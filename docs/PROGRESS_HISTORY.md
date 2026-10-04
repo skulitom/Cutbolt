@@ -1,5 +1,11 @@
 # Progress history
 
+## 4 October 2026: timeline loudness meters
+
+Clip gain made levels editable, but an agent had no way to measure a timeline's loudness short of exporting it and probing the result. The read-only `timeline.meters` command (`cutbolt_timeline_meters`) renders a range's audio exactly as an audio-only export would. It reports sample peak, RMS and BS.1770 integrated loudness for the mix and for each enabled audio track played alone. A range is limited to 600 seconds.
+
+The transitions fixture writes its oracle PCM to a WAV and meters it through an `audio.inspect` mix recipe. The meters of the leveled timeline, and of a sub-range, matched those values exactly. No scoring changed.
+
 ## 4 October 2026: run-length scene timing reports
 
 Scene inspection and render receipts listed every layer's selected source frame and sampled parameters once per output frame. A ten-second title with several static layers cost tens of kilobytes of agent context to validate. Both arrays are now run-length encoded in frame order as `{count, value}` runs. The trial's four-second title card inspection dropped from 10,088 to 4,348 bytes, and a static layer is now one run however long the scene is. The scene fixtures expand the runs and keep their exact per-frame checks. No scoring changed.

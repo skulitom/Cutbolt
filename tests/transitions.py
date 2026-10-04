@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time as clock
+import wave
 from PIL import Image, ImageDraw
 from jsonschema import Draft202012Validator
 from agents import Client
@@ -145,6 +146,18 @@ def run(root):
     apply(base,[edit('clip_audio',clip_ids=['al'],fade_in=time(10000,48000),fade_out=time(6000,48000))],'INVALID_RANGE')
     apply(base,[edit('clip_audio',clip_ids=['al'],fade_in=time(1,96000))],'UNALIGNED_TIME')
     passed.append('transitions.clip_gain_fades_exact')
+    # Timeline meters measure exactly the rendered timeline PCM: compare with a mix recipe of the oracle PCM.
+    def metered(pcm,name):
+        path=out/(name+'.wav')
+        with wave.open(str(path),'wb') as w:w.setnchannels(2);w.setsampwidth(2);w.setframerate(48000);w.writeframes(pcm)
+        n=len(pcm)//4;length={'num':n,'den':48000}
+        clip={'id':'c','file':{'path':path.name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'bytes':path.stat().st_size},'channels':'preserve_stereo','start':time(0),'source_in':time(0),'duration':length}
+        return call({'command':'audio.inspect','mix':{'schema_version':1,'id':name,'duration':length,'tracks':[{'id':'t','clips':[clip]}]},'input_root':str(out)})['meters']
+    whole=call({'command':'timeline.meters','project':levels,'input_root':str(root)})
+    assert whole['mix']==metered(leveled[1],'levels-mix') and [t['track_id'] for t in whole['tracks']]==['a'] and whole['tracks'][0]['meters']==whole['mix']
+    part=call({'command':'timeline.meters','project':levels,'input_root':str(root),'start':time(5,25),'duration':time(10,25),'tracks':False})
+    assert part['mix']==metered(leveled[1][5*1920*4:15*1920*4],'levels-part') and part['tracks']==[]
+    passed.append('transitions.timeline_meters_match_rendered_pcm')
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS

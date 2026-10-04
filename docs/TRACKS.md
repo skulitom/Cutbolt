@@ -89,6 +89,8 @@ Edits keep the audible result:
 - Range previews and exports keep the original clip's envelope, so a window that starts inside a fade plays exactly as the full render does.
 - Interchange export reports clip gain and fades as a critical loss.
 
+`timeline.meters` measures levels without exporting. It takes a `project`, `input_root`, an optional frame-aligned `start` and `duration` (at most 600 seconds; by default to the timeline end), and `tracks` (default true). It renders the range's audio exactly as an audio-only export would. It then reports sample peak, RMS and BS.1770 integrated loudness (`integrated_lkfs`) for the mix of enabled audio tracks and, with `tracks`, for each enabled audio track played alone. Each track costs one more audio pass. Use it to set `gain_milli` against a loudness target. Halving a clip's gain lowers its measured loudness by 6.02 dB.
+
 Session diffs and previews list a clip's `levels` (`gain_milli`, `fade_in`, `fade_out`) when it has gain or fades, so a `clip_audio` change appears as a clip change.
 
 ## Sessions, previews and export

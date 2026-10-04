@@ -29,6 +29,7 @@ pub mod keying;
 pub mod lut;
 pub mod mcp;
 pub mod media;
+pub mod meters;
 pub mod model;
 pub mod multicam;
 pub mod native_project;
