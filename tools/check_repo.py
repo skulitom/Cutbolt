@@ -24,7 +24,8 @@ def git(root, *args, input_data=None, allowed=(0,)):
 
 def local_patterns(root):
     required = git(root, "config", "--bool", "--get", "cutbolt.requireContentPolicy", allowed=(0, 1)).strip() == b"true"
-    path = Path(git(root, "rev-parse", "--git-path", "private-content-policy.json").decode().strip())
+    # The policy is shared by linked worktrees, so read it from the common Git directory.
+    path = Path(git(root, "rev-parse", "--git-common-dir").decode().strip()) / "private-content-policy.json"
     if not path.is_absolute():
         path = root / path
     if not path.exists():

@@ -74,6 +74,14 @@ class RepositoryBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "policy is missing"):
             self.issues(staged=True)
 
+    def test_linked_worktree_uses_shared_policy(self):
+        linked = tempfile.TemporaryDirectory(prefix="cutbolt-worktree-")
+        self.addCleanup(linked.cleanup)
+        worktree = Path(linked.name) / "linked"
+        self.git("worktree", "add", "--quiet", "--orphan", "-b", "linked", str(worktree))
+        (worktree / "README.md").write_text("A blocked brand reference.\n", encoding="utf-8")
+        self.assertTrue(any("README.md:1" in x for x in CHECK.check_repository(worktree)[0]))
+
     def test_malformed_policy(self):
         self.write(".git/private-content-policy.json", '{"patterns":[]}')
         with self.assertRaisesRegex(ValueError, "Invalid"):
