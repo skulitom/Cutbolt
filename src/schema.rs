@@ -165,30 +165,152 @@ fn discriminator(definition: &Value) -> Option<(String, Vec<Value>)> {
     })
 }
 
-/// The complete schema of a command's arguments or of a deferred shared type.
-pub fn lookup(name: &str) -> Result<Value> {
-    if let Some((public, definition)) = DEFERRED.iter().find(|(p, _)| *p == name) {
+/// Lookups larger than this come back as an outline unless the whole schema is requested.
+const OUTLINE_BYTES: usize = 16 * 1024;
+
+/// The schema of a command's arguments or of a deferred shared type. Command schemas keep the
+/// deferred types abbreviated, since each has its own lookup. `select` narrows the result to one
+/// tagged variant or one definition; a large schema otherwise comes back as an outline.
+pub fn lookup(name: &str, select: Option<&str>, full: bool) -> Result<Value> {
+    let (mut found, schema) = if let Some((public, definition)) =
+        DEFERRED.iter().find(|(p, _)| *p == name)
+    {
         let schema = attach(json!({"$ref":format!("#/$defs/{definition}")}), false);
-        return Ok(json!({"name":public,"kind":"type","schema":schema}));
-    }
-    let command = name
-        .strip_prefix("cutbolt_")
-        .map_or(name.to_owned(), |t| t.replace('_', "."));
-    let Some(schema) = arguments(&command, false) else {
-        let types = DEFERRED.map(|(p, _)| p).join(", ");
-        return Err(error(
-            "UNKNOWN_SCHEMA",
-            format!(
-                "{name:?} is neither a command nor a shared type. Use a command from capabilities.commands (for example scene.render), its MCP tool name, or one of: {types}"
-            ),
-        ));
+        (json!({"name":public,"kind":"type"}), schema)
+    } else {
+        let command = name
+            .strip_prefix("cutbolt_")
+            .map_or(name.to_owned(), |t| t.replace('_', "."));
+        let Some(schema) = arguments(&command, true) else {
+            let types = DEFERRED.map(|(p, _)| p).join(", ");
+            return Err(error(
+                "UNKNOWN_SCHEMA",
+                format!(
+                    "{name:?} is neither a command nor a shared type. Use a command from capabilities.commands (for example scene.render), its MCP tool name, or one of: {types}"
+                ),
+            ));
+        };
+        let tool =
+            crate::mcp::exposed(&command).then(|| format!("cutbolt_{}", command.replace('.', "_")));
+        let found = json!({"name":command,"kind":"command",
+                "description":crate::mcp::description(&command),"mcp_tool":tool});
+        (found, schema)
     };
-    let tool =
-        crate::mcp::exposed(&command).then(|| format!("cutbolt_{}", command.replace('.', "_")));
-    Ok(
-        json!({"name":command,"kind":"command","description":crate::mcp::description(&command),
-        "mcp_tool":tool,"schema":schema}),
-    )
+    let schema = match select {
+        Some(select) => {
+            found["select"] = json!(select);
+            narrow(&schema, select)?
+        }
+        None => schema,
+    };
+    let size = schema.to_string().len();
+    if full || size <= OUTLINE_BYTES {
+        found["schema"] = schema;
+    } else {
+        found["outline"] = outline(&schema);
+        found["note"] = json!(format!(
+            "The complete schema is {size} bytes. Pass select with a variant or definition name for one part with everything it references, or full: true for all of it."
+        ));
+    }
+    Ok(found)
+}
+
+/// The root object of a looked-up schema: a referenced definition, or the schema itself.
+fn root(schema: &Value) -> &Value {
+    match schema
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|t| t.strip_prefix("#/$defs/"))
+    {
+        Some(name) => &schema["$defs"][name],
+        None => schema,
+    }
+}
+
+/// One tagged variant of the root, or one definition, with every definition it reaches.
+fn narrow(schema: &Value, select: &str) -> Result<Value> {
+    let root = root(schema);
+    if let Some((tag, _)) = discriminator(root) {
+        let branch = root["oneOf"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|b| b["properties"][&tag]["const"] == select);
+        if let Some(branch) = branch {
+            return Ok(attach(branch.clone(), false));
+        }
+    }
+    let defs = schema["$defs"].as_object();
+    let name = defs.and_then(|d| {
+        d.keys()
+            .find(|k| *k == select)
+            .or_else(|| d.keys().find(|k| k.eq_ignore_ascii_case(select)))
+    });
+    if let Some(name) = name {
+        return Ok(attach(json!({"$ref":format!("#/$defs/{name}")}), false));
+    }
+    let mut choices: Vec<String> = discriminator(root)
+        .map(|(_, tags)| {
+            tags.iter()
+                .filter_map(|t| t.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    choices.extend(defs.into_iter().flat_map(|d| d.keys().cloned()));
+    Err(error(
+        "UNKNOWN_SCHEMA",
+        format!(
+            "select {select:?} is not a variant or definition here; choose one of: {}",
+            choices.join(", ")
+        ),
+    ))
+}
+
+/// A compact map of a large schema: the root's variants or properties, and every definition it
+/// reaches, each with its description.
+fn outline(schema: &Value) -> Value {
+    let root = root(schema);
+    let described = |v: &Value| v["description"].as_str().unwrap_or_default().to_owned();
+    let mut map = json!({"description":described(root)});
+    if let Some((tag, _)) = discriminator(root) {
+        map["variants"] = root["oneOf"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|b| {
+                let fields: Vec<&String> = b["properties"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|p| p.keys())
+                    .filter(|k| **k != tag)
+                    .collect();
+                json!({"select":b["properties"][&tag]["const"],"description":described(b),"fields":fields})
+            })
+            .collect();
+    } else if let Some(properties) = root["properties"].as_object() {
+        let summary: Map<String, Value> = properties
+            .iter()
+            .map(|(name, p)| {
+                (
+                    name.clone(),
+                    json!({"description":described(p),"types":references(p)}),
+                )
+            })
+            .collect();
+        map["properties"] = Value::Object(summary);
+    }
+    let own = schema["$ref"]
+        .as_str()
+        .and_then(|t| t.strip_prefix("#/$defs/"));
+    let definitions: Map<String, Value> = schema["$defs"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(name, _)| Some(name.as_str()) != own)
+        .map(|(name, d)| (name.clone(), json!(described(d))))
+        .collect();
+    map["definitions"] = Value::Object(definitions);
+    map
 }
 
 fn dereference(schema: &'static Value) -> &'static Value {
@@ -376,14 +498,16 @@ mod tests {
     }
 
     #[test]
-    fn lookups_return_complete_schemas() {
+    fn lookups_return_outlines_selections_and_complete_schemas() {
         for (public, definition) in DEFERRED {
-            let found = lookup(public).unwrap();
-            assert_eq!(found["schema"]["$ref"], format!("#/$defs/{definition}"));
-            assert!(found["schema"]["$defs"][definition].is_object());
+            let whole = lookup(public, None, true).unwrap();
+            assert_eq!(whole["schema"]["$ref"], format!("#/$defs/{definition}"));
+            assert!(whole["schema"]["$defs"][definition].is_object());
+            let default = lookup(public, None, false).unwrap();
+            assert!(default["schema"].is_object() || default["outline"]["definitions"].is_object());
         }
         for command in commands() {
-            let found = lookup(command).unwrap();
+            let found = lookup(command, None, true).unwrap();
             assert_eq!(found["kind"], "command");
             for target in references(&found["schema"]) {
                 assert!(
@@ -392,11 +516,36 @@ mod tests {
                 );
             }
         }
-        let by_tool = lookup("cutbolt_scene_inspect").unwrap();
+        // Large types outline their parts; select returns one part with what it references.
+        let operations = lookup("operation", None, false).unwrap();
+        let variants = operations["outline"]["variants"].as_array().unwrap();
+        assert!(
+            variants
+                .iter()
+                .any(|v| v["select"] == "clip.append" && v["fields"] == json!(["clip"]))
+        );
+        let append = lookup("operation", Some("clip.append"), false).unwrap();
+        assert!(append["schema"]["$defs"]["Clip"].is_object());
+        assert!(append["schema"].to_string().len() < 4096);
+        let layer = lookup("scene", Some("layer"), true).unwrap();
+        assert_eq!(layer["schema"]["$ref"], "#/$defs/Layer");
+        // A large selection is outlined too, so its parts can be selected in turn.
+        let outlined = lookup("scene", Some("Layer"), false).unwrap();
+        assert!(outlined["outline"]["properties"]["transform"].is_object());
+        // Command lookups name shared types instead of repeating them.
+        let render = lookup("scene.render", None, false).unwrap();
+        assert!(render["schema"]["$defs"].get("Scene").is_none());
+        assert!(render["schema"].to_string().len() < 4096);
+        let by_tool = lookup("cutbolt_scene_inspect", None, false).unwrap();
         assert_eq!(by_tool["name"], "scene.inspect");
         assert_eq!(by_tool["mcp_tool"], "cutbolt_scene_inspect");
-        assert!(lookup("scene.render").unwrap()["mcp_tool"].is_null());
-        assert_eq!(lookup("scenes").unwrap_err().code, "UNKNOWN_SCHEMA");
+        assert!(lookup("scene.render", None, false).unwrap()["mcp_tool"].is_null());
+        assert_eq!(
+            lookup("scenes", None, false).unwrap_err().code,
+            "UNKNOWN_SCHEMA"
+        );
+        let unknown = lookup("operation", Some("clip.add"), false).unwrap_err();
+        assert_eq!(unknown.code, "UNKNOWN_SCHEMA");
     }
 
     #[test]

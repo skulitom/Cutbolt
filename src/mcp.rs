@@ -200,7 +200,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Reconcile saved publication and wake a Windows worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
         }
         "schema" => {
-            "Return the complete JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template or audio_routing. Read-only."
+            "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template or audio_routing. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
         }
         "image.sequence.compile" => {
             "Compile a validated numbered PNG recipe into a transparent lossless movie or an explicitly flattened native editing asset at an unused output path. Blocking CLI/library command."

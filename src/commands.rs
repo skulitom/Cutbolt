@@ -437,6 +437,12 @@ pub enum Request {
     Schema {
         /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template` or `audio_routing`.
         name: String,
+        /// One part to return: a variant tag such as `clip.append`, or a definition name such as `Layer`. Omit for the whole schema, or an outline of it when it is large.
+        #[serde(default)]
+        select: Option<String>,
+        /// Return the whole schema even when it is large; it is otherwise outlined.
+        #[serde(default)]
+        full: bool,
     },
     #[serde(rename = "project.create")]
     Create {
@@ -654,6 +660,7 @@ pub fn handle_json(
     if let Some(workspace) = workspace {
         if schema {
             crate::schema::relax_roots(&mut result["schema"]);
+            crate::schema::relax_roots(&mut result["outline"]);
             if let Some(text) = result["description"].as_str() {
                 result["description"] = Value::String(crate::schema::workspace_wording(text));
             }
@@ -911,7 +918,9 @@ pub fn handle(request: Request) -> Result<Value> {
             result["frame_matte"] = json!({"profile":"binary-source-matte-v1","field":"scene.layers[].frames[].matte","identity":"relative path, SHA-256 and bytes","pixels":"opaque black/white RGB or RGBA PNG matching source dimensions","processing":"held with source, before effects and transforms","limits":"included in existing source byte and decoded/derived pixel budgets","optional_producer":"tools/segmentation.py; annotated frames; external pinned CPU runtime; no automatic tracking"});
             Ok(result)
         }
-        Request::Schema { name } => crate::schema::lookup(&name),
+        Request::Schema { name, select, full } => {
+            crate::schema::lookup(&name, select.as_deref(), full)
+        }
         Request::Create {
             id,
             width,
