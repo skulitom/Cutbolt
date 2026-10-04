@@ -1,5 +1,5 @@
 """Original easing/retiming fixtures, with independent Fraction and image references."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from fractions import Fraction
@@ -74,8 +74,8 @@ def run(root):
         info=inspect(scene); receipt=render(scene,name+".mkv",from_file=from_file)
         assert receipt["timing"]==info["timing"]
         layer=scene["layers"][0]
-        for n,actual in enumerate(info["timing"][0]["sampled_parameters"]):
-            assert info["timing"][0]["selected_frames"][n]==selected(layer,n)
+        for n,actual in enumerate(per_frame(info["timing"][0]["sampled_parameters"])):
+            assert per_frame(info["timing"][0]["selected_frames"])[n]==selected(layer,n)
             if selected(layer,n) is None:
                 assert actual is None
             else:

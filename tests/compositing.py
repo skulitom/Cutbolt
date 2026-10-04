@@ -1,5 +1,5 @@
 """Independent rational blend equations and forward image/mask operations."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from fractions import Fraction
@@ -129,7 +129,7 @@ def run(root):
         nonlocal count
         info=inspect(value);render(value,name+".mkv")
         for i,item in enumerate(info["timing"]):
-            for n,params in enumerate(item["sampled_parameters"]):
+            for n,params in enumerate(per_frame(item["sampled_parameters"])):
                 if params is not None:
                     assert params.get("mask_rect")==rect_at(value["layers"][i],n)
         frames=info["frames"]

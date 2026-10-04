@@ -1,5 +1,5 @@
 """Original shutter fixtures, analytic moving-box exposure and independent sampling."""
-from engine import ENGINE, MCP_TOOLS
+from engine import ENGINE, MCP_TOOLS, per_frame
 import argparse
 import budgets
 import copy
@@ -159,7 +159,7 @@ def run(root):
             assert actual['sample_times']==[rat(t) for t in signed]
             assert actual['active_sample_times']==[rat(t) if 0<=t<fraction(s['duration']) else None for t in signed]
             assert actual['sample_count']==count*s['temporal']['samples']
-            assert all(len(t['sampled_parameters'])==len(signed) for t in receipt['timing'])
+            assert all(len(per_frame(t['sampled_parameters']))==len(signed) for t in receipt['timing'])
             assert actual['effects']['history_filters']=='unsupported' and actual['effects']['optical_flow']=='unsupported'
         cases.append({'name':name,'frames':count,'samples_per_frame':s.get('temporal',{}).get('samples',1),'maximum_rgb_error':0})
         return receipt,expected
@@ -271,7 +271,7 @@ def run(root):
     records['layers']=[copy.deepcopy(records['layers'][0]) for _ in range(16)]
     for i,l in enumerate(records['layers']):l.update(id=f'record-{i}',duration=records['duration'])
     rr,_=check(records,'maximum-records',lambda n:bytes([255])*3)
-    assert sum(len(t['sampled_parameters']) for t in rr['timing'])==32768
+    assert sum(len(per_frame(t['sampled_parameters'])) for t in rr['timing'])==32768
     passed.append('temporal.maximum_render_work_and_sample_record_limits')
 
     invalid=[]

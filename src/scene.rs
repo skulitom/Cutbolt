@@ -894,7 +894,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
                     .collect::<Result<Vec<_>>>()
             })
             .transpose()?;
-        let mut layer_report = json!({"layer_id":layer.id,"source_cycle_duration":total,"timing":layer.timing,"end":layer.end,"selected_frames":selected,"sampled_parameters":sampled,"alpha_mode":layer.alpha_mode,"blend_mode":layer.blend_mode,"mask_inverted":layer.mask.as_ref().map(|m|m.inverted)});
+        let mut layer_report = json!({"layer_id":layer.id,"source_cycle_duration":total,"timing":layer.timing,"end":layer.end,"selected_frames":runs(&selected),"sampled_parameters":runs(&sampled),"alpha_mode":layer.alpha_mode,"blend_mode":layer.blend_mode,"mask_inverted":layer.mask.as_ref().map(|m|m.inverted)});
         if let Some(report) = graphic_report {
             layer_report["graphics"] = report;
         }
@@ -1207,6 +1207,21 @@ fn select_cycle(frames: &[Frame], end: &End, mut time: Time) -> Result<Option<us
     Err(invalid("Animation sampling exceeded duration"))
 }
 
+/// Run-length form of a per-frame report array, `[{"count": n, "value": v}, ...]` in frame order,
+/// so held or static values cost one entry instead of one per frame.
+fn runs<T: Serialize>(values: &[T]) -> Value {
+    let mut out: Vec<Value> = Vec::new();
+    for value in values {
+        let value = json!(value);
+        match out.last_mut() {
+            Some(run) if run["value"] == value => {
+                run["count"] = json!(run["count"].as_u64().unwrap_or(0) + 1);
+            }
+            _ => out.push(json!({"count":1,"value":value})),
+        }
+    }
+    Value::Array(out)
+}
 /// Compose one sample. A transparent scene composes over black; with `matte`, every source pixel
 /// becomes white with its own alpha, so the result accumulates 255 x alpha with the same weights
 /// and rounding as the color pass.

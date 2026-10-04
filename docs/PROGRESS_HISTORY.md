@@ -1,5 +1,9 @@
 # Progress history
 
+## 4 October 2026: run-length scene timing reports
+
+Scene inspection and render receipts listed every layer's selected source frame and sampled parameters once per output frame. A ten-second title with several static layers cost tens of kilobytes of agent context to validate. Both arrays are now run-length encoded in frame order as `{count, value}` runs. The trial's four-second title card inspection dropped from 10,088 to 4,348 bytes, and a static layer is now one run however long the scene is. The scene fixtures expand the runs and keep their exact per-frame checks. No scoring changed.
+
 ## 4 October 2026: concurrent MCP tool calls and wait progress
 
 The stdio server answered one request at a time, so a two-minute `job.wait` blocked every other tool call from the same agent. Tool calls now run on worker threads, up to eight at once, and responses are paired with requests by ID. Every accepted call is still answered when input ends. A `job.wait` sent with a progress token reports the job's phase once a second through `notifications/progress`.

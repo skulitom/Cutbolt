@@ -1,5 +1,5 @@
 """Original outline fonts and independent geometry/layout/coverage acceptance checks."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from fractions import Fraction as F
@@ -268,9 +268,9 @@ def run(root):
     moving["layers"][0]["animation"]["position_x"]=curve(80,96,"ease_in_out")
     move_info,move_receipt,move_reference=check_case(moving,"animated")
     for i,item in enumerate(move_info["timing"]):
-        for n,parameters in enumerate(item["sampled_parameters"]):
+        for n,parameters in enumerate(per_frame(item["sampled_parameters"])):
             active=i+1 <= n < 19
-            assert item["selected_frames"][n] == (0 if active else None)
+            assert per_frame(item["selected_frames"])[n] == (0 if active else None)
             if active:
                 t=animated_scene_at(moving,n)["layers"][i]["transform"]
                 assert parameters["position"] == t["position"] and parameters["opacity"] == t["opacity"]

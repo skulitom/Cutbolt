@@ -1,5 +1,5 @@
 """Original keyframe fixtures; independent Fraction values and forward image operations."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from fractions import Fraction
@@ -106,14 +106,14 @@ def run(root):
 
     info=inspect(scene)
     for i, item in enumerate(info["timing"]):
-        for n, actual in enumerate(item["sampled_parameters"]):
-            if item["selected_frames"][n] is None:
+        for n, actual in enumerate(per_frame(item["sampled_parameters"])):
+            if per_frame(item["selected_frames"])[n] is None:
                 assert actual is None
             else:
                 tr=animated_scene_at(scene,n)["layers"][i]["transform"]
                 assert actual=={"position":tr["position"],"opacity":tr["opacity"]},(i,n,actual,tr)
     # Fixed independent landmarks: endpoint clamp, exact hold change and negative half rounding.
-    assert info["timing"][0]["sampled_parameters"][2]=={"position":[-2,10],"opacity":0}
+    assert per_frame(info["timing"][0]["sampled_parameters"])[2]=={"position":[-2,10],"opacity":0}
     assert sample(curve([(0,1,-1,"linear"),(2,25,0,"hold")]),Fraction(1,25))==-1
     passed.append("animation.sampled_parameters")
     render(scene,"animated.mkv")

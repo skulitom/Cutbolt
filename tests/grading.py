@@ -1,5 +1,5 @@
 """Original charts, high-precision color equations and independent forward compositing."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from decimal import Decimal as D, getcontext, ROUND_HALF_UP
@@ -147,7 +147,7 @@ def run(root):
     def check(scene,name):
         scene=copy.deepcopy(scene);scene['id']=name;info=inspect(scene);receipt=render(scene,name)
         for layer,report in zip(scene['layers'],info['timing']):
-            for n,parameters in enumerate(report['sampled_parameters']):
+            for n,parameters in enumerate(per_frame(report['sampled_parameters'])):
                 if parameters is None:continue
                 clock=F(n,25)-F(layer['start']['num'],layer['start']['den'])
                 expected=[{k:e[k] for k in ('kind','exposure_milli','contrast_milli','white_balance_milli')} for e in (resolve(e,clock) for e in layer.get('effects',[]))]

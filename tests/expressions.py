@@ -4,7 +4,7 @@ This fixture deliberately does not implement an expression interpreter. Its
 authored graphs have explicit Fraction formulae, fixed truth tables and hash
 vectors, then use the existing forward pixel/geometry references.
 """
-from engine import ENGINE, MCP_TOOLS
+from engine import ENGINE, MCP_TOOLS, per_frame
 import argparse
 import budgets
 import copy
@@ -166,7 +166,7 @@ def run(root):
     info = call('scene.inspect',scene=scene,input_root=str(sources))
     assert info['expressions']['frame_bindings'] == [s['bindings'] for s in report['samples'][:50]]
     for i, timing in enumerate(info['timing']):
-        for n, parameters in enumerate(timing['sampled_parameters']):
+        for n, parameters in enumerate(per_frame(timing['sampled_parameters'])):
             if parameters is not None:
                 tr = resolved(scene,n)['layers'][i]['transform']
                 assert parameters['position'] == tr['position'] and parameters['opacity'] == tr['opacity']

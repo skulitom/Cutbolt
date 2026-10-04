@@ -1,5 +1,5 @@
 """Original geometric charts; high-precision forward geometry and rational filtering oracle."""
-from engine import ENGINE, MCP_TOOLS
+from engine import ENGINE, MCP_TOOLS, per_frame
 import argparse
 import copy
 from decimal import Decimal as D, getcontext, ROUND_HALF_UP, ROUND_FLOOR
@@ -177,7 +177,7 @@ def run(root):
             if key not in cache:cache[key]=reference(scene,sources,n)
             expected.append(cache[key])
             for layer,item in zip(scene['layers'],info['timing']):
-                actual=item['sampled_parameters'][n]
+                actual=per_frame(item['sampled_parameters'])[n]
                 if actual is None:continue
                 anchor=[0,0] if layer.get('graphics') else layer['frames'][selected(layer,n)]['anchor'];v,forward,inverse,_=state(layer,n,anchor)
                 assert actual['spatial']['translate_milli']==v[:2] and actual['spatial']['scale_milli']==v[2:4] and actual['spatial']['rotation_mdeg']==v[4]

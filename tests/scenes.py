@@ -1,5 +1,5 @@
 """Independent decoded-pixel/audio acceptance for bounded scenes and timeline previews."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from fractions import Fraction
@@ -140,7 +140,7 @@ def run(root, pixelforge=None):
     before = {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     info = inspect(scene)
     for layer, report in zip(scene["layers"], info["timing"]):
-        assert report["selected_frames"] == [selected(layer,n) for n in range(125)]
+        assert per_frame(report["selected_frames"]) == [selected(layer,n) for n in range(125)]
     check("scene.rational_animation_order")
     receipt = render(scene,"scene.mkv")
     cache = {}
@@ -232,7 +232,7 @@ def run(root, pixelforge=None):
     strict=copy.deepcopy(variant);strict["layers"][0]["timing"]="strict";inspect(strict,"UNALIGNED_TIME")
     for end in ("loop","hold_last","transparent"):
         layer["end"]=end
-        assert inspect(variant)["timing"][0]["selected_frames"]==[selected(layer,n) for n in range(25)]
+        assert per_frame(inspect(variant)["timing"][0]["selected_frames"])==[selected(layer,n) for n in range(25)]
         render(variant,end+".mkv")
         decode_check(output/(end+".mkv"),64,48,lambda n:expected_frame(variant,sources,n),25)
     check("scene.trimmed_anchor_and_end_policies")

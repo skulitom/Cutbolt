@@ -1,5 +1,5 @@
 """Independent rational key mattes, Decimal color recovery and original edge quality fixtures."""
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 from fractions import Fraction as F
@@ -173,7 +173,7 @@ def run(root):
     def check(scene,name):
         scene=copy.deepcopy(scene);scene['id']=name;info=inspect(scene);receipt=render(scene,name)
         for layer,report in zip(scene['layers'],info['timing']):
-            for n,parameters in enumerate(report['sampled_parameters']):
+            for n,parameters in enumerate(per_frame(report['sampled_parameters'])):
                 if parameters is None:continue
                 clock=F(n,25)-F(layer['start']['num'],layer['start']['den']);expected=[]
                 for e in resolve_chain(layer['effects'],clock):
