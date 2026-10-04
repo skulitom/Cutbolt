@@ -422,10 +422,10 @@ fn rejected(schema: &Value, value: &Value, path: String) -> Option<String> {
                     return Some(field(&path, key));
                 }
             }
-            if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
-                if let Some(key) = object.keys().find(|k| !properties.contains_key(*k)) {
-                    return Some(field(&path, key));
-                }
+            if schema.get("additionalProperties") == Some(&Value::Bool(false))
+                && let Some(key) = object.keys().find(|k| !properties.contains_key(*k))
+            {
+                return Some(field(&path, key));
             }
             object
                 .iter()
