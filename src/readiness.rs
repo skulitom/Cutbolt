@@ -110,7 +110,7 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
         }
     }
     let mut result = json!({"ready":false,"reasons":reasons});
-    match video.map(|v| conform(relative, v, audio, rate)) {
+    match video.map(|v| conform(relative, v, audio, rate, None)) {
         Some(Ok(recipe)) => {
             result["conform"] = json!({"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),
                 "next":"check the recipe with media.conform.inspect, run it with job.start run media.conform, then media.add the returned asset"})
@@ -122,6 +122,81 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
         None => {}
     }
     result
+}
+
+/// One step from any decodable video file to a timeline asset. A ready file that fits the target
+/// is returned as it is. Anything else is converted with the readiness recipe: at the project's
+/// frame rate and size when a project is given, otherwise at the source's own rate when that is a
+/// timeline rate (25 fps otherwise) and its own size.
+pub fn prepare(
+    path: &Path,
+    input_root: &Path,
+    output_root: &Path,
+    output: Option<&Path>,
+    project: Option<&crate::model::Project>,
+) -> crate::Result<Value> {
+    use crate::error;
+    let path = media::allowed_file(path, input_root)?;
+    let identity = crate::identity::relative(&path, input_root)?;
+    let relative = identity["path"]
+        .as_str()
+        .expect("identity path")
+        .to_string();
+    let metadata = media::probe(&path)?;
+    let readiness = timeline(&path, &relative, &metadata);
+    let fits = |r: &Value| match project {
+        None => true,
+        Some(p) => {
+            r["width"] == p.width
+                && r["height"] == p.height
+                && serde_json::from_value::<Time>(r["frame_rate"].clone())
+                    .is_ok_and(|rate| rate == p.frame_rate)
+        }
+    };
+    if readiness["ready"] == true && fits(&readiness) {
+        return Ok(json!({"converted":false,"asset":readiness["asset"],"readiness":readiness}));
+    }
+    let streams = metadata["streams"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    let video = streams.iter().find(|s| s["codec_type"] == "video");
+    let audio = streams.iter().find(|s| s["codec_type"] == "audio");
+    let still = metadata["format"]["format_name"]
+        .as_str()
+        .is_some_and(|f| f == "image2" || f.ends_with("_pipe"));
+    let (Some(video), false) = (video, still) else {
+        return Err(error(
+            "UNSUPPORTED_MEDIA",
+            format!(
+                "{relative} cannot become a timeline asset: {}",
+                readiness["reasons"]
+            ),
+        ));
+    };
+    let rate = match project {
+        Some(p) => Some(crate::render::clock::rate(p.frame_rate)?),
+        None => native_rate(video, &metadata),
+    };
+    let known = serde_json::from_value::<Time>(readiness["duration"].clone()).ok();
+    let mut recipe = conform(&relative, video, audio, rate, known)
+        .map_err(|why| error("UNSUPPORTED_MEDIA", format!("{relative}: {why}")))?;
+    // The request-level identity completion does not reach a recipe built here.
+    recipe["source"]["file"] = identity.clone();
+    if let Some(p) = project {
+        recipe["width"] = json!(p.width);
+        recipe["height"] = json!(p.height);
+    }
+    let recipe: crate::conform::Recipe = serde_json::from_value(recipe)?;
+    let output = match output {
+        Some(output) => output.to_path_buf(),
+        None => output_root.join(format!("{}-prepared.mkv", asset_id(&relative))),
+    };
+    let receipt = crate::conform::run(&recipe, input_root, output_root, &output)?;
+    Ok(
+        json!({"converted":true,"asset":receipt["asset"],"recipe":recipe,"output":receipt["output"],
+        "frames":receipt["frames"],"frame_rate":recipe.frame_rate.unwrap_or(Time { num: 25, den: 1 }),
+        "reasons":readiness["reasons"]}),
+    )
 }
 
 fn dimension(value: &Value) -> u32 {
@@ -155,13 +230,33 @@ fn asset_id(relative: &str) -> String {
     id
 }
 
-/// Exact stream length from `duration_ts` and `time_base`, in whole frames at `rate`.
+/// A stream's length: exact from `duration_ts` and `time_base`, else its decimal `duration`, else
+/// a Matroska `DURATION` tag such as `00:00:03.000000000`.
+fn stream_duration(stream: &Value) -> Option<Time> {
+    if let (Some(ticks), Some((num, den))) = (
+        stream["duration_ts"].as_u64(),
+        stream["time_base"].as_str().and_then(|t| t.split_once('/')),
+    ) {
+        return Time::new(ticks.checked_mul(num.parse().ok()?)?, den.parse().ok()?).ok();
+    }
+    if let Some(seconds) = stream["duration"].as_str() {
+        return serde_json::from_value(json!(seconds)).ok();
+    }
+    let tag = stream["tags"]["DURATION"].as_str()?;
+    let mut parts = tag.split(':');
+    let (hours, minutes, seconds) = (parts.next()?, parts.next()?, parts.next()?);
+    let seconds: Time = serde_json::from_value(json!(seconds)).ok()?;
+    let whole = hours.parse::<u64>().ok()? * 3600 + minutes.parse::<u64>().ok()? * 60;
+    seconds.plus(Time::new(whole, 1).ok()?).ok()
+}
+
+/// A stream's length in whole frames at `rate`.
 fn frames_at(stream: &Value, rate: Time) -> Option<u64> {
-    let ticks = stream["duration_ts"].as_u64()?;
-    let (num, den) = stream["time_base"].as_str()?.split_once('/')?;
-    let (num, den): (u128, u128) = (num.parse().ok()?, den.parse().ok()?);
-    (den > 0)
-        .then(|| (ticks as u128 * num * u128::from(rate.num) / (den * u128::from(rate.den))) as u64)
+    let d = stream_duration(stream)?;
+    Some(
+        (u128::from(d.num) * u128::from(rate.num) / (u128::from(d.den) * u128::from(rate.den)))
+            as u64,
+    )
 }
 
 /// Frames per step that make a whole number of 48 kHz samples at `rate` (5 at 30000/1001).
@@ -179,6 +274,7 @@ fn conform(
     video: &Value,
     audio: Option<&Value>,
     rate: Option<Time>,
+    known: Option<Time>,
 ) -> Result<Value, &'static str> {
     let tag = |key: &str| {
         video[key]
@@ -200,12 +296,20 @@ fn conform(
     // Keep the source's own rate when it is a timeline rate, so every frame survives.
     let rate = rate.unwrap_or(Time { num: 25, den: 1 });
     let step = sample_step(rate);
-    let frames = [Some(video), audio]
-        .into_iter()
-        .flatten()
-        .map(|s| frames_at(s, rate))
-        .collect::<Option<Vec<_>>>()
-        .and_then(|f| f.into_iter().min())
+    // A verified source duration (from the renderer's own inspection) wins over stream metadata.
+    let from_known = known.map(|d| {
+        (u128::from(d.num) * u128::from(rate.num) / (u128::from(d.den) * u128::from(rate.den)))
+            as u64
+    });
+    let frames = from_known
+        .or_else(|| {
+            [Some(video), audio]
+                .into_iter()
+                .flatten()
+                .map(|s| frames_at(s, rate))
+                .collect::<Option<Vec<_>>>()
+                .and_then(|f| f.into_iter().min())
+        })
         .ok_or("the stream durations are not exact, so no conform duration can be proposed")?
         .min(CONFORM_FRAMES);
     let frames = frames / step * step;

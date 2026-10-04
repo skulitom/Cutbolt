@@ -211,7 +211,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
         }
         "job.wait" => {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
@@ -227,6 +227,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         }
         "preview.cuts" => {
             "Review the edit: write a sheet of the last frame before and first frame after each cut (16 per page, two cuts per row), return it as an inline image, and list each cut's time, clips and source times. Continue with `next`."
+        }
+        "media.prepare" => {
+            "Turn any decodable video file, such as a phone or camera MP4, into a timeline asset in one step: a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. Run it with job.start; the result's asset goes to media.add."
         }
         "media.sheet" => {
             "See a source file without adding it to a project: a sheet of frames at given times or spread evenly through it, from any format FFmpeg decodes, returned as an inline image with each cell's time."
@@ -276,7 +279,8 @@ pub(crate) fn description(command: &str) -> &'static str {
 pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
 /// Long renders belong in persisted jobs so the MCP connection stays usable.
-const BLOCKING: [&str; 13] = [
+const BLOCKING: [&str; 14] = [
+    "media.prepare",
     "image.sequence.compile",
     "cache.run",
     "transcript.transcribe",
@@ -471,8 +475,8 @@ impl Server {
     fn instructions(&self) -> String {
         let mut text = concat!(
             "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
-            "Typical cut: session.create with id, width, height and frame_rate; media.inspect each source (its timeline field gives a ready asset for media.add, ",
-            "or a media.conform recipe to run with job.start); session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
+            "Typical cut: session.create with id, width, height and frame_rate (30 or 60 fps footage keeps every frame on a 30 or 60 fps project); ",
+            "job.start run media.prepare with each source's path and the project, then job.wait, gives an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",

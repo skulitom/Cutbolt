@@ -148,6 +148,28 @@ def run(root):
         expected_outputs[label]=(rgb,pcm);receipts[label]=receipt
         comparisons.append({"case":label,"source":name,"frames":receipt["frames"],"sample_frames":receipt["samples"]})
     passed.extend(["conform.validated_format_matrix","conform.exact_timestamp_mapping","conform.speed_reverse_freeze","conform.audio_rates_layouts"])
+    # One-step preparation: a fitting ready source is returned as it is; anything else is converted
+    # with the readiness recipe, identical to running that recipe through media.conform.
+    def prepare(name,label=None,project=None,error=None):
+        value={"command":"media.prepare","path":str(sources/name),"input_root":str(sources),"output_root":str(output)}
+        if label:value["output"]=str(output/(label+".mkv"))
+        if project:value["project"]=project
+        return request(value,error)
+    def frame_digests(path):return ff(["-i",str(path),"-map","0","-f","framemd5","-"])
+    p25=request({"command":"project.create","id":"prepare25","width":W,"height":H,"frame_rate":time(25)})
+    p30=request({"command":"project.create","id":"prepare30","width":W,"height":H,"frame_rate":time(30)})
+    # An earlier conversion is timeline-ready at 25 fps and fits p25, so it comes back unchanged.
+    ready=request({"command":"media.prepare","path":str(output/"rgb25.mkv"),"input_root":str(output),"output_root":str(output),"project":p25})
+    assert ready["converted"] is False and ready["asset"]["path"]=="rgb25.mkv" and ready["asset"]["duration"]==time(1),ready
+    for name,label,project,rate in [("fractional.mp4","prepared-own",None,time(30000,1001)),("rgb25.mkv","prepared-30",p30,time(30))]:
+        prepared=prepare(name,label,project)
+        assert prepared["converted"] and prepared["frame_rate"]==rate and prepared["recipe"]["width"]==W,prepared
+        again=render(prepared["recipe"],label+"-explicit")
+        assert frame_digests(output/(label+".mkv"))==frame_digests(output/(label+"-explicit.mkv")) and again["frames"]==prepared["frames"]
+    assert prepare("fractional.mp4")["converted"] and (output/"fractional-prepared.mkv").exists()
+    prepare("audio-48000-2.wav",error="UNSUPPORTED_MEDIA")
+    prepare("hdr.mkv",error="UNSUPPORTED_MEDIA")
+    passed.append("conform.one_step_preparation")
     # Use conformed media as ordinary identity-bound assets in saved timeline edits.
     project=request({"command":"project.create","id":"conformed","width":W,"height":H,"frame_rate":time(25)})
     request({"command":"session.create","store_root":str(store),"project":project,"request_id":"create"})

@@ -1,5 +1,17 @@
 # Progress history
 
+## 5 October 2026: one-step preparation of camera files
+
+Getting a phone clip onto a timeline took three steps: inspect it, copy the proposed recipe, and queue a conversion. `media.prepare`, queued with `job.start`, now does this in one call. It returns a fitting ready file unchanged. Anything else it converts with the readiness recipe, at the target project's rate and size, or at the source's own rate. The readiness recipe now reads Matroska duration tags when streams carry no exact tick count.
+
+In an end-to-end run, a 30 fps phone H.264 clip prepared for a 30 fps project kept all 240 frames, rendered at 30 fps and delivered H.264 at 30 fps. The conform fixture checks four things:
+- A fitting ready file comes back unchanged.
+- Prepared conversions at the source's own rate and at a project's rate are frame-identical to running their returned recipes through `media.conform`.
+- An audio-only file and an HDR file are refused.
+- The command is reachable only through jobs.
+
+With this, the 30/60 fps path is complete: preparation, placed tracks, scenes and captions, and H.264 delivery all run at the native rate. Reading compressed video directly during render, without an FFV1 intermediate, remains future work. No scoring changed.
+
 ## 4 October 2026: scenes and captions at native frame rates
 
 Scenes compiled to 25 fps only, so titles and caption windows could not be placed on the new 29.97 and 60 fps timelines. A scene now takes an optional `frame_rate`, one of the eight native rates, defaulting to 25. Durations, layer timing, strict holds, motion-blur sample times, soundtrack length, the encoder clock and output verification all use it. A scene may last up to ten seconds at its rate: 250 frames at 25 fps, 600 at 60. Caption windows sample cues on the base scene's clock.

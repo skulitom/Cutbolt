@@ -198,6 +198,16 @@ Output is written to a temporary file in the destination directory, verified, an
 
 Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool executables. Dependencies are never downloaded at engine runtime. Only `file` and `pipe` media protocols are allowed when inspecting/reading inputs.
 
+## Preparing camera and phone files
+
+`media.prepare` takes any video file FFmpeg decodes, such as a phone or camera MP4, plus an optional target `project`, and returns a timeline asset in one step. It is queued with `job.start`, like other long-running commands.
+
+- A file that is already a timeline source and fits the project's frame rate and size, or any ready file when no project is given, comes back unchanged as `{"converted": false, "asset": ...}`.
+- Anything else is converted with the [`media.inspect` readiness recipe](#local-media-and-rendering) through [`media.conform`](CONFORM.md). With a project, it uses the project's frame rate and size. Without one, it keeps the source's own size and rate when that is a timeline rate, and uses 25 fps otherwise. The output defaults to `<name>-prepared.mkv` in `output_root`.
+- The result holds the `asset` for `media.add`, the `recipe` it ran, `frames` and `frame_rate`.
+
+A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. Stills, audio-only files, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
+
 ## Reviewing edits and footage
 
 These commands let an agent check its own work from still images and numbers.

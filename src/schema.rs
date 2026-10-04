@@ -692,7 +692,11 @@ mod tests {
     }
 
     fn accepts_reference(property: &Value) -> bool {
-        property["$ref"] == "#/$defs/ProjectInput"
+        let reference = |s: &Value| s["$ref"] == "#/$defs/ProjectInput";
+        reference(property)
+            || property["anyOf"]
+                .as_array()
+                .is_some_and(|options| options.iter().any(reference))
     }
 
     /// The workspace and reference resolution visit only the request, render.start's `render` and

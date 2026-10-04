@@ -186,7 +186,7 @@ def run(executable, fixture):
               and "cutbolt_schema" in names and "cutbolt_render_start" in names and "cutbolt_render_run" not in names
               and "cutbolt_audio_inspect" in names and "cutbolt_audio_render" not in names
               and "cutbolt_proxy_status" in names and "cutbolt_proxy_relink" in names and "cutbolt_proxy_generate" not in names
-              and "cutbolt_media_conform_inspect" in names and "cutbolt_media_conform" not in names
+              and "cutbolt_media_conform_inspect" in names and "cutbolt_media_conform" not in names and "cutbolt_media_prepare" not in names
               and "cutbolt_hdr_inspect" in names and "cutbolt_hdr_conform" not in names
               and "cutbolt_graphics_instantiate" in names
               and {"cutbolt_captions_"+operation for operation in ("import","inspect","apply","encode","export","scene")}.issubset(names))
