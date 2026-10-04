@@ -39,6 +39,21 @@ pub struct ClipChange {
     pub after: Option<Placement>,
 }
 
+/// More clips than this that only moved in time are summarized instead of listed one by one.
+const SHIFT_LISTING: usize = 32;
+
+/// Clips an edit only moved in time (same content, track and sequence), summarized when there are
+/// more than SHIFT_LISTING of them so a ripple through a long timeline stays a small receipt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Shifted {
+    pub count: usize,
+    pub clip_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub earlier_by: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub later_by: Option<Time>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Changes {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -46,6 +61,8 @@ pub struct Changes {
     pub duration_before: Time,
     pub duration_after: Time,
     pub clips: Vec<ClipChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shifted: Option<Shifted>,
     pub added_assets: Vec<String>,
     pub removed_assets: Vec<String>,
     pub modified_assets: Vec<String>,
@@ -436,6 +453,7 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
             after: new.get(id).cloned(),
         })
         .collect();
+    let (clips, shifted) = summarize_shifts(clips)?;
     let old_assets: BTreeMap<_, _> = before.assets.iter().map(|a| (&a.id, a)).collect();
     let new_assets: BTreeMap<_, _> = after.assets.iter().map(|a| (&a.id, a)).collect();
     Ok(Changes {
@@ -470,6 +488,7 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
         duration_before: before.duration()?,
         duration_after: after.duration()?,
         clips,
+        shifted,
         added_assets: new_assets
             .keys()
             .filter(|id| !old_assets.contains_key(*id))
@@ -486,6 +505,39 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
             .map(|(id, _)| (*id).clone())
             .collect(),
     })
+}
+
+/// Split off clips that only moved in time when there are many of them.
+fn summarize_shifts(clips: Vec<ClipChange>) -> Result<(Vec<ClipChange>, Option<Shifted>)> {
+    let moved_only = |c: &ClipChange| match (&c.before, &c.after) {
+        (Some(a), Some(b)) => {
+            a.clip == b.clip && a.track_id == b.track_id && a.sequence_id == b.sequence_id
+        }
+        _ => false,
+    };
+    if clips.iter().filter(|c| moved_only(c)).count() <= SHIFT_LISTING {
+        return Ok((clips, None));
+    }
+    let (moved, kept): (Vec<_>, Vec<_>) = clips.into_iter().partition(|c| moved_only(c));
+    let mut offsets = Vec::new();
+    for change in &moved {
+        let (a, b) = (
+            change.before.as_ref().unwrap(),
+            change.after.as_ref().unwrap(),
+        );
+        offsets.push(match a.timeline_start.compare(b.timeline_start)? {
+            std::cmp::Ordering::Greater => (true, a.timeline_start.minus(b.timeline_start)?),
+            _ => (false, b.timeline_start.minus(a.timeline_start)?),
+        });
+    }
+    let uniform = offsets.iter().all(|o| *o == offsets[0]).then(|| offsets[0]);
+    let shifted = Shifted {
+        count: moved.len(),
+        clip_ids: moved.into_iter().map(|c| c.clip_id).collect(),
+        earlier_by: uniform.and_then(|(earlier, by)| earlier.then_some(by)),
+        later_by: uniform.and_then(|(earlier, by)| (!earlier).then_some(by)),
+    };
+    Ok((kept, Some(shifted)))
 }
 
 fn record(
@@ -784,6 +836,43 @@ mod tests {
         }
         project
     }
+    #[test]
+    fn long_ripples_summarize_clips_that_only_moved() {
+        let long = |count: usize| {
+            let mut project = sample();
+            project.clips = (0..count)
+                .map(|i| Clip {
+                    id: format!("c{i}"),
+                    asset_id: Some("a".into()),
+                    gap: false,
+                    source_in: t(0),
+                    duration: t(2),
+                })
+                .collect();
+            project
+        };
+        for (count, listed) in [
+            (SHIFT_LISTING + 1, SHIFT_LISTING + 1),
+            (SHIFT_LISTING + 2, 1),
+        ] {
+            let before = long(count);
+            let mut after = before.clone();
+            after.clips[0].duration = t(1);
+            let changes = diff(&before, &after).unwrap();
+            assert_eq!(changes.clips.len(), listed, "{count} clips");
+            assert_eq!(changes.clips[0].clip_id, "c0");
+            if listed == 1 {
+                let shifted = changes.shifted.unwrap();
+                assert_eq!(shifted.count, count - 1);
+                assert_eq!(shifted.earlier_by, Some(t(1)));
+                assert_eq!(shifted.later_by, None);
+                assert_eq!(shifted.clip_ids[0], "c1");
+            } else {
+                assert!(changes.shifted.is_none());
+            }
+        }
+    }
+
     fn trim(duration: u64) -> Mutation {
         Mutation::Apply {
             operations: vec![Operation::Trim {
