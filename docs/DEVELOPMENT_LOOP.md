@@ -15,7 +15,18 @@ Audit of the edit → build → test → verify loop, 4 October 2026. Every numb
   - `tools/verify.py --gate` runs only the fixtures the diff can affect, within about two minutes, beside lint and Rust tests, and reuses passes whose inputs are unchanged.
   - `tools/ship.py` gates, pushes, and verifies the deferred remainder in an isolated background worktree that blocks no one.
   - Map, run records and timings are shared by all worktrees.
-- **Next: phase 1** (one `ffprobe` per source, cached tool identity, validated-probe cache).
+- **Shipping takes about 100–130 s, measured over eight real ships** (pushed by `tools/ship.py`, including under heavy load). Lessons built into it:
+  - The gate budget is a hard deadline. Predictions fail under contention: one early gate took six minutes.
+  - Background runs use four lanes, start nothing while a gate runs, and skip fixtures that a newer run of a descendant commit will verify.
+  - Ships take a shared lock, then fetch, rebase, gate and push inside it. Concurrent sessions otherwise kept racing at the push.
+  - `docs/PROGRESS_HISTORY.md` union-merges.
+  - The real-time capture fixture may retry once outside thorough runs.
+  - Background verification uses a hidden shared console and a shared build directory.
+- **Phase 1a is done.** One packet listing replaces three `ffprobe` runs per source inspection (−24% engine launches on `tracks`).
+- **Next:**
+  - Rebuild the impact map regularly. It is diffed from its own commit, so selection widens as main moves.
+  - Phase 1b/1c: remove the strict per-command video decode once a decode-once, content-addressed probe cache exists. Its location needs a decision, because the engine keeps no state outside explicit roots or workspaces.
+  - Phases 2–3.
 
 ## 1. Summary
 
