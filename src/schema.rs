@@ -313,6 +313,135 @@ fn outline(schema: &Value) -> Value {
     map
 }
 
+/// The path of the first value in a request that its schema rejects, such as
+/// `operations[2].clip.duration`; empty for the request itself, `None` when nothing is rejected.
+pub(crate) fn locate(request: &Value) -> Option<String> {
+    let command = request.get("command")?.as_str()?;
+    let (_, variant) = variants().find(|(c, _)| *c == command)?;
+    rejected(variant, request, String::new())
+}
+
+fn field(path: &str, key: &str) -> String {
+    if path.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{path}.{key}")
+    }
+}
+
+/// The only string pattern request schemas use: the exact time literal.
+const TIME_PATTERN: &str = "^[0-9]+([./][0-9]+)?$";
+
+fn time_literal(text: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    match text.split_once(['.', '/']) {
+        Some((whole, part)) => digits(whole) && digits(part),
+        None => digits(text),
+    }
+}
+
+fn type_matches(kind: &Value, value: &Value) -> bool {
+    match kind {
+        Value::Array(kinds) => kinds.iter().any(|k| type_matches(k, value)),
+        Value::String(kind) => match kind.as_str() {
+            "integer" => value.is_u64() || value.is_i64(),
+            "number" => value.is_number(),
+            "string" => value.is_string(),
+            "boolean" => value.is_boolean(),
+            "null" => value.is_null(),
+            "array" => value.is_array(),
+            "object" => value.is_object(),
+            _ => true,
+        },
+        _ => true,
+    }
+}
+
+fn rejected(schema: &Value, value: &Value, path: String) -> Option<String> {
+    let schema = match schema
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|t| t.strip_prefix("#/$defs/"))
+    {
+        Some(name) => &definitions()[name],
+        None => schema,
+    };
+    for key in ["oneOf", "anyOf"] {
+        let Some(branches) = schema.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        // A tagged variant is chosen by its tag; otherwise any branch that accepts the value.
+        let tagged = branches.iter().find(|b| {
+            b["properties"].as_object().is_some_and(|p| {
+                p.iter()
+                    .any(|(k, v)| v.get("const").is_some_and(|c| value.get(k) == Some(c)))
+            })
+        });
+        if let Some(branch) = tagged {
+            return rejected(branch, value, path);
+        }
+        if branches
+            .iter()
+            .any(|b| rejected(b, value, path.clone()).is_none())
+        {
+            return None;
+        }
+        let shaped = branches.iter().find(|b| {
+            let b = match b.get("$ref").and_then(Value::as_str) {
+                Some(t) => &definitions()[t.trim_start_matches("#/$defs/")],
+                None => *b,
+            };
+            b.get("type").is_some_and(|t| type_matches(t, value))
+        });
+        return match shaped {
+            Some(branch) => rejected(branch, value, path.clone()).or(Some(path)),
+            None => Some(path),
+        };
+    }
+    if schema.get("const").is_some_and(|c| c != value)
+        || schema
+            .get("enum")
+            .and_then(Value::as_array)
+            .is_some_and(|e| !e.contains(value))
+        || schema.get("type").is_some_and(|t| !type_matches(t, value))
+        || value.as_str().is_some_and(|text| {
+            schema["pattern"].as_str() == Some(TIME_PATTERN) && !time_literal(text)
+        })
+        || value.as_f64().is_some_and(|n| {
+            schema["minimum"].as_f64().is_some_and(|m| n < m)
+                || schema["maximum"].as_f64().is_some_and(|m| n > m)
+        })
+    {
+        return Some(path);
+    }
+    match value {
+        Value::Object(object) => {
+            let properties = schema.get("properties").and_then(Value::as_object)?;
+            for required in schema["required"].as_array().into_iter().flatten() {
+                if let Some(key) = required.as_str().filter(|k| !object.contains_key(*k)) {
+                    return Some(field(&path, key));
+                }
+            }
+            if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
+                if let Some(key) = object.keys().find(|k| !properties.contains_key(*k)) {
+                    return Some(field(&path, key));
+                }
+            }
+            object
+                .iter()
+                .find_map(|(key, value)| rejected(properties.get(key)?, value, field(&path, key)))
+        }
+        Value::Array(items) => {
+            let item = schema.get("items")?;
+            items
+                .iter()
+                .enumerate()
+                .find_map(|(i, value)| rejected(item, value, format!("{path}[{i}]")))
+        }
+        _ => None,
+    }
+}
+
 fn dereference(schema: &'static Value) -> &'static Value {
     match schema
         .get("$ref")
@@ -616,6 +745,62 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn rejected_values_are_located_by_field() {
+        let at = |request: Value| locate(&request);
+        let ops = |operation: Value| {
+            json!({"command":"session.apply","store_root":"C:/s","project_id":"p","request_id":"r",
+                "expected_revision":0,"operations":[{"op":"clip.remove","clip_id":"a"},operation]})
+        };
+        assert_eq!(
+            at(ops(
+                json!({"op":"clip.append","clip":{"id":"c","asset_id":"i","source_in":0,"duration":{"num":"1","den":1}}})
+            )),
+            Some("operations[1].clip.duration.num".into())
+        );
+        assert_eq!(
+            at(ops(json!({"op":"clip.trim","clipId":"c"}))),
+            Some("operations[1].clip_id".into())
+        );
+        assert_eq!(
+            at(
+                json!({"command":"project.create","id":"q","width":"640","height":360,"frame_rate":25})
+            ),
+            Some("width".into())
+        );
+        assert_eq!(
+            at(
+                json!({"command":"project.create","id":"q","width":640,"height":-1,"frame_rate":25})
+            ),
+            Some("height".into())
+        );
+        assert_eq!(
+            at(json!({"command":"session.get","store_root":"C:/s","project_id":"p"})),
+            None
+        );
+        assert_eq!(
+            at(ops(
+                json!({"op":"clip.trim","clip_id":"c","source_in":"x","duration":"5/2"})
+            )),
+            Some("operations[1].source_in".into())
+        );
+        // Patterns other than the time literal would silently pass, so none may appear.
+        let patterns: Vec<String> = definitions()
+            .values()
+            .flat_map(|d| {
+                let mut found = Vec::new();
+                walk(d, &mut |node| {
+                    if let Some(p) = node.get("pattern").and_then(Value::as_str) {
+                        found.push(p.to_owned());
+                    }
+                });
+                found
+            })
+            .filter(|p| p != TIME_PATTERN)
+            .collect();
+        assert!(patterns.is_empty(), "{patterns:?}");
     }
 
     /// identity::complete treats any object of only path/sha256/bytes keys as a file identity.

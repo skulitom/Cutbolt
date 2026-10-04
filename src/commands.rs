@@ -658,7 +658,17 @@ pub fn handle_json(
     let store = workspace.map(crate::workspace::Workspace::store_root);
     crate::reference::resolve(&mut request, store.as_deref())?;
     let completed = crate::identity::complete(&mut request)?;
-    let request: Request = serde_json::from_value(request)?;
+    let located = crate::schema::locate(&request);
+    let request: Request = serde_json::from_value(request).map_err(|e| {
+        // Tagged requests and operations lose serde's position, so name the field the schema
+        // rejects, such as operations[2].clip.duration.
+        match located {
+            Some(field) if !field.is_empty() => {
+                crate::error("INVALID_JSON", format!("{field}: {e}"))
+            }
+            _ => crate::Error::from(e),
+        }
+    })?;
     let schema = matches!(request, Request::Schema { .. });
     let capabilities = matches!(&request, Request::Capabilities { section } if section.as_deref().is_none_or(|s| s == "all"));
     let mut result = handle(request)?;
