@@ -1,2 +1,4 @@
 # Preserve exact verified bytes; progress evidence fingerprints source files.
 * -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Sessions add history entries at the top concurrently; keep both sides when they meet.
+docs/PROGRESS_HISTORY.md merge=union
