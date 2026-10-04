@@ -1,5 +1,9 @@
 # Progress history
 
+## 4 October 2026: one retry for the real-time capture outside thorough runs
+
+Background runs share the machine, and the recording fixture's real-time capture is correctly rejected when a packet is delayed by load: a 90 ms gap in one background run. Outside `--thorough`, that one fixture may now retry once, and its record notes the earlier failure. The thorough run still captures once, in its quiet phase.
+
 ## 4 October 2026: gate deadline and background yielding
 
 Shipping while background verification ran showed that duration predictions fail under contention: one gate took six minutes.

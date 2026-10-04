@@ -171,12 +171,13 @@ print(f"{MODE} verification of {engine_copy.name} copied to {run_directory}", fl
 PY = [sys.executable, "-X", "utf8"]
 
 
-def fixture(name, *extra, lane="pool", quick_lane="pool", result="verification.json", check=None, utf8=True, long=(), quick=(), needs=()):
+def fixture(name, *extra, lane="pool", quick_lane="pool", result="verification.json", check=None, utf8=True, long=(), quick=(), needs=(), retry=False):
     script = (PY if utf8 else [sys.executable]) + [f"tests/{name}.py"]
     output = "{dir}" if result == "verification.json" else "{dir}/" + result.split("/")[0]
     mode_args = list(long) if args.thorough else list(quick)
     return {"name": name, "lane": lane if args.thorough else quick_lane, "commands": [script + ["--output", output, *extra, *mode_args]],
-            "results": {name: result}, "check": check if args.thorough else None, "needs": list(needs)}
+            "results": {name: result}, "check": check if args.thorough else None, "needs": list(needs),
+            "retry": retry and not args.thorough}
 
 
 def value_at(value, field):
@@ -211,7 +212,9 @@ STAGES = [
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
     fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech"]), fixture("remapping"),
-    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"],
+    # Real-time capture is rejected (correctly) when a busy machine delays a packet; outside the thorough
+    # run's quiet phase it may retry once, and the record says so.
+    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"], retry=True,
             check=require("sustained.long_gate_passed", "Full recording verification requires the sustained native capture gate")),
     fixture("long_form_4k", lane="long", long=["--long-form"],
             check=require("long_gate_passed", "Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")),
@@ -348,6 +351,15 @@ def run_command(argv, environment):
 
 
 def execute(stage):
+    execute_once(stage)
+    outcome = outcomes[stage["name"]]
+    if stage.get("retry") and not outcome["ok"] and not outcome.get("deferred") and not deadline_passed.is_set():
+        log(f"{stage['name']} retrying once (timing-sensitive real-time fixture)")
+        execute_once(stage)
+        outcomes[stage["name"]]["retried_after"] = outcome.get("log", "")[-400:]
+
+
+def execute_once(stage):
     directory = Path(tempfile.mkdtemp(prefix=f"cutbolt-{stage['name'].replace('_', '-')}-"))
     began = time.monotonic()
     outcome = {"ok": False, "budget_misses": []}
