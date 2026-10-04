@@ -1,0 +1,143 @@
+# Timed captions and subtitle files
+
+Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. All six `captions.*` commands are available through CLI/library and MCP stdio. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
+
+## Commands
+
+Caption scene layouts also accept optional `text_layout` with the [Unicode text profile](UNICODE_TEXT.md), for shaping and mixed writing directions using explicit local fonts. Omitting it preserves the scalar layout. The Unicode fixture verifies this integration independently of the caption-sidecar fixture.
+
+| Command | Required fields | Result |
+| --- | --- | --- |
+| `captions.import` | `source`, `input_root`, `format`, `id`, `overlap` | Native `document`, inspection and source identity |
+| `captions.inspect` | `document` | Validated cue/style usage, end time and maximum simultaneous cues |
+| `captions.apply` | `document`, `expected_revision`, `operations` | New document, inspection and per-cue before/after changes |
+| `captions.encode` | `document`, `format` | UTF-8 text, byte count/digests, cue ID mapping and loss report; no file write |
+| `captions.export` | `document`, `format`, `loss_policy`, `output_root`, `output` | The encoding report and a newly published file |
+| `captions.scene` | `document`, `scene`, `scene_id`, `offset`, `layouts`, `sampling`, `layer_prefix`, `input_root` | New scene, full inspection and sampled/skipped cue report |
+
+Formats are `srt` and `webvtt`. Import uses a relative `{path, bytes, sha256}` source identity beneath an explicit absolute input root, as in [scene identities](SCENES.md). It verifies the actual bytes and never changes the source. Export requires an absolute destination within an existing output root, with `.srt` or `.vtt` respectively. Existing paths are rejected. A temporary file is synced and read back before publication without overwrite. Successful repeated exports to the same path fail with `OUTPUT_EXISTS`; use the returned digest to reconcile a lost response.
+
+## Native document and editing
+
+```json
+{
+  "schema_version": 1,
+  "id": "captions",
+  "revision": 0,
+  "overlap": "allow",
+  "styles": {"warm": {"color": [237, 99, 32]}},
+  "cues": [
+    {
+      "id": "opening",
+      "start": {"num": 1, "den": 1000},
+      "end": {"num": 81, "den": 1000},
+      "text": "First line\nSecond line",
+      "style": "warm",
+      "align": "left",
+      "speaker": "Guide"
+    }
+  ]
+}
+```
+
+Times are exact nonnegative rational seconds, with half-open intervals `[start,end)`. The document supports subframe times independently of video. Cues must have nondecreasing start times, positive duration and an end no later than 24 hours. Equal starts retain their document order. `overlap: reject` rejects any simultaneous cues; `allow` preserves them and inspection reports their maximum concurrency. A cue ending exactly when another starts does not overlap it.
+
+Limits are 4,096 cues, 32 styles, 1 MiB total text and 2 MiB per imported/encoded file. Document/cue/style IDs use 1-64 ASCII letters, digits, `_` or `-`; style IDs must start with a letter or `_`. `STYLE`, `NOTE` and `REGION` are reserved. Revision is an exact JSON integer up to 9,007,199,254,740,991. Each cue requires a defined style, left/center/right alignment, 1-1,024 Unicode scalars and at most 4,096 UTF-8 bytes. Text permits LF between nonblank lines, but no trailing LF or other control characters. Speaker metadata is optional (`null`), trimmed, 1-128 bytes and cannot contain controls, `<`, `>` or `&`.
+
+Sidecar text preserves Unicode, including scripts and emoji that the current graphics rasterizer cannot render. Rendering uses either the default [scalar layout](GRAPHICS.md) or the optional [Unicode layout](UNICODE_TEXT.md), subject to the supplied fonts and each profile's bounds. Unrenderable visible text fails scene inspection explicitly.
+
+| Operation | Additional fields | Behavior |
+| --- | --- | --- |
+| `cue.add` | `cue` | Add a complete cue with a new ID |
+| `cue.replace` | `cue` | Replace an existing cue matching its ID |
+| `cue.remove` | `cue_id` | Remove an existing cue |
+| `style.set` | `style_id`, `style` | Add or replace a color definition |
+| `style.remove` | `style_id` | Remove a definition; final cues must not reference it |
+| `overlap.set` | `overlap` | Set `allow` or `reject` |
+| `cues.shift` | `cue_ids`, `offset`, `backward` | Shift 1-4,096 unique existing cues by exact nonnegative time |
+
+Apply accepts 1-256 operations and checks the supplied revision. It edits a clone, sorts cues stably by start, increments the revision and validates the complete final document. A batch can remove a style and replace its references together. Invalid operations or final state return no new document. Pure retries against the same original snapshot are deterministic. The revision guard is against the supplied snapshot, not an authoritative store: callers must save the returned document and coordinate concurrent changes. The change list contains changed cues; style/overlap changes are visible in the full returned document. Compiled video assets use ordinary saved sessions for persistent timeline edits.
+
+## Supported interchange profile
+
+Both imports require UTF-8, with optional initial BOM and LF, CRLF or CR line endings. Whitespace-only lines separate blocks. Import does not infer encodings, repair malformed intervals or ignore unsupported markup.
+
+SRT requires a positive numeric cue counter, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, and nonblank plain text. There are exactly three millisecond digits; hours have at least two digits and intervals remain within 24 hours. Duplicate cue IDs fail. The plain-text profile rejects `<`, `>` and `&` to avoid ambiguous markup/entity interpretation. Use WebVTT for escaped text containing those characters. This profile does not preserve SRT formatting extensions.
+
+WebVTT requires a standalone `WEBVTT` header followed by a blank line. It supports:
+
+- Optional bounded cue IDs; missing IDs receive deterministic `cue-N` values without colliding with explicit IDs.
+- `HH:MM:SS.mmm` or `MM:SS.mmm` timestamps and one optional `align:left`, `align:center` or `align:right` setting; default center.
+- Plain text or one whole-cue `<c.name>...</c>` color class, optionally wrapped in one whole-cue `<v Speaker>...</v>` voice span. The wrappers can appear in either order; the voice closing tag may be omitted. Class closing tags are required.
+- `STYLE` blocks before all cues containing only `::cue(.name) { color: #rrggbb; }` rules. One six-digit hexadecimal color per unique class; an optional final semicolon is accepted.
+- Standard undeclared foreground classes `white`, `lime`, `cyan`, `red`, `yellow`, `magenta`, `blue` and `black`. Other classes need definitions. Unclassed text stays white even when a class named `default` has another color; the importer creates a separate white style when needed.
+- Character references `&amp;`, `&lt;`, `&gt;`, `&nbsp;`, `&lrm;` and `&rlm;`. Export escapes literal ampersands and angle brackets.
+
+Header metadata, NOTE/REGION blocks, positioning/size/vertical settings, additional CSS, multiple/mixed inline classes, bold/italic/ruby and embedded timestamps are outside this profile and rejected. WebVTT's general syntax is broader; acceptance of this subset is not a claim of full WebVTT conformance or identical layout in every player. Whole-cue color, alignment and speaker metadata round trip. Rendering uses the explicit Cutbolt layout below, not a browser's automatic caption placement.
+
+Export requires exact millisecond-aligned endpoints and returns `UNALIGNED_TIME` instead of rounding. WebVTT retains cue IDs, styles, alignment and speaker metadata. SRT renumbers cues from 1 and reports any changed IDs, removed nondefault style definitions, color/style, alignment or speaker fields. `captions.encode` previews those losses without writing. `captions.export` with `loss_policy: reject` refuses a lossy conversion; `allow_reported` explicitly permits only the reported losses. Text characters outside the SRT profile still fail. Empty WebVTT documents are supported; SRT export requires at least one cue. Document ID, revision and overlap policy are native editing metadata, not sidecar fields.
+
+## Rendering a caption window
+
+`captions.scene` appends text layers to a supplied base scene and gives the result `scene_id`. The caller supplies an explicit layout for each visible style:
+
+```json
+{
+  "fonts": [{"path": "font.ttf", "bytes": 1234, "sha256": "replace-with-actual-sha256"}],
+  "size": 20,
+  "rect": [2, 1, 90, 60],
+  "line_height": 24,
+  "letter_spacing": 0,
+  "wrap": "none",
+  "overflow": "reject"
+}
+```
+
+Use actual external font identities. Layout has the same size, box, spacing, wrapping and overflow constraints as graphics text. Cue color and alignment come from the document. The `layouts` object maps style IDs to layouts; unknown styles are rejected. A style with no sampled visible cue does not need a layout. The base scene's audio and existing layers are retained; generated captions are normal straight-alpha layers above them. Later document cues paint over earlier cues. There is no automatic collision avoidance or stacking; choose explicit boxes/styles for simultaneous speakers. Speaker labels are metadata and are not inserted into visible text.
+
+The only sampling policy is `sample_start`: output frame `n` uses caption time `offset + n/25`. `offset` may fall between video frames and remains exact; the document is unchanged. Active cue intervals are clipped to the selected window and sampled at its frame starts. The report identifies `sampled` cues with inclusive `first_frame` and exclusive `end_frame`, `outside_window` cues, and `no_sampled_frame` cues that lie entirely between samples. For example, `[0.081,0.082)` has no sample in a zero-offset 25 fps scene, but its original subtitle timing remains intact.
+
+Scene duration is 1-250 frames (up to ten seconds); offset must not exceed 24 hours. Each visible cue becomes one layer named `layer_prefix-cue_id`. The prefix is a bounded ID of at most 32 bytes and generated names must not collide with base layers. All normal scene limits still apply, including **16 layers total**, external font validation, canvas/output dimensions and decoded-memory limits. Repeated cues count as separate layers even when they do not overlap. Select smaller windows when necessary. Scene conversion is read-only; call `scene.render` to compile the returned scene, then add its asset to a saved session. This does not add direct captions to arbitrary video timeline tracks or extend the general scene duration.
+
+## Runnable local fixture and workflow
+
+Build the engine and retain the original fixtures outside the repository:
+
+```powershell
+cargo build --locked
+python -X utf8 tests/captions.py --output C:\DEV\CutboltData\new-caption-test
+```
+
+This creates subtitle files, original tiny test fonts and a background image. After the fixture succeeds, this Python example imports its SRT, shifts every cue forward exactly 80 ms, previews export losses, and writes a new sidecar:
+
+```python
+from pathlib import Path
+import hashlib, json, subprocess
+
+exe = Path(r"C:\DEV\Cutbolt\target\debug\cutbolt.exe")
+root = Path(r"C:\DEV\CutboltData\new-caption-test")
+source = root / "sources" / "original.srt"
+def call(command, **args):
+    result = subprocess.run([str(exe)], input=json.dumps(dict(command=command, **args)),
+                            text=True, encoding="utf-8", capture_output=True, check=True)
+    return json.loads(result.stdout)["result"]
+identity = {"path": source.name, "bytes": source.stat().st_size,
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+document = call("captions.import", source=identity, input_root=str(source.parent),
+                format="srt", id="edited-captions", overlap="allow")["document"]
+document = call("captions.apply", document=document, expected_revision=0, operations=[
+    {"op": "cues.shift", "cue_ids": [c["id"] for c in document["cues"]],
+     "offset": {"num": 2, "den": 25}, "backward": False}])["document"]
+plan = call("captions.encode", document=document, format="srt")
+assert plan["losses"] == []
+call("captions.export", document=document, format="srt", loss_policy="reject",
+     output_root=str(root / "output"), output=str(root / "output" / "shifted.srt"))
+```
+
+Save the native document alongside editable scene recipes when further caption changes are needed. Subtitle files provide independent timed-text delivery; embedding subtitle streams in delivery containers and production transcription/review workflows remain open.
+
+## Evidence and sources
+
+The fixture independently demuxes exported SRT/WebVTT with external FFprobe 7.0, checks exact timestamps, text, Unicode, formatting-loss reports and round trips. A Fraction-based clock and original known glyph geometry check every RGB frame across four scene windows and a saved-session cut: **47 frames and 90,240 silent stereo sample frames**. It exercises multiline alignment, fallback, overlapping colors, subframe/unsampled cues, a one-hour boundary, atomic edits, six MCP commands, schema validation, 43 invalid/output-preservation cases and unchanged source bytes. This verifies G03 basic and extended within the documented profile; it adds no speech-recognition or broader Unicode-rendering point.
+
+The implementation is original and uses the public [WebVTT Candidate Recommendation Draft, 20 May 2026](https://www.w3.org/TR/2026/CRD-webvtt1-20260520/) and [Library of Congress SRT format description](https://www.loc.gov/preservation/digital/formats/fdd/fdd000569.shtml) as format references. No specification copies, third-party fixtures or parser implementations are bundled. Existing dependency versions and licenses are unchanged.

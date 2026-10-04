@@ -1,0 +1,7 @@
+{
+  "command": "project.create",
+  "id": "my-first-edit",
+  "width": 320,
+  "height": 180,
+  "frame_rate": {"num": 25, "den": 1}
+}

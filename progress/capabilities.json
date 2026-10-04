@@ -1,0 +1,1031 @@
+{
+  "baseline": "cutbolt-local-v1",
+  "date": "2026-10-03",
+  "description": "50 scoped capabilities, two acceptance checkpoints each. One point per verified checkpoint; 100 points total. Coverage, not engineering effort or measured cross-product equivalence.",
+  "exclusions": [
+    "Accounts and activation",
+    "Cloud services and collaboration",
+    "Stock marketplaces",
+    "Telemetry",
+    "GUI-only workflows (underlying editing operations remain in scope)"
+  ],
+  "features": [
+    {
+      "id": "M01",
+      "category": "Media",
+      "name": "Local media inspection",
+      "basic": "Inspect streams and dimensions of local sources",
+      "extended": "Validated codec/container matrix including malformed files",
+      "basic_evidence": [
+        "media.inspect"
+      ],
+      "extended_evidence": [
+        "conform.validated_format_matrix",
+        "conform.audio_rates_layouts",
+        "conform.malformed_boundaries_preservation"
+      ]
+    },
+    {
+      "id": "M02",
+      "category": "Media",
+      "name": "Bins, search and metadata",
+      "basic": "Organize and search a local asset registry",
+      "extended": "Metadata round trips, large collections and duplicate handling",
+      "basic_evidence": [
+        "registry.organize_search"
+      ],
+      "extended_evidence": [
+        "registry.metadata_roundtrip_duplicates",
+        "registry.large_collection_pagination"
+      ]
+    },
+    {
+      "id": "M03",
+      "category": "Media",
+      "name": "Relinking and offline media",
+      "basic": "Detect and relink missing source media",
+      "extended": "Content identity, moved projects and ambiguous replacement handling",
+      "basic_evidence": [
+        "registry.missing_relink_render"
+      ],
+      "extended_evidence": [
+        "registry.identity_ambiguity_and_history",
+        "registry.missing_relink_render"
+      ]
+    },
+    {
+      "id": "M04",
+      "category": "Media",
+      "name": "Proxy workflow",
+      "basic": "Generate and switch to proxies",
+      "extended": "Relink, mixed rates and final-quality export preserve timing",
+      "basic_evidence": [
+        "proxy.generate_bind_select",
+        "proxy.preview_frame_range",
+        "proxy.session_history_replay"
+      ],
+      "extended_evidence": [
+        "proxy.relink_mixed_rate_identity",
+        "proxy.final_quality_export",
+        "proxy.failures_and_preservation"
+      ]
+    },
+    {
+      "id": "T01",
+      "category": "Timeline",
+      "name": "Sequential assembly",
+      "basic": "Render ordered clips into one continuous sequence",
+      "extended": "Gaps, overwrite/insert interaction and mixed source formats",
+      "basic_evidence": [
+        "timeline.assemble"
+      ],
+      "extended_evidence": [
+        "timeline_edges.explicit_gaps",
+        "timeline_edges.insert_overwrite_ripple",
+        "timeline_edges.gap_previews",
+        "timeline_edges.saved_and_queued",
+        "timeline_edges.invalid_atomicity_preservation"
+      ]
+    },
+    {
+      "id": "T02",
+      "category": "Timeline",
+      "name": "Source in/out trimming",
+      "basic": "Render exact source ranges on a frame boundary",
+      "extended": "Mixed frame rates, keyframe codecs and audio-only edges",
+      "basic_evidence": [
+        "timeline.trim",
+        "timeline.reject_invalid_ranges"
+      ],
+      "extended_evidence": [
+        "timeline_edges.mixed_rate_codec_audio_edges",
+        "timeline_edges.invalid_atomicity_preservation"
+      ]
+    },
+    {
+      "id": "T03",
+      "category": "Timeline",
+      "name": "Split edits",
+      "basic": "Split a clip without changing rendered content or duration",
+      "extended": "Linked media, transitions and subframe audio splits",
+      "basic_evidence": [
+        "timeline.split",
+        "rust:model::tests::split_preserves_source_range_and_total_duration"
+      ],
+      "extended_evidence": [
+        "track_edits.split_links_transitions_subframes",
+        "track_edits.saved_diffs_history_schema",
+        "track_edits.previews_ranges_proxies_queue",
+        "track_edits.invalid_handles_preservation"
+      ]
+    },
+    {
+      "id": "T04",
+      "category": "Timeline",
+      "name": "Move and remove clips",
+      "basic": "Reorder and remove sequential clips with verified output",
+      "extended": "Multiple tracks, selections, locks and collision policies",
+      "basic_evidence": [
+        "timeline.reorder_remove"
+      ],
+      "extended_evidence": [
+        "tracks.linked_move_remove_targets",
+        "tracks.locks_collisions_sync",
+        "tracks.atomic_sessions_history_mcp",
+        "tracks.invalid_preservation_faults"
+      ]
+    },
+    {
+      "id": "T05",
+      "category": "Timeline",
+      "name": "Exact timing",
+      "basic": "Exact rational arithmetic and verified 25 fps render boundaries",
+      "extended": "Rendered fractional-rate, VFR and long-form sync fixtures",
+      "basic_evidence": [
+        "rust:time::tests::fractional_rates_and_long_sequences_are_exact",
+        "export.reference_counts"
+      ],
+      "extended_evidence": [
+        "native_timing.fractional_and_integer_rates_decoded_pixels_samples_and_pts",
+        "native_timing.fractional_saved_edits_undo_previews_and_queued_output",
+        "native_timing.vfr_source_clock_conversion_and_rendered_edits",
+        "native_timing.thirty_minute_fractional_render_complete_sync",
+        "rust:jobs::recovery::tests::fractional_publication_crash_recovers_exact_frame_and_audio_clocks"
+      ]
+    },
+    {
+      "id": "T06",
+      "category": "Timeline",
+      "name": "Insert, overwrite and ripple",
+      "basic": "Explicit insert/overwrite/ripple semantics",
+      "extended": "Cross-track locks, sync groups and boundary collisions",
+      "basic_evidence": [
+        "editing.insert_overwrite_ripple",
+        "editing.invalid_boundaries_atomicity"
+      ],
+      "extended_evidence": [
+        "track_edits.insert_overwrite_ripple_sync",
+        "track_edits.cross_track_locks_collisions_atomicity",
+        "track_edits.saved_diffs_history_schema",
+        "track_edits.invalid_handles_preservation"
+      ]
+    },
+    {
+      "id": "T07",
+      "category": "Timeline",
+      "name": "Slip, slide and rolling edits",
+      "basic": "Implement each operation with visible edit diffs",
+      "extended": "Transitions, handles and linked audio remain valid",
+      "basic_evidence": [
+        "editing.slip_slide_roll",
+        "editing.visible_diffs_replay_undo"
+      ],
+      "extended_evidence": [
+        "track_edits.slip_slide_roll_handles_links",
+        "track_edits.cross_track_locks_collisions_atomicity",
+        "track_edits.saved_diffs_history_schema",
+        "track_edits.invalid_handles_preservation"
+      ]
+    },
+    {
+      "id": "T08",
+      "category": "Timeline",
+      "name": "Tracks and linked groups",
+      "basic": "Multiple tracks with linked audio/video",
+      "extended": "Track targeting, locking, gaps and sync protection",
+      "basic_evidence": [
+        "tracks.native_composition_audio_gaps",
+        "tracks.linked_move_remove_targets",
+        "tracks.legacy_promotion_preserves_media"
+      ],
+      "extended_evidence": [
+        "tracks.locks_collisions_sync",
+        "tracks.atomic_sessions_history_mcp",
+        "tracks.previews_ranges_delivery",
+        "tracks.proxies_and_queued_full_quality",
+        "tracks.invalid_preservation_faults"
+      ]
+    },
+    {
+      "id": "T09",
+      "category": "Timeline",
+      "name": "Nested sequences",
+      "basic": "Render reusable nested sequences",
+      "extended": "Time mapping, cycles, changes and nested effects",
+      "basic_evidence": [
+        "sequences.reuse_exact_child_output",
+        "sequences.decoded_handles_identity_preservation"
+      ],
+      "extended_evidence": [
+        "sequences.time_mapping_nested_effects_changes",
+        "sequences.cycles_locks_missing_bounds_limits",
+        "sequences.saved_diffs_retries_undo_schema",
+        "sequences.previews_ranges_proxies_queue",
+        "sequences.decoded_handles_identity_preservation"
+      ]
+    },
+    {
+      "id": "T10",
+      "category": "Timeline",
+      "name": "Multicam and synchronization",
+      "basic": "Switch between synchronized camera angles",
+      "extended": "Audio/timecode sync, drift and recoverable angle edits",
+      "basic_evidence": [
+        "multicam.declared_sync_camera_switches",
+        "multicam.audio_policies_sample_alignment",
+        "multicam.dependencies_locks_projection_limits",
+        "multicam.previews_proxies_ranges_queue",
+        "multicam.source_identity_preservation"
+      ],
+      "extended_evidence": [
+        "sync.known_audio_offsets_drift_polarity",
+        "sync.explicit_correction_pixels_pcm_quality",
+        "sync.declared_timecode_day_anchors",
+        "sync.corrected_multicam_saved_mcp",
+        "sync.ambiguity_clock_bounds_rejection",
+        "sync.identities_read_only_source_preservation",
+        "multicam.recoverable_cuts_angles_history"
+      ]
+    },
+    {
+      "id": "V01",
+      "category": "Video",
+      "name": "Transform and crop",
+      "basic": "Position, scale, rotate and crop a clip",
+      "extended": "Aspect ratios, interpolation and animated transforms",
+      "extended_evidence": [
+        "spatial.legacy_exact_quadrant_regression",
+        "spatial.aspect_fit_crop_anchor",
+        "spatial.interpolation_alpha_edges_blends",
+        "spatial.animated_property_clocks",
+        "spatial.graphics_mask_effect_order",
+        "spatial.mcp_templates_saved_previews",
+        "spatial.validation_source_preservation"
+      ],
+      "basic_evidence": [
+        "video.scene_transform_crop"
+      ]
+    },
+    {
+      "id": "V02",
+      "category": "Video",
+      "name": "Opacity and compositing",
+      "basic": "Composite layered clips with opacity",
+      "extended": "Blend modes, premultiplied alpha and edge correctness",
+      "basic_evidence": [
+        "video.scene_alpha_layers"
+      ],
+      "extended_evidence": [
+        "composite.blend_alpha_equations",
+        "composite.transparent_edges_and_limits"
+      ]
+    },
+    {
+      "id": "V03",
+      "category": "Video",
+      "name": "Transitions",
+      "basic": "Cross-dissolve with explicit source handles",
+      "extended": "Transition set, asymmetric handles and mixed content",
+      "basic_evidence": [
+        "transitions.styles_asymmetric_handles_exact",
+        "transitions.rejections_identity_preservation"
+      ],
+      "extended_evidence": [
+        "transitions.styles_asymmetric_handles_exact",
+        "transitions.mixed_content_occlusion_chains",
+        "transitions.edit_dependencies_locks",
+        "transitions.saved_diffs_history_schema",
+        "transitions.previews_ranges_scopes_delivery",
+        "transitions.proxies_queued_original_quality",
+        "transitions.rejections_identity_preservation"
+      ]
+    },
+    {
+      "id": "V04",
+      "category": "Video",
+      "name": "Keyframes and easing",
+      "basic": "Animate effect parameters",
+      "extended": "Interpolation modes, retiming and deterministic evaluation",
+      "basic_evidence": [
+        "animation.sampled_parameters",
+        "animation.rendered_parameter_curves"
+      ],
+      "extended_evidence": [
+        "easing.exact_modes_and_pixels",
+        "easing.forward_reverse_retiming",
+        "easing.retime_limits_and_clamps",
+        "easing.deterministic_mcp_replay",
+        "rust:animation::tests::quadratic_easing_has_exact_landmarks_and_no_overshoot"
+      ]
+    },
+    {
+      "id": "V05",
+      "category": "Video",
+      "name": "Masks and tracking",
+      "basic": "Static and keyframed effect masks",
+      "extended": "Motion tracking and robust feather/edge behavior",
+      "extended_evidence": [
+        "tracking.known_motion_confidence_and_boundaries",
+        "tracking.exact_clocks_transforms_and_rendered_masks",
+        "tracking.feather_alpha_blends_and_geometric_edges",
+        "tracking.ambiguity_occlusion_and_discontinuity_rejection",
+        "tracking.mcp_templates_saved_history_and_previews",
+        "tracking.validation_atomicity_and_source_preservation"
+      ],
+      "basic_evidence": [
+        "mask.static_and_inverted_rectangles",
+        "mask.keyframes_and_transform_order"
+      ]
+    },
+    {
+      "id": "V06",
+      "category": "Video",
+      "name": "Stabilization",
+      "basic": "Stabilize a handheld fixture",
+      "extended": "Scene cuts, rolling motion and crop-quality tradeoffs",
+      "basic_evidence": [
+        "stabilization.measured_handheld_and_rendered_lock",
+        "stabilization.smoothing_strength_and_exact_clocks",
+        "stabilization.mcp_templates_saved_history_previews",
+        "stabilization.validation_and_source_preservation"
+      ],
+      "extended_evidence": [
+        "stabilization.roll_geometry_and_quality",
+        "stabilization.cut_resets_and_unreliable_rejection",
+        "stabilization.crop_tradeoffs_and_authored_mapping",
+        "stabilization.validation_and_source_preservation"
+      ]
+    },
+    {
+      "id": "V07",
+      "category": "Video",
+      "name": "Speed and time remapping",
+      "basic": "Constant speed, reverse and freeze frame",
+      "extended": "Variable speed ramps, interpolation and audio pitch policy",
+      "basic_evidence": [
+        "conform.speed_reverse_freeze",
+        "conform.exact_timestamp_mapping",
+        "conform.saved_session_and_mcp"
+      ],
+      "extended_evidence": [
+        "remapping.exact_variable_speed_and_boundaries",
+        "remapping.timestamp_interpolation_and_quality",
+        "remapping.reverse_freeze_and_continuity",
+        "remapping.pitch_policy_and_pcm",
+        "remapping.color_and_lut_order",
+        "remapping.mcp_saved_history_and_previews",
+        "remapping.validation_and_source_preservation"
+      ]
+    },
+    {
+      "id": "V08",
+      "category": "Video",
+      "name": "Keying and reusable effects",
+      "basic": "Chroma key and independent effect chains",
+      "extended": "Spill control, presets and representative effect quality tests",
+      "basic_evidence": [
+        "keying.chroma_geometry_boundaries",
+        "keying.effect_order_and_independence",
+        "keying.alpha_precision_and_bypass",
+        "keying.validation_and_preservation"
+      ],
+      "extended_evidence": [
+        "keying.spill_and_known_edge_quality",
+        "keying.presets_mcp_templates_sessions",
+        "keying.masks_and_transforms",
+        "keying.animation_and_graphics"
+      ]
+    },
+    {
+      "id": "A01",
+      "category": "Audio",
+      "name": "Synchronized audio cuts",
+      "basic": "Sample-exact linked audio cuts and concatenation",
+      "extended": "Audio-only edits, sample rates and channel layouts",
+      "extended_evidence": [
+        "audio_mix.sample_cuts_rates_layouts",
+        "audio_mix.scene_session_integration",
+        "audio_mix.validation_source_protection"
+      ],
+      "basic_evidence": [
+        "audio.cut_sync"
+      ]
+    },
+    {
+      "id": "A02",
+      "category": "Audio",
+      "name": "Gain, mute and fades",
+      "basic": "Gain, mute and fades on clips",
+      "extended": "Automation curves, crossfades and clipping behavior",
+      "basic_evidence": [
+        "audio_mix.gain_mute_fades"
+      ],
+      "extended_evidence": [
+        "audio_mix.automation_crossfade_clipping",
+        "audio_mix.mcp_recipe_roundtrip"
+      ]
+    },
+    {
+      "id": "A03",
+      "category": "Audio",
+      "name": "Track mixing and routing",
+      "basic": "Mix multiple audio tracks",
+      "extended": "Buses, channel mapping, pan and surround layouts",
+      "basic_evidence": [
+        "audio_mix.multitrack_sum"
+      ],
+      "extended_evidence": [
+        "audio_routing.named_layouts_and_sample_clocks",
+        "audio_routing.buses_matrices_and_headroom",
+        "audio_routing.pan_laws_and_automation",
+        "audio_routing.multichannel_processing_and_meters",
+        "audio_routing.mcp_templates_saved_edits_and_previews",
+        "audio_routing.bounded_graphs",
+        "audio_routing.validation_and_preservation",
+        "rust:audio_routing::tests::changed_source_before_publication_preserves_files"
+      ]
+    },
+    {
+      "id": "A04",
+      "category": "Audio",
+      "name": "Audio processing and meters",
+      "basic": "EQ, dynamics and loudness/peak measurements",
+      "extended": "Meter accuracy and effect-chain regression fixtures",
+      "basic_evidence": [
+        "audio_processing.eq_reference_and_response",
+        "audio_processing.dynamics_step_response",
+        "audio_processing.meter_accuracy_gates"
+      ],
+      "extended_evidence": [
+        "audio_processing.effect_order_roundtrip",
+        "audio_processing.meter_accuracy_gates",
+        "audio_processing.validation_preservation_mcp"
+      ]
+    },
+    {
+      "id": "A05",
+      "category": "Audio",
+      "name": "Dialogue repair",
+      "basic": "Local denoise and basic dialogue cleanup",
+      "extended": "Noise types, artifact limits and controlled quality comparisons",
+      "basic_evidence": [
+        "audio_repair.spectral_reference_and_sample_clocks",
+        "audio_repair.dc_cleanup_processing_and_clipping",
+        "audio_repair.controlled_speech_and_noise_quality",
+        "audio_repair.mcp_scenes_saved_edits_and_previews"
+      ],
+      "extended_evidence": [
+        "audio_repair.controlled_speech_and_noise_quality",
+        "audio_repair.clean_bypass_and_transient_artifact_limits",
+        "audio_repair.maximum_profiles_duration_and_memory",
+        "audio_repair.validation_and_source_preservation",
+        "rust:audio_repair::tests::changed_source_before_publication_preserves_files"
+      ]
+    },
+    {
+      "id": "A06",
+      "category": "Audio",
+      "name": "Audio recording",
+      "basic": "Local input recording onto a sequence",
+      "extended": "Latency compensation, device changes and long capture",
+      "basic_evidence": [
+        "recording.native_capture_formats_channels_and_isolation",
+        "recording.exact_native_placement_and_latency_shifts",
+        "recording.saved_edits_and_read_only_mcp",
+        "recording.native_wave_previews_ranges_and_nesting",
+        "recording.validation_and_source_preservation"
+      ],
+      "extended_evidence": [
+        "recording.exact_native_placement_and_latency_shifts",
+        "recording.input_loss_and_explicit_reselection",
+        "recording.sustained_native_capture_clock_and_memory",
+        "rust:recording::tests::packet_clocks_silence_and_discontinuities",
+        "rust:recording::tests::capture_packets_publication_cancellation_and_device_faults",
+        "rust:pcm_stream::tests::streaming_wave_counts_boundaries_and_failed_writes",
+        "rust:pcm_stream::tests::two_hour_streaming_writer_exact_size_and_digest"
+      ]
+    },
+    {
+      "id": "C01",
+      "category": "Color",
+      "name": "SDR color management",
+      "basic": "Explicit transfer, matrix and range conversions",
+      "extended": "Mixed tagged/untagged media and reference chart tolerances",
+      "basic_evidence": [
+        "color.transfer_matrix_range_charts",
+        "color.clipping_and_identity_precision",
+        "color.invalid_metadata_and_preservation"
+      ],
+      "extended_evidence": [
+        "color.tagged_untagged_and_native_yuv420",
+        "color.mixed_saved_session_mcp_and_delivery",
+        "color.retime_and_repeatability",
+        "color.transfer_matrix_range_charts",
+        "color.invalid_metadata_and_preservation"
+      ]
+    },
+    {
+      "id": "C02",
+      "category": "Color",
+      "name": "Primary grading",
+      "basic": "Exposure, contrast, white balance and curves",
+      "extended": "Numerical color-chart tests and animated grading",
+      "basic_evidence": [
+        "grading.exposure_contrast_white_balance_charts",
+        "grading.curves_chain_order_and_clipping",
+        "grading.validation_and_preservation"
+      ],
+      "extended_evidence": [
+        "grading.animated_local_clock_and_retime",
+        "grading.alpha_modes_edges_and_neutral_bypass",
+        "grading.graphics_sources",
+        "grading.mcp_templates_and_saved_session",
+        "grading.exposure_contrast_white_balance_charts"
+      ]
+    },
+    {
+      "id": "C03",
+      "category": "Color",
+      "name": "Secondary grading",
+      "basic": "Selective color correction",
+      "extended": "Qualifiers, masks and difficult boundary tests",
+      "basic_evidence": [
+        "selection.hsl_qualifiers_boundaries_inversion",
+        "selection.ordered_effects_and_layer_isolation",
+        "selection.validation_and_preservation"
+      ],
+      "extended_evidence": [
+        "selection.feathered_masks_source_coordinates",
+        "selection.alpha_and_unselected_exactness",
+        "selection.animated_mix_masks_and_graphics",
+        "selection.hsl_qualifiers_boundaries_inversion",
+        "selection.mcp_templates_saved_session"
+      ]
+    },
+    {
+      "id": "C04",
+      "category": "Color",
+      "name": "LUTs and scopes",
+      "basic": "Load supported LUTs and provide scopes",
+      "extended": "Interpolation, out-of-range values and validated scope math",
+      "basic_evidence": [
+        "lut.one_d_and_three_d_rendering",
+        "scopes.exact_histogram_waveform_vectorscope",
+        "scopes.timeline_proxy_preview_and_sessions",
+        "lut.validation_identity_and_preservation"
+      ],
+      "extended_evidence": [
+        "lut.interpolation_domains_and_clipping",
+        "lut.external_filter_agreement",
+        "scopes.exact_histogram_waveform_vectorscope",
+        "scopes.invalid_requests_and_preservation",
+        "lut.validation_identity_and_preservation"
+      ]
+    },
+    {
+      "id": "C05",
+      "category": "Color",
+      "name": "HDR and high bit depth",
+      "basic": "Explicit high-bit-depth/HDR processing path",
+      "extended": "Tone mapping, display/output metadata and reference comparisons",
+      "basic_evidence": [
+        "hdr.native_depth_transfer_precision",
+        "hdr.high_depth_ranges",
+        "hdr.exact_retime_resize_audio"
+      ],
+      "extended_evidence": [
+        "hdr.exposure_gamut_tone_charts",
+        "hdr.standard_display_metadata_and_reimport",
+        "hdr.external_transfer_reference",
+        "hdr.saved_session_mcp_preview_delivery",
+        "hdr.metadata_validation_preservation_faults"
+      ]
+    },
+    {
+      "id": "G01",
+      "category": "Text and graphics",
+      "name": "Text and shapes",
+      "basic": "Original text and shape overlays using user-supplied fonts",
+      "extended": "Layout, Unicode, font fallback and transparency",
+      "basic_evidence": [
+        "graphics.original_fonts_layout_fallback",
+        "graphics.shapes_transparency_strokes",
+        "graphics.validation_source_output_preservation"
+      ],
+      "extended_evidence": [
+        "unicode.original_substitutions_marks_scripts_and_fallback",
+        "unicode.paragraph_bidi_controls_and_mirroring",
+        "unicode.wrap_alignment_spacing_and_transparency",
+        "unicode.templates_captions_and_animated_scenes",
+        "unicode.mcp_saved_retries_undo_and_previews",
+        "unicode.bounded_work_and_font_metrics",
+        "unicode.validation_changed_fonts_and_output_preservation",
+        "rust:graphics::unicode::tests::signed_origin_rounding_and_work_limits"
+      ]
+    },
+    {
+      "id": "G02",
+      "category": "Text and graphics",
+      "name": "Animated graphics",
+      "basic": "Animate text and shape properties",
+      "extended": "Reusable original templates and parameter validation",
+      "basic_evidence": [
+        "graphics.animated_text_shapes_masks",
+        "graphics.mcp_saved_session_replay"
+      ],
+      "extended_evidence": [
+        "templates.original_presets_and_pixels",
+        "templates.typed_values_and_bindings",
+        "templates.reuse_isolation_and_hashes",
+        "templates.invalid_constraints_and_atomicity",
+        "templates.saved_session_mcp_preservation"
+      ]
+    },
+    {
+      "id": "G03",
+      "category": "Text and graphics",
+      "name": "Captions and subtitles",
+      "basic": "Import, edit and export timed captions",
+      "extended": "Styles, multiline layout, overlap and accessible output formats",
+      "basic_evidence": [
+        "captions.import_export_exact_interchange",
+        "captions.atomic_edit_diffs_and_timing",
+        "captions.validation_and_source_output_preservation"
+      ],
+      "extended_evidence": [
+        "captions.styles_voices_losses_unicode",
+        "captions.sampled_multiline_overlap_pixels",
+        "captions.mcp_and_saved_session_use",
+        "captions.validation_and_source_output_preservation"
+      ]
+    },
+    {
+      "id": "G04",
+      "category": "Text and graphics",
+      "name": "Transcription and text edits",
+      "basic": "Optional local transcription and text-range cuts",
+      "extended": "Word alignment, languages and synchronized edit corrections",
+      "basic_evidence": [
+        "transcript.exact_source_corrections_and_projection",
+        "transcript.linked_rendered_word_cuts",
+        "transcript.saved_mcp_retry_undo_preview",
+        "transcription.offline_languages_independent_word_clocks",
+        "transcription.maximum_channels_resources_and_exact_clock",
+        "transcription.native_rejection_cancellation_and_owner_lifetime",
+        "transcription.supervisor_protocol_and_detached_descendants"
+      ],
+      "extended_evidence": [
+        "transcription.offline_languages_independent_word_clocks",
+        "transcription.recognized_corrections_saved_rendered_cuts",
+        "transcription.maximum_channels_resources_and_exact_clock",
+        "transcript.document_batch_and_sample_cut_bounds",
+        "transcript.atomic_rejections_and_source_preservation",
+        "rust:transcript::tests::source_clocks_and_provenance_are_part_of_content_identity",
+        "rust:transcript_cut::tests::rounding_reports_even_a_partially_bound_neighbor_and_estimates_are_explicit"
+      ]
+    },
+    {
+      "id": "G05",
+      "category": "Text and graphics",
+      "name": "Reframing and content selection",
+      "basic": "User-directed tracking/reframing with explicit crop decisions",
+      "extended": "Subject changes, motion and optional local analysis",
+      "basic_evidence": [
+        "reframe.explicit_geometry_aspect_edges_and_alpha",
+        "reframe.authored_paths_source_clocks_and_corrections",
+        "reframe.local_tracking_confidence_and_loss",
+        "reframe.validation_identity_and_output_preservation",
+        "rust:spatial::tests::fitting_window_keeps_source_crop_and_pixel_aspect_explicit"
+      ],
+      "extended_evidence": [
+        "reframe.subject_changes_motion_constraints_and_smoothing",
+        "reframe.local_tracking_confidence_and_loss",
+        "reframe.effects_templates_mcp_saved_audio_and_previews",
+        "reframe.maximum_duration_work_and_memory",
+        "rust:reframe::tests::future_constraints_and_exact_smoothing",
+        "rust:reframe::tests::crop_path_matches_enumerated_candidate_graphs"
+      ]
+    },
+    {
+      "id": "E01",
+      "category": "Export",
+      "name": "Lossless reference export",
+      "basic": "Verified FFV1/PCM output from the sequence",
+      "extended": "Additional lossless profiles, long renders and color/alpha cases",
+      "extended_evidence": [
+        "image_sequence.lossless_straight_associated_rgba_and_color_clocks",
+        "image_sequence.opaque_composition_saved_edits_and_typed_inspection",
+        "image_sequence.complete_numbered_identity_alpha_color_and_boundary_rejections",
+        "image_sequence.thirty_minute_lossless_alpha_and_exact_silent_audio"
+      ],
+      "basic_evidence": [
+        "export.reference_counts",
+        "audio.cut_sync"
+      ]
+    },
+    {
+      "id": "E02",
+      "category": "Export",
+      "name": "Delivery encoding",
+      "basic": "One validated H.264/AAC delivery preset",
+      "extended": "Bitrate, rate control, quality and device compatibility matrix",
+      "extended_evidence": [
+        "delivery_profiles.quality_two_pass_bitrate_and_audio_matrix",
+        "delivery_profiles.actual_software_cuda_compatibility_and_timing",
+        "delivery_profiles.concurrent_two_pass_logs_and_decoded_repeatability",
+        "delivery_profiles.geometry_boundaries_and_audio_only_controls",
+        "delivery_profiles.first_and_second_pass_failures_clean_owned_statistics",
+        "delivery_profiles.invalid_combinations_mcp_and_source_preservation"
+      ],
+      "basic_evidence": [
+        "delivery.h264_aac_color_quality_and_timing",
+        "delivery.aac_delay_padding_and_stream_options",
+        "delivery.validation_faults_and_preservation"
+      ]
+    },
+    {
+      "id": "E03",
+      "category": "Export",
+      "name": "Previews and stills",
+      "basic": "Timeline frame previews and still export",
+      "extended": "Contact sheets, cached intervals and preview/final agreement",
+      "basic_evidence": [
+        "preview.timeline_frames",
+        "preview.range_boundary_sync"
+      ],
+      "extended_evidence": [
+        "preview.contact_sheets_cached_intervals_final_agreement",
+        "cache.probes_proxies_frames_intervals_content_identity",
+        "cache.saved_edits_retry_undo_and_restore",
+        "cache.preview_bounds_roots_and_source_preservation"
+      ]
+    },
+    {
+      "id": "E04",
+      "category": "Export",
+      "name": "Batch export and job control",
+      "basic": "Queued exports with progress and cancellation",
+      "extended": "Crash recovery, retries and bounded concurrency",
+      "basic_evidence": [
+        "jobs.durable_completion",
+        "jobs.render_equivalence",
+        "jobs.live_progress",
+        "jobs.queued_cancel",
+        "jobs.running_cancel_tree"
+      ],
+      "extended_evidence": [
+        "recovery.actual_retry_pixels_audio_idempotency_and_schema",
+        "recovery.attempt_exhaustion_and_source_pinning",
+        "recovery.actual_worker_interruption_and_checked_rerender",
+        "recovery.all_32_slots_single_worker_and_cancel_no_retry",
+        "rust:jobs::recovery::tests::published_crash_reconciles_without_reencoding_or_overwrite",
+        "rust:jobs::recovery::tests::intent_crash_requeues_only_opted_in_and_cancellation_wins",
+        "rust:jobs::recovery::tests::publication_conflicts_and_corrupt_receipts_are_preserved_and_reject",
+        "rust:jobs::recovery::tests::bounded_attempts_pin_sources_and_keep_failure_history",
+        "rust:jobs::recovery::tests::version_one_queue_migration_preserves_tickets_requests_and_default_retry_policy",
+        "rust:jobs::recovery::tests::failed_queue_migration_rolls_back_schema_and_preserves_rows"
+      ]
+    },
+    {
+      "id": "E05",
+      "category": "Export",
+      "name": "Format and range options",
+      "basic": "Selected range and audio/video-only exports",
+      "extended": "Broader containers, frame sizes, rates and image sequences",
+      "extended_evidence": [
+        "formats.eight_native_rates_mov_mkv_wav_and_ordered_png_ranges",
+        "formats.large_portrait_odd_and_single_pixel_lossless_outputs",
+        "formats.complete_sequence_validation_concurrent_publication_and_failures",
+        "formats.typed_inspection_roots_settings_and_source_preservation"
+      ],
+      "basic_evidence": [
+        "delivery.lossless_ranges_and_streams",
+        "delivery.aac_delay_padding_and_stream_options",
+        "delivery.original_quality_and_repeatability",
+        "delivery.mcp_saved_sessions",
+        "delivery.validation_faults_and_preservation"
+      ]
+    },
+    {
+      "id": "E06",
+      "category": "Export",
+      "name": "Validation and source protection",
+      "basic": "Verify output counts and refuse source/output overwrites",
+      "extended": "Crash, disk-full and changed-source failure injection",
+      "extended_evidence": [
+        "failure_injection.real_encoded_disk_full_cleanup_and_bounded_retry",
+        "failure_injection.changed_source_after_complete_encode_blocks_publication",
+        "failure_injection.actual_encode_worker_exit_and_preserved_crash_partial",
+        "rust:jobs::recovery::tests::published_crash_reconciles_without_reencoding_or_overwrite",
+        "rust:jobs::recovery::tests::intent_crash_requeues_only_opted_in_and_cancellation_wins",
+        "rust:jobs::recovery::tests::publication_conflicts_and_corrupt_receipts_are_preserved_and_reject"
+      ],
+      "basic_evidence": [
+        "media.originals_preserved",
+        "export.no_overwrite",
+        "export.source_overwrite_rejected",
+        "export.failure_cleanup"
+      ]
+    },
+    {
+      "id": "I01",
+      "category": "Projects and interchange",
+      "name": "Native project save/load",
+      "basic": "Round-trip a portable versioned project snapshot",
+      "extended": "Migrations, relative media paths, history and recovery",
+      "basic_evidence": [
+        "project.roundtrip"
+      ],
+      "extended_evidence": [
+        "portable.actual_version_one_migration_and_exact_history_preservation",
+        "portable.relative_sources_proxies_and_saved_relocation",
+        "portable.consistent_live_backup_complete_history_and_recovery",
+        "portable.corrupt_history_boundaries_and_publication_preservation",
+        "portable.typed_local_tools_and_explicit_migration",
+        "rust:store::integrity::tests::explicit_migration_crashes_preserve_history_and_atomic_schema",
+        "rust:store::integrity::tests::full_database_migration_rolls_back_schema_and_all_original_rows",
+        "rust:store::integrity::tests::revision_metadata_and_head_corruption_reject_saved_reads",
+        "rust:store::integrity::tests::backup_process_crash_publishes_only_a_complete_checked_history",
+        "rust:store::integrity::tests::recovery_process_crash_preserves_backup_and_never_exposes_partial_database",
+        "rust:store::integrity::tests::invalid_legacy_history_rejects_without_partial_migration_or_repair"
+      ]
+    },
+    {
+      "id": "I02",
+      "category": "Projects and interchange",
+      "name": "Editorial interchange",
+      "basic": "Supported OTIO/XML/EDL subset with loss reports",
+      "extended": "Round-trip tracks, transitions, audio and unsupported features",
+      "basic_evidence": [
+        "interchange.public_reference_tracks_gaps_and_sample_clocks",
+        "interchange.reviewed_losses_and_unacknowledgeable_unknowns",
+        "interchange.identity_roots_limits_and_no_overwrite"
+      ],
+      "extended_evidence": [
+        "interchange.independent_decoded_roundtrip_transitions_and_audio",
+        "interchange.signed_origins_versioned_clips_and_disabled_items",
+        "interchange.reviewed_losses_and_unacknowledgeable_unknowns",
+        "interchange.typed_tools_saved_edits_retry_and_undo"
+      ]
+    },
+    {
+      "id": "I03",
+      "category": "Projects and interchange",
+      "name": "Native third-party project compatibility",
+      "basic": "Import an agreed native project subset where legally supported",
+      "extended": "Version matrix and transparent handling of unsupported constructs",
+      "basic_evidence": [
+        "native_projects.actual_native_captures_and_independent_editorial_output",
+        "native_projects.typed_proposals_saved_edits_replay_and_undo"
+      ],
+      "extended_evidence": [
+        "native_projects.explicit_omissions_disabled_mute_and_blocked_nesting",
+        "native_projects.exact_build_adapter_source_and_boundary_guards"
+      ]
+    },
+    {
+      "id": "P01",
+      "category": "Performance",
+      "name": "Caching and responsive inspection",
+      "basic": "Cache probes/proxies/previews by content identity",
+      "extended": "Eviction, invalidation and measured cold/warm latency",
+      "basic_evidence": [
+        "cache.probes_proxies_frames_intervals_content_identity",
+        "cache.invalidation_relocation_tools_and_corruption",
+        "cache.concurrent_builds_and_no_overwrite_publication",
+        "cache.preview_bounds_roots_and_source_preservation"
+      ],
+      "extended_evidence": [
+        "cache.lru_entry_byte_eviction_and_budget_bypass",
+        "cache.invalidation_relocation_tools_and_corruption",
+        "cache.saved_edits_retry_undo_and_restore",
+        "cache.measured_cold_and_warm_latency",
+        "rust:cache_store::tests::exact_payloads_lru_eviction_and_corrupt_entry_rebuild",
+        "rust:cache_store::tests::hot_journal_recovery_preserves_last_complete_payload",
+        "rust:cache_store::tests::sqlite_full_rolls_back_eviction_and_payload_write",
+        "rust:cache_store::tests::pruning_reclaims_owned_database_payload_pages",
+        "rust:cache_store::tests::failed_insert_rolls_back_eviction_and_keeps_sources",
+        "rust:cache_store::tests::unrelated_database_is_never_adopted"
+      ]
+    },
+    {
+      "id": "P02",
+      "category": "Performance",
+      "name": "Hardware acceleration",
+      "basic": "One accelerated decode/render path",
+      "extended": "Device fallback, numerical tolerances and measured throughput",
+      "basic_evidence": [
+        "acceleration.actual_cuda_decode_clocks_and_numerical_tolerance",
+        "acceleration.normalization_and_resize_pipeline_agreement",
+        "acceleration.typed_inspection_and_saved_native_asset"
+      ],
+      "extended_evidence": [
+        "acceleration.actual_device_fallback_and_failure_preservation",
+        "acceleration.late_decode_faults_timeout_and_cleanup",
+        "acceleration.measured_native_and_decode_stage_throughput"
+      ]
+    },
+    {
+      "id": "P03",
+      "category": "Performance",
+      "name": "Large projects and long media",
+      "basic": "Bounded memory and usable 1000-clip operation latency",
+      "extended": "Long-form 4K fixtures, stress failures and performance regression limits",
+      "basic_evidence": [
+        "performance.thousand_clip_edits"
+      ],
+      "extended_evidence": [
+        "long_form_4k.complete_moving_pixels_pcm_and_clocks",
+        "long_form_4k.bounded_tree_memory_and_render_latency",
+        "long_form_4k.repeated_complete_pipeline_latency",
+        "long_form_4k.real_write_failures_cancel_and_queue_recovery",
+        "rust:render::tests::cancelled_partial_waits_for_real_windows_file_handle_release"
+      ]
+    }
+  ],
+  "agent_checks": [
+    {
+      "name": "Local typed command interface",
+      "evidence": [
+        "agent.strict_requests"
+      ]
+    },
+    {
+      "name": "Capability discovery",
+      "evidence": [
+        "agent.capabilities"
+      ]
+    },
+    {
+      "name": "Atomic snapshot edits and revision guards",
+      "evidence": [
+        "agent.revision_guard",
+        "rust:model::tests::failed_batch_does_not_mutate_original"
+      ]
+    },
+    {
+      "name": "Explicit local file boundaries",
+      "evidence": [
+        "agent.input_roots",
+        "agent.output_roots"
+      ]
+    },
+    {
+      "name": "Inspectable render plans",
+      "evidence": [
+        "agent.dry_render_plan"
+      ]
+    },
+    {
+      "name": "Durable project store",
+      "evidence": [
+        "session.durable_reopen",
+        "rust:store::tests::process_crash_before_commit_rolls_back",
+        "session.concurrent_writers"
+      ]
+    },
+    {
+      "name": "Durable idempotent retries",
+      "evidence": [
+        "session.retry_after_advance",
+        "session.concurrent_retry",
+        "rust:store::tests::process_crash_after_commit_replays_lost_response"
+      ]
+    },
+    {
+      "name": "Persistent undo/history",
+      "evidence": [
+        "session.undo_restore",
+        "session.paginated_history",
+        "rust:store::tests::repeated_undo_restore_and_paginated_history"
+      ]
+    },
+    {
+      "name": "Asynchronous job control",
+      "acceptance": "Durable local queue; status/phase and frame progress; queued and running cancellation; no output overwrites; worker interruption detection. Windows backend, one render per root.",
+      "evidence": [
+        "jobs.durable_completion",
+        "jobs.live_progress",
+        "jobs.bounded_queue",
+        "jobs.queued_cancel",
+        "jobs.running_cancel_tree",
+        "jobs.worker_interruption",
+        "jobs.queue_continues",
+        "jobs.completed_output_preserved"
+      ]
+    },
+    {
+      "name": "MCP stdio adapter",
+      "acceptance": "Version negotiation, discoverable typed tools, structured results/errors, shared saved-session semantics, clean stdio framing/EOF and official Python SDK interoperability; no listening service.",
+      "evidence": [
+        "mcp.version_negotiation",
+        "mcp.discoverable_schemas",
+        "mcp.error_contract",
+        "mcp.framing_recovery",
+        "mcp.shared_session_semantics",
+        "mcp.undo_history",
+        "mcp.official_sdk_interop"
+      ]
+    }
+  ]
+}

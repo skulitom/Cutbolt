@@ -1,0 +1,122 @@
+{
+  "contract_version": "cutbolt-production-draft-1",
+  "status": "planning_only",
+  "notice": "Illustrative production data. No current Cutbolt command accepts this document. Null artifacts have not been generated or approved.",
+  "production_id": "animation-explainer-pilot",
+  "revision": 0,
+  "parent_revision": null,
+  "title": "How a few still pictures become an animation",
+  "language": "English",
+  "target_duration": {"min": {"num": 60, "den": 1}, "max": {"num": 90, "den": 1}},
+  "roots": {"sources": null, "generated": null, "normalized": null, "previews": null, "exports": null, "state": null},
+  "profile": {
+    "logical_canvas": {"width": 320, "height": 180, "color": "srgb"},
+    "output": {"width": 1920, "height": 1080, "frame_rate": {"num": 25, "den": 1}, "color": "rec709-sdr"},
+    "scale": {"factor": 6, "filter": "nearest"},
+    "audio": {"sample_rate": 48000, "channels": 2},
+    "delivery_target": {"container": "mp4", "video_codec": "h264", "audio_codec": "aac"},
+    "caption_target": "sidecar_srt",
+    "scene_timing_policy": "preserve_scene_duration",
+    "overflow_action": "require_explicit_retiming_choice",
+    "padding_policy": null,
+    "animation_sampling": "reject_unaligned_durations"
+  },
+  "tools": {
+    "pixelforge": {"package": "pixelforge-agent", "version": "0.1.0", "commit": "911d4fa167bdea5949669c20679693257e3cc170"},
+    "qwen": {
+      "repository": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+      "revision": "5d83992436eae1d760afd27aff78a71d676296fc",
+      "speech_tokenizer_subdirectory": "speech_tokenizer",
+      "runtime_lock": null,
+      "reference_voice_artifact": null,
+      "reference_transcript": null
+    },
+    "cutbolt": {"baseline_version": "0.2.0", "required_pipeline_capabilities": "not_implemented"}
+  },
+  "review_policy": {
+    "version": "pilot-human-gates-v1",
+    "editorial_reviewer": "human",
+    "gates": ["script", "storyboard", "narration", "rough_cut", "final_export"],
+    "bind_to_content_and_dependencies": true,
+    "agent_checks_are_advisory": true
+  },
+  "scenes": [
+    {
+      "id": "scene-01",
+      "title": "One picture holds still",
+      "script_revision": 1,
+      "script": "A tiny character stands still. Now its feet move, its body rises, and it seems to hop. The illusion begins with a small collection of carefully chosen pictures.",
+      "planned_duration": {"num": 12, "den": 1},
+      "visual_brief": "Original 32-by-32 character in a small stage; compare one held pose with a short hop. Start with simple shapes and clear contrast.",
+      "visual_artifact": null,
+      "narration_artifact": null,
+      "caption_artifact": null,
+      "measured_duration": null
+    },
+    {
+      "id": "scene-02",
+      "title": "Choose the important poses",
+      "script_revision": 1,
+      "script": "Each picture is a frame. For a hop, we can draw a crouch, a push, a floating pose, and a landing. These poses explain the action before we add detail.",
+      "planned_duration": {"num": 12, "den": 1},
+      "visual_brief": "Four original poses displayed in a contact-sheet composition, then selected in order. Keep sprite canvases and ground anchors identical.",
+      "visual_artifact": null,
+      "narration_artifact": null,
+      "caption_artifact": null,
+      "measured_duration": null
+    },
+    {
+      "id": "scene-03",
+      "title": "Put the pictures in order",
+      "script_revision": 1,
+      "script": "Play those frames in order and the character begins to move. Change the order, and the same pictures tell a different story. A clear sequence makes the movement easy to follow.",
+      "planned_duration": {"num": 12, "den": 1},
+      "visual_brief": "A highlighted frame strip below the character shows correct order, then one deliberately reordered version. Include repeated holds in the frame list.",
+      "visual_artifact": null,
+      "narration_artifact": null,
+      "caption_artifact": null,
+      "measured_duration": null
+    },
+    {
+      "id": "scene-04",
+      "title": "Timing gives the action weight",
+      "script_revision": 1,
+      "script": "How long we hold each pose matters too. A brief push followed by a longer pause in the air feels different from evenly spaced poses. Timing helps an action feel light or heavy.",
+      "planned_duration": {"num": 12, "den": 1},
+      "visual_brief": "Side-by-side timing variants using exactly the same pose images. This is the designated narration-replacement scene; all initial holds align to 40 milliseconds.",
+      "visual_artifact": null,
+      "narration_artifact": null,
+      "caption_artifact": null,
+      "measured_duration": null
+    },
+    {
+      "id": "scene-05",
+      "title": "Revise one part",
+      "script_revision": 1,
+      "script": "Because the pictures stay editable, we can change a color or improve a pose without starting again. Then we watch the sequence to check that the correction helps the whole movement.",
+      "planned_duration": {"num": 12, "den": 1},
+      "visual_brief": "Compare a before/after bounded recolor on one character accessory. Preserve every other sprite region and all audio; show the revised movement afterward.",
+      "visual_artifact": null,
+      "narration_artifact": null,
+      "caption_artifact": null,
+      "measured_duration": null
+    },
+    {
+      "id": "scene-06",
+      "title": "Watch and listen together",
+      "script_revision": 1,
+      "script": "Finally, we combine the animation with narration and captions. We watch, listen, and make another small revision. Simple pictures, deliberate timing, and careful review bring the character to life.",
+      "planned_duration": {"num": 12, "den": 1},
+      "visual_brief": "Full hop animation in the final stage with room for captions; finish on a deliberate held pose. No music needed for the pilot.",
+      "visual_artifact": null,
+      "narration_artifact": null,
+      "caption_artifact": null,
+      "measured_duration": null
+    }
+  ],
+  "artifacts": [],
+  "review_events": [],
+  "stage_receipts": [],
+  "final_export_artifact": null,
+  "upload_requested": false
+}

@@ -1,0 +1,18 @@
+# Project instructions
+
+- Build an original video editing engine for local agent use. The user explicitly does not want to host an API.
+- This repository has a working Rust/JSON snapshot engine, transactional local sessions with retries/undo/history, a narrow FFV1/PCM renderer, a persisted Windows render queue, and native MCP stdio. Bounded PNG/WAV scene compilation and timeline frame/range previews are also implemented; see docs/SCENES.md for strict limits. Read README.md, docs/USAGE.md and docs/AGENT_INTERFACE.md for implemented behavior; architecture documents include future work.
+- For PixelForge/Qwen/YouTube work, read docs/YOUTUBE_PIPELINE.md, docs/pipeline/CONTRACT.md and docs/pipeline/ACCEPTANCE.md first. These describe the agreed pilot and prepared model assets; docs/pipeline/RESULTS.md distinguishes the passing bounded P1/P2 fixture from planned production work. Keep companion tools, weights and generated media external; reuse the existing session contract.
+- Original project code is MIT licensed. Preserve LICENSE and package metadata; dependencies retain their own licenses.
+- Keep docs/PROGRESS.md current through tools/verify.py and the evidence in progress/capabilities.json. Only award points for the specific verified acceptance criteria. Record progress/scope changes in docs/PROGRESS_HISTORY.md. Do not inflate editing coverage with agent-only features or silently remove desirable but unimplemented features.
+- The user accepted these exclusions: accounts/activation, cloud services, stock marketplaces, telemetry, and GUI-only workflows. Underlying editing operations, offline AI-assisted editing, and project compatibility remain in scope.
+- Use CLI/library interfaces and optional MCP over stdio. Do not introduce a listening network service, remote dependency at runtime, or telemetry without a new product requirement.
+- Do not add third-party application binaries, installers, plugins, assets, presets, documentation copies, SDK source, project files, memory dumps, disassembly, or decompiled code to this repository.
+- Do not translate, paraphrase, or port decompiled implementation into the engine. Renaming code or keeping the original file out of Git does not establish independent authorship.
+- Read docs/RESEARCH.md before any proprietary application inspection. Raw research belongs outside this repository. Implementation must use original design, public specifications, and appropriately reviewed factual compatibility requirements.
+- Do not claim a formal clean-room process merely because files or agent conversations are separate. An implementer exposed to proprietary implementation is not an independent clean-room implementer.
+- Do not vendor third-party code or binaries. Keep dependencies external, record exact versions and licenses when selected, and use original synthetic fixture generators.
+- Preserve source media. Use explicit input/output roots and never overwrite an input as part of rendering.
+- Store timeline time as exact rational values, and reject unsupported editing semantics explicitly.
+- Never claim compatibility across all builds of a third-party application; record and test an exact build for any compatibility work.
+- Keep product-specific research and audit records private and excluded from Git. Published documentation uses project-owned capability names. Run the repository material check before committing; preserve all provenance restrictions above.

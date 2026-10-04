@@ -1,0 +1,78 @@
+{
+  "baseline": "research-implementation-v1",
+  "date": "2026-10-02",
+  "core_baseline": "cutbolt-local-v1",
+  "core_points": 100,
+  "description": "The unchanged 100 core acceptance points plus eight explicit research-derived checkpoints. Research completion itself earns no implementation points.",
+  "supplemental": [
+    {
+      "id": "X01",
+      "name": "3D scene geometry and lighting",
+      "basic": "Render original planes with camera projection, depth ordering and declared light behavior against independent geometry/pixel references",
+      "extended": "Validate clipping, hierarchy, camera/light animation and unsupported material or shadow diagnostics",
+      "basic_evidence": [
+        "geometry.independent_projection_per_pixel_depth_and_alpha",
+        "geometry.declared_lighting_and_actual_light_animation",
+        "geometry.typed_inspection_saved_edits_retry_undo_and_previews"
+      ],
+      "extended_evidence": [
+        "geometry.clipping_frustum_edges_and_face_policy",
+        "geometry.hierarchy_and_actual_camera_animation",
+        "geometry.texture_parameters_links_and_temporal_composition",
+        "geometry.maximum_work_nodes_depth_lights_and_record_limits",
+        "geometry.invalid_hierarchies_materials_shadows_and_publication_guards"
+      ]
+    },
+    {
+      "id": "X02",
+      "name": "Motion blur and temporal integration",
+      "basic": "Render declared shutter angle, phase and bounded temporal samples against an independent time-integration fixture",
+      "extended": "Verify animated boundaries, subframe offsets, convergence and explicit effect-specific temporal limitations",
+      "basic_evidence": [
+        "temporal.analytic_moving_box_shutter_and_convergence",
+        "temporal.exact_fractional_phases_boundaries_and_unchanged_audio",
+        "temporal.typed_scene_inspection_saved_edits_and_previews"
+      ],
+      "extended_evidence": [
+        "temporal.subframe_held_sources_masks_effects_and_layer_boundaries",
+        "temporal.linked_properties_and_bounded_aggregate_evaluation",
+        "temporal.maximum_render_work_and_sample_record_limits",
+        "temporal.precision_effect_diagnostics_and_publication_preservation"
+      ]
+    },
+    {
+      "id": "X03",
+      "name": "Typed property expressions and links",
+      "basic": "Evaluate bounded time-driven expressions and property links deterministically without arbitrary code or network execution",
+      "extended": "Reject cycles and invalid types; validate shuffled-time evaluation, seeded operations, limits and reproducibility",
+      "basic_evidence": [
+        "expressions.closed_form_rational_links_and_complete_rendered_pixels",
+        "expressions.typed_algebra_base_clocks_and_spatial_composition",
+        "expressions.typed_inspection_saved_edits_retry_undo_and_previews"
+      ],
+      "extended_evidence": [
+        "expressions.seeded_random_access_and_order_independence",
+        "expressions_cycles_types_domains_precision_and_atomic_preservation",
+        "expressions.maximum_graph_depth_bindings_samples_and_render_work",
+        "rust:expressions::number::tests::exact_negative_modulo_rounding_and_precision_guards"
+      ]
+    },
+    {
+      "id": "X04",
+      "name": "Local foreground segmentation",
+      "basic": "Accept original annotations and produce editable versioned masks through an optional local tool with explicit provenance",
+      "extended": "Verify edge and temporal quality, fresh offline execution, repeatability, model identity and unsupported automation diagnostics",
+      "basic_evidence": [
+        "segmentation.versioned_corrections_parent_identity_and_source_preservation",
+        "segmentation.native_held_mattes_crop_temporal_and_geometry_pixels",
+        "segmentation.typed_inspection_saved_edits_retry_undo_and_previews"
+      ],
+      "extended_evidence": [
+        "segmentation.authored_edge_and_motion_compensated_temporal_quality",
+        "segmentation.fresh_offline_workers_repeatability_and_fitted_model_identity",
+        "segmentation.maximum_frame_and_pixel_workload",
+        "segmentation.unsupported_automation_limits_identity_and_publication_guards"
+      ]
+    }
+  ]
+}

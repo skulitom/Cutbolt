@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-title-card-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "title-card-base",
+    "width": 160,
+    "height": 90,
+    "output_scale": 4,
+    "duration": {
+      "num": 3,
+      "den": 1
+    },
+    "background": [
+      12,
+      18,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "layers": [
+      {
+        "id": "panel",
+        "canvas": [
+          160,
+          90
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "rectangle",
+          "rect": [
+            8,
+            13,
+            144,
+            64
+          ],
+          "fill": [
+            28,
+            56,
+            89,
+            220
+          ],
+          "stroke": {
+            "width": 1,
+            "color": [
+              64,
+              184,
+              211,
+              255
+            ]
+          }
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            160,
+            90
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "label",
+        "canvas": [
+          160,
+          90
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "Title",
+          "fonts": [],
+          "size": 20,
+          "color": [
+            244,
+            239,
+            224,
+            255
+          ],
+          "rect": [
+            16,
+            24,
+            128,
+            39
+          ],
+          "line_height": 24,
+          "letter_spacing": 0,
+          "align": "center",
+          "wrap": "none",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            160,
+            90
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ],
+    "audio": null
+  },
+  "parameters": [
+    {
+      "name": "label",
+      "definition": {
+        "type": "text",
+        "default": "Title",
+        "max_chars": 64
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          244,
+          239,
+          224,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "panel",
+      "definition": {
+        "type": "color",
+        "default": [
+          28,
+          56,
+          89,
+          220
+        ]
+      },
+      "bindings": [
+        {
+          "property": "shape_fill",
+          "layer": "panel"
+        }
+      ]
+    },
+    {
+      "name": "font_size",
+      "definition": {
+        "type": "integer",
+        "default": 20,
+        "min": 8,
+        "max": 28
+      },
+      "bindings": [
+        {
+          "property": "font_size",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 3,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        },
+        {
+          "property": "layer_duration",
+          "layer": "panel"
+        },
+        {
+          "property": "layer_duration",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "fade",
+      "definition": {
+        "type": "curve",
+        "default": {
+          "keys": [
+            {
+              "time": {
+                "num": 0,
+                "den": 1
+              },
+              "value": 0,
+              "interpolation": "linear"
+            },
+            {
+              "time": {
+                "num": 1,
+                "den": 5
+              },
+              "value": 255,
+              "interpolation": "hold"
+            },
+            {
+              "time": {
+                "num": 14,
+                "den": 5
+              },
+              "value": 255,
+              "interpolation": "linear"
+            },
+            {
+              "time": {
+                "num": 3,
+                "den": 1
+              },
+              "value": 0,
+              "interpolation": "hold"
+            }
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "property": "opacity_curve",
+          "layer": "panel"
+        },
+        {
+          "property": "opacity_curve",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "rise",
+      "definition": {
+        "type": "curve",
+        "default": {
+          "keys": [
+            {
+              "time": {
+                "num": 0,
+                "den": 1
+              },
+              "value": 6,
+              "interpolation": "ease_out"
+            },
+            {
+              "time": {
+                "num": 1,
+                "den": 5
+              },
+              "value": 0,
+              "interpolation": "hold"
+            }
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "property": "position_y_curve",
+          "layer": "panel"
+        },
+        {
+          "property": "position_y_curve",
+          "layer": "label"
+        }
+      ]
+    }
+  ]
+}
