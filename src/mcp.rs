@@ -205,7 +205,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Reconcile saved publication and wake a Windows worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
         }
         "timeline.meters" => {
-            "Measure a timeline range's loudness without exporting: sample peak, RMS and BS.1770 integrated loudness (LKFS) of the mix of enabled audio tracks and, by default, of each enabled audio track alone. Use it to set clip gain_milli against a target such as -14 LKFS. Read-only; at most 600 s per call."
+            "Measure a timeline range's loudness without exporting: sample peak, RMS and BS.1770 integrated loudness (LKFS) of the mix of enabled audio tracks and, by default, of each enabled audio track alone. Use it to set clip gain_milli against a target such as -14 LKFS. With curve, also loudness per second and the silent and clipped runs, to find dead air, music that buries speech, or distortion. Read-only; at most 600 s per call."
         }
         "files.list" => {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
@@ -224,6 +224,15 @@ pub(crate) fn description(command: &str) -> &'static str {
         }
         "cache.run" => {
             "Produce or reuse one content-checked cached probe, proxy, frame, interval or contact sheet under an explicit cache root and byte/entry policy. Blocking CLI/library command."
+        }
+        "preview.cuts" => {
+            "Review the edit: write a sheet of the last frame before and first frame after each cut (16 per page, two cuts per row), return it as an inline image, and list each cut's time, clips and source times. Continue with `next`."
+        }
+        "media.sheet" => {
+            "See a source file without adding it to a project: a sheet of frames at given times or spread evenly through it, from any format FFmpeg decodes, returned as an inline image with each cell's time."
+        }
+        "media.shots" => {
+            "Log footage: find the shot boundaries of a source file and list each shot's start, end and cut score; with output, also write a sheet of each shot's middle frame, returned as an inline image."
         }
         "preview.sheet" => {
             "Write a contact sheet of exact timeline frames, laid out on a grid, to an unused PNG, and return it as an inline image so the edit can be seen. Uses the saved proxy selection."
@@ -438,7 +447,10 @@ impl Call {
 }
 /// A preview command's PNG as an image content block, downscaled to PREVIEW_EDGE.
 fn preview_image(workspace: Option<&Workspace>, command: &str, result: &Value) -> Option<Value> {
-    if !matches!(command, "preview.frame" | "preview.sheet") {
+    if !matches!(
+        command,
+        "preview.frame" | "preview.sheet" | "preview.cuts" | "media.sheet" | "media.shots"
+    ) {
         return None;
     }
     let output = std::path::Path::new(result["output"].as_str()?);
@@ -466,6 +478,7 @@ impl Server {
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, fade_in and fade_out with tracks.edit clip_audio. ",
             "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
+            "Review your work: preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
             "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template and audio_routing schemas; ",
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
@@ -697,7 +710,7 @@ mod tests {
 
     /// Agents load the whole catalog into context, so listings stay within explicit budgets.
     const TOOL_BYTES: usize = 16 * 1024;
-    const CATALOG_BYTES: usize = 240 * 1024;
+    const CATALOG_BYTES: usize = 256 * 1024;
 
     /// Listed properties, including those of generated stubs, all describe themselves.
     fn undescribed(schema: &Value) -> usize {

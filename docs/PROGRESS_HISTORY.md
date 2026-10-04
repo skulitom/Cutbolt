@@ -1,5 +1,26 @@
 # Progress history
 
+## 4 October 2026: reviewing cuts, footage and loudness over time
+
+An agent can only see stills and numbers, so it had no practical way to check an edit or log footage. This adds four read-only views:
+
+- **`preview.cuts`** pages through every cut, 16 at a time, as a sheet of the frames on either side. The result says which clips and source times sit on each side, and which edit points are continuous splits rather than visible cuts.
+- **`media.sheet`** shows frames from any decodable source file, before it is added to a project.
+- **`media.shots`** finds shot boundaries with a frame-difference test that ignores motion and single-frame flashes. It can add a sheet with one frame per shot.
+- **`timeline.meters` with `curve`** gives per-second short-term and momentary loudness, plus silent and clipped runs with exact sample times.
+
+The new sheets return inline images over MCP. Frame previews also stop rejecting projects with more than 64 clips, because a preview reads only the frames it shows. This finishes the long-timeline change.
+
+The tracks fixture checks each view:
+
+- The cut table and paging on the 1,000-clip timeline, and pixel identity with the equivalent contact sheet.
+- A continuous split.
+- Source-sheet cells equal to the source frames.
+- Three shots, with a flash ignored, in an FFmpeg test-pattern clip.
+- Loudness curves within 0.11 dB of an independent K-weighted meter of the oracle PCM, with exact silence and clipping runs.
+
+With 73 tools, the catalog budget unit test rises from 240 to 256 KiB. The new tools add about 11 KB, and the largest existing listings, `transcript.plan` and `captions.scene`, are the place to trim next. No scoring changed.
+
 ## 4 October 2026: long timelines render in exact chunks
 
 One FFmpeg graph held at most 64 clips. A real-length edit with jump cuts and b-roll therefore failed to render at all, and track previews of any window failed once the whole arrangement passed 64 clips. Renders, range renders, previews, exports and meters now count only the clips a window reads. A window with more clips is planned as consecutive chunks of at most 64 clips. Each chunk renders through the ordinary path and they are joined by stream copy.

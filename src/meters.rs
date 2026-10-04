@@ -27,6 +27,7 @@ pub fn inspect(
     start: Option<Time>,
     duration: Option<Time>,
     per_track: bool,
+    curve: bool,
 ) -> Result<Value> {
     let start = start.unwrap_or(Time::ZERO);
     let duration = match duration {
@@ -39,7 +40,7 @@ pub fn inspect(
             format!("Meters measure at most {MAX_SECONDS} s at a time; select a shorter range"),
         ));
     }
-    let mix = measure(project, input_root, start, duration)?;
+    let mix = measure(project, input_root, start, duration, curve)?;
     let mut tracks = Vec::new();
     if per_track && let Some(arrangement) = &project.tracks {
         for (index, track) in arrangement.tracks.iter().enumerate() {
@@ -60,7 +61,7 @@ pub fn inspect(
                 }
             }
             tracks.push(
-                json!({"track_id":track.id,"meters":measure(&solo, input_root, start, duration)?}),
+                json!({"track_id":track.id,"meters":measure(&solo, input_root, start, duration, curve)?}),
             );
         }
     }
@@ -68,7 +69,13 @@ pub fn inspect(
 }
 
 /// Render the range's audio exactly as an audio-only export would, then meter the PCM.
-fn measure(project: &Project, input_root: &Path, start: Time, duration: Time) -> Result<Value> {
+fn measure(
+    project: &Project,
+    input_root: &Path,
+    start: Time,
+    duration: Time,
+    curve: bool,
+) -> Result<Value> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| error("CLOCK_ERROR", "Clock before epoch"))?
@@ -104,5 +111,9 @@ fn measure(project: &Project, input_root: &Path, start: Time, duration: Time) ->
             return Err(error("MEDIA_CHANGED", "Source changed during measurement"));
         }
     }
-    Ok(crate::audio_processing::meters(&decoded.data))
+    let mut meters = crate::audio_processing::meters(&decoded.data);
+    if curve {
+        meters["over_time"] = crate::audio_processing::profile(&decoded.data);
+    }
+    Ok(meters)
 }

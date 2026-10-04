@@ -80,6 +80,72 @@ pub enum Request {
         /// Absolute path of a new .png file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
+    #[serde(rename = "preview.cuts")]
+    PreviewCuts {
+        /// Project whose cuts to review.
+        #[schemars(with = "crate::reference::ProjectInput")]
+        project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
+        input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
+        output_root: PathBuf,
+        /// Absolute path of a new .png file inside output_root; existing files are never overwritten.
+        output: PathBuf,
+        /// List cuts at or after this timeline time; default zero. Pass the previous result's `next` to continue.
+        #[serde(default)]
+        start: Option<Time>,
+        /// Cuts on this sheet, 1-16; default 16.
+        #[serde(default)]
+        limit: Option<usize>,
+        /// Cell width in pixels, 16-480; default 192. Cell height follows the project's aspect ratio.
+        #[serde(default)]
+        tile_width: Option<u32>,
+    },
+    #[serde(rename = "media.sheet")]
+    MediaSheet {
+        /// Video file to sample; any format FFmpeg decodes, not only timeline sources.
+        path: PathBuf,
+        /// Existing absolute directory that must contain `path`.
+        input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
+        output_root: PathBuf,
+        /// Absolute path of a new .png file inside output_root; existing files are never overwritten.
+        output: PathBuf,
+        /// 1-64 source times in rational seconds, in cell order; omit to spread `count` frames evenly.
+        #[serde(default)]
+        times: Option<Vec<Time>>,
+        /// Evenly spread frames, 1-64, when `times` is omitted; default 16.
+        #[serde(default)]
+        count: Option<u32>,
+        /// Cells per row, 1-8; default 4.
+        #[serde(default)]
+        columns: Option<u32>,
+        /// Cell width in pixels, 16-480; default 192. Cell height follows the source's aspect ratio.
+        #[serde(default)]
+        tile_width: Option<u32>,
+    },
+    #[serde(rename = "media.shots")]
+    MediaShots {
+        /// Video file to analyze; any format FFmpeg decodes.
+        path: PathBuf,
+        /// Existing absolute directory that must contain `path`.
+        input_root: PathBuf,
+        /// Cut threshold on the 0-255 mean absolute difference of 64x36 gray frames; default 20.
+        #[serde(default)]
+        threshold: Option<u8>,
+        /// Shortest shot in frames; closer cuts are ignored. Default 6.
+        #[serde(default)]
+        minimum_frames: Option<u32>,
+        /// Existing absolute directory for the optional shot sheet.
+        #[serde(default)]
+        output_root: Option<PathBuf>,
+        /// New .png for a sheet of each shot's middle frame (first 64 shots); omit for the list alone.
+        #[serde(default)]
+        output: Option<PathBuf>,
+        /// Sheet cell width in pixels, 16-480; default 192.
+        #[serde(default)]
+        tile_width: Option<u32>,
+    },
     #[serde(rename = "transcript.transcribe")]
     Transcribe(crate::transcribe::Transcribe),
     #[serde(rename = "transcript.inspect")]
@@ -645,6 +711,9 @@ pub enum Request {
         /// Also meter each enabled audio track alone; default true. Each track costs one more audio pass.
         #[serde(default = "crate::commands::yes")]
         tracks: bool,
+        /// Add `over_time`: per-second short-term and loudest momentary LKFS, silent runs (-60 dBFS for 0.5 s or more) and clipped runs, with exact times; default false.
+        #[serde(default)]
+        curve: bool,
     },
     #[serde(rename = "files.list")]
     FilesList {
@@ -831,6 +900,59 @@ pub fn handle(request: Request) -> Result<Value> {
             output_root,
             output,
         } => preview::sheet(&project, &spec, &input_root, &output_root, &output),
+        Request::PreviewCuts {
+            project,
+            input_root,
+            output_root,
+            output,
+            start,
+            limit,
+            tile_width,
+        } => crate::review::cut_sheet(
+            &project,
+            &input_root,
+            &output_root,
+            &output,
+            start,
+            limit,
+            tile_width,
+        ),
+        Request::MediaSheet {
+            path,
+            input_root,
+            output_root,
+            output,
+            times,
+            count,
+            columns,
+            tile_width,
+        } => crate::review::source_sheet(
+            &path,
+            &input_root,
+            &output_root,
+            &output,
+            times,
+            count,
+            columns,
+            tile_width,
+        ),
+        Request::MediaShots {
+            path,
+            input_root,
+            threshold,
+            minimum_frames,
+            output_root,
+            output,
+            tile_width,
+        } => crate::review::shots(
+            &path,
+            &input_root,
+            threshold,
+            minimum_frames,
+            output_root.as_deref(),
+            output.as_deref(),
+            tile_width,
+        ),
         Request::AudioInputs {} => crate::recording::inputs(),
         Request::AudioRecordInspect { input, duration } => {
             crate::recording::inspect(&input, duration)
@@ -1178,7 +1300,8 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             duration,
             tracks,
-        } => crate::meters::inspect(&project, &input_root, start, duration, tracks),
+            curve,
+        } => crate::meters::inspect(&project, &input_root, start, duration, tracks, curve),
         Request::FilesList {
             input_root,
             dir,
@@ -1223,7 +1346,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","preview.cuts","media.sheet","media.shots","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},

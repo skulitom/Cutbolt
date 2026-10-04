@@ -45,6 +45,7 @@ pub mod reframe;
 pub mod registry;
 pub mod remap;
 pub mod render;
+pub mod review;
 pub mod scene;
 pub mod schema;
 pub mod scopes;

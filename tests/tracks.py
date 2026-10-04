@@ -200,6 +200,92 @@ def run(root):
     plan=call({'command':'render.plan','project':model_limit,'input_root':str(root),'output_root':str(out),'output':str(out/'thousand-clips-plan.mkv')})
     assert plan['frames']==1000 and len(plan['chunks'])==16 and [c['frames'] for c in plan['chunks']]==[64]*15+[40],plan['chunks']
     render(model_limit,'thousand-clips-chunked')
+    # Cut review: the frame before and after each cut, 16 per page, as a sheet identical to preview.sheet.
+    def cut_request(p,name,**fields):
+        return {'command':'preview.cuts','project':p,'input_root':str(root),'output_root':str(out),'output':str(out/name),**fields}
+    page=call(cut_request(model_limit,'cuts-1.png'))
+    assert page['total_cuts']==999 and page['next']==time(17,25) and [c['time'] for c in page['cuts']]==[time(n,25) for n in range(1,17)]
+    assert page['cuts'][0]['before']['clip_id']=='clip-0' and page['cuts'][0]['after']['clip_id']=='clip-1' and page['cuts'][0]['cells']==[0,1]
+    assert page['cuts'][0]['after']['source_time']==time(1,25) and not any(c['continuous'] for c in page['cuts'])
+    times=[t for c in page['cuts'] for t in (time(seconds(c['time'])*25-1,25),c['time'])]
+    call({'command':'preview.sheet','project':model_limit,'input_root':str(root),'output_root':str(out),'output':str(out/'cuts-1-sheet.png'),
+          'spec':{'times':times,'columns':4,'tile_width':192,'tile_height':144,'gap':6,'background':[24,24,24]}})
+    with Image.open(out/'cuts-1.png') as a, Image.open(out/'cuts-1-sheet.png') as b:assert a.tobytes()==b.tobytes() and a.size==(4*192+3*6,8*144+7*6)
+    last=call(cut_request(model_limit,'cuts-last.png',start=time(990,25),limit=16))
+    assert len(last['cuts'])==10 and last['next'] is None
+    split=copy.deepcopy(empty);split['tracks']['duration']=time(24,25)
+    split['tracks']['tracks'][0]['clips']=[placement('p0',0,0,10,0),placement('p1',0,10,10,10),placement('p2',1,20,4,0)]
+    review=call(cut_request(split,'cuts-split.png'))
+    assert [(c['time'],c['continuous']) for c in review['cuts']]==[(time(10,25),True),(time(20,25),False)] and review['total_cuts']==2
+    # Source sheets: frames of any source at given times; at native tile size the cells are the source frames.
+    sheet=call({'command':'media.sheet','path':str(sources/'0.mkv'),'input_root':str(sources),'output_root':str(out),'output':str(out/'source-sheet.png'),
+                'times':[time(n,25) for n in (0,5,23)],'tile_width':W})
+    assert (sheet['width'],sheet['height'],sheet['tile'])==(4*W+3*6,H,[W,H]) and [c['time'] for c in sheet['cells']]==[time(n,25) for n in (0,5,23)]
+    with Image.open(out/'source-sheet.png') as image:
+        for i,n in enumerate((0,5,23)):assert image.convert('RGB').crop((i*(W+6),0,i*(W+6)+W,H)).tobytes()==frame(0,n),n
+    spread=call({'command':'media.sheet','path':str(sources/'1.mkv'),'input_root':str(sources),'output_root':str(out),'output':str(out/'spread.png'),'count':4})
+    assert [seconds(c['time']) for c in spread['cells']]==[F(N,25)*F(2*i+1,8) for i in range(4)]
+    call({'command':'media.sheet','path':str(sources/'0.mkv'),'input_root':str(sources),'output_root':str(out),'output':str(out/'bad.png'),'times':[time(0)],'count':2},'INVALID_ARGUMENT')
+    # Shot boundaries: three one-second shots (moving test pattern, flat colour, bars with a one-frame
+    # flash); the flash is not a cut.
+    ff(['-f','lavfi','-i','testsrc2=s=64x36:r=25:d=1','-f','lavfi','-i','color=c=navy:s=64x36:r=25:d=1','-f','lavfi','-i','smptebars=s=64x36:r=25:d=1',
+        '-filter_complex',"[0:v][1:v][2:v]concat=n=3:v=1:a=0,drawbox=x=0:y=0:w=64:h=36:color=white:t=fill:enable='eq(n,60)'[v]",
+        '-map','[v]','-c:v','ffv1','-pix_fmt','bgr0',str(out/'shots.mkv')])
+    shots=call({'command':'media.shots','path':str(out/'shots.mkv'),'input_root':str(out),'output_root':str(out),'output':str(out/'shots.png')})
+    assert shots['frames']==75 and [s['start'] for s in shots['shots']]==[time(0),time(1),time(2)],shots['shots']
+    assert shots['shots'][1]['cut_score']>=20 and shots['sheet']['shots_shown']==3 and (out/'shots.png').exists()
+    passed.append('tracks.cut_review_source_sheets_and_shots')
+    # Loudness over time: a clip, a 1.04 s gap, then two tracks summing the same source into
+    # saturation. The oracle PCM is metered independently (BS.1770 K-weighting, 100 ms blocks).
+    meter=copy.deepcopy(empty);meter['tracks']['duration']=time(100,25)
+    layers={t['id']:t for t in meter['tracks']['tracks']}
+    layers['dialogue']['clips']=[placement('m1',0,0,24,0),placement('m2',1,50,24,0)]
+    layers['upper-audio']['clips']=[placement('m3',1,50,24,0)]
+    _,pcm=oracle(meter);pcm=array('h',pcm)
+    measured=call({'command':'timeline.meters','project':meter,'input_root':str(root),'curve':True})
+    profile=measured['mix']['over_time']
+    def biquad(b,a):
+        state=[[0.0,0.0],[0.0,0.0]]
+        def run(x,ch):
+            s=state[ch];y=b[0]*x+s[0];s[0]=b[1]*x-a[0]*y+s[1];s[1]=b[2]*x-a[1]*y;return y
+        return run
+    shelf=biquad([1.53512485958697,-2.69169618940638,1.19839281085285],[-1.69065929318241,0.73248077421585])
+    highpass=biquad([1.0,-2.0,1.0],[-1.99004745483398,0.99007225036621])
+    blocks=[];energy=0.0
+    for n in range(len(pcm)//2):
+        for ch in range(2):
+            y=highpass(shelf(pcm[2*n+ch]/32768,ch),ch);energy+=y*y
+        if (n+1)%4800==0:blocks.append(energy);energy=0.0
+    import math
+    def loud(total,count):
+        value=total/(count*4800)
+        if value<=0:return None
+        lkfs=10*math.log10(value)-0.691
+        return None if lkfs<-70 else lkfs
+    short=[loud(sum(blocks[max(0,e-30):e]),e-max(0,e-30)) for e in range(10,len(blocks)+1,10)]
+    loudest=[max((v for v in (loud(sum(blocks[k-4:k]),4) for k in range(e-9,e+1) if k>=4) if v is not None),default=None) for e in range(10,len(blocks)+1,10)]
+    for name,expected in (('short_term_lkfs',short),('momentary_max_lkfs',loudest)):
+        actual=profile[name];assert len(actual)==len(expected)==4,(name,actual)
+        assert all((a is None and b is None) or (a is not None and b is not None and abs(a-b)<=0.11) for a,b in zip(actual,expected)),(name,actual,expected)
+    def runs(test,minimum):
+        found=[];start=None
+        for n in range(len(pcm)//2):
+            if test(pcm[2*n],pcm[2*n+1]):
+                if start is None:start=n
+            elif start is not None:
+                if n-start>=minimum:found.append({'start':{'num':start,'den':48000},'end':{'num':n,'den':48000}})
+                start=None
+        if start is not None and len(pcm)//2-start>=minimum:found.append({'start':{'num':start,'den':48000},'end':{'num':len(pcm)//2,'den':48000}})
+        return found
+    silent=runs(lambda l,r:abs(l)<=32 and abs(r)<=32,24000)
+    assert silent and profile['silence']['runs']==silent[:50] and profile['silence']['count']==len(silent),(profile['silence'],silent)
+    assert silent[0]['start']=={'num':24*1920,'den':48000}
+    full=lambda v:v in (32767,-32768)
+    clipped=runs(lambda l,r:full(l) or full(r),1)
+    assert clipped and profile['clipping']['clipped_samples']==sum(1 for v in pcm if full(v)) and profile['clipping']['runs']==clipped[:50]
+    assert profile['clipping']['count']==len(clipped)
+    assert [t['track_id'] for t in measured['tracks']]==['dialogue','upper-audio','extra-audio'] and measured['tracks'][2]['meters']['over_time']['clipping']['clipped_samples']==0
+    passed.append('tracks.loudness_curve_silence_and_clipping')
     model_limit['tracks']['duration']=time(1001,25);model_limit['tracks']['tracks'][0]['clips'].append(placement('overflow',0,1000,1))
     call({'command':'project.validate','project':model_limit},'LIMIT_EXCEEDED')
     malformed=copy.deepcopy(base);malformed['tracks']['links'][0]['members'][0]['start']={'num':0,'den':0}

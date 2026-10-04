@@ -281,6 +281,105 @@ fn decibels(power: f64) -> Option<f64> {
     (power > 0.0).then(|| 10.0 * power.log10())
 }
 
+/// Silence: every channel within this many codes of zero (-60 dBFS).
+const SILENT_CODE: i32 = 32;
+/// Shortest reported silent run: half a second at 48 kHz.
+const SILENT_SAMPLES: usize = 24_000;
+/// Runs listed per kind; counts stay exact.
+const MAX_RUNS: usize = 50;
+
+/// Loudness over time and level events of final stereo 48 kHz PCM, for reviewing a timeline.
+/// For each whole second it gives the short-term loudness of the 3 s ending there and the
+/// loudest momentary (400 ms, 100 ms hop) loudness ending inside it, K-weighted as in `meters`
+/// and rounded to 0.1 LKFS (null below the -70 LKFS absolute gate). It also lists silent runs (at most -60 dBFS
+/// for 0.5 s or more) and runs of clipped samples (full-scale codes), with exact sample times.
+pub(crate) fn profile(pcm: &[i16]) -> Value {
+    const BLOCK: usize = 4800;
+    let mut shelf = Biquad::new(
+        [1.53512485958697, -2.69169618940638, 1.19839281085285],
+        [1.0, -1.69065929318241, 0.73248077421585],
+    );
+    let mut highpass = Biquad::new([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621]);
+    let frames = pcm.len() / 2;
+    let mut blocks = Vec::with_capacity(frames / BLOCK);
+    let mut energy = 0.0;
+    let (mut silent_from, mut silent) = (None, Vec::new());
+    let (mut clipped_from, mut clipped, mut clipped_samples) = (None, Vec::new(), 0usize);
+    let time = |n: usize| json!({"num":n,"den":48000});
+    for (n, pair) in pcm.as_chunks::<2>().0.iter().enumerate() {
+        for (ch, &sample) in pair.iter().enumerate() {
+            let x = sample as f64 / 32768.0;
+            let weighted = highpass.sample(shelf.sample(x, ch), ch);
+            energy += weighted * weighted;
+        }
+        if (n + 1) % BLOCK == 0 {
+            blocks.push(energy);
+            energy = 0.0;
+        }
+        let quiet = pair.iter().all(|&s| i32::from(s).abs() <= SILENT_CODE);
+        match (quiet, silent_from) {
+            (true, None) => silent_from = Some(n),
+            (false, Some(from)) => {
+                if n - from >= SILENT_SAMPLES {
+                    silent.push((from, n));
+                }
+                silent_from = None;
+            }
+            _ => {}
+        }
+        let clip = pair.iter().any(|&s| s == i16::MAX || s == i16::MIN);
+        clipped_samples += pair
+            .iter()
+            .filter(|&&s| s == i16::MAX || s == i16::MIN)
+            .count();
+        match (clip, clipped_from) {
+            (true, None) => clipped_from = Some(n),
+            (false, Some(from)) => {
+                clipped.push((from, n));
+                clipped_from = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(from) = silent_from.filter(|from| frames - from >= SILENT_SAMPLES) {
+        silent.push((from, frames));
+    }
+    if let Some(from) = clipped_from {
+        clipped.push((from, frames));
+    }
+    // Below the -70 LKFS absolute gate, as in integrated loudness, reads as silence (null).
+    let loudness = |sum: f64, count: usize| {
+        decibels(sum / (count * BLOCK) as f64)
+            .map(|x| x - 0.691)
+            .filter(|x| *x >= -70.0)
+            .map(|x| (x * 10.0).round() / 10.0)
+    };
+    let seconds = blocks.len() / 10;
+    let mut short_term = Vec::with_capacity(seconds);
+    let mut momentary = Vec::with_capacity(seconds);
+    for second in 0..seconds {
+        let end = (second + 1) * 10;
+        let first = end.saturating_sub(30);
+        short_term.push(loudness(blocks[first..end].iter().sum(), end - first));
+        let loudest = (end - 9..=end)
+            .filter(|&e| e >= 4)
+            .filter_map(|e| loudness(blocks[e - 4..e].iter().sum(), 4))
+            .fold(None, |best: Option<f64>, x| {
+                Some(best.map_or(x, |b| b.max(x)))
+            });
+        momentary.push(loudest);
+    }
+    let runs = |runs: &[(usize, usize)]| {
+        runs.iter()
+            .take(MAX_RUNS)
+            .map(|&(from, to)| json!({"start":time(from),"end":time(to)}))
+            .collect::<Vec<_>>()
+    };
+    json!({"step_seconds":1,"short_term_lkfs":short_term,"momentary_max_lkfs":momentary,
+        "silence":{"threshold_dbfs":-60,"minimum_seconds":0.5,"count":silent.len(),"runs":runs(&silent)},
+        "clipping":{"clipped_samples":clipped_samples,"count":clipped.len(),"runs":runs(&clipped)}})
+}
+
 /// Final PCM measurement: stereo only, 48 kHz block counts, no true-peak claim.
 pub(crate) fn meters(pcm: &[i16]) -> Value {
     // Public 48 kHz coefficients: BS.1770-5 Annex 1, Tables 1 and 2.
@@ -360,4 +459,58 @@ pub(crate) fn channel_meters(pcm: &[i16], channels: usize) -> Value {
     let frames = pcm.len() / channels;
     json!({"profile":"channel-48k-meters-v1","measured_signal":"final_pcm16", "sample_peak_dbfs":peaks.iter().map(|x| decibels(x*x)).collect::<Vec<_>>(),
         "rms_dbfs":squares.iter().map(|x| decibels(x / frames as f64)).collect::<Vec<_>>(), "integrated_lkfs":null,"loudness_status":"unsupported_layout","true_peak":false})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One second of a stereo sine at `amplitude` codes and 1 kHz.
+    fn tone(amplitude: f64) -> Vec<i16> {
+        (0..48_000)
+            .flat_map(|n| {
+                let x = (amplitude
+                    * (2.0 * std::f64::consts::PI * 1000.0 * n as f64 / 48_000.0).sin())
+                .round() as i16;
+                [x, x]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn profile_reports_loudness_per_second_silence_and_clipping() {
+        // 2 s of tone, 2 s of silence, 1 s of a louder tone with three clipped frames.
+        let mut pcm = tone(3000.0);
+        pcm.extend(tone(3000.0));
+        pcm.extend(vec![0; 192_000]);
+        let mut loud = tone(12_000.0);
+        for n in [1000, 1001, 30_000] {
+            loud[2 * n] = i16::MAX;
+            loud[2 * n + 1] = i16::MIN;
+        }
+        pcm.extend(loud);
+        let profile = profile(&pcm);
+        let short: Vec<Option<f64>> =
+            serde_json::from_value(profile["short_term_lkfs"].clone()).unwrap();
+        let momentary: Vec<Option<f64>> =
+            serde_json::from_value(profile["momentary_max_lkfs"].clone()).unwrap();
+        assert_eq!((short.len(), momentary.len()), (5, 5));
+        // The fourth second is wholly silent: no momentary loudness, but its 3 s short-term window
+        // still reaches the tone.
+        assert!(momentary[3].is_none() && short[3].is_some());
+        // Four times the amplitude is about 12 dB louder.
+        let gain = momentary[4].unwrap() - momentary[1].unwrap();
+        assert!((gain - 12.0).abs() < 0.2, "{gain}");
+        // The run ends one sample into the loud tone, whose first sample, sin(0), is silent.
+        assert_eq!(
+            profile["silence"]["runs"],
+            json!([{"start":{"num":96000,"den":48000},"end":{"num":192001,"den":48000}}])
+        );
+        assert_eq!(profile["clipping"]["clipped_samples"], 6);
+        assert_eq!(profile["clipping"]["count"], 2);
+        assert_eq!(
+            profile["clipping"]["runs"][0],
+            json!({"start":{"num":193000,"den":48000},"end":{"num":193002,"den":48000}})
+        );
+    }
 }

@@ -7,21 +7,20 @@ const FPS: Time = Time { num: 25, den: 1 };
 pub(crate) fn validate(project: &Project) -> Result<u64> {
     project.validate()?;
     if let Some(a) = &project.tracks {
-        if project.frame_rate.compare(FPS)?.is_ne()
-            || a.tracks.iter().map(|t| t.clips.len()).sum::<usize>() > 64
-        {
+        // Previews read only the window they show; long ranges render as chunks.
+        if project.frame_rate.compare(FPS)?.is_ne() {
             return Err(error(
                 "UNSUPPORTED_TIMELINE",
-                "Track previews require 25 fps and at most 64 clips",
+                "Track previews require 25 fps",
             ));
         }
         return a.duration.units(FPS);
     }
     crate::render::clock::rate(project.frame_rate)?;
-    if project.clips.is_empty() || project.clips.len() > 64 {
+    if project.clips.is_empty() {
         return Err(error(
             "UNSUPPORTED_TIMELINE",
-            "Previews require a supported native frame rate and 1-64 sequential clips",
+            "Previews require a supported native frame rate and at least one sequential item",
         ));
     }
     for clip in &project.clips {
