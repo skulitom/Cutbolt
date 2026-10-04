@@ -31,7 +31,8 @@ pub struct Retry {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenderRequest {
-    /// Project snapshot to render, e.g. from session.get.
+    /// Project to render; the job pins its snapshot at submission.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: Project,
     /// Existing absolute directory that project media paths resolve against.
     pub input_root: PathBuf,

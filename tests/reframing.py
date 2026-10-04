@@ -1,5 +1,7 @@
 """Original subject trajectories, enumerated crop feasibility and decoded scene references."""
+from engine import ENGINE
 import argparse
+import budgets
 import array
 import copy
 from fractions import Fraction as F
@@ -24,7 +26,7 @@ from spatial import reference
 from tracking import coverage
 
 ROOT=Path(__file__).resolve().parents[1]
-EXE=ROOT/'target/debug/cutbolt.exe'
+EXE=ENGINE
 
 
 def nearest(value):
@@ -341,7 +343,8 @@ def run(root):
         clock.sleep(.01)
     reader.join(timeout=5);wall=clock.monotonic()-started;value=json.loads(response['stdout'])
     assert process.returncode==0 and value['ok'],value
-    assert 0<peak<128*1024*1024 and wall<30,(peak,wall)
+    assert 0<peak<128*1024*1024,(peak,wall)
+    budgets.check(wall<30,(peak,wall))
     max_result=check(maximum,maximum_boxes,'maximum-frames-and-segments',list(range(0,128,8)))
     assert len(max_result[1]['decisions'])==128 and all(d['source_frame']==0 for d in max_result[1]['decisions'])
     performance={'frames':128,'segments':16,'source_canvas':[512,512],'inspection_peak_working_set_bytes':peak,'inspection_seconds':wall,'gates':{'maximum_bytes':128*1024*1024,'maximum_seconds':30}}

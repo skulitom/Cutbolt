@@ -1,4 +1,5 @@
 """Independent rational key mattes, Decimal color recovery and original edge quality fixtures."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -109,7 +110,7 @@ def run(root):
             truth.putpixel((x,y),(f,f,f,a));plate.putpixel((x,y),(v,v+255-a,v,255))
     truth.save(sources/'edge-truth.png');plate.save(sources/'edge-plate.png')
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe';decoded=0;maximum_error=0;passed=[];cases=[];quality={}
+    exe=ENGINE;decoded=0;maximum_error=0;passed=[];cases=[];quality={}
     def request(cmd,error=None):
         p=subprocess.run([str(exe)],input=json.dumps(cmd).encode(),capture_output=True,timeout=120);r=json.loads(p.stdout)
         if error:

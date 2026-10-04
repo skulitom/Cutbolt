@@ -1,4 +1,5 @@
 """Original SDR charts: independent Decimal transfer and YCbCr matrix/range references."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -130,7 +131,7 @@ def run(root):
     generate('hdr','bgr0','srgb','full',overrides={'color_trc':'smpte2084'})
     generate('wrong-chroma','yuv420p','bt709','limited',overrides={'chroma_sample_location':'center'})
     originals={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe'
+    exe=ENGINE
     def call(request,error=None,env=None):
         p=subprocess.run([str(exe)],input=json.dumps(request).encode(),capture_output=True,timeout=180,env=env);v=json.loads(p.stdout)
         if error:assert p.returncode==1 and v['error']['code']==error,(error,v);return v

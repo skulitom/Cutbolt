@@ -8,7 +8,8 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
-    /// Project snapshot to sample; frames up to 8M pixels, originals used even if a proxy is selected.
+    /// Project to sample; frames up to 8M pixels, originals used even if a proxy is selected.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: Project,
     /// Existing absolute directory that project media paths resolve against.
     pub input_root: PathBuf,

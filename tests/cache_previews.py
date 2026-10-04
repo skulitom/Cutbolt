@@ -1,5 +1,7 @@
 """Original content-cache fixtures and independent contact-sheet/interval pixels."""
+from engine import ENGINE
 import argparse
+import budgets
 from array import array
 from concurrent.futures import ThreadPoolExecutor
 import copy
@@ -36,7 +38,7 @@ def run(root):
     sources, out, cache, store = [root / name for name in ('sources', 'output', 'cache', 'sessions')]
     for p in (sources, out, cache, store):
         p.mkdir()
-    exe = ROOT / 'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed, cases, timings = [], [], []
     rejected = frames = samples = 0
 
@@ -441,7 +443,7 @@ def run(root):
                 result = cached(t, selected_cache=benchmark_cache, hit=hit)
                 measured.append(timings[-1]['wall_seconds'])
         latency[kind] = {'cold_seconds': cold, 'warm_seconds': warm, 'cold_median': statistics.median(cold), 'warm_median': statistics.median(warm)}
-        assert latency[kind]['warm_median'] < latency[kind]['cold_median'], (kind, latency[kind])
+        budgets.check(latency[kind]['warm_median'] < latency[kind]['cold_median'], (kind, latency[kind]))
     passed.append('cache.measured_cold_and_warm_latency')
     result = {'passed': passed, 'frames_compared': frames, 'stereo_sample_frames_compared': samples, 'rejections': rejected, 'cases': cases, 'latency': latency, 'timings': timings,
               'limits': {'actual_contact_sheet_items': 64, 'actual_contact_sheet_pixels': 8000000, 'payload_budget_max': 1073741824, 'entry_budget_max': 4096},

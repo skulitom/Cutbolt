@@ -34,7 +34,8 @@ pub enum Task {
     },
     /// Lossless proxy for one bound asset, like proxy.generate; returns operations to attach it.
     Proxy {
-        /// Project snapshot containing the asset.
+        /// Project containing the asset.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Must equal `project.revision`.
         expected_revision: u64,
@@ -51,7 +52,8 @@ pub enum Task {
     },
     /// One timeline frame as PNG, like preview.frame.
     Frame {
-        /// Project snapshot to preview.
+        /// Project to preview.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Frame time in rational seconds; a frame boundary before the timeline end.
         time: Time,
@@ -64,7 +66,8 @@ pub enum Task {
     },
     /// Timeline interval as a lossless MKV, like preview.range.
     Interval {
-        /// Project snapshot to preview.
+        /// Project to preview.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Interval start in rational seconds on a frame boundary.
         start: Time,
@@ -79,7 +82,8 @@ pub enum Task {
     },
     /// Contact sheet PNG, like preview.sheet.
     Sheet {
-        /// Project snapshot to sample.
+        /// Project to sample.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Sheet times and layout.
         spec: preview::Sheet,

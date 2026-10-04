@@ -1,4 +1,6 @@
 """Authored glyph plans, rational outline coverage and full scene/saved-edit acceptance."""
+from engine import ENGINE
+import budgets
 import argparse,copy,hashlib,json,math,subprocess,time as clock
 from fractions import Fraction as F
 from pathlib import Path
@@ -15,7 +17,7 @@ from templates import parameter,binding,value
 from unicode_fonts import make_font,ORDER
 
 ROOT=Path(__file__).resolve().parents[1]
-EXE=ROOT/'target/debug/cutbolt.exe'
+EXE=ENGINE
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def g(name,cluster,font=0,advance=None,offset=(0,0)):
     return {'name':name,'cluster':cluster,'font':font,'advance':advance,'offset':offset}
@@ -220,7 +222,8 @@ def run(root):
         clock.sleep(.01)
     reader.join(timeout=5);wall=clock.monotonic()-started;result=json.loads(reply['stdout']);assert process.returncode==0 and result['ok'],result
     report=result['result']['timing'][0]['graphics'];assert len(report['glyphs'])==1024 and report['shaped_input_scalars']<=1048576
-    assert peak<256*1024*1024 and wall<30,(peak,wall)
+    assert peak<256*1024*1024,(peak,wall)
+    budgets.check(wall<30,(peak,wall))
     performance={'glyphs':1024,'peak_working_set_bytes':peak,'seconds':wall,'shaped_input_scalars':report['shaped_input_scalars'],'gates':{'maximum_bytes':256*1024*1024,'maximum_seconds':30}}
     per_line=512*64//nearest(F(600*64,1000))
     maximum_plans=[plain('A'*min(per_line,1024-i),i) for i in range(0,1024,per_line)]

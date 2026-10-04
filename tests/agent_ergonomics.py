@@ -5,7 +5,9 @@ scope populations match an exact reference computed from separately decoded sour
 exports of 1080p sequential and native-track timelines match integer PCM assembled from the known sources,
 finish without rendering pictures and publish no video stream.
 """
+from engine import ENGINE
 import argparse
+import budgets
 from fractions import Fraction as F
 import hashlib
 import json
@@ -22,7 +24,7 @@ from luts_scopes import scope_reference
 from scenes import time
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = ROOT / "target" / "debug" / "cutbolt.exe"
+EXE = ENGINE
 WIDE, SMALL = (1920, 1080), (160, 90)
 SECONDS = 30
 
@@ -192,7 +194,7 @@ def run(root):
             assert min(lags, key=lags.get) == 0, lags
         # Pictures are never decoded or composited: the whole export costs less than a quarter of
         # rendering the same timeline's 1080p reference video, extrapolated from a measured range.
-        assert timings[name] < 0.25 * frames * video_seconds_per_frame, (name, timings[name], video_seconds_per_frame)
+        budgets.check(timings[name] < 0.25 * frames * video_seconds_per_frame, (name, timings[name], video_seconds_per_frame))
         return receipt
 
     started = clock.perf_counter()

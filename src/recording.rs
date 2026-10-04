@@ -78,7 +78,8 @@ pub struct Record {
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Place {
-    /// Saved project snapshot to place into.
+    /// Project to place into.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: crate::model::Project,
     /// Recorded WAV from the `audio.record` receipt: absolute path, SHA-256 hex and byte count.
     pub source: scene::Identity,

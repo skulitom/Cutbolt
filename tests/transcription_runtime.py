@@ -1,4 +1,5 @@
 """Maximum native inputs, original negative fixtures and owner cancellation."""
+from engine import ENGINE
 from array import array
 import copy
 from fractions import Fraction as F
@@ -12,7 +13,7 @@ from tracks import time, seconds
 from transcription_guard import linux, processes, no_namespaces, wsl
 
 ROOT=Path(__file__).resolve().parents[1]
-EXE=ROOT/'target/debug/cutbolt.exe'
+EXE=ENGINE
 
 
 def maximum(root,speech,runtime,call,ff,correspondence,stats):

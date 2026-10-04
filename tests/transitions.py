@@ -1,4 +1,5 @@
 """Editable transitions: independent integer image/audio oracles and saved/range behavior."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -21,7 +22,7 @@ def run(root):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
     sources,out,store,queue=[root/n for n in ('sources','output','store','queue')]
     for path in (sources,out,store,queue):path.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];rejected=0;frames=0;samples=0;cases=[];previews=0
+    exe=ENGINE;passed=[];rejected=0;frames=0;samples=0;cases=[];previews=0
     def ff(args):return subprocess.run(['ffmpeg','-v','error','-nostdin','-n',*args],capture_output=True,check=True,timeout=120).stdout
     def call(request,error=None,env=None):
         nonlocal rejected

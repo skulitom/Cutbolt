@@ -1,4 +1,5 @@
 """Original complete numbered RGBA footage, lossless outputs and long native-clock acceptance."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -19,7 +20,7 @@ def run(root,long_form):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
     sources,output,store=[root/x for x in ['sources','output','store']]
     for path in [sources,output,store]:path.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';w,h=32,18;passed=[];originals={};frames=samples=rejected=0
+    exe=ENGINE;w,h=32,18;passed=[];originals={};frames=samples=rejected=0
     def t(f):return {'num':f.numerator,'den':f.denominator}
     def sha(p):
         with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()

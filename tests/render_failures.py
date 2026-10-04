@@ -1,4 +1,5 @@
 """Real encoding with original write-fault injection, worker exits and source changes."""
+from engine import ENGINE
 import argparse
 import hashlib
 import json
@@ -20,7 +21,7 @@ def run(root):
     root.mkdir(parents=True, exist_ok=True)
     sources, output = root/'sources', root/'output'
     sources.mkdir(); output.mkdir()
-    exe = ROOT/'target/debug/cutbolt.exe'
+    exe = ENGINE
     helper = root/'write-fault.exe'
     subprocess.run(['rustc', '--edition=2024', str(ROOT/'tests/render_failure_tool.rs'), '-o', str(helper)], check=True, capture_output=True)
     real = shutil.which('ffmpeg')

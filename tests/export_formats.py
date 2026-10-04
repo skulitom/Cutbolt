@@ -1,4 +1,5 @@
 """Independent decoded export clocks, numbered images, large sizes and publication faults."""
+from engine import ENGINE
 import argparse
 import copy
 from concurrent.futures import ThreadPoolExecutor
@@ -20,7 +21,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def run(root):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
     source=root/'sources';output=root/'output';source.mkdir();output.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];cases=[];frames=samples=rejected=0;originals={}
+    exe=ENGINE;passed=[];cases=[];frames=samples=rejected=0;originals={}
     def t(n):return {'num':n.numerator,'den':n.denominator}
     def sha(p):
         with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()

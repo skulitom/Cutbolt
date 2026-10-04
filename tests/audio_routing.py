@@ -1,5 +1,7 @@
 """Original named-channel signals, independent graph algebra and rendered PCM checks."""
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 from decimal import Decimal as D
 from fractions import Fraction as F
@@ -138,7 +140,7 @@ def run(root):
     root.mkdir(parents=True, exist_ok=True)
     sources, output, store = (root/n for n in ('sources', 'output', 'store'))
     for p in (sources, output, store): p.mkdir()
-    exe = ROOT/'target/debug/cutbolt.exe'; fixtures = {}; passed = []; comparisons = []; rejected = 0; previews = 0; video_frames = 0
+    exe = ENGINE; fixtures = {}; passed = []; comparisons = []; rejected = 0; previews = 0; video_frames = 0
 
     def write(name, layout, rate, values, classic=False):
         fixtures[name] = values, rate, layout
@@ -340,7 +342,8 @@ def run(root):
         client.initialize(); started = wall_clock.monotonic()
         info = client.call('audio.inspect', mix=longest, input_root=str(sources))
         inspection_seconds = wall_clock.monotonic()-started; memory = peak_memory(client.process.pid)
-        assert memory < 256*1024*1024 and inspection_seconds < 45, (memory, inspection_seconds)
+        assert memory < 256*1024*1024, (memory, inspection_seconds)
+        budgets.check(inspection_seconds < 45, (memory, inspection_seconds))
     finally: client.close()
     receipt = call(render_request(longest, 'maximum-duration'))
     raw = (output/'maximum-duration.wav').read_bytes(); first = pack(fixtures['7.1-48000.wav'][0][:1])

@@ -15,7 +15,8 @@ pub enum Request {
     NativeImport(crate::native_project::Import),
     #[serde(rename = "project.portable")]
     ProjectPortable {
-        /// Project snapshot whose media paths to make relative.
+        /// Project whose media paths to make relative.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Must equal the supplied project's revision.
         expected_revision: u64,
@@ -42,7 +43,8 @@ pub enum Request {
     /// Inspect the OTIO export document and exact unsupported-feature report without writing a file.
     #[serde(rename = "interchange.export.inspect")]
     InterchangeInspect {
-        /// Project snapshot to describe as OTIO.
+        /// Project to describe as OTIO.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
@@ -66,7 +68,8 @@ pub enum Request {
     },
     #[serde(rename = "preview.sheet")]
     PreviewSheet {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Frame times and grid layout of the contact sheet.
         spec: preview::Sheet,
@@ -99,7 +102,8 @@ pub enum Request {
     },
     #[serde(rename = "transcript.plan")]
     TranscriptPlan {
-        /// Project snapshot containing the clip to cut.
+        /// Project containing the clip to cut.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Transcript document as returned by transcript.transcribe or transcript.correct.
         document: crate::transcript::Document,
@@ -258,14 +262,16 @@ pub enum Request {
     ProxyGenerate(proxy::Generate),
     #[serde(rename = "proxy.status")]
     ProxyStatus {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "proxy.relink")]
     ProxyRelink {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Must equal the supplied project's revision.
         expected_revision: u64,
@@ -314,21 +320,24 @@ pub enum Request {
     },
     #[serde(rename = "registry.search")]
     RegistrySearch {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Text, bin prefix, tag filters and pagination.
         query: registry::Query,
     },
     #[serde(rename = "registry.status")]
     RegistryStatus {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "registry.bind")]
     RegistryBind {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Must equal the supplied project's revision.
         expected_revision: u64,
@@ -339,7 +348,8 @@ pub enum Request {
     },
     #[serde(rename = "registry.relink")]
     RegistryRelink {
-        /// Project snapshot as returned by project.create, timeline.apply or session.get.
+        /// Project to read.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Must equal the supplied project's revision.
         expected_revision: u64,
@@ -393,7 +403,8 @@ pub enum Request {
     },
     #[serde(rename = "preview.frame")]
     PreviewFrame {
-        /// Project snapshot to preview; its saved proxy selection applies.
+        /// Project to preview; its saved proxy selection applies.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
@@ -406,7 +417,8 @@ pub enum Request {
     },
     #[serde(rename = "preview.range")]
     PreviewRange {
-        /// Project snapshot to preview; its saved proxy selection applies.
+        /// Project to preview; its saved proxy selection applies.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
@@ -439,12 +451,14 @@ pub enum Request {
     },
     #[serde(rename = "project.validate")]
     Validate {
-        /// Project snapshot to check.
+        /// Project to check.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
     },
     #[serde(rename = "timeline.apply")]
     Apply {
-        /// Caller-owned project snapshot to transform; it is not modified.
+        /// Project to transform; neither the input nor a saved revision is modified.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Must equal the supplied project's revision.
         expected_revision: u64,
@@ -580,7 +594,8 @@ pub enum Request {
     },
     #[serde(rename = "render.plan")]
     Plan {
-        /// Project snapshot to plan; use session.get at a fixed revision for a stable render.
+        /// Project to plan; give a saved `revision` for a stable render.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
@@ -591,7 +606,8 @@ pub enum Request {
     },
     #[serde(rename = "render.run")]
     Render {
-        /// Project snapshot to render; use session.get at a fixed revision for a stable render.
+        /// Project to render; give a saved `revision` for a stable render.
+        #[schemars(with = "crate::reference::ProjectInput")]
         project: Project,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
@@ -604,6 +620,36 @@ pub enum Request {
 
 fn history_limit() -> u16 {
     50
+}
+
+/// Handle one JSON request as the CLI and MCP adapter receive it. Saved-project references are
+/// loaded first; with a workspace, omitted roots default inside it, relative paths resolve
+/// against it, and engine-produced paths in the result are reported relative to it.
+pub fn handle_json(
+    mut request: Value,
+    workspace: Option<&crate::workspace::Workspace>,
+) -> Result<Value> {
+    if let Some(workspace) = workspace {
+        workspace.prepare(&mut request)?;
+    }
+    let store = workspace.map(crate::workspace::Workspace::store_root);
+    crate::reference::resolve(&mut request, store.as_deref())?;
+    let request: Request = serde_json::from_value(request)?;
+    let schema = matches!(request, Request::Schema { .. });
+    let capabilities = matches!(request, Request::Capabilities {});
+    let mut result = handle(request)?;
+    if let Some(workspace) = workspace {
+        if schema {
+            crate::schema::relax_roots(&mut result["schema"]);
+        }
+        workspace.present(&mut result);
+        if capabilities {
+            result["workspace"] = workspace.describe();
+        }
+    } else if capabilities {
+        result["workspace"] = Value::Null;
+    }
+    Ok(result)
 }
 
 pub fn handle(request: Request) -> Result<Value> {

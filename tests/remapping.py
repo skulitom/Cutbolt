@@ -1,4 +1,5 @@
 """Authored speed integrals, complete RGB/PCM references and pitch measurements."""
+from engine import ENGINE
 import argparse
 from bisect import bisect_right
 import copy
@@ -55,7 +56,7 @@ def run(root):
     root.mkdir(parents=True, exist_ok=True)
     sources, out, store = (root / n for n in ('sources', 'output', 'store'))
     for p in (sources, out, store): p.mkdir()
-    exe = ROOT/'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed, cases, pitches = [], [], []
     frame_count = sample_count = rejected = previews = 0
 

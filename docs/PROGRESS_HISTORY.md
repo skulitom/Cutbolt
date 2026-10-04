@@ -1,5 +1,38 @@
 # Progress history
 
+## 4 October 2026: quick verification by default
+
+An audit of the edit/test/verify loop is recorded in [DEVELOPMENT_LOOP.md](DEVELOPMENT_LOOP.md), with measurements and a phased plan. Its first phase is implemented here.
+
+- **Quick by default.** `tools/verify.py` now runs Rust lint/tests and every correctness fixture concurrently, in each long-form fixture's short mode, with a 30-second capture. Wall-clock budgets are recorded rather than enforced, and nothing is written to the evidence. A complete quick run took 16.4 minutes for all 61 fixtures with every external runtime configured.
+- **`--thorough` is the evidence run,** unchanged from the previous verifier: every budget enforced, long-form cases complete, budget-gated fixtures on a quiet machine, progress regenerated.
+- **Targeted runs:**
+  - `--only` runs named fixtures without the Rust prelude;
+  - `--last-failed` reruns failures;
+  - `--fail-fast` stops starting fixtures after the first failure;
+  - `--strict` turns skipped external runtimes into errors.
+- **Preflight.** External runtimes and tools (`ffmpeg`, `ffprobe`, `cargo`, `pwsh`) are checked before any work; the thorough run requires all of them.
+- **Copied engine.** Fixtures run a private copy of the engine through `CUTBOLT_EXE` (`tests/engine.py`), so `target/debug` can be rebuilt while verification runs. Per-machine stage times and failures go to the ignored `verification/last-run.json`.
+- **Budget helper.** All 19 wall-clock budgets in 15 fixtures go through `tests/budgets.py`. It enforces them by default, and only the quick check records them instead. Memory and correctness assertions are unchanged.
+
+No acceptance criteria, budgets, evidence, weights, exclusions or denominators changed. The core and combined trackers remain 100/100 and 108/108. The recorded source fingerprints stay stale until the next thorough run.
+
+## 4 October 2026: workspaces and saved project references
+
+Every command that reads a project now also accepts `{"project_id", "revision"}`. That covers 27 fields, including the project nested in render.start and in cache tasks. The engine loads the saved revision itself, so agents no longer copy whole snapshots back into requests. An optional workspace, set with `--workspace DIR` or `CUTBOLT_WORKSPACE`:
+- supplies omitted roots, with engine state under `.cutbolt/`;
+- resolves relative paths;
+- confines explicit roots;
+- reports engine-produced paths relative to itself, without the Windows `\\?\` prefix.
+
+Without a workspace, existing requests and results are unchanged. Request fingerprints hash the loaded snapshot, so stored receipts keep matching. New unit tests cover:
+- defaults, containment and `..` rejection;
+- reference loading and its errors;
+- relative reporting;
+- an MCP server answering without any roots.
+
+A schema test fails if a root or project input appears where these passes do not look. The 65-tool catalog is 236,434 bytes, or 239,292 with a workspace. A full reference render ran end to end with relative paths and no roots. No baseline, criteria, evidence, weights, exclusions or denominators changed.
+
 ## 4 October 2026: native-resolution scenes, overlay tracks, large imports and agent ergonomics
 
 These changes fix findings from two external capability demonstrations, a pixel-art reel and a narrated 1080p video. No acceptance criteria, weights, exclusions or denominators changed, and no points were awarded. The core and combined trackers remain 100/100 and 108/108; the new checks are additional regression evidence.

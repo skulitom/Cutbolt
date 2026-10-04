@@ -1,4 +1,5 @@
 """Original placed-track fixtures with independent frame and integer PCM references."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -30,7 +31,7 @@ def run(root):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
     sources,out,store,queue=[root/name for name in ('sources','output','store','queue')]
     for path in (sources,out,store,queue):path.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];cases=[];rejected=0;frames_checked=0;samples_checked=0
+    exe=ENGINE;passed=[];cases=[];rejected=0;frames_checked=0;samples_checked=0
     def ff(args):return subprocess.run(['ffmpeg','-v','error','-nostdin','-n',*args],check=True,capture_output=True,timeout=120).stdout
     def call(request,error=None,env=None):
         nonlocal rejected

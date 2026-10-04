@@ -1,4 +1,5 @@
 """Actual optional CUDA decoding against software reference pixels and source clocks."""
+from engine import ENGINE
 import argparse
 from bisect import bisect_right
 import copy
@@ -27,7 +28,7 @@ def run(root, device):
     sources, output, store = [root / name for name in ('sources', 'output', 'store')]
     for p in (sources, output, store):
         p.mkdir()
-    exe = ROOT / 'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed, measured, cases = [], [], []
     frames = samples = rejected = 0
     source_reference = {}

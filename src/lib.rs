@@ -35,6 +35,7 @@ pub mod portable;
 pub mod preview;
 pub mod proxy;
 pub mod recording;
+pub mod reference;
 pub mod reframe;
 pub mod registry;
 pub mod remap;
@@ -58,6 +59,7 @@ pub mod tracks;
 pub mod transcribe;
 pub mod transcript;
 pub mod transcript_cut;
+pub mod workspace;
 
 use serde::Serialize;
 

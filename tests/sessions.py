@@ -1,4 +1,5 @@
 """Local CLI session acceptance checks; every request starts a fresh process."""
+from engine import ENGINE
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -148,7 +149,7 @@ def run(executable, directory):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--executable", type=Path, default=ROOT / "target/debug" / ("cutbolt.exe" if sys.platform == "win32" else "cutbolt"))
+    parser.add_argument("--executable", type=Path, default=ENGINE)
     parser.add_argument("--output", type=Path, required=True, help="New directory outside the repository")
     args = parser.parse_args()
     result = run(args.executable, args.output)

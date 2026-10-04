@@ -1,4 +1,5 @@
 """Typed template reuse checked against independently built scenes and original glyph geometry."""
+from engine import ENGINE
 import argparse
 import copy
 import hashlib
@@ -35,7 +36,7 @@ def run(root):
     paths=[ROOT/"examples"/(name+"-template.json") for name in ("lower-third","title-card")]
     originals={p.name:p.read_bytes() for p in paths}
     templates=[json.loads(p.read_text()) for p in paths]
-    exe=ROOT/"target/debug/cutbolt.exe";passed=[];decoded=0;rendered=[]
+    exe=ENGINE;passed=[];decoded=0;rendered=[]
     def request(command,error=None):
         result=subprocess.run([str(exe)],input=json.dumps(command).encode(),capture_output=True,timeout=120)
         data=json.loads(result.stdout)

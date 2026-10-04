@@ -1,4 +1,5 @@
 """Original high-depth charts with independent Decimal transfer/color and Fraction time references."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -121,7 +122,7 @@ def run(root):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
     sources,output,store=[root/p for p in ('sources','output','store')]
     for p in (sources,output,store):p.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];cases=[];rejected=0;fixtures={};originals={};receipts={};recipes={};expected={}
+    exe=ENGINE;passed=[];cases=[];rejected=0;fixtures={};originals={};receipts={};recipes={};expected={}
     def ff(args,cwd=None):
         p=subprocess.run(['ffmpeg','-v','error','-nostdin','-n',*args],capture_output=True,timeout=180,cwd=cwd)
         assert p.returncode==0,p.stderr.decode(errors='replace');return p.stdout

@@ -3,6 +3,7 @@
 Native files and application-specific adapters remain in a reviewed external
 fixture. This replays captured public-interface evidence, not a fresh app launch.
 """
+from engine import ENGINE
 import argparse
 import copy
 import hashlib
@@ -28,7 +29,7 @@ def run(root, fixture):
     manifest=json.loads(fixture.read_text(encoding='utf-8'))
     assert manifest['schema_version']==1 and manifest['profile']=='native-flat-timeline-v1'
     assert manifest['capture_method']=='installed_application_public_interface'
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];frames=samples=rejected=0
+    exe=ENGINE;passed=[];frames=samples=rejected=0
     def sha(path):
         with Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
     def checked(item):

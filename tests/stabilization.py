@@ -1,4 +1,5 @@
 """Original handheld/roll/cut fixtures with physical trajectory and rendered pixel references."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -62,7 +63,7 @@ def desired(poses,n,mode,strength=1000):
 def run(root):
     root=root.resolve();root.mkdir(parents=True,exist_ok=True);sources=root/'sources';out=root/'renders';store=root/'sessions'
     for path in (sources,out,store):path.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];cases=[];physical=[];frames=0;samples=0;rejected=0;previews=0
+    exe=ENGINE;passed=[];cases=[];physical=[];frames=0;samples=0;rejected=0;previews=0
     def call(req,error=None,env=None):
         nonlocal rejected
         process=subprocess.run([str(exe)],input=json.dumps(req).encode(),capture_output=True,env=env,timeout=120);result=json.loads(process.stdout)

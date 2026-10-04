@@ -1,5 +1,7 @@
 """4K queue cancellation, actual encoder write faults and repeated latency gates."""
+from engine import ENGINE
 import argparse
+import budgets
 import hashlib
 import json
 import os
@@ -21,7 +23,7 @@ def run(root):
     fixture=root/'moving';moving_fixture(fixture,False)
     request=json.loads((fixture/'request.json').read_text())
     baseline=json.loads((fixture/'verification.json').read_text());assert not baseline['long_gate_passed']
-    exe=Path(os.environ.get('CUTBOLT_TEST_ENGINE',ROOT/'target/debug/cutbolt.exe'));sources=fixture/'sources';output=fixture/'output';passed=[];jobs=[]
+    exe=Path(os.environ.get('CUTBOLT_TEST_ENGINE',ENGINE));sources=fixture/'sources';output=fixture/'output';passed=[];jobs=[]
     def sha(path):
         with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
     originals={p.name:sha(p) for p in sources.iterdir()}
@@ -45,7 +47,8 @@ def run(root):
     for n in range(3):
         current={**request,'output':str(output/f'repeated-{n}.mkv')}
         receipt,metrics=monitored([str(exe)],current,120)
-        assert metrics['seconds']<60 and metrics['sampled_tree_peak_bytes']<4*1024**3,metrics
+        assert metrics['sampled_tree_peak_bytes']<4*1024**3,metrics
+        budgets.check(metrics['seconds']<60,metrics)
         assert receipt['frames']==300 and receipt['samples']==576000
         compare(current['output'],f'repeated-{n}');repetitions.append(metrics)
     passed.append('long_form_4k.repeated_complete_pipeline_latency')
@@ -83,7 +86,7 @@ def run(root):
         next_ticket=call('render.start',job_root=str(queue),request_id='after-cancel',render=following);jobs.append((queue,next_ticket['job_id']))
         start=clock.monotonic();call('job.cancel',job_root=str(queue),job_id=ticket['job_id'])
         final=until(lambda:call('job.status',job_root=str(queue),job_id=ticket['job_id']),lambda r:r['status'] in {'cancelled','failed','completed'},seconds=10)
-        cancellation_seconds=clock.monotonic()-start;assert final['status']=='cancelled' and cancellation_seconds<10,final
+        cancellation_seconds=clock.monotonic()-start;assert final['status']=='cancelled',final;budgets.check(cancellation_seconds<10,final)
         until(lambda:all(handle.exited() for handle in child_handles),bool,seconds=10)
         assert not cancelled_output.exists()
         next_final=until(lambda:call('job.status',job_root=str(queue),job_id=next_ticket['job_id']),lambda r:r['status'] in {'completed','failed','interrupted'},seconds=120)

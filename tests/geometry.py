@@ -4,7 +4,9 @@ The production renderer intersects camera rays in inverse plane coordinates.
 This reference transforms plane corners forward, clips polygons in camera space,
 triangulates the projected polygons and interpolates depth/texture coordinates.
 """
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 from decimal import Decimal as D, getcontext, ROUND_HALF_UP
 from fractions import Fraction as F
@@ -207,7 +209,7 @@ def run(root):
            'geometry':{'camera':camera,'nodes':[node('plane-a','A',(-13000,1000,0),extent=(50000,35000)),
                                               node('plane-b','B',(12000,-4000,30000),extent=(40000,30000))],
                        'lights':[],'shadows':'none'}}
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];cases=[];frames=0;samples=0;rejected=0;previews=0
+    exe=ENGINE;passed=[];cases=[];frames=0;samples=0;rejected=0;previews=0
     def call(command,error=None,**fields):
         nonlocal rejected
         request={'command':command,**fields};p=subprocess.run([str(exe)],input=json.dumps(request).encode(),capture_output=True,timeout=240);r=json.loads(p.stdout)
@@ -357,7 +359,8 @@ def run(root):
         l['transform']['crop']=[0,0,1,1];l['transform']['opacity']=255;maximum['layers'].append(l)
         maximum['geometry']['nodes'].append(node(f'n{i}',l['id'],position=(0,0,i),extent=(1000000,1000000)))
     began=clock.perf_counter();mr,_=check(maximum,'maximum-work',oracle=lambda n:bytes([255])*(128*128*3));elapsed=clock.perf_counter()-began
-    assert mr['geometry']['pixel_plane_sample_visits']==16777216 and elapsed<180,elapsed
+    assert mr['geometry']['pixel_plane_sample_visits']==16777216,elapsed
+    budgets.check(elapsed<180,elapsed)
     records=copy.deepcopy(maximum);records.update(width=1,height=1,duration=time(128,25),temporal=exposure(8,360,0))
     for l in records['layers']:l['duration']=records['duration']
     records['geometry']['nodes'] += [node(f'g{i}',parent=f'g{i-1}' if i else None) for i in range(15)]+[node('extra')]

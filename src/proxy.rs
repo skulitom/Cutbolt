@@ -72,7 +72,8 @@ fn asset<'a>(project: &'a Project, id: &str) -> Result<&'a Asset> {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Generate {
-    /// Project snapshot containing the asset; it must be 25 fps.
+    /// Project containing the asset; it must be 25 fps.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: Project,
     /// Must equal `project.revision`.
     pub expected_revision: u64,

@@ -86,9 +86,12 @@ Requires Rust/Cargo with a C build toolchain for SQLite, Python 3 with the devel
 cargo build --locked
 .\target\debug\cutbolt.exe capabilities
 .\target\debug\cutbolt.exe examples/create-project.json
-python tools/verify.py --decode-device 0
+python tools/verify.py                              # quick pre-commit check
+python tools/verify.py --thorough --decode-device 0  # evidence run
 # An MCP client can launch this local command:
 .\target\debug\cutbolt.exe mcp
+# Or bind one workspace: roots default inside it and paths may be relative.
+.\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp
 ```
 
 For a retained demo, use a new output directory outside the repository:

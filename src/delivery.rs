@@ -76,7 +76,8 @@ pub struct Range {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Export {
-    /// Project snapshot to export, e.g. from session.get; original media is always used.
+    /// Project to export; original media is always used.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: Project,
     /// Existing absolute directory that project media paths resolve against.
     pub input_root: PathBuf,

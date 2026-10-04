@@ -1,4 +1,5 @@
 """Original known-motion images and an independent geometric/alpha output oracle."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -51,7 +52,7 @@ def run(root):
     root = root.resolve(); root.mkdir(parents=True,exist_ok=True)
     sources=root/'sources'; out=root/'renders'; store=root/'sessions'
     for p in (sources,out,store):p.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe'; passed=[]; cases=[]; rejected=0; frame_count=0; sample_count=0; previews=0
+    exe=ENGINE; passed=[]; cases=[]; rejected=0; frame_count=0; sample_count=0; previews=0
     def call(request,error=None,env=None):
         nonlocal rejected
         process=subprocess.run([str(exe)],input=json.dumps(request).encode(),capture_output=True,env=env,timeout=120)

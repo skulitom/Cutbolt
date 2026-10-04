@@ -1,4 +1,5 @@
 """Explicit gaps and mixed-source boundaries against independent RGB/PCM timelines."""
+from engine import ENGINE
 import argparse
 from bisect import bisect_right
 import copy
@@ -24,7 +25,7 @@ def run(root):
     root.mkdir(parents=True,exist_ok=True)
     sources,masters,output,store,jobs=[root/name for name in ("sources","masters","output","store","jobs")]
     for p in (sources,masters,output,store,jobs):p.mkdir()
-    exe=ROOT/"target/debug/cutbolt.exe";passed=[];compared=0;samples=0;rejected=0;cases=[]
+    exe=ENGINE;passed=[];compared=0;samples=0;rejected=0;cases=[]
     def ff(args):return subprocess.run(["ffmpeg","-v","error","-nostdin","-n"]+args,capture_output=True,check=True,timeout=120).stdout
     def request(command,error=None,**fields):
         nonlocal rejected

@@ -1,5 +1,7 @@
 """Original shutter fixtures, analytic moving-box exposure and independent sampling."""
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 from fractions import Fraction as F
 import hashlib
@@ -119,7 +121,7 @@ def run(root):
              'background':[7,11,19],'color':'srgb_straight_encoded','layers':[layer],
              'audio':{'file':identity(sources/'sound.wav',sources),'start':time(0),'channels':'preserve_stereo','resampling':'linear','padding':'silence'},
              'temporal':exposure()}
-    exe = ROOT/'target/debug/cutbolt.exe'; passed=[]; cases=[]; frames=0; samples=0; rejected=0; previews=0
+    exe = ENGINE; passed=[]; cases=[]; frames=0; samples=0; rejected=0; previews=0
 
     def call(command,error=None,**fields):
         nonlocal rejected
@@ -263,7 +265,8 @@ def run(root):
     l=maximum['layers'][0];l.update(canvas=[512,512]);l['frames'][0]['image']=identity(sources/'large.png',sources)
     l['transform']={'position':[0,0],'crop':[0,0,512,512],'scale':1,'quarter_turns':0,'opacity':255}
     start=clock.perf_counter();mr,_=check(maximum,'maximum',lambda n:bytes([255])*(512*512*3));seconds=clock.perf_counter()-start
-    assert mr['temporal']['layer_pixel_sample_visits']==67108864 and seconds<90,seconds
+    assert mr['temporal']['layer_pixel_sample_visits']==67108864,seconds
+    budgets.check(seconds<90,seconds)
     records=copy.deepcopy(maximum);records.update(id='records',width=1,height=1,duration=time(64,25))
     records['layers']=[copy.deepcopy(records['layers'][0]) for _ in range(16)]
     for i,l in enumerate(records['layers']):l.update(id=f'record-{i}',duration=records['duration'])

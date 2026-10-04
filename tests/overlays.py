@@ -4,6 +4,7 @@ Independent oracle: sources are decoded separately with FFmpeg and combined with
 equation round((s*a + d*(255-a)) / 255); every decoded frame of full renders, previews and range exports
 is compared exactly.
 """
+from engine import ENGINE
 import argparse
 import copy
 import hashlib
@@ -18,7 +19,7 @@ from PIL import Image
 from scenes import identity, time
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = ROOT / "target" / "debug" / "cutbolt.exe"
+EXE = ENGINE
 W, H = 320, 180
 
 

@@ -1,4 +1,5 @@
 """Original mixed-rate sources, identity-bound proxies, offline edits and final media."""
+from engine import ENGINE
 import argparse
 from bisect import bisect_right
 import copy
@@ -23,7 +24,7 @@ def run(root):
     root.mkdir(parents=True,exist_ok=True)
     sources,masters,proxies,moved,output,store,jobs=[root/p for p in ("sources","masters","proxies","moved","output","store","jobs")]
     for p in (sources,masters,proxies,moved,output,store,jobs):p.mkdir()
-    executable=ROOT/"target/debug/cutbolt.exe"
+    executable=ENGINE
     rejected=0
     def ff(args):return subprocess.run(["ffmpeg","-v","error","-nostdin","-n"]+args,capture_output=True,check=True,timeout=90).stdout
     def probe(path):return json.loads(subprocess.run(["ffprobe","-v","error","-select_streams","v:0","-show_streams","-show_frames","-show_entries","stream=time_base:frame=best_effort_timestamp","-of","json",str(path)],capture_output=True,check=True).stdout)

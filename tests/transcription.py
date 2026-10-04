@@ -3,6 +3,7 @@
 Requires an explicitly configured external runtime. Missing setup is a failure,
 never a skipped test that can award transcription coverage.
 """
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -24,7 +25,7 @@ from transcription_runtime import maximum, failures
 from transcription_guard import run as guard_checks
 
 ROOT=Path(__file__).resolve().parents[1]
-EXE=ROOT/'target/debug/cutbolt.exe'
+EXE=ENGINE
 W,H=16,12
 
 

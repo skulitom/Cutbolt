@@ -1,10 +1,7 @@
 //! Local MCP tools over newline-delimited JSON-RPC, pinned to the 2025-11-25 contract.
-use crate::{Result, commands};
+use crate::{Result, commands, workspace::Workspace};
 use serde_json::{Value, json};
-use std::{
-    io::{self, BufRead, Write},
-    sync::OnceLock,
-};
+use std::io::{self, BufRead, Write};
 const MAX_LINE: usize = 4 * 1024 * 1024;
 const VERSION: &str = "2025-11-25";
 
@@ -275,15 +272,18 @@ pub(crate) fn exposed(command: &str) -> bool {
     !BLOCKING.contains(&command)
 }
 
-pub fn tools() -> &'static [Value] {
-    static TOOLS: OnceLock<Vec<Value>> = OnceLock::new();
-    TOOLS.get_or_init(|| crate::schema::commands().filter(|c| exposed(c)).map(|command| {
-        let input = crate::schema::arguments(command, true).expect("command schema");
+/// The tool catalog. With a workspace, the roots it supplies are optional in every schema.
+pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
+    crate::schema::commands().filter(|c| exposed(c)).map(|command| {
+        let mut input = crate::schema::arguments(command, true).expect("command schema");
+        if workspace.is_some() {
+            crate::schema::relax_roots(&mut input);
+        }
         let read_only=matches!(command,"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         json!({"name":format!("cutbolt_{}",command.replace('.',"_")),"description":description(command),"inputSchema":input,
             "outputSchema":{"type":"object","properties":{"ok":{"type":"boolean"},"result":{},"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]}},"required":["ok"],"additionalProperties":false},
             "annotations":{"readOnlyHint":read_only,"destructiveHint":matches!(command,"job.cancel"|"cache.prune"),"idempotentHint":!matches!(command,"preview.frame"|"captions.export"|"interchange.export"|"session.backup"|"session.recover"),"openWorldHint":false}})
-    }).collect())
+    }).collect()
 }
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
@@ -296,8 +296,21 @@ fn response(id: Value, result: Value) -> Value {
 struct Server {
     initialized: bool,
     ready: bool,
+    workspace: Option<Workspace>,
+    catalog: Option<Vec<Value>>,
 }
 impl Server {
+    fn catalog(&mut self) -> &[Value] {
+        let workspace = self.workspace.as_ref();
+        self.catalog.get_or_insert_with(|| tools(workspace))
+    }
+    fn instructions(&self) -> String {
+        let mut text = "Cutbolt runs locally. Use session commands for saved editing, durable request IDs for retries, and render.start/job.status/job.cancel for background work. Unsupported editing semantics fail explicitly. No HTTP service is used. Tool listings abbreviate the large shared project, operation, scene, template and audio_routing schemas; cutbolt_schema returns any of them, or any command's arguments, in full. Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision instead of a full snapshot.".to_owned();
+        if let Some(workspace) = &self.workspace {
+            text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it.", workspace.root().display()));
+        }
+        text
+    }
     fn message(&mut self, message: Value) -> Option<Value> {
         if !message.is_object() || message["jsonrpc"] != "2.0" || !message["method"].is_string() {
             return Some(rpc_error(
@@ -348,7 +361,7 @@ impl Server {
                 id,
                 json!({"protocolVersion":if params["protocolVersion"]=="2025-06-18" {"2025-06-18"} else {VERSION},"capabilities":{"tools":{"listChanged":false}},
                 "serverInfo":{"name":"cutbolt","version":env!("CARGO_PKG_VERSION")},
-                "instructions":"Cutbolt runs locally. Use session commands for saved editing, durable request IDs for retries, and render.start/job.status/job.cancel for background work. Unsupported editing semantics fail explicitly. No HTTP service is used. Tool listings abbreviate the large shared project, operation, scene, template and audio_routing schemas; cutbolt_schema returns any of them, or any command's arguments, in full."}),
+                "instructions":self.instructions()}),
             ));
         }
         if !self.ready {
@@ -367,14 +380,13 @@ impl Server {
                         "The complete catalog fits one page; no cursor is accepted",
                     ));
                 }
-                Some(response(id, json!({"tools":tools()})))
+                Some(response(id, json!({"tools":self.catalog()})))
             }
             "tools/call" => {
                 let Some(name) = params["name"].as_str() else {
                     return Some(rpc_error(id, -32602, "Tool name is required"));
                 };
-                let catalog = tools();
-                if !catalog.iter().any(|t| t["name"] == name) {
+                if !self.catalog().iter().any(|t| t["name"] == name) {
                     return Some(rpc_error(
                         id,
                         -32602,
@@ -397,7 +409,7 @@ impl Server {
                     }
                     let command = name.strip_prefix("cutbolt_").unwrap().replace('_', ".");
                     object.insert("command".into(), Value::String(command));
-                    commands::handle(serde_json::from_value(arguments)?)
+                    commands::handle_json(arguments, self.workspace.as_ref())
                 })();
                 let value = match outcome {
                     Ok(result) => json!({"ok":true,"result":result}),
@@ -436,8 +448,11 @@ fn line(reader: &mut impl BufRead) -> io::Result<Option<(Vec<u8>, bool)>> {
     }
 }
 
-pub fn serve() -> Result<()> {
-    let mut server = Server::default();
+pub fn serve(workspace: Option<Workspace>) -> Result<()> {
+    let mut server = Server {
+        workspace,
+        ..Server::default()
+    };
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     while let Some((bytes, oversized)) = line(&mut input)? {
@@ -490,8 +505,88 @@ mod tests {
 
     #[test]
     fn tool_listings_fit_agent_context() {
+        let total = check_catalog(&tools(None));
+        eprintln!("catalog: {} tools, {total} bytes", tools(None).len());
+        let temp = std::env::temp_dir().join(format!("cutbolt-mcp-catalog-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let workspace = Workspace::open(&temp).unwrap();
+        eprintln!(
+            "workspace catalog: {} bytes",
+            check_catalog(&tools(Some(&workspace)))
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn workspace_servers_need_no_roots() {
+        let temp =
+            std::env::temp_dir().join(format!("cutbolt-mcp-workspace-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let mut server = Server {
+            workspace: Some(Workspace::open(&temp).unwrap()),
+            ..Server::default()
+        };
+        let mut call = |id: i64, method: &str, params: Value| {
+            server
+                .message(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
+                .unwrap()
+        };
+        let init = call(
+            1,
+            "initialize",
+            json!({"protocolVersion":VERSION,"capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
+        );
+        assert!(
+            init["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("Workspace: ")
+        );
+        server.message(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+        let mut call = |id: i64, name: &str, arguments: Value| {
+            server
+                .message(json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}}))
+                .unwrap()["result"]["structuredContent"]
+                .clone()
+        };
+        let project = json!({"schema_version":1,"id":"w","revision":0,"width":32,"height":24,"frame_rate":{"num":25,"den":1},"assets":[],"clips":[]});
+        let created = call(
+            2,
+            "cutbolt_session_create",
+            json!({"request_id":"c","project":project}),
+        );
+        assert_eq!(created["result"]["revision"], 0, "{created}");
+        let read = call(
+            3,
+            "cutbolt_session_get",
+            json!({"project_id":"w","store_root":".cutbolt/store"}),
+        );
+        assert_eq!(read["result"]["id"], "w", "{read}");
+        let checked = call(
+            4,
+            "cutbolt_project_validate",
+            json!({"project":{"project_id":"w"}}),
+        );
+        assert_eq!(checked["result"]["valid"], true, "{checked}");
+        let listed = server
+            .message(json!({"jsonrpc":"2.0","id":5,"method":"tools/list"}))
+            .unwrap();
+        let start = listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "cutbolt_render_start")
+            .unwrap();
+        assert_eq!(
+            start["inputSchema"]["required"],
+            json!(["request_id", "render"])
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    fn check_catalog(catalog: &[Value]) -> usize {
         let mut total = 0;
-        for tool in tools() {
+        for tool in catalog {
             let bytes = tool.to_string().len();
             assert!(bytes <= TOOL_BYTES, "{} uses {bytes} bytes", tool["name"]);
             total += bytes;
@@ -516,7 +611,7 @@ mod tests {
                 tool["name"]
             );
         }
-        eprintln!("catalog: {} tools, {total} bytes", tools().len());
         assert!(total <= CATALOG_BYTES, "catalog uses {total} bytes");
+        total
     }
 }

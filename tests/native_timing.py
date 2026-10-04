@@ -1,4 +1,5 @@
 """Original exact native-rate editing and long-form decoded video/audio clock checks."""
+from engine import ENGINE
 import argparse
 from bisect import bisect_right
 import copy
@@ -22,7 +23,7 @@ def run(root,long_form):
     sources,output,store,queue=[root/n for n in ['sources','output','store','queue']]
     for p in [sources,output,store,queue]:p.mkdir()
     cache=root/'cache';cache.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';w,h=32,18;passed=[];cases=[];frames=samples=rejected=0
+    exe=ENGINE;w,h=32,18;passed=[];cases=[];frames=samples=rejected=0
     originals={}
 
     def sha(path):

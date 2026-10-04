@@ -86,7 +86,8 @@ pub enum Method {
 pub struct Inspect {
     /// Alignment ID used to name the returned recipes; 1..100 bytes, not blank.
     pub id: String,
-    /// Project snapshot at 25 fps that contains both content-bound assets.
+    /// Project at 25 fps that contains both content-bound assets.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: Project,
     /// Absolute directory containing both asset files.
     pub input_root: PathBuf,

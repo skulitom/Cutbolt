@@ -1,5 +1,7 @@
 """Independent registry/relink/session and bounded 1000-clip acceptance checks."""
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 import ctypes
 from ctypes import wintypes
@@ -47,7 +49,7 @@ def run(root):
     subprocess.run(["ffmpeg","-v","error","-n","-f","rawvideo","-pixel_format","rgb24","-video_size","32x24","-framerate","25","-i",str(sources/"video.rgb"),"-f","s16le","-ar","48000","-ac","2","-i",str(sources/"audio.pcm"),"-c:v","ffv1","-level","3","-pix_fmt","bgr0","-threads","1","-c:a","pcm_s16le",str(sources/"source.mkv")],check=True)
     (sources/"wrong.bin").write_bytes(b"original wrong candidate")
     source_hash=hashlib.sha256((sources/"source.mkv").read_bytes()).hexdigest()
-    exe=ROOT/"target/debug/cutbolt.exe";passed=[]
+    exe=ENGINE;passed=[]
     def request(value,error=None):
         reply=subprocess.run([str(exe)],input=json.dumps(value).encode(),capture_output=True,timeout=120)
         data=json.loads(reply.stdout)
@@ -156,7 +158,7 @@ def run(root):
         assert client.call("project.validate",project=edited)["duration"]==time(80)
         assert client.call("registry.search",project=edited,query={"text":"shot 999"})["assets"][0]["id"]=="asset-0999"
         measurements["peak_working_set_bytes"]=peak_memory(client.process.pid)
-        assert measurements["validate_seconds"]<5 and measurements["batch_1000_edit_seconds"]<5,measurements
+        budgets.check(measurements["validate_seconds"]<5 and measurements["batch_1000_edit_seconds"]<5,measurements)
         assert measurements["peak_working_set_bytes"]<256*1024*1024,measurements
     finally:client.close()
     passed.extend(["registry.large_collection_pagination","performance.thousand_clip_edits"])

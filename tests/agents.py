@@ -1,4 +1,5 @@
 """Wire-level MCP and persisted job acceptance against original generated media."""
+from engine import ENGINE
 import argparse
 import asyncio
 from datetime import timedelta
@@ -373,7 +374,7 @@ def run(executable, fixture):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--executable", type=Path, default=ROOT / "target/debug/cutbolt.exe")
+    parser.add_argument("--executable", type=Path, default=ENGINE)
     parser.add_argument("--fixture", type=Path, required=True)
     args = parser.parse_args()
     print(f"Passed {len(run(args.executable, args.fixture)['passed'])} MCP/job checks")

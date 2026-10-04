@@ -1,4 +1,5 @@
 """Original rate-control quality and actual software/CUDA decode compatibility matrix."""
+from engine import ENGINE
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import copy
@@ -23,7 +24,7 @@ def run(root,device):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents
     root.mkdir(parents=True,exist_ok=True)
     sources,output=root/'sources',root/'output';sources.mkdir();output.mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe';cases=[];bounds=[];passed=[];rejected=0
+    exe=ENGINE;cases=[];bounds=[];passed=[];rejected=0
     w,h,count=320,180,200
     y,x=np.indices((h,w));rng=np.random.default_rng(74011)
     pictures=[]

@@ -1,5 +1,7 @@
 """Original binary foreground fixtures; analytic labels and independent raster checks."""
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 import hashlib
 import json
@@ -90,7 +92,7 @@ def run(root, python):
     def masks(doc):
         return [[v[0]==255 for v in Image.open(root/f['mask']['path']).getdata()] for f in doc['frames']]
     start=clock.monotonic();first=segment(recipe,'first');elapsed=clock.monotonic()-start
-    assert elapsed<90,elapsed
+    budgets.check(elapsed<90,elapsed)
     doc=read_doc(first);actual=masks(doc);metrics=[quality(a,b,width,height) for a,b in zip(actual,truths)]
     assert min(m['iou'] for m in metrics)>=.98,metrics
     assert min(m['boundary_f1'] for m in metrics)>=.95,metrics
@@ -133,7 +135,7 @@ def run(root, python):
     passed.append('segmentation.versioned_corrections_parent_identity_and_source_preservation')
 
     scene=helper('scene',document=corrected['document'],scene_id='masked-sequence',background=[7,19,41])['scene']
-    exe=ROOT/'target/debug/cutbolt.exe'
+    exe=ENGINE
     def call(command,error=None,**fields):
         nonlocal rejected
         p=subprocess.run([str(exe)],input=json.dumps({'command':command,**fields}).encode(),capture_output=True,timeout=240);r=json.loads(p.stdout)
@@ -226,7 +228,7 @@ def run(root, python):
              'frames':[{'source':identity(maximum_path,root),'hold':time(1,25),
                         'annotations':{'region':[48,48,160,160],'foreground':[[90,90,20,20]],'background':[]}} for _ in range(64)]}
     start=clock.monotonic();maximum_result=segment(maximum,'maximum');maximum_seconds=clock.monotonic()-start
-    assert maximum_seconds<120,maximum_seconds
+    budgets.check(maximum_seconds<120,maximum_seconds)
     maximum_doc=read_doc(maximum_result);maximum_truth=[64<=x<192 and 64<=y<192 for y in range(256) for x in range(256)]
     assert all(mask==maximum_truth for mask in masks(maximum_doc))
     # Cross the aggregate pixel limit while each individual image is valid.

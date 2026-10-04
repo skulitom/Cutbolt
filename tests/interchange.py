@@ -1,4 +1,5 @@
 """Original OTIO fixtures, independent library checks and decoded editorial oracles."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -26,7 +27,7 @@ def run(root, reference_python):
     sources, output, store = [root/n for n in ('sources Ω', 'output Ω', 'store')]
     for directory in (sources, output, store):
         directory.mkdir()
-    exe = ROOT/'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed, cases, references = [], [], []
     frames = samples = rejected = blocked = 0
 

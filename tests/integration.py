@@ -1,4 +1,5 @@
 """End-to-end checks against original frames/audio, independent of render filters."""
+from engine import ENGINE
 import argparse
 import copy
 import hashlib
@@ -145,7 +146,7 @@ def run(executable, root):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--executable", type=Path, default=ROOT / "target" / "debug" / ("cutbolt.exe" if os.name == "nt" else "cutbolt"))
+    parser.add_argument("--executable", type=Path, default=ENGINE)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.output:

@@ -57,7 +57,8 @@ pub struct Import {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Export {
-    /// Project snapshot to export.
+    /// Project to export.
+    #[schemars(with = "crate::reference::ProjectInput")]
     pub project: Project,
     /// Absolute directory containing every registered asset; each asset identity is checked.
     pub input_root: PathBuf,

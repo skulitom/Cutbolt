@@ -1,4 +1,5 @@
 """Independent rational blend equations and forward image/mask operations."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction
@@ -110,7 +111,7 @@ def run(root):
     top["transform"].update(position=[7,8],crop=[1,1,18,10],scale=2,opacity=173)
     scene={"schema_version":1,"id":"compositing-fixture","width":64,"height":48,"output_scale":1,"duration":time(3,5),"background":[11,87,161],"color":"srgb_straight_encoded","layers":[bottom,top],"audio":None}
     original_hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/"target/debug/cutbolt.exe";passed=[];count=0;cases=[]
+    exe=ENGINE;passed=[];count=0;cases=[]
 
     def request(value,error=None):
         result=subprocess.run([str(exe)],input=json.dumps(value).encode(),capture_output=True,timeout=90)

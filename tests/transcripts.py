@@ -3,6 +3,7 @@
 Synthetic coded pixels/PCM expose every exact deletion independently. Authored
 word anchors exercise the editing contract; actual recognizer acceptance is separate.
 """
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -17,7 +18,7 @@ from agents import Client
 from tracks import time, seconds, edit, placement, track
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = ROOT / 'target/debug/cutbolt.exe'
+EXE = ENGINE
 W, H, N = 24, 16, 100
 
 

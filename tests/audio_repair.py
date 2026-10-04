@@ -1,5 +1,7 @@
 """Original clean/noisy signals and independent whole-buffer spectral references."""
+from engine import ENGINE
 import argparse
+import budgets
 import base64
 import copy
 import hashlib
@@ -121,7 +123,7 @@ def run(root):
     root.mkdir(parents=True, exist_ok=True)
     sources, output, store = (root/n for n in ('sources', 'output', 'store'))
     for directory in (sources, output, store): directory.mkdir()
-    exe = ROOT/'target/debug/cutbolt.exe'; fixtures = {}; passed = []; cases = []; rejected = 0
+    exe = ENGINE; fixtures = {}; passed = []; cases = []; rejected = 0
     original_sources = {}; published_outputs = {}
 
     def write(name, values, rate=RATE):
@@ -351,7 +353,8 @@ def run(root):
         info = client.call('audio.repair.inspect', recipe=longest, input_root=str(sources))
         elapsed = clock.monotonic()-start; memory = peak_memory(client.process.pid)
     finally: client.close()
-    assert elapsed < 40 and memory < 256*1024*1024, (elapsed, memory)
+    assert memory < 256*1024*1024, (elapsed, memory)
+    budgets.check(elapsed < 40, (elapsed, memory))
     assert all(not c['bypassed'] and c['profile_windows'] == 465 and c['windows'] == 2816 for c in info['noise_profiles'])
     check(longest, 'maximum-duration-and-profile', expected=boundary[:RATE*60], tolerance=0, inspect=False)
     many = {'regions': [{'start': time(i*N, RATE), 'duration': time(N, RATE)} for i in range(8)], 'floor_milli': 0, 'strength_milli': 3000}

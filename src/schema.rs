@@ -191,6 +191,74 @@ pub fn lookup(name: &str) -> Result<Value> {
     )
 }
 
+fn dereference(schema: &'static Value) -> &'static Value {
+    match schema
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|t| t.strip_prefix("#/$defs/"))
+    {
+        Some(name) => &definitions()[name],
+        None => schema,
+    }
+}
+
+/// Property names accepted by one request object: the request itself (`context` empty) or a
+/// nested object such as render.start's `render`, choosing a tagged variant by its tag.
+pub(crate) fn context_properties(command: &str, context: &str, object: &Value) -> Vec<String> {
+    let Some((_, mut schema)) = variants().find(|(c, _)| *c == command) else {
+        return Vec::new();
+    };
+    if !context.is_empty() {
+        let Some(property) = schema["properties"].get(context) else {
+            return Vec::new();
+        };
+        schema = dereference(property);
+        if let Some(branches) = schema.get("oneOf").and_then(Value::as_array) {
+            let tagged = |branch: &&Value| {
+                branch["properties"].as_object().is_some_and(|p| {
+                    p.iter()
+                        .any(|(k, v)| v.get("const").is_some_and(|c| object.get(k) == Some(c)))
+                })
+            };
+            let Some(branch) = branches.iter().find(tagged) else {
+                return Vec::new();
+            };
+            schema = branch;
+        }
+    }
+    schema["properties"]
+        .as_object()
+        .map(|p| p.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// With a workspace, the roots it supplies become optional and say where they default.
+pub fn relax_roots(schema: &mut Value) {
+    match schema {
+        Value::Object(object) => {
+            for (field, relative) in crate::workspace::DEFAULTS {
+                let Some(property) = object.get_mut("properties").and_then(|p| p.get_mut(field))
+                else {
+                    continue;
+                };
+                let place = match relative {
+                    "" => "the workspace".to_owned(),
+                    inside => format!("{inside} in the workspace"),
+                };
+                let text = property["description"].as_str().unwrap_or_default();
+                property["description"] =
+                    json!(format!("{text} Optional: defaults to {place}.").trim_start());
+                if let Some(required) = object.get_mut("required").and_then(Value::as_array_mut) {
+                    required.retain(|r| r != field);
+                }
+            }
+            object.values_mut().for_each(relax_roots);
+        }
+        Value::Array(items) => items.iter_mut().for_each(relax_roots),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +375,93 @@ mod tests {
             apply
                 .get("$defs")
                 .is_none_or(|d| d.get("Operation").is_none())
+        );
+    }
+
+    fn accepts_reference(property: &Value) -> bool {
+        property["$ref"] == "#/$defs/ProjectInput"
+    }
+
+    /// The workspace and reference resolution visit only the request, render.start's `render` and
+    /// cache.run's `task`; a root or project input anywhere else would silently be skipped.
+    #[test]
+    fn roots_and_project_inputs_live_where_they_are_resolved() {
+        assert_eq!(
+            arguments("render.start", false).unwrap()["properties"]["render"]["$ref"],
+            "#/$defs/RenderRequest"
+        );
+        assert_eq!(
+            arguments("cache.run", false).unwrap()["properties"]["task"]["$ref"],
+            "#/$defs/Task"
+        );
+        let roots: Vec<&str> = crate::workspace::DEFAULTS.iter().map(|(f, _)| *f).collect();
+        for (name, definition) in definitions() {
+            if ["RenderRequest", "Task", "SavedProject"].contains(&name.as_str()) {
+                continue;
+            }
+            walk(definition, &mut |node| {
+                for (field, property) in node
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .into_iter()
+                    .flatten()
+                {
+                    assert!(
+                        !roots.contains(&field.as_str()) && !accepts_reference(property),
+                        "{name}.{field} is outside the resolved request contexts"
+                    );
+                }
+            });
+        }
+        for command in commands().filter(|c| *c != "session.create") {
+            let schema = arguments(command, false).unwrap();
+            if let Some(project) = schema["properties"].get("project") {
+                assert!(
+                    accepts_reference(project),
+                    "{command}.project takes only snapshots"
+                );
+            }
+        }
+        for definition in ["RenderRequest", "Task"] {
+            walk(&definitions()[definition], &mut |node| {
+                if let Some(project) = node.get("properties").and_then(|p| p.get("project")) {
+                    assert!(
+                        accepts_reference(project),
+                        "{definition}.project takes only snapshots"
+                    );
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn workspace_schemas_make_supplied_roots_optional() {
+        let mut render = arguments("render.start", true).unwrap();
+        relax_roots(&mut render);
+        assert_eq!(render["required"], json!(["request_id", "render"]));
+        let nested = &render["$defs"]["RenderRequest"];
+        assert!(
+            !nested["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "input_root")
+        );
+        assert!(
+            nested["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "output")
+        );
+        let described = nested["properties"]["input_root"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(described.ends_with("Optional: defaults to the workspace."));
+        let task = json!({"type":"frame"});
+        assert!(context_properties("cache.run", "task", &task).contains(&"project".to_owned()));
+        assert!(
+            context_properties("render.start", "", &json!({})).contains(&"job_root".to_owned())
         );
     }
 }

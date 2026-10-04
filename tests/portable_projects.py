@@ -1,4 +1,5 @@
 """Actual previous-engine migration, moved media and complete local history recovery."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -26,7 +27,7 @@ def run(root,legacy):
     media,output,old,portable,moved,recovered=[root/n for n in ('original Ω','outputs','old-store','portable-store','moved Ω','recovered')]
     for p in (media,output,old,portable,moved,recovered):p.mkdir()
     for n in ('clips','previews'):(media/n).mkdir();(moved/n).mkdir()
-    exe=ROOT/'target/debug/cutbolt.exe'
+    exe=ENGINE
     passed=[];rejected=frames=samples=0
 
     def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()

@@ -85,7 +85,7 @@ An example for clients accepting the common `mcpServers` configuration shape:
   "mcpServers": {
     "cutbolt": {
       "command": "C:\\DEV\\Cutbolt\\target\\debug\\cutbolt.exe",
-      "args": ["mcp"],
+      "args": ["--workspace", "C:\\DEV\\CutboltData\\demo", "mcp"],
       "env": {
         "CUTBOLT_FFMPEG": "C:\\ffmpeg\\bin\\ffmpeg.exe",
         "CUTBOLT_FFPROBE": "C:\\ffmpeg\\bin\\ffprobe.exe"
@@ -96,6 +96,21 @@ An example for clients accepting the common `mcpServers` configuration shape:
 ```
 
 This example does not change any installed client. Client-specific formats may differ.
+
+### Workspace
+
+`--workspace DIR` (before `mcp`, or before a CLI request) or `CUTBOLT_WORKSPACE` fixes one existing directory as the boundary for every call. Omit it to keep explicit absolute roots on every request. With a workspace:
+
+- **Omitted roots default inside it.** `input_root`, `output_root` and `media_root` are the workspace itself. `store_root`, `job_root`, `cache_root` and `scratch_root` are `.cutbolt/store`, `.cutbolt/jobs`, `.cutbolt/cache` and `.cutbolt/scratch`, created at startup. Tool schemas mark these fields optional and name their defaults. `capabilities` reports them under `workspace`.
+- **Relative paths resolve against the workspace.** This covers roots, `output`, probed `path` values, relink `candidates` and a reference's `store_root`; `..` is rejected. Asset and identity paths already resolve under `input_root`, which is the workspace.
+- **Explicit roots must lie inside the workspace,** checked after resolving links. Violations fail with `PATH_OUTSIDE_WORKSPACE` and the field name.
+- **Paths the engine reports come back clean.** Output files, probed sources and job receipts inside the workspace are reported relative to it with `/` separators, and without the Windows `\\?\` prefix. Paths the caller wrote into a project are returned unchanged.
+
+Output directories must already exist, so write to the workspace root or to a folder you created.
+
+### Saved project references
+
+Wherever a command takes a `project`, it also accepts `{"project_id": "...", "revision": N}`. The engine then loads that saved revision from the session store; omit `revision` for the current head. `store_root` inside the reference defaults to the workspace store; without a workspace, it is required. The loaded snapshot is used exactly as if it had been sent, including `expected_revision` checks and pinned render submissions. A missing project or revision fails with its usual code, and the message is prefixed with the field, for example `render.project:`. `session.create` still requires a full snapshot.
 
 Sixty-five tools use `cutbolt_`: capabilities; schema; project create/validate/portable; timeline apply; session create/get/apply/preview/undo/restore/history/receipt/check/migrate/backup/recover; interchange import/export inspect/export; native import; expression inspect; media inspect and conform inspect; HDR inspect, LUT inspect and scopes inspect; registry search/status/bind/relink; proxy status/relink; render plan/start; export inspect; job status/cancel/resume; image sequence inspect; scene inspect; effects preset; graphics instantiate; captions import/inspect/apply/encode/export/scene; audio inspect and repair inspect; audio inputs, record inspect and record place; sync inspect; tracking inspect; stabilization inspect; reframe inspect; transcript inspect/correct/plan; cache inspect/prune; preview frame. Replace each command dot with an underscore, e.g. `media.conform.inspect` becomes `cutbolt_media_conform_inspect`. Arguments omit `command`. `image.sequence.compile`, `render.run`, `export.run`, `scene.render`, `audio.render`, `audio.repair.render`, `audio.record`, `media.conform`, `hdr.conform`, `proxy.generate`, `preview.range`, `preview.sheet`, `cache.run` and `transcript.transcribe` stay CLI/library-only. The existing queue accepts reference projects; compilation/conversion and range export do not yet have queued equivalents. See [SCENES.md](SCENES.md), [audio mixing](AUDIO.md), [dialogue cleanup](DIALOGUE_REPAIR.md), [validated media import](CONFORM.md), [HDR conversion](HDR.md), [proxy previews](PROXIES.md), [range/delivery exports](EXPORT.md) and [the registry workflow](REGISTRY.md).
 
@@ -126,7 +141,7 @@ The scene schema also includes ordered [grading effects](GRADING.md). Scene insp
 Three useful tool sequences:
 
 1. **Saved edit:** session get, preview, then apply with the inspected revision and a saved unique request ID. On a lost result, repeat the exact apply arguments.
-2. **Export:** session get at a specific revision, render plan, render start with that snapshot, then poll job status until terminal. Read the completion manifest before consuming output.
+2. **Export:** render plan, then render start with `{"project_id": ..., "revision": N}` as the project. Poll job status until terminal, and read the completion manifest before consuming output.
 3. **Stop/recover:** job cancel, then poll status. After a crash, inspect status, resume queued work, and explicitly resubmit interrupted work to a new output when needed.
 
 The existing media-conform inspection schema also supports [explicit SDR normalization](COLOR.md). Supply `source.sdr` instead of legacy `source.color` and declare `working_transfer`; inspection reports color assumptions and time mapping before the blocking converter writes a new tagged editing asset.

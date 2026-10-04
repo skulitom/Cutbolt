@@ -12,6 +12,8 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `{"command":"schema","name":"scene.render"}` returns a command's complete argument schema, with a description on every field. It also accepts the shared types `project`, `operation`, `scene`, `template` and `audio_routing`.
 
+`cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
+
 ## Project snapshots
 
 The [transcript editing contract](TRANSCRIPTS.md) adds `transcript.inspect`, `transcript.correct`, `transcript.plan` and the content-bound `transcript.cut` operation. The blocking `transcript.transcribe` command and both G04 checkpoints pass bounded local English/Greek acceptance; estimated intervals remain subject to explicit review.
@@ -204,13 +206,24 @@ Add `transform.spatial` to a scene layer for animated axis scales, rotation and 
 
 ## Verification and demo
 
-Full verification requires explicit external acceptance dependencies: `CUTBOLT_TRANSCRIPTION_RUNTIME` (speech runtime JSON), `CUTBOLT_OTIO_PYTHON` (pinned interchange-reference Python), `CUTBOLT_LEGACY_STORE_ENGINE` (retained original schema-1 store writer), `CUTBOLT_NATIVE_PROJECT_FIXTURE` (private reviewed exact-build capture fixture) and `CUTBOLT_SEGMENTATION_PYTHON` (pinned local foreground worker Python). The corresponding capability documents specify their versions and contracts. Verification never installs or downloads them; missing evidence fails rather than silently skipping a criterion. Use an otherwise idle machine for fixed performance gates.
+Verification has three tiers (see [the development-loop plan](DEVELOPMENT_LOOP.md)):
 
-The verifier schedules fixtures itself. Correctness fixtures run concurrently (`--jobs`, default half the logical processors), and no new fixture starts while less than 6 GiB of memory is free. Fixtures that assert wall-clock or memory budgets, or report throughput, then run one at a time, with the long-form 4K render in a second lane beside them. The registry edit-latency fixture and the 15-minute real-time recording capture run last on a quiet machine: beside other work the five-second edit budget is marginal, and scheduling delays are correctly rejected as capture discontinuities. Every failing fixture's output tail is printed as soon as it fails, and the run continues to report all failures. The report records each stage's wall time under `verification_timing`, and the next run uses those times to start the longest correctness fixtures first.
+| When | Command | What it does |
+| --- | --- | --- |
+| While working | `cargo test` and `python tools/verify.py --only conform,overlays` | Builds the engine and runs only the named fixtures; `--last-failed` reruns the previous failures |
+| Before committing | `python tools/verify.py` | Formatting, lint, Rust tests, then every correctness fixture concurrently in its short mode; wall-clock budgets are recorded, not enforced; no evidence is written |
+| Milestones and progress claims | `python tools/verify.py --thorough --decode-device 0` | The evidence run: every budget enforced, long-form cases complete, budget-gated fixtures on a quiet machine, progress documents regenerated |
+
+The quick check skips fixtures whose external runtime (below) or CUDA device is not configured and lists them; `--strict` makes that an error. `--fail-fast` stops starting fixtures after the first failure. Fixtures run against a private copy of the engine, so `target/debug` can be rebuilt while verification runs. Per-machine stage times and failures are kept in the ignored `verification/last-run.json`.
+
+Thorough verification requires explicit external acceptance dependencies: `CUTBOLT_TRANSCRIPTION_RUNTIME` (speech runtime JSON), `CUTBOLT_OTIO_PYTHON` (pinned interchange-reference Python), `CUTBOLT_LEGACY_STORE_ENGINE` (retained original schema-1 store writer), `CUTBOLT_NATIVE_PROJECT_FIXTURE` (private reviewed exact-build capture fixture) and `CUTBOLT_SEGMENTATION_PYTHON` (pinned local foreground worker Python). The corresponding capability documents specify their versions and contracts. Verification never installs or downloads them; missing evidence fails rather than silently skipping a criterion. Use an otherwise idle machine for fixed performance gates.
+
+The thorough run schedules fixtures itself. Correctness fixtures run concurrently (`--jobs`, default half the logical processors), and no new fixture starts while less than 6 GiB of memory is free. Fixtures that assert wall-clock or memory budgets, or report throughput, then run one at a time, with the long-form 4K render in a second lane beside them. The registry edit-latency fixture and the 15-minute real-time recording capture run last on a quiet machine: beside other work the five-second edit budget is marginal, and scheduling delays are correctly rejected as capture discontinuities. Every failing fixture's output tail is printed as soon as it fails, and the run continues to report all failures. Wall-clock budgets live in `tests/budgets.py`; correctness and memory checks are ordinary assertions in every tier.
 
 ```powershell
 cargo build --locked
-python tools/verify.py --decode-device 0
+python tools/verify.py
+python tools/verify.py --thorough --decode-device 0
 python tests/integration.py --output C:\DEV\CutboltData\new-demo-directory
 ```
 

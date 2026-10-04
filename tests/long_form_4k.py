@@ -1,5 +1,7 @@
 """Original 4K motion, complete decoded clocks/content, process memory and stress gates."""
+from engine import ENGINE
 import argparse
+import budgets
 import ctypes
 from ctypes import wintypes
 from fractions import Fraction
@@ -95,7 +97,7 @@ def run(root, long_form):
     root = root.resolve(); assert root != ROOT and ROOT not in root.parents
     root.mkdir(parents=True, exist_ok=True)
     sources, output = root/'sources', root/'output'; sources.mkdir(); output.mkdir()
-    exe = Path(os.environ.get('CUTBOLT_TEST_ENGINE', ROOT/'target/debug/cutbolt.exe')); passed = []; measurements = {}; originals = {}
+    exe = Path(os.environ.get('CUTBOLT_TEST_ENGINE', ENGINE)); passed = []; measurements = {}; originals = {}
     seconds = 1800 if long_form else 12; count = seconds*RATE
     def save(name, value):
         (root/name).write_text(json.dumps(value, indent=2)+'\n', encoding='utf-8')
@@ -158,7 +160,7 @@ def run(root, long_form):
     # Predetermined gates apply to the entire source inspection, encode, output
     # inspection and integrity checking path, not just encoder progress.
     max_seconds=2700 if long_form else 120
-    assert measurement['seconds'] < max_seconds, measurement
+    budgets.check(measurement['seconds'] < max_seconds, measurement)
     assert measurement['sampled_tree_peak_bytes'] < 4*1024**3, measurement
     assert receipt['frames']==count and receipt['samples']==count*1920,receipt
     measurements['render']={**measurement,'gates':{'seconds':max_seconds,'tree_bytes':4*1024**3}}

@@ -1,4 +1,5 @@
 """Original geometric charts; high-precision forward geometry and rational filtering oracle."""
+from engine import ENGINE
 import argparse
 import copy
 from decimal import Decimal as D, getcontext, ROUND_HALF_UP, ROUND_FLOOR
@@ -152,7 +153,7 @@ def run(root):
         image=Image.new('RGBA',(12,8));image.putdata([(((x*51+y*30+k*9)%256)//3*3,((y*57+x*24+k*30)%256)//3*3,((x*9+y*45+k*72)%256)//3*3,[0,85,170,255][(x+y+k)%4]) for y in range(8) for x in range(12)])
         image.save(sources/f'chart-{k}.png');image.putdata([tuple(c*p[3]//255 for c in p[:3])+(p[3],) for p in image.getdata()]);image.save(sources/f'premult-{k}.png')
     original={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];cases=[];rejected=0;frames=0;samples=0;previews=0
+    exe=ENGINE;passed=[];cases=[];rejected=0;frames=0;samples=0;previews=0
     def call(req,error=None,env=None):
         nonlocal rejected
         p=subprocess.run([str(exe)],input=json.dumps(req).encode(),capture_output=True,timeout=180,env=env);r=json.loads(p.stdout)

@@ -1,4 +1,10 @@
-"""One local verification command; generates evidence and the progress document."""
+"""Local verification.
+
+The default quick check runs Rust lint/tests and every correctness fixture concurrently, using each
+long-form fixture's short mode; wall-clock budgets are recorded rather than enforced, and nothing is
+written to the evidence. --thorough is the evidence run: every budget enforced, long-form cases complete,
+budget-gated fixtures on a quiet machine, and the progress documents regenerated.
+"""
 from datetime import datetime, timezone
 import argparse
 import json
@@ -16,33 +22,57 @@ import psutil
 
 from progress import ROOT, source_hashes
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--thorough", action="store_true", help="Evidence run: enforce every budget, run long-form cases on a quiet machine, regenerate progress")
 parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"), help="Verification date; pass the user's local date when different from UTC")
-parser.add_argument("--decode-device", type=int, required=True, help="Explicit local CUDA device ordinal for real hardware-decode acceptance; no software substitution")
-parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2), help="Concurrent correctness fixtures; budget-gated fixtures always run in their own lane")
+parser.add_argument("--decode-device", type=int, help="Explicit local CUDA device ordinal for real hardware-decode acceptance (required by --thorough; quick skips those fixtures without it)")
+parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2), help="Concurrent correctness fixtures")
+parser.add_argument("--only", help="Quick: comma-separated fixture names to run (Rust lint/tests are skipped; run cargo test separately)")
+parser.add_argument("--last-failed", action="store_true", help="Quick: rerun the fixtures that failed in the previous quick run")
+parser.add_argument("--fail-fast", action="store_true", help="Start no further fixtures after the first failure")
+parser.add_argument("--strict", action="store_true", help="Quick: fail instead of skipping fixtures whose external runtime is not configured")
 args = parser.parse_args()
 datetime.strptime(args.date, "%Y-%m-%d")
-if not 0 <= args.decode_device < 31:
-    raise SystemExit("Full verification requires a CUDA device ordinal 0..30; the bounded unavailable-device fixture reserves ordinal 31.")
-speech_runtime = os.environ.get("CUTBOLT_TRANSCRIPTION_RUNTIME")
-if not speech_runtime or not Path(speech_runtime).is_file():
-    raise SystemExit("Full verification requires CUTBOLT_TRANSCRIPTION_RUNTIME pointing to the explicit external speech runtime JSON. Missing optional runtime evidence cannot be skipped for coverage.")
+MODE = "thorough" if args.thorough else "quick"
+if args.thorough and (args.only or args.last_failed):
+    raise SystemExit("--thorough always runs every fixture; --only and --last-failed are quick-mode options")
+started_at = time.monotonic()
+history_path = ROOT / "verification" / "last-run.json"
+try:
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    history = {}
 
-otio_python = os.environ.get("CUTBOLT_OTIO_PYTHON")
-if not otio_python or not Path(otio_python).is_file():
-    raise SystemExit("Full verification requires CUTBOLT_OTIO_PYTHON pointing to an explicit external Python with OpenTimelineIO 0.18.1. Reference-library interchange checks cannot be skipped for coverage.")
+# External acceptance dependencies. The thorough run requires every one; the quick check skips the
+# fixtures that need a missing one (unless --strict) and says so.
+EXTERNAL = {
+    "speech": ("CUTBOLT_TRANSCRIPTION_RUNTIME", "the explicit external speech runtime JSON. Missing optional runtime evidence cannot be skipped for coverage."),
+    "otio": ("CUTBOLT_OTIO_PYTHON", "an explicit external Python with OpenTimelineIO 0.18.1. Reference-library interchange checks cannot be skipped for coverage."),
+    "legacy": ("CUTBOLT_LEGACY_STORE_ENGINE", "a retained project-owned version-1 store writer. Real migration acceptance cannot be skipped."),
+    "native": ("CUTBOLT_NATIVE_PROJECT_FIXTURE", "the reviewed external native application fixture. Native capture and exact-build evidence cannot be replaced by synthetic transfer JSON."),
+    "segmentation": ("CUTBOLT_SEGMENTATION_PYTHON", "the explicit external segmentation runtime. Foreground-mask evidence cannot be skipped for coverage."),
+}
+available = {}
+for key, (variable, description) in EXTERNAL.items():
+    value = os.environ.get(variable)
+    available[key] = value if value and Path(value).is_file() else None
+    if args.thorough and not available[key]:
+        raise SystemExit(f"Full verification requires {variable} pointing to {description}")
+speech_runtime, otio_python, legacy_store_engine, native_fixture, segmentation_python = (available[k] for k in ("speech", "otio", "legacy", "native", "segmentation"))
+if args.decode_device is not None and not 0 <= args.decode_device < 31:
+    raise SystemExit("Hardware-decode acceptance requires a CUDA device ordinal 0..30; the bounded unavailable-device fixture reserves ordinal 31.")
+if args.thorough and args.decode_device is None:
+    raise SystemExit("Full verification requires --decode-device; there is no software substitution for hardware-decode acceptance.")
+available["device"] = None if args.decode_device is None else str(args.decode_device)
+# Tools on PATH, checked in seconds rather than discovered by a failing fixture an hour later.
+TOOLS = {"ffmpeg": None, "ffprobe": None, "cargo": None, "pwsh": "speech"}
+for tool, needed_by in TOOLS.items():
+    if shutil.which(tool):
+        continue
+    if needed_by is None or args.thorough:
+        raise SystemExit(f"Verification requires `{tool}` on PATH" + (" (PowerShell 7 generates the speech fixtures)" if tool == "pwsh" else ""))
+    available[needed_by] = None
 
-legacy_store_engine = os.environ.get("CUTBOLT_LEGACY_STORE_ENGINE")
-if not legacy_store_engine or not Path(legacy_store_engine).is_file():
-    raise SystemExit("Full verification requires CUTBOLT_LEGACY_STORE_ENGINE pointing to a retained project-owned version-1 store writer. Real migration acceptance cannot be skipped.")
-
-native_fixture = os.environ.get("CUTBOLT_NATIVE_PROJECT_FIXTURE")
-if not native_fixture or not Path(native_fixture).is_file():
-    raise SystemExit("Full verification requires CUTBOLT_NATIVE_PROJECT_FIXTURE pointing to the reviewed external native application fixture. Native capture and exact-build evidence cannot be replaced by synthetic transfer JSON.")
-
-segmentation_python = os.environ.get("CUTBOLT_SEGMENTATION_PYTHON")
-if not segmentation_python or not Path(segmentation_python).is_file():
-    raise SystemExit("Full verification requires CUTBOLT_SEGMENTATION_PYTHON pointing to the explicit external segmentation runtime. Foreground-mask evidence cannot be skipped for coverage.")
 
 def command(args):
     result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
@@ -54,29 +84,39 @@ def command(args):
 
 
 starting_hashes = source_hashes()
-command([sys.executable, "tests/repository.py"])
-command(["cargo", "fmt", "--check"])
-command(["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"])
-rust = command(["cargo", "test", "--locked"])
-tests = ["rust:" + match for match in re.findall(r"^test (\S+) \.\.\. ok$", rust, re.MULTILINE)]
-tests = [name for name in tests if name not in {"rust:store::tests::crash_worker", "rust:store::integrity::tests::crash_worker", "rust:cache_store::tests::crash_child", "rust:jobs::recovery::tests::crash_child"}]
-if not tests:
-    raise SystemExit("No Rust test evidence was collected")
+targeted = bool(args.only or args.last_failed)
+if not targeted:
+    command([sys.executable, "tests/repository.py"])
+    command(["cargo", "fmt", "--check"])
+    command(["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"])
+    rust = command(["cargo", "test", "--locked"])
+    tests = ["rust:" + match for match in re.findall(r"^test (\S+) \.\.\. ok$", rust, re.MULTILINE)]
+    tests = [name for name in tests if name not in {"rust:store::tests::crash_worker", "rust:store::integrity::tests::crash_worker", "rust:cache_store::tests::crash_child", "rust:jobs::recovery::tests::crash_child"}]
+    if not tests:
+        raise SystemExit("No Rust test evidence was collected")
 command(["cargo", "build", "--locked"])
+# Fixtures run a private copy of the engine, so target/debug stays free to rebuild during verification.
+run_directory = Path(tempfile.mkdtemp(prefix="cutbolt-verify-run-"))
+engine_copy = run_directory / ("cutbolt.exe" if os.name == "nt" else "cutbolt")
+shutil.copy2(ROOT / "target" / "debug" / engine_copy.name, engine_copy)
+print(f"{MODE} verification of {engine_copy.name} copied to {run_directory}", flush=True)
 
-# Fixture scheduling. Correctness fixtures share the machine in a memory-aware pool. Fixtures that
-# assert wall-clock or memory budgets, or report throughput, run afterwards in one sequential lane;
-# the long-form 4K render, whose budget leaves a wide margin, runs beside that lane rather than beside
-# the pool. The registry edit-latency budget and the sustained real-time capture run last on a quiet
-# machine: beside other work the 5-second edit budget is marginal, and a delayed capture packet is
-# (correctly) rejected as a discontinuity. Every failure is reported as soon as it happens.
+# Fixture scheduling. Correctness fixtures share the machine in a memory-aware pool. In the thorough run,
+# fixtures that assert wall-clock or memory budgets, or report throughput, then run in one sequential
+# lane; the long-form 4K render, whose budget leaves a wide margin, runs beside that lane rather than
+# beside the pool. The registry edit-latency budget and the sustained real-time capture run last on a
+# quiet machine: beside other work the 5-second edit budget is marginal, and a delayed capture packet is
+# (correctly) rejected as a discontinuity. The quick check runs everything except the capture in the
+# pool, records budgets instead of enforcing them and keeps a short capture for the quiet phase.
 PY = [sys.executable, "-X", "utf8"]
 
 
-def fixture(name, *extra, lane="pool", result="verification.json", check=None, utf8=True):
+def fixture(name, *extra, lane="pool", quick_lane="pool", result="verification.json", check=None, utf8=True, long=(), quick=(), needs=()):
     script = (PY if utf8 else [sys.executable]) + [f"tests/{name}.py"]
     output = "{dir}" if result == "verification.json" else "{dir}/" + result.split("/")[0]
-    return {"name": name, "lane": lane, "commands": [script + ["--output", output, *extra]], "results": {name: result}, "check": check}
+    mode_args = list(long) if args.thorough else list(quick)
+    return {"name": name, "lane": lane if args.thorough else quick_lane, "commands": [script + ["--output", output, *extra, *mode_args]],
+            "results": {name: result}, "check": check if args.thorough else None, "needs": list(needs)}
 
 
 def value_at(value, field):
@@ -89,18 +129,19 @@ def require(field, message):
     return lambda values: None if all(value_at(v, field) for v in values.values()) else message
 
 
+device = available["device"] or ""
 STAGES = [
-    {"name": "integration", "lane": "pool", "check": None,
+    {"name": "integration", "lane": "pool", "check": None, "needs": [],
      "commands": [[sys.executable, "tests/integration.py", "--output", "{dir}"], [sys.executable, "tests/agents.py", "--fixture", "{dir}"]],
      "results": {"integration": "verification.json", "agents": "agents/verification.json"}},
-    fixture("native_timing", "--long-form", check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
-    fixture("image_sequences", "--long-form", check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
+    fixture("native_timing", long=["--long-form"], check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
+    fixture("image_sequences", long=["--long-form"], check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
     fixture("queue_recovery"),
-    fixture("interchange", "--reference-python", otio_python),
-    fixture("native_projects", "--fixture", native_fixture),
-    fixture("portable_projects", "--legacy-engine", legacy_store_engine),
+    fixture("interchange", "--reference-python", otio_python or "", needs=["otio"]),
+    fixture("native_projects", "--fixture", native_fixture or "", needs=["native"]),
+    fixture("portable_projects", "--legacy-engine", legacy_store_engine or "", needs=["legacy"]),
     fixture("render_failures"),
-    fixture("delivery_profiles", "--device", str(args.decode_device)),
+    fixture("delivery_profiles", "--device", device, needs=["device"]),
     fixture("export_formats"),
     fixture("sessions", result="sessions/verification.json", utf8=False),
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
@@ -109,25 +150,48 @@ STAGES = [
     fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
-    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime), fixture("remapping"),
-    fixture("recording", lane="quiet", check=require("sustained.long_gate_passed", "Full recording verification requires the sustained native capture gate")),
-    fixture("long_form_4k", "--long-form", lane="long", check=require("long_gate_passed", "Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")),
+    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech"]), fixture("remapping"),
+    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"],
+            check=require("sustained.long_gate_passed", "Full recording verification requires the sustained native capture gate")),
+    fixture("long_form_4k", lane="long", long=["--long-form"],
+            check=require("long_gate_passed", "Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")),
     fixture("long_form_stress", lane="gated"), fixture("expressions", lane="gated"), fixture("temporal", lane="gated"),
-    fixture("geometry", lane="gated"), fixture("segmentation", "--runtime-python", segmentation_python, lane="gated"),
-    fixture("registry", lane="quiet"), fixture("acceleration", "--device", str(args.decode_device), lane="gated"),
+    fixture("geometry", lane="gated"), fixture("segmentation", "--runtime-python", segmentation_python or "", lane="gated", needs=["segmentation"]),
+    fixture("registry", lane="quiet"), fixture("acceleration", "--device", device, lane="gated", needs=["device"]),
     fixture("unicode_text", lane="gated"), fixture("reframing", lane="gated"), fixture("cache_previews", lane="gated"),
     fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated"),
     fixture("native_scenes", lane="gated", result="run/verification.json"),
     fixture("agent_ergonomics", lane="gated", result="run/verification.json"),
 ]
 assert len({s["name"] for s in STAGES}) == len(STAGES)
-try:
-    previous = json.loads((ROOT / "verification/latest.json").read_text(encoding="utf-8"))["verification_timing"]["stages"]
-except (OSError, KeyError, ValueError):
-    previous = {}
-started_at = time.monotonic()
+NAMES = [s["name"] for s in STAGES]
+previous = history.get(MODE, {}).get("stages", {})
+if args.only:
+    wanted = [n.strip() for n in args.only.split(",") if n.strip()]
+    unknown = sorted(set(wanted) - set(NAMES))
+    if unknown:
+        raise SystemExit(f"Unknown fixtures: {', '.join(unknown)}. Choose from: {', '.join(NAMES)}")
+    STAGES = [s for s in STAGES if s["name"] in wanted]
+elif args.last_failed:
+    failed_before = [name for name, stage in previous.items() if stage.get("ok") is False]
+    if not failed_before:
+        raise SystemExit("No fixture failed in the previous quick run")
+    STAGES = [s for s in STAGES if s["name"] in failed_before]
+skipped = {}
+for stage in list(STAGES):
+    missing = [need for need in stage["needs"] if not available[need]]
+    if missing:
+        reason = "needs " + ", ".join(EXTERNAL[m][0] if m in EXTERNAL else "--decode-device" if m == "device" else m for m in missing)
+        if args.strict:
+            raise SystemExit(f"{stage['name']} {reason} (--strict)")
+        skipped[stage["name"]] = reason
+        STAGES.remove(stage)
 lock = threading.Lock()
 outcomes = {}
+stop_starting = threading.Event()
+fixture_environment = {**os.environ, "CUTBOLT_EXE": str(engine_copy)}
+if not args.thorough:
+    fixture_environment["CUTBOLT_BUDGETS"] = "record"
 
 
 def log(message):
@@ -139,11 +203,12 @@ def log(message):
 def execute(stage):
     directory = Path(tempfile.mkdtemp(prefix=f"cutbolt-{stage['name'].replace('_', '-')}-"))
     began = time.monotonic()
-    outcome = {"ok": False}
+    outcome = {"ok": False, "budget_misses": []}
     try:
         for argv in stage["commands"]:
             result = subprocess.run([a.replace("{dir}", str(directory)) for a in argv], cwd=ROOT, capture_output=True,
-                                    text=True, encoding="utf-8", errors="replace")
+                                    text=True, encoding="utf-8", errors="replace", env=fixture_environment)
+            outcome["budget_misses"] += [line.split(" ", 1)[1] for line in result.stderr.splitlines() if line.startswith("CUTBOLT_BUDGET_MISS ")]
             if result.returncode:
                 outcome["log"] = f"exit {result.returncode}\n{result.stdout[-4000:]}\n{result.stderr[-8000:]}"
                 return
@@ -160,8 +225,11 @@ def execute(stage):
         shutil.rmtree(directory, ignore_errors=True)
         with lock:
             outcomes[stage["name"]] = outcome
-        log(f"{stage['name']} {'passed' if outcome['ok'] else 'FAILED'} in {outcome['seconds']:.0f} s")
+        note = f" ({len(outcome['budget_misses'])} budget(s) recorded over)" if outcome["budget_misses"] else ""
+        log(f"{stage['name']} {'passed' if outcome['ok'] else 'FAILED'} in {outcome['seconds']:.0f} s{note}")
         if not outcome["ok"]:
+            if args.fail_fast:
+                stop_starting.set()
             with lock:
                 print(f"----- {stage['name']} output -----\n{outcome['log']}\n-----", flush=True)
 
@@ -170,10 +238,10 @@ def run_phase(lanes):
     """Run lanes concurrently; each lane starts its stages in order up to its own concurrency limit."""
     queues = [(list(stages), limit, memory_aware) for stages, limit, memory_aware in lanes]
     running = [[] for _ in queues]
-    while any(queue for queue, _, _ in queues) or any(t.is_alive() for active in running for t in active):
+    while (any(queue for queue, _, _ in queues) and not stop_starting.is_set()) or any(t.is_alive() for active in running for t in active):
         for (queue, limit, memory_aware), active in zip(queues, running):
             active[:] = [t for t in active if t.is_alive()]
-            while queue and len(active) < limit:
+            while queue and len(active) < limit and not stop_starting.is_set():
                 if memory_aware and active and psutil.virtual_memory().available < 6 * 1024**3:
                     break
                 stage = queue.pop(0)
@@ -186,20 +254,41 @@ def run_phase(lanes):
 
 def lane(name):
     stages = [s for s in STAGES if s["lane"] == name]
-    # Longest first, using the previous verified run's stage times when available.
-    return sorted(stages, key=lambda s: -previous.get(s["name"], 0)) if name == "pool" else stages
+    # Longest first, using the previous run's stage times in this mode when available.
+    return sorted(stages, key=lambda s: -previous.get(s["name"], {}).get("seconds", 0)) if name == "pool" else stages
 
 
 run_phase([(lane("pool"), args.jobs, True)])
 run_phase([(lane("long"), 1, False), (lane("gated"), 1, False)])
 run_phase([(lane("quiet"), 1, False)])
+shutil.rmtree(run_directory, ignore_errors=True)
 failures = {name: outcome for name, outcome in outcomes.items() if not outcome["ok"]}
-if failures or len(outcomes) != len(STAGES):
-    raise SystemExit(f"{len(failures)} of {len(STAGES)} verification stages failed: {', '.join(failures)}")
+not_run = [s["name"] for s in STAGES if s["name"] not in outcomes]
+wall = round(time.monotonic() - started_at, 1)
+recorded = {**previous, **{name: {"ok": o["ok"], "seconds": o["seconds"], "budget_misses": o["budget_misses"]} for name, o in outcomes.items()}}
+history[MODE] = {"finished": datetime.now(timezone.utc).isoformat(timespec="seconds"), "wall_seconds": wall, "stages": recorded,
+                 "last_failed": sorted(failures), "skipped": skipped}
+(ROOT / "verification").mkdir(exist_ok=True)
+history_path.write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
+misses = {name: o["budget_misses"] for name, o in outcomes.items() if o["budget_misses"]}
+if not args.thorough:
+    print(f"\nQuick verification: {len(outcomes) - len(failures)} passed, {len(failures)} failed, {len(skipped)} skipped, "
+          f"{len(not_run)} not started, {wall:.0f} s. No evidence was written; run --thorough for progress evidence.")
+    for name, reason in skipped.items():
+        print(f"  skipped {name}: {reason}")
+    for name, lines in misses.items():
+        print(f"  budget recorded over in {name}: {len(lines)} ({lines[0][:160]})")
+    if not_run:
+        print(f"  not started after a failure (--fail-fast): {', '.join(not_run)}")
+    if failures:
+        raise SystemExit(f"Failed: {', '.join(failures)} (rerun with --last-failed)")
+    raise SystemExit(0)
+if failures or not_run:
+    raise SystemExit(f"{len(failures)} of {len(STAGES)} verification stages failed: {', '.join(failures)}" + (f"; not started: {', '.join(not_run)}" if not_run else ""))
 results = {key: value for outcome in outcomes.values() for key, value in outcome["values"].items()}
 # The report below refers to each fixture's evidence by its stage name.
 globals().update(results)
-verification_timing = {"jobs": args.jobs, "fixture_wall_seconds": round(time.monotonic() - started_at, 3),
+verification_timing = {"jobs": args.jobs, "fixture_wall_seconds": wall,
                        "stages": {name: outcome["seconds"] for name, outcome in sorted(outcomes.items())}}
 if source_hashes() != starting_hashes:
     raise SystemExit("Source changed during verification; rerun against a stable checkout")

@@ -1,4 +1,5 @@
 """Independent rational HSL/feather selection, Decimal correction and forward composition."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -128,7 +129,7 @@ def run(root):
     for name,func in [('premultiplied',lambda p:(*((v*p[3]+127)//255 for v in p[:3]),p[3])),('alternate',lambda p:(p[2],p[0],p[1],p[3]))]:
         image=Image.new('RGBA',source.size);image.putdata([func(p) for p in source.getdata()]);image.save(sources/(name+'.png'))
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe';decoded=0;maximum_error=0;passed=[];cases=[]
+    exe=ENGINE;decoded=0;maximum_error=0;passed=[];cases=[]
     def request(cmd,error=None):
         p=subprocess.run([str(exe)],input=json.dumps(cmd).encode(),capture_output=True,timeout=120);r=json.loads(p.stdout)
         if error:

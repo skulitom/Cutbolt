@@ -1,4 +1,5 @@
 """Original subtitle text, external demux timing, and independent caption pixel references."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -47,7 +48,7 @@ def run(root):
         for x in range(96):backdrop.putpixel((x,y),(20+x,30+y,50+(x+y)%100))
     backdrop.save(sources/'backdrop.png')
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];decoded=0
+    exe=ENGINE;passed=[];decoded=0
     def request(cmd,error=None):
         p=subprocess.run([str(exe)],input=json.dumps(cmd).encode(),capture_output=True,timeout=120)
         reply=json.loads(p.stdout)

@@ -1,4 +1,6 @@
 """Original isolated native capture, exact placement and bounded streaming acceptance."""
+from engine import ENGINE
+import budgets
 import argparse,copy,hashlib,json,os,struct,subprocess,time as clock,wave
 from pathlib import Path
 import numpy as np
@@ -9,7 +11,7 @@ from PIL import Image
 from jsonschema import Draft202012Validator
 
 ROOT=Path(__file__).resolve().parents[1]
-EXE=ROOT/'target/debug/cutbolt.exe'
+EXE=ENGINE
 HELPER=ROOT/'target/debug/examples/recording_fixture.exe'
 def sha(path):
     h=hashlib.sha256()
@@ -200,8 +202,8 @@ def run(root,native_seconds):
                 if recorder.poll() is None:raise
             clock.sleep(.1)
         wall=clock.monotonic()-start;value=json.loads(recorder.stdout.read());assert recorder.returncode==0 and value['ok'],value
-        r=value['result'];assert r['samples']==native_seconds*48000 and peak<128*1024*1024 and wall<native_seconds+30
-        assert r['timing']['maximum_qpc_sample_clock_deviation_100ns']<=200000
+        r=value['result'];assert r['samples']==native_seconds*48000 and peak<128*1024*1024;budgets.check(wall<native_seconds+30,wall)
+        budgets.check(r['timing']['maximum_qpc_sample_clock_deviation_100ns']<=200000,r['timing'])
         digest=hashlib.sha256();peak_pcm=0;count=0
         with wave.open(str(out/'sustained.wav')) as wav:
             assert (wav.getnchannels(),wav.getsampwidth(),wav.getframerate(),wav.getnframes())==(2,2,48000,native_seconds*48000)

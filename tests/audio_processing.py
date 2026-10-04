@@ -1,4 +1,5 @@
 """Original signals, external EQ/loudness references and closed-form compressor checks."""
+from engine import ENGINE
 import argparse
 import hashlib
 import json
@@ -77,7 +78,7 @@ def run(root):
     segments = [(2400, 1000, -500), (4800, 24000, -12000), (4800, 2000, -1000), (2400, 0, 0)]
     write("steps", [pair for length, left, right in segments for pair in [(left, right)]*length])
     originals = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    executable = ROOT/"target/debug/cutbolt.exe"
+    executable = ENGINE
     passed, comparisons, meter_comparisons = [], [], []
     total = 0
     def request(value, error=None):

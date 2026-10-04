@@ -1,4 +1,5 @@
 """Original real-media attempts, interrupted workers and bounded queue recovery."""
+from engine import ENGINE
 import argparse
 import copy
 import hashlib
@@ -22,7 +23,7 @@ def run(root):
     root.mkdir(parents=True, exist_ok=True)
     sources, output = root/'sources', root/'output'
     sources.mkdir(); output.mkdir()
-    exe = ROOT/'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed, jobs, gates, handles = [], [], [], []
     compared = samples = rejected = 0
 

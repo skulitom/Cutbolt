@@ -1,4 +1,5 @@
 """Original LUT charts and exact Fraction scope references; generated media stays external."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -89,7 +90,7 @@ def run(root):
     root.mkdir(parents=True, exist_ok=True)
     sources, output, store = [root / p for p in ('sources', 'output', 'store')]
     for p in (sources, output, store): p.mkdir()
-    exe = ROOT / 'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed, renders, scope_checks, rejected = [], [], [], 0
 
     def ff(args, cwd=None):

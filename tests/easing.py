@@ -1,4 +1,5 @@
 """Original easing/retiming fixtures, with independent Fraction and image references."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction
@@ -47,7 +48,7 @@ def run(root):
             "mask":{"rect":[1,2,5,3], "inverted":False, "animation":{"x":curve((0,3,1),mode), "width":curve((2,6,4),mode)}}}
         return {"schema_version":1,"id":"easing-fixture","width":32,"height":24,"output_scale":2,"duration":time(2),"background":[13,71,119],"color":"srgb_straight_encoded","layers":[layer],"audio":None}
 
-    exe=ROOT/"target/debug/cutbolt.exe"; passed=[]; cases=[]; frame_count=0
+    exe=ENGINE; passed=[]; cases=[]; frame_count=0
 
     def request(value, error=None, from_file=False):
         if from_file:

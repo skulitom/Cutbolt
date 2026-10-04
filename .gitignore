@@ -109,3 +109,5 @@ audit-private/
 
 # External render queue ownership file
 worker.lock
+# Per-machine verifier history (stage times, last failures); not evidence.
+/verification/last-run.json

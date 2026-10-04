@@ -1,4 +1,5 @@
 """Original outline fonts and independent geometry/layout/coverage acceptance checks."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction as F
@@ -135,7 +136,7 @@ def run(root):
     (sources/"invalid.ttf").write_bytes(b"not a font")
     (sources/"truncated.ttf").write_bytes(b"\x00\x01\x00\x00"+b"\x00"*8)
     original_hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/"target/debug/cutbolt.exe"; passed=[]; cases=[]; decoded=0
+    exe=ENGINE; passed=[]; cases=[]; decoded=0
     def request(command,error=None):
         result=subprocess.run([str(exe)],input=json.dumps(command).encode(),capture_output=True,timeout=120)
         data=json.loads(result.stdout)

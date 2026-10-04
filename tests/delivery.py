@@ -1,4 +1,5 @@
 """Original range/stream fixtures, exact lossless samples and bounded delivery quality."""
+from engine import ENGINE
 import argparse
 from array import array
 import copy
@@ -66,7 +67,7 @@ def run(root):
                         '-f','s16le','-ar','48000','-ac','2','-i',str(sound),'-vf','setsar=1','-c:v','ffv1','-level','3','-pix_fmt','bgr0','-threads','1','-c:a','pcm_s16le','-metadata','title=original-fixture-title',str(path)],check=True)
         assets.append({'id':'source-'+str(i),'path':str(path),'duration':time(N,25),'identity':{'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}})
     original_hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe';cases=[];passed=[];frames_checked=0;samples_checked=0;quality=[]
+    exe=ENGINE;cases=[];passed=[];frames_checked=0;samples_checked=0;quality=[]
     def call(r,error=None,env=None):
         p=subprocess.run([str(exe)],input=json.dumps(r).encode(),capture_output=True,timeout=240,env=env);v=json.loads(p.stdout)
         if error:

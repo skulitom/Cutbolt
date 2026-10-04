@@ -1,4 +1,5 @@
 """Visible sequential edit semantics checked against independent frame/sample lists."""
+from engine import ENGINE
 import argparse
 import copy
 import hashlib
@@ -26,7 +27,7 @@ def run(root):
         (sources/f"{s}.pcm").write_bytes(pcm)
         subprocess.run(["ffmpeg","-v","error","-n","-f","rawvideo","-pixel_format","rgb24","-video_size","32x24","-framerate","25","-i",str(sources/f"{s}.rgb"),"-f","s16le","-ar","48000","-ac","2","-i",str(sources/f"{s}.pcm"),"-c:v","ffv1","-level","3","-pix_fmt","bgr0","-threads","1","-c:a","pcm_s16le",str(sources/f"{s}.mkv")],check=True)
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/"target/debug/cutbolt.exe";passed=[];cases=[];frame_count=0
+    exe=ENGINE;passed=[];cases=[];frame_count=0
     def request(value,error=None):
         p=subprocess.run([str(exe)],input=json.dumps(value).encode(),capture_output=True,timeout=120)
         r=json.loads(p.stdout)

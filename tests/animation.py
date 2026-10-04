@@ -1,4 +1,5 @@
 """Original keyframe fixtures; independent Fraction values and forward image operations."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction
@@ -82,7 +83,7 @@ def run(root):
     top["animation"]={"opacity":curve([(1,2,128,"hold")])}
     scene={"schema_version":1,"id":"keyframe-fixture","width":32,"height":24,"output_scale":2,"duration":time(2),"background":[10,20,30],"color":"srgb_straight_encoded","layers":[layer,top],"audio":None}
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/"target/debug/cutbolt.exe"; passed=[]
+    exe=ENGINE; passed=[]
 
     def request(command, error=None, from_file=False):
         if from_file:

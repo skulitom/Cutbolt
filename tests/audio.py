@@ -1,4 +1,5 @@
 """Original PCM fixtures with independent rational trim, resample, envelope and mix references."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction
@@ -64,7 +65,7 @@ def run(root):
     write("unsupported.wav",32000,1,[[0]]*32)
     Image.new("RGB",(4,4),(25,90,170)).save(sources/"image.png")
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/"target/debug/cutbolt.exe";passed=[];cases=[];samples=0
+    exe=ENGINE;passed=[];cases=[];samples=0
     def request(value,error=None):
         result=subprocess.run([str(exe)],input=json.dumps(value).encode(),capture_output=True,timeout=90)
         data=json.loads(result.stdout)

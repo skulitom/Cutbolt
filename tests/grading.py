@@ -1,4 +1,5 @@
 """Original charts, high-precision color equations and independent forward compositing."""
+from engine import ENGINE
 import argparse
 import copy
 from decimal import Decimal as D, getcontext, ROUND_HALF_UP
@@ -90,7 +91,7 @@ def run(root):
     Image.new('RGBA',(8,8),(128,64,200,128)).save(sources/'small.png')
     make_font(sources/'original.ttf',PRIMARY)
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    exe=ROOT/'target/debug/cutbolt.exe';passed=[];decoded=0;maximum_error=0;cases=[]
+    exe=ENGINE;passed=[];decoded=0;maximum_error=0;cases=[]
     def request(value,error=None):
         p=subprocess.run([str(exe)],input=json.dumps(value).encode(),capture_output=True,timeout=120)
         r=json.loads(p.stdout)

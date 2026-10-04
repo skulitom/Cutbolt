@@ -4,7 +4,9 @@ This fixture deliberately does not implement an expression interpreter. Its
 authored graphs have explicit Fraction formulae, fixed truth tables and hash
 vectors, then use the existing forward pixel/geometry references.
 """
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 from fractions import Fraction as F
 import hashlib
@@ -108,7 +110,7 @@ def run(root):
     b.pop('animation')
     scene = {'schema_version':1,'id':'property-graph','width':64,'height':48,'output_scale':1,'duration':time(2),
              'background':[7,11,19],'color':'srgb_straight_encoded','audio':None,'layers':[a,b],'expressions':graph()}
-    exe = ROOT/'target/debug/cutbolt.exe'
+    exe = ENGINE
     passed = []; rejected = 0; frames = 0; samples = 0; previews = 0
 
     def call(command, error=None, **fields):
@@ -358,14 +360,14 @@ def run(root):
     maximum['expressions'] = {'schema_version':1,'seed':0,'nodes':nodes,'bindings':[
         {'layer':f'L{i}','property':prop,'node':'p' if prop=='position' else 'd62'} for i in range(16) for prop in ('position','opacity')]}
     begun = clock.perf_counter(); max_report = inspect(maximum,[F(i,100) for i in range(256)]); elapsed = clock.perf_counter()-begun
-    assert elapsed < 15, elapsed
+    budgets.check(elapsed < 15, elapsed)
     assert max_report['node_evaluations']==65536 and len(max_report['samples'])==256
     assert all(s['values']['d62']==value(128) and len(s['bindings'])==32 for s in max_report['samples'])
     static = copy.deepcopy(maximum); static.pop('expressions')
     for layer in static['layers']: layer['transform'].update(position=[1,1],opacity=128)
     cache = {n:expected_frame(static,sources,n) for n in range(10)}
     begun = clock.perf_counter(); render(maximum,'maximum',lambda n:cache[n%10]); render_elapsed = clock.perf_counter()-begun
-    assert render_elapsed < 60, render_elapsed
+    budgets.check(render_elapsed < 60, render_elapsed)
     passed.append('expressions.maximum_graph_depth_bindings_samples_and_render_work')
     result = {'passed':passed,'frames_compared':frames,'samples_compared':samples,'previews':previews,'rejections':rejected,
               'maximum_inspect_seconds':elapsed,'maximum_render_seconds':render_elapsed,'maximum_nodes':256,'maximum_bindings':32,

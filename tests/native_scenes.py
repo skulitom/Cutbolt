@@ -4,7 +4,9 @@ Independent checks: a vectorised integer oracle for every decoded 1080p frame, e
 4x enlarged 480x270 scene and its native 1920x1080 counterpart, analytic large-text coverage, captions at
 native size, downstream preview/export, explicit limits and measured time/memory/scratch use.
 """
+from engine import ENGINE
 import argparse
+import budgets
 import copy
 import hashlib
 import json
@@ -24,7 +26,7 @@ from graphics import PRIMARY, make_font, shape_pixels, text_pixels
 from scenes import audio_bytes, decode_check, identity, selected, time
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = ROOT / "target" / "debug" / "cutbolt.exe"
+EXE = ENGINE
 W, H = 1920, 1080
 TILE = (240, 216)
 
@@ -370,7 +372,7 @@ def run(root):
     measurements["equivalence"] = {"frames": 50, "low_480x270x4_seconds": round(timings["low"], 3),
                                    "native_1920x1080_seconds": round(timings["high"], 3),
                                    "ratio": round(timings["high"] / timings["low"], 3)}
-    assert timings["high"] <= 3 * timings["low"] + 10, measurements["equivalence"]
+    budgets.check(timings["high"] <= 3 * timings["low"] + 10, measurements["equivalence"])
     passed.append("native.scale_equivalence_effects_masks_alpha")
     passed.append("native.time_within_three_times_enlarged")
 

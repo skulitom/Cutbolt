@@ -1,4 +1,5 @@
 """Codec/container matrix and exact timestamp retiming of original synthetic sources."""
+from engine import ENGINE
 import argparse
 from bisect import bisect_right
 import copy
@@ -55,7 +56,7 @@ def run(root):
     (sources/"truncated.mp4").write_bytes((sources/"fractional.mp4").read_bytes()[:97])
     (sources/"malformed.wav").write_bytes(b"RIFF\xff\xff\xff\xffWAVEfmt broken")
     originals={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
-    executable=ROOT/"target/debug/cutbolt.exe"
+    executable=ENGINE
     passed=[];comparisons=[];expected_outputs={};receipts={}
     def request(value,error=None):
         p=subprocess.run([str(executable)],input=json.dumps(value).encode(),capture_output=True,timeout=120)

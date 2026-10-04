@@ -1,4 +1,5 @@
 """Independent decoded-pixel/audio acceptance for bounded scenes and timeline previews."""
+from engine import ENGINE
 import argparse
 import copy
 from fractions import Fraction
@@ -119,7 +120,7 @@ def run(root, pixelforge=None):
     sources = root / "sources"; output = root / "output"; output.mkdir(exist_ok=True)
     scene = generate(sources)
     passed = []
-    exe = ROOT / "target/debug/cutbolt.exe"
+    exe = ENGINE
     def check(name, condition=True):
         assert condition, name
         passed.append(name)

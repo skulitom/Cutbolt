@@ -22,7 +22,7 @@ def generate():
     if report["baseline"] != data["baseline"]:
         raise ValueError("Scope baseline and verification baseline disagree")
     if report["source_hashes"] != source_hashes():
-        raise ValueError("Verification is stale. Run python tools/verify.py before scoring changed code.")
+        raise ValueError("Verification is stale. Run python tools/verify.py --thorough before scoring changed code.")
     features = data["features"]
     if len(features) != 50 or len({item["id"] for item in features}) != 50:
         raise ValueError("Baseline v1 requires exactly 50 unique capabilities (100 acceptance points). Version scope changes explicitly.")
@@ -60,7 +60,7 @@ def generate():
     text += ["", "## Updating this tracker", "",
              "1. Implement a defined checkpoint and add meaningful acceptance coverage.",
              "2. Add passing check IDs to `progress/capabilities.json` only when the checkpoint's stated behavior is actually covered.",
-             "3. Run `python tools/verify.py`; it runs formatting, lint, unit/crash tests, session, MCP/job and render integrations, repository checks, and regenerates this file.",
+             "3. Run `python tools/verify.py --thorough`; it runs formatting, lint, unit/crash tests, session, MCP/job and render integrations, repository checks, and regenerates this file. The default quick check writes no evidence.",
              "4. Record a change in `docs/PROGRESS_HISTORY.md`. Change the baseline ID and log old/new scope if exclusions or weights change; never silently shrink the denominator.", "",
              "The generator checks source fingerprints and evidence IDs. Human review is still required to judge whether a test demonstrates the full checkpoint. Evidence is in [verification/latest.json](../verification/latest.json); criteria are in [progress/capabilities.json](../progress/capabilities.json).", "",
              "## Scope references", "",
