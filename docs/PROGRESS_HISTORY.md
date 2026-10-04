@@ -1,5 +1,13 @@
 # Progress history
 
+## 4 October 2026: scenes and captions at native frame rates
+
+Scenes compiled to 25 fps only, so titles and caption windows could not be placed on the new 29.97 and 60 fps timelines. A scene now takes an optional `frame_rate`, one of the eight native rates, defaulting to 25. Durations, layer timing, strict holds, motion-blur sample times, soundtrack length, the encoder clock and output verification all use it. A scene may last up to ten seconds at its rate: 250 frames at 25 fps, 600 at 60. Caption windows sample cues on the base scene's clock.
+
+The native timing fixture compiles a 29.97 fps scene and a transparent 60 fps scene whose strict one-frame holds alternate two images. Every frame matches exactly, both directly and when placed on a track timeline at the same rate, opaque or as an alpha overlay. The captions fixture samples a caption window on a 29.97 fps scene with the expected first and end frames.
+
+Scene-layer tracking, stabilization and reframing still measure on their 25 fps clock. Existing 25 fps scenes serialize and render unchanged. No scoring changed.
+
 ## 4 October 2026: media conversion at the source's own frame rate
 
 `media.conform` produced 25 fps assets only, so 30 and 60 fps footage lost or repeated frames even on a native-rate timeline. Recipes now take an optional `frame_rate`, one of the eight native rates, defaulting to 25 so existing recipes keep their fingerprints. `media.inspect` proposes the source's own rate when it is a timeline rate.

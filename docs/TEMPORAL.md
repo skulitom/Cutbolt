@@ -15,9 +15,9 @@ Add this optional scene field to render eight evenly weighted midpoint samples t
 }
 ```
 
-Angles and phase are exact signed rationals in degrees. Angle must be 0..360, phase −360..360, and sample count 1..32. Zero angle requires one sample. At 25 fps, sample `k` of output frame `n` is:
+Angles and phase are exact signed rationals in degrees. Angle must be 0..360, phase −360..360, and sample count 1..32. Zero angle requires one sample. At frame rate `R`, sample `k` of output frame `n` is:
 
-`t = n/25 + (phase + shutter_angle * (2*k+1)/(2*samples)) / 9000`.
+`t = n/R + (phase + shutter_angle * (2*k+1)/(2*samples)) / (360*R)`, which at 25 fps divides by 9000.
 
 Phase marks the shutter's opening offset relative to the frame timestamp. A 180-degree shutter with phase −90 is centered on that timestamp; phase zero opens there. A zero-degree shutter is an instantaneous sample at the phase offset. Zero angle, zero phase and one sample reproduce the legacy frame-start result.
 

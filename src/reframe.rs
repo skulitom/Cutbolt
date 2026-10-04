@@ -347,7 +347,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     }
     let source_indices = (0..count)
         .map(|n| {
-            scene::select_frame(layer, n)?.ok_or_else(|| {
+            scene::select_frame(layer, n, Time { num: 25, den: 1 })?.ok_or_else(|| {
                 error(
                     "REFRAME_UNAVAILABLE",
                     "A source frame is transparent beyond its selected media",

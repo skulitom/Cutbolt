@@ -32,10 +32,11 @@ pub(crate) struct Plan {
 
 impl Plan {
     pub(crate) fn new(scene: &Scene, frames: u64) -> Result<Self> {
+        let rate = scene.clock()?;
         let Some(spec) = &scene.temporal else {
             return Ok(Self {
                 times: (0..frames)
-                    .map(|n| Time::new(n, 25).map(Some))
+                    .map(|n| Time::new(n * rate.den, rate.num).map(Some))
                     .collect::<Result<_>>()?,
                 samples: 1,
                 report: None,
@@ -73,10 +74,12 @@ impl Plan {
         for frame in 0..frames {
             for k in 0..samples {
                 let position = Number::make((2 * k + 1) as i128, (2 * samples) as u128)?;
+                // Degrees of shutter over 360 x rate degrees per second (9000 at 25 fps).
                 let offset = phase
                     .add(angle.mul(position)?)?
-                    .div(Number::integer(9000))?;
-                let time = Number::make(frame as i128, 25)?.add(offset)?;
+                    .mul(Number::make(rate.den as i128, 360 * rate.num as u128)?)?;
+                let time =
+                    Number::make((frame * rate.den) as i128, rate.num as u128)?.add(offset)?;
                 signed.push(time);
                 times.push(if time.num < 0 || !time.less(duration) {
                     None

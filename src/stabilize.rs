@@ -470,12 +470,13 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
         let mut selected = Vec::new();
         target.frames.clear();
         for n in range[0]..range[1] {
-            let index = scene::select_frame(layer, start + n)?.ok_or_else(|| {
-                error(
-                    "STABILIZATION_UNRELIABLE",
-                    "A tracked source frame is transparent",
-                )
-            })?;
+            let index = scene::select_frame(layer, start + n, Time { num: 25, den: 1 })?
+                .ok_or_else(|| {
+                    error(
+                        "STABILIZATION_UNRELIABLE",
+                        "A tracked source frame is transparent",
+                    )
+                })?;
             selected.push(index);
             let mut frame = layer.frames[index].clone();
             frame.hold = Time::new(1, 25)?;

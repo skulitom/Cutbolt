@@ -38,7 +38,7 @@ pub(crate) const MAX_TILE_CELLS: usize = 4096;
 
 pub(crate) fn limits() -> Value {
     json!({"canvas_per_axis":[1,MAX_CANVAS],"output_scale":[1,8],"maximum_output_pixels":MAX_OUTPUT_PIXELS,
-        "frames":[1,MAX_FRAMES],"frame_rate":{"num":25,"den":1},"layers":[1,MAX_LAYERS],"maximum_frame_references":MAX_REFERENCES,
+        "frames":[1,MAX_FRAMES],"frame_rate":{"num":25,"den":1},"frame_rates":"eight_native_rates_default_25","maximum_seconds":10,"layers":[1,MAX_LAYERS],"maximum_frame_references":MAX_REFERENCES,
         "maximum_decoded_pixels":MAX_DECODED_PIXELS,"png_per_axis":[1,MAX_CANVAS],"png_maximum_bytes":64*1024*1024,
         "png_total_bytes":256*1024*1024,"text_size":[1,MAX_TEXT_SIZE],"glyph_bitmap_per_axis":MAX_GLYPH,
         "integer_layer_scale":[1,16],"tilemap":{"maximum_tiles":MAX_TILES,"maximum_cells":MAX_TILE_CELLS,"tile_size_per_axis":[1,MAX_CANVAS],
@@ -164,7 +164,7 @@ impl Tilemap {
             self.cells.len() as u32,
         )
     }
-    fn validate(&self, layer: &Layer, at: &dyn Fn(&str) -> String) -> Result<()> {
+    fn validate(&self, layer: &Layer, rate: Time, at: &dyn Fn(&str) -> String) -> Result<()> {
         let (columns, rows) = self.grid();
         if self.tiles.is_empty()
             || self.tiles.len() > MAX_TILES
@@ -205,7 +205,7 @@ impl Tilemap {
                     return Err(invalid("Frame holds must be positive and anchors bounded"));
                 }
                 if matches!(tile.timing, Timing::Strict) {
-                    f.hold.units(FPS).at(path)?;
+                    f.hold.units(rate).at(path)?;
                 }
             }
         }
@@ -308,8 +308,11 @@ pub struct Scene {
     pub height: u32,
     /// Integer nearest-neighbor output enlargement, 1..8; the scaled output is at most 8,000,000 pixels.
     pub output_scale: u32,
-    /// Scene length, rational seconds; a whole number of 25 fps frames, 1..250.
+    /// Scene length, rational seconds; a whole number of frames at `frame_rate` and of 48 kHz samples, at most 10 seconds (250 frames at 25 fps).
     pub duration: Time,
+    /// Output frame rate, one of the eight native rates; default 25. Match the timeline's rate so the compiled asset can be placed on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<Time>,
     /// Opaque encoded sRGB `[r, g, b]` backdrop below all layers.
     pub background: [u8; 3],
     /// Color interpretation of sources and compositing.
@@ -393,13 +396,15 @@ impl Scene {
                 "Scene soundtracks require explicit stereo output routing",
             ));
         }
-        let frames = self.duration.units(FPS).at(|| "duration".into())?;
+        let rate = self.clock()?;
+        let frames = self.duration.units(rate).at(|| "duration".into())?;
+        self.duration.units(RATE).at(|| "duration".into())?;
         if self.schema_version != 1
             || !bounded_id(&self.id)
             || !(1..=MAX_CANVAS).contains(&self.width)
             || !(1..=MAX_CANVAS).contains(&self.height)
             || !(1..=8).contains(&self.output_scale)
-            || !(1..=MAX_FRAMES).contains(&frames)
+            || !(1..=max_frames(rate)).contains(&frames)
             || self.width as u64
                 * self.height as u64
                 * self.output_scale as u64
@@ -409,7 +414,7 @@ impl Scene {
             || self.layers.len() > MAX_LAYERS
         {
             return Err(invalid(&format!(
-                "Scene v1 requires 1-250 frames at 25 fps, 1-16 layers, canvas 1-{MAX_CANVAS} per axis, output scale 1-8 and at most 8M output pixels (got {}x{} x{}, {frames} frames, {} layers)",
+                "Scene v1 requires 1 frame to 10 seconds of frames at its frame_rate, 1-16 layers, canvas 1-{MAX_CANVAS} per axis, output scale 1-8 and at most 8M output pixels (got {}x{} x{}, {frames} frames, {} layers)",
                 self.width,
                 self.height,
                 self.output_scale,
@@ -420,8 +425,8 @@ impl Scene {
         let mut references = 0;
         for (li, layer) in self.layers.iter().enumerate() {
             let at = |field: &str| format!("layers[{li}] ({}).{field}", layer.id);
-            let start_units = layer.start.units(FPS).at(|| at("start"))?;
-            let duration_units = layer.duration.units(FPS).at(|| at("duration"))?;
+            let start_units = layer.start.units(rate).at(|| at("start"))?;
+            let duration_units = layer.duration.units(rate).at(|| at("duration"))?;
             references += layer.frames.len()
                 + layer
                     .tilemap
@@ -458,7 +463,7 @@ impl Scene {
                 return Err(invalid("Graphics require straight alpha"));
             }
             if let Some(map) = &layer.tilemap {
-                map.validate(layer, &at)?;
+                map.validate(layer, rate, &at)?;
             }
             let t = &layer.transform;
             let [x, y, w, h] = t.crop;
@@ -482,7 +487,7 @@ impl Scene {
                 }
                 if matches!(layer.timing, Timing::Strict) {
                     f.hold
-                        .units(FPS)
+                        .units(rate)
                         .at(|| at(&format!("frames[{fi}].hold (strict timing)")))?;
                 }
                 total = total.plus(f.hold)?;
@@ -920,8 +925,9 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         parameters.push(sampled);
     }
     sources.extend(font_cache.sources());
-    let mut pcm = vec![0i16; frames as usize * 1920 * 2];
-    let mut audio_report = json!({"silence":true,"output_samples":frames*1920});
+    let samples = scene.duration.units(RATE)?;
+    let mut pcm = vec![0i16; samples as usize * 2];
+    let mut audio_report = json!({"silence":true,"output_samples":samples});
     if let Some(audio) = &scene.audio {
         let (path, bytes) = identity_bytes(&audio.file, root)?;
         // Restrict the layout contract to classic mono/stereo PCM, where channel order
@@ -975,7 +981,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         let count = source.len() as u64 / spec.channels as u64;
         let converted = (count * 48000 + spec.sample_rate as u64 / 2) / spec.sample_rate as u64;
         let start = audio.start.units(RATE)?;
-        if start as u128 + converted as u128 > frames as u128 * 1920 {
+        if start as u128 + converted as u128 > samples as u128 {
             return Err(error(
                 "AUDIO_OVERFLOW",
                 "Narration exceeds the scene; extend the scene explicitly, never truncate or stretch",
@@ -1011,7 +1017,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         audio_report = prepared.report;
         sources.extend(prepared.sources);
     }
-    let mut report = json!({"profile":"pixel-scene-v1","scene_id":scene.id,"frames":frames,"samples":frames*1920,"width":scene.width*scene.output_scale,"height":scene.height*scene.output_scale,"color":"srgb-opaque-composited-in-encoded-srgb","timing":timing,"audio":audio_report,"sources":sources.iter().map(|(path,i)|json!({"path":path,"identity":i})).collect::<Vec<_>>()});
+    let mut report = json!({"profile":"pixel-scene-v1","scene_id":scene.id,"frame_rate":scene.clock()?,"frames":frames,"samples":samples,"width":scene.width*scene.output_scale,"height":scene.height*scene.output_scale,"color":"srgb-opaque-composited-in-encoded-srgb","timing":timing,"audio":audio_report,"sources":sources.iter().map(|(path,i)|json!({"path":path,"identity":i})).collect::<Vec<_>>()});
     report["frame_matte"] = json!({"profile":"binary-source-matte-v1","matted_pairs":matted.len(),"sampling":"same held frame as source; applied before effects and spatial filtering"});
     if let Some(samples) = expression_samples {
         report["expressions"] = json!({"profile":"typed-property-graph-v1","program":scene.expressions,"frame_bindings":samples});
@@ -1153,8 +1159,20 @@ fn sample_parameters(
         .collect()
 }
 
-pub(crate) fn select_frame(layer: &Layer, n: u64) -> Result<Option<usize>> {
-    select_at(layer, Time::new(n, 25)?)
+pub(crate) fn select_frame(layer: &Layer, n: u64, rate: Time) -> Result<Option<usize>> {
+    select_at(layer, Time::new(n * rate.den, rate.num)?)
+}
+
+/// Frames in ten seconds at `rate`: 250 at 25 fps, 600 at 60 fps.
+fn max_frames(rate: Time) -> u64 {
+    10 * rate.num / rate.den
+}
+
+impl Scene {
+    /// The validated output frame rate.
+    pub(crate) fn clock(&self) -> Result<Time> {
+        render::clock::rate(self.frame_rate.unwrap_or(FPS))
+    }
 }
 
 fn select_at(layer: &Layer, time: Time) -> Result<Option<usize>> {
@@ -1616,7 +1634,9 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     let output = render::destination(output, output_root)?;
     let prepared = prepare(scene, root)?;
     let scratch = Scratch::new(output.parent().expect("validated parent"))?;
-    let frames = scene.duration.units(FPS)?;
+    let rate = scene.clock()?;
+    let frames = scene.duration.units(rate)?;
+    let samples = scene.duration.units(RATE)?;
     let mut audio = BufWriter::new(File::create_new(scratch.0.join("audio.pcm"))?);
     for sample in &prepared.pcm {
         audio.write_all(&sample.to_le_bytes())?;
@@ -1635,7 +1655,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     } else {
         format!("scale={out_w}:{out_h}:flags=neighbor,setsar=1")
     };
-    let args = vec![
+    let mut args: Vec<String> = vec![
         "-hide_banner".into(),
         "-v".into(),
         "error".into(),
@@ -1647,7 +1667,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         "-video_size".into(),
         format!("{}x{}", scene.width, scene.height),
         "-framerate".into(),
-        "25".into(),
+        format!("{}/{}", rate.num, rate.den),
         "-i".into(),
         "pipe:0".into(),
         "-f".into(),
@@ -1676,8 +1696,19 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         "-1".into(),
         "-f".into(),
         "matroska".into(),
-        temp.to_string_lossy().into_owned(),
     ];
+    if rate != FPS {
+        // Exact frame timestamps at fractional and high rates, as the renderers use.
+        args.extend([
+            "-r".into(),
+            format!("{}/{}", rate.num, rate.den),
+            "-fps_mode".into(),
+            "cfr".into(),
+            "-enc_time_base:v".into(),
+            format!("{}/{}", rate.den, rate.num),
+        ]);
+    }
+    args.push(temp.to_string_lossy().into_owned());
     let ffmpeg = media::version("ffmpeg")?;
     let ffprobe = media::version("ffprobe")?;
     // Allow composition time in addition to the original fixed encoding allowance.
@@ -1715,13 +1746,8 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         scene.height * scene.output_scale,
     );
     let verified = if scene.transparent {
-        let (verified, alpha) = render::inspect_overlay(
-            &temp,
-            out_w,
-            out_h,
-            Time { num: 25, den: 1 },
-            &media::Uncontrolled,
-        )?;
+        let (verified, alpha) =
+            render::inspect_overlay(&temp, out_w, out_h, rate, &media::Uncontrolled)?;
         if !alpha {
             return Err(error(
                 "RENDER_VALIDATION_FAILED",
@@ -1730,9 +1756,9 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         }
         verified
     } else {
-        render::inspect_reference(&temp, out_w, out_h, &media::Uncontrolled)?
+        render::inspect_reference_at(&temp, out_w, out_h, rate, &media::Uncontrolled)?
     };
-    if verified.frames != frames || verified.samples != frames * 1920 {
+    if verified.frames != frames || verified.samples != samples {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
             "Scene output counts differ",

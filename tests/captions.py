@@ -167,6 +167,16 @@ def run(root):
         decode_check(output/(name+'.mkv'),192,128,ref,10);assert audio_bytes(output/(name+'.mkv'))==b'\0'*(10*1920*4);decoded+=10
         scene_cases.append((name,info,render,ref))
     assert scene_cases[0][1]['cues'][2]['status']=='no_sampled_frame'
+    # A caption window on a 29.97 fps scene samples cues on that clock.
+    rate=F(30000,1001);base30=copy.deepcopy(base);base30.update(frame_rate={'num':30000,'den':1001},duration={'num':10*1001,'den':30000})
+    base30['layers'][0].update(duration=base30['duration']);base30['layers'][0]['frames'][0]['hold']=base30['duration']
+    native=request({**scene_request(name='captions-native'),'scene':base30})
+    reports={r['cue_id']:r for r in native['cues']}
+    for c in render_doc['cues']:
+        selected=[n for n in range(10) if rational(c['start'])<=F(n)/rate<rational(c['end'])]
+        if selected:assert reports[c['id']]['first_frame']==min(selected) and reports[c['id']]['end_frame']==max(selected)+1,(c['id'],reports[c['id']])
+    compiled=request({'command':'scene.render','scene':native['scene'],'input_root':str(sources),'output_root':str(output),'output':str(output/'captions-native.mkv')})
+    assert compiled['frames']==10 and compiled['samples']==16016 and compiled['frame_rate']=={'num':30000,'den':1001}
     assert scene_cases[0][3](0)!=scene_cases[0][3](1) and scene_cases[0][3](2)!=scene_cases[0][3](3)
     passed.append('captions.sampled_multiline_overlap_pixels')
 

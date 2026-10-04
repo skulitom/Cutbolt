@@ -239,7 +239,7 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
     let mut observations = Vec::new();
     let stride = layer.canvas[0] as usize;
     for n in 0..count {
-        let source_frame = scene::select_frame(layer, start + n)?
+        let source_frame = scene::select_frame(layer, start + n, Time { num: 25, den: 1 })?
             .ok_or_else(|| lost(n, "source is transparent beyond its last frame"))?;
         let frame = &layer.frames[source_frame];
         let image = &images[&frame.image.path];

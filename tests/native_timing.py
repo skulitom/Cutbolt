@@ -200,6 +200,27 @@ def run(root,long_form):
         probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0','-count_frames','-show_entries','stream=r_frame_rate,nb_read_frames,codec_name','-of','json',str(delivery)]))['streams'][0]
         assert F(probe['r_frame_rate'])==rate and int(probe['nb_read_frames'])==30 and probe['codec_name']=='h264',probe
     passed.append('native_timing.placed_tracks_and_h264_at_native_rates')
+    # Scenes at native rates: strict one-frame holds alternate two images on the scene clock, and the
+    # compiled asset, opaque or transparent, is placed on a track timeline at the same rate.
+    for n in (0,1):Image.frombytes('RGB',(w,h),rgb(n)).save(sources/f'alternate-{n}.png')
+    def identity(path):return {'path':path.name,'sha256':sha(path),'bytes':path.stat().st_size}
+    for rate,transparent in [(F(30000,1001),False),(F(60),True)]:
+        count=30;label='scene-'+str(rate).replace('/','-')
+        frames_=[{'image':identity(sources/f'alternate-{n}.png'),'hold':t(F(1)/rate),'offset':[0,0],'anchor':[0,0]} for n in (0,1)]
+        scene={'schema_version':1,'id':label,'width':w,'height':h,'output_scale':1,'duration':t(F(count)/rate),'frame_rate':t(rate),'background':[0,0,0],
+               'color':'srgb_straight_encoded','audio':None,'transparent':transparent,
+               'layers':[{'id':'flip','canvas':[w,h],'start':t(F(0)),'duration':t(F(count)/rate),'frames':frames_,'timing':'strict','end':'loop',
+                          'transform':{'position':[0,0],'crop':[0,0,w,h],'scale':1,'quarter_turns':0,'opacity':255}}]}
+        compiled=call('scene.render',scene=scene,input_root=str(sources),output_root=str(sources),output=str(sources/(label+'.mkv')))
+        assert compiled['frames']==count and compiled['frame_rate']==t(rate) and compiled['samples']==F(count)/rate*48000
+        video_frames(sources/(label+'.mkv'),[rgb(n%2) for n in range(count)])
+        placed=create(rate,40,label+'-base');placed=append(placed,rate,[(0,count)])
+        placed=call('timeline.apply',project=placed,expected_revision=placed['revision'],operations=[promote,{'op':'media.add','asset':compiled['asset']},
+            {'op':'tracks.edit','edit':{'op':'add','track':{'id':'title','kind':'video','locked':False,'enabled':True,'clips':[],**({'composite':'alpha_over'} if transparent else {})}}},
+            {'op':'tracks.edit','edit':{'op':'place','track_id':'title','clip':{'id':'t','asset_id':label,'start':t(F(0)),'source_in':t(F(0)),'duration':t(F(count)/rate)},'collision':'reject'}}])
+        path=output/(label+'-placed.mkv');call('render.run',project=placed,input_root=str(sources),output_root=str(output),output=str(path))
+        video_frames(path,[rgb(n%2) for n in range(count)])
+    passed.append('native_timing.scenes_at_native_rates')
     for rate,code in [(F(23),'UNSUPPORTED_TIMELINE'),(F(30),'UNSUPPORTED_MEDIA')]:
         bad=copy.deepcopy(p);bad['clips']=[];bad['frame_rate']=t(rate);bad=append(bad,rate,[(0,10)])
         target=output/('mismatched-'+str(rate)+'.mkv')

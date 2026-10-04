@@ -18,7 +18,6 @@ use std::{
 };
 
 const LIMIT: usize = 2 * 1024 * 1024;
-const FPS: Time = Time { num: 25, den: 1 };
 const DAY: Time = Time { num: 86400, den: 1 };
 /// Subtitle file format: `srt` (plain-text SRT profile) or `webvtt` (bounded WebVTT profile).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -894,22 +893,23 @@ pub struct SceneRequest {
     /// Absolute directory containing the base scene's media and the layout fonts.
     pub input_root: PathBuf,
 }
-fn ceil_frames(t: Time) -> u64 {
-    (t.num as u128 * 25).div_ceil(t.den as u128) as u64
+fn ceil_frames(t: Time, rate: Time) -> u64 {
+    (t.num as u128 * rate.num as u128).div_ceil(t.den as u128 * rate.den as u128) as u64
 }
 pub fn to_scene(request: &SceneRequest) -> Result<Value> {
     let d = &request.document;
     d.validate()?;
     request.offset.validate()?;
-    let frames = request.scene.duration.units(FPS)?;
-    if !(1..=250).contains(&frames)
+    let rate = request.scene.clock()?;
+    let frames = request.scene.duration.units(rate)?;
+    if !(1..=10 * rate.num / rate.den).contains(&frames)
         || request.offset.compare(DAY)? == Ordering::Greater
         || !id_ok(&request.layer_prefix)
         || request.layer_prefix.len() > 32
         || request.layouts.keys().any(|k| !d.styles.contains_key(k))
     {
         return Err(invalid(
-            "Caption scenes require 1-250 frames, a bounded offset/prefix and known layout style IDs",
+            "Caption scenes require 1 frame to 10 seconds at the scene's frame_rate, a bounded offset/prefix and known layout style IDs",
         ));
     }
     let window_end = request.offset.plus(request.scene.duration)?;
@@ -934,7 +934,7 @@ pub fn to_scene(request: &SceneRequest) -> Result<Value> {
         } else {
             cue.end.minus(request.offset)?
         };
-        let (first, last) = (ceil_frames(start), ceil_frames(end));
+        let (first, last) = (ceil_frames(start, rate), ceil_frames(end, rate));
         if first == last {
             cues.push(json!({"cue_id":cue.id,"status":"no_sampled_frame"}));
             continue;
@@ -951,8 +951,8 @@ pub fn to_scene(request: &SceneRequest) -> Result<Value> {
         result.layers.push(scene::Layer {
             id: id.clone(),
             canvas: [result.width, result.height],
-            start: Time::new(first, 25)?,
-            duration: Time::new(last - first, 25)?,
+            start: Time::new(first * rate.den, rate.num)?,
+            duration: Time::new((last - first) * rate.den, rate.num)?,
             frames: Vec::new(),
             tilemap: None,
             graphics: Some(Graphic::Text {
