@@ -2,7 +2,7 @@
 
 `media.conform.inspect` accepts optional `recipe.remap` through CLI/library and the existing read-only MCP tool. `media.conform` compiles the same recipe to a new identity-bound reference asset. Keep the source and recipe outside the repository. Register the returned asset to trim, assemble, preview or queue ordinary saved-session edits. Re-editing the speed map requires a new conversion; session undo does not regenerate media.
 
-The existing [source matrix, color interpretation and publication rules](CONFORM.md) apply. Output remains 25 fps FFV1/RGB8 with 48 kHz stereo PCM16, up to 45,000 frames/30 minutes. Source duration, streaming and random-access window limits are those of [media conversion](CONFORM.md). This feature does not change native timeline frame rates or the separate long-form synchronization acceptance criterion.
+The existing [source matrix, color interpretation and publication rules](CONFORM.md) apply. Output is FFV1/RGB8 with 48 kHz stereo PCM16 at the recipe's `frame_rate` (default 25 fps), up to 45,000 frames/30 minutes. Source duration, streaming and random-access window limits are those of [media conversion](CONFORM.md). This feature does not change native timeline frame rates or the separate long-form synchronization acceptance criterion.
 
 ## Recipe
 
@@ -47,7 +47,7 @@ At each exact output frame time, inspect the adjacent decoded source timestamps 
 
 | `video_sampling` | Behavior |
 | --- | --- |
-| `previous` | Select the latest source timestamp at or before the mapped position. |
+| `previous` | Select the latest source timestamp at or before the mapped position, plus half a source time-base tick (see [frame selection](CONFORM.md)). |
 | `nearest` | Select the nearer adjacent timestamp; an exact midpoint chooses the later frame. |
 | `linear` | Blend adjacent frames using the exact fractional distance between their timestamps. At an exact source timestamp, use that frame alone. |
 

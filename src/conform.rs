@@ -58,10 +58,13 @@ pub struct Source {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdr: Option<color::Input>,
 }
-/// Media conversion recipe for media.conform: samples a source into a new 25 fps FFV1/PCM16 editing asset.
+/// Media conversion recipe for media.conform: samples a source into a new FFV1/PCM16 editing asset at `frame_rate` (default 25 fps).
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
+    /// Output frame rate, one of 24, 25, 30, 50, 60, 24000/1001, 30000/1001 or 60000/1001; default 25. Use the source's own rate to keep every frame, which avoids judder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<Time>,
     /// Recipe format version; must be 1.
     pub schema_version: u32,
     /// Asset ID for the returned asset (1-128 bytes, not blank).
@@ -70,7 +73,7 @@ pub struct Recipe {
     pub source: Source,
     /// Source position in rational seconds at output time zero; on a source audio sample when resampling without remap.
     pub source_in: Time,
-    /// Output duration in rational seconds; whole 25 fps frames, 1 to 45000 frames.
+    /// Output duration in rational seconds; whole frames at `frame_rate` and whole 48 kHz samples, 1 to 45000 frames.
     pub duration: Time,
     /// Constant speed factor from 1/16 to 16; must be 1 with `freeze` or `remap`.
     pub rate: Time,
@@ -452,6 +455,12 @@ struct Mapping {
     times: Vec<Time>,
     remap: Option<remap::Compiled>,
 }
+impl Recipe {
+    /// The validated output frame rate.
+    fn clock(&self) -> Result<Time> {
+        render::clock::rate(self.frame_rate.unwrap_or(FPS))
+    }
+}
 fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
     if recipe.source.sdr.is_some() != recipe.working_transfer.is_some() {
         return Err(error(
@@ -465,7 +474,9 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
             "LUT application requires explicit SDR normalization and working_transfer",
         ));
     }
-    let count = recipe.duration.units(FPS)?;
+    let rate = recipe.clock()?;
+    let count = recipe.duration.units(rate)?;
+    recipe.duration.units(Time::new(48000, 1)?)?;
     if recipe.schema_version != 1
         || recipe.id.trim().is_empty()
         || recipe.id.len() > 128
@@ -531,8 +542,16 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
         times: Vec::new(),
         remap,
     };
+    // Container timestamps are rounded to the source time base (whole milliseconds in Matroska),
+    // so a frame within half a tick after an output time is the frame shown at that time.
+    let half_tick = source.metadata["streams"]
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["codec_type"] == "video"))
+        .and_then(|v| v["time_base"].as_str()?.split_once('/'))
+        .and_then(|(n, d)| Time::new(n.parse().ok()?, 2 * d.parse::<u64>().ok()?).ok())
+        .unwrap_or(Time::ZERO);
     for n in 0..count {
-        let output_time = Time::new(n, 25)?;
+        let output_time = Time::new(n * rate.den, rate.num)?;
         let offset = output_time.times(recipe.rate)?;
         let t = if let Some(remap) = &mapped.remap {
             remap.source_time(output_time)?
@@ -551,9 +570,14 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
         }
         mapped.times.push(t);
         if !source.pts.is_empty() {
-            let first = source.pts.partition_point(|pts| {
-                pts.compare(t).expect("validated rational") != Ordering::Greater
-            }) - 1;
+            let reach = t.plus(half_tick)?;
+            let first = source
+                .pts
+                .partition_point(|pts| {
+                    pts.compare(reach).expect("validated rational") != Ordering::Greater
+                })
+                .max(1)
+                - 1;
             let second = (first + 1).min(source.pts.len() - 1);
             let mut sample = FrameSample {
                 source_time: t,
@@ -566,9 +590,12 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
                 && !matches!(remap.video_sampling, remap::Sampling::Previous)
             {
                 let gap = source.pts[second].minus(source.pts[first])?;
-                let weight = t
-                    .minus(source.pts[first])?
-                    .times(Time::new(gap.den, gap.num)?)?;
+                let weight = if t.compare(source.pts[first])?.is_lt() {
+                    Time::ZERO
+                } else {
+                    t.minus(source.pts[first])?
+                        .times(Time::new(gap.den, gap.num)?)?
+                };
                 match remap.video_sampling {
                     remap::Sampling::Previous => {}
                     remap::Sampling::Nearest => {
@@ -605,7 +632,7 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
 }
 fn report(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Value {
     let selected = mapped.frames.iter().map(|f| f.first).collect::<Vec<_>>();
-    let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"frames":recipe.duration.units(FPS).expect("validated"),"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":"latest_source_timestamp_at_or_before_output_clock","resize":"nearest_top_left","audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
+    let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"frame_rate":recipe.clock().expect("validated"),"frames":recipe.duration.units(recipe.clock().expect("validated")).expect("validated"),"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":"latest_source_timestamp_at_or_before_output_clock_plus_half_source_tick","resize":"nearest_top_left","audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
     if let Some(remap) = &mapped.remap {
         let request = recipe.remap.as_ref().expect("compiled remap");
         report["remap"] = json!({"segments":remap.spans,"source_times":mapped.times,"video_samples":mapped.frames,"video_sampling":request.video_sampling,"audio_pitch":request.audio_pitch,"clock":"exact_integral_of_linear_speed","interpolation_space":"working_rgb_values_after_normalization_and_lut"});
@@ -707,10 +734,11 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
     let source_video = scratch.0.join("source.rgb");
     let source_audio = scratch.0.join("source.pcm");
-    let count = recipe.duration.units(FPS)?;
+    let rate = recipe.clock()?;
+    let count = recipe.duration.units(rate)?;
     let media_seconds = seconds(source.video_end)
         .max(source.samples as f64 / source.audio_rate.max(1) as f64)
-        + count as f64 / 25.0;
+        + count as f64 * rate.den as f64 / rate.num as f64;
     let timeout = tool_timeout(media_seconds);
     let mut decode_video_micros = 0;
 
@@ -906,7 +934,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         "-video_size".into(),
         format!("{}x{}", recipe.width, recipe.height),
         "-framerate".into(),
-        "25".into(),
+        format!("{}/{}", rate.num, rate.den),
         "-i".into(),
         "pipe:0".into(),
         "-f".into(),
@@ -936,6 +964,17 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         "-f".into(),
         "matroska".into(),
     ];
+    if rate != FPS {
+        // The rendering clock options: exact frame timestamps at fractional and high rates.
+        args.extend([
+            "-r".into(),
+            format!("{}/{}", rate.num, rate.den),
+            "-fps_mode".into(),
+            "cfr".into(),
+            "-enc_time_base:v".into(),
+            format!("{}/{}", rate.den, rate.num),
+        ]);
+    }
     if let Some(transfer) = recipe.working_transfer {
         args.extend(
             [
@@ -1047,10 +1086,15 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         reader.finish()?;
     }
     let video_hash = format!("{:x}", video_hash.finalize());
-    let verified =
-        render::inspect_reference(&temp, recipe.width, recipe.height, &media::Uncontrolled)?;
+    let verified = render::inspect_reference_at(
+        &temp,
+        recipe.width,
+        recipe.height,
+        rate,
+        &media::Uncontrolled,
+    )?;
     if verified.frames != count
-        || verified.samples != verified.frames * 1920
+        || verified.samples != recipe.duration.units(Time::new(48000, 1)?)?
         || decoded_hash(&temp, true, timeout)? != video_hash
         || decoded_hash(&temp, false, timeout)? != media::file_hash(&raw_audio)?
     {
@@ -1098,7 +1142,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
+    let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
     value
 }

@@ -490,6 +490,7 @@ fn recipe(
 ) -> Result<conform::Recipe> {
     Ok(conform::Recipe {
         decode: None,
+        frame_rate: None,
         schema_version: 1,
         id: format!("{}-{suffix}", request.id),
         source: conform::Source {

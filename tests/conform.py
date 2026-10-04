@@ -71,7 +71,7 @@ def run(root):
         if name in decoded:return decoded[name]
         path=sources/name
         v=probe(path,"v:0");a=probe(path,"a:0")
-        rgb=b"";pts=[];pcm=[];rate=0;channels=0
+        rgb=b"";pts=[];pcm=[];rate=0;channels=0;tb=Fraction(0)
         if v["streams"]:
             tb=Fraction(v["streams"][0]["time_base"])
             pts=[Fraction(f["best_effort_timestamp"])*tb for f in v["frames"]]
@@ -83,22 +83,24 @@ def run(root):
             meta=json.loads(subprocess.run(["ffprobe","-v","error","-show_streams","-select_streams","a:0","-of","json",str(path)],capture_output=True,check=True).stdout)["streams"][0]
             rate=int(meta["sample_rate"]);channels=meta["channels"]
             pcm=list(struct.iter_unpack("<"+"h"*channels,ff(["-i",str(path),"-map","0:a:0","-c:a","pcm_s16le","-f","s16le","-"])))
-        decoded[name]=(rgb,pts,pcm,rate,channels)
+        decoded[name]=(rgb,pts,pcm,rate,channels,tb)
         return decoded[name]
     def recipe(name,label,**changes):
         result={"schema_version":1,"id":label,"source":{"file":identity(sources/name,sources),"color":None if name.endswith(".wav") else "bt709_limited" if name.endswith((".mov",".mp4")) else "encoded_rgb"},"source_in":time(0),"duration":time(1),"rate":time(1),"reverse":False,"freeze":False,"width":W,"height":H,"audio":"resample"}
         result.update(changes);return result
     def render(value,label,error=None):return request({"command":"media.conform","recipe":value,"input_root":str(sources),"output_root":str(output),"output":str(output/(label+".mkv"))},error)
     def expected(name,value):
-        rgb,pts,pcm,source_rate,channels=reference(name)
+        rgb,pts,pcm,source_rate,channels,tb=reference(name)
         fraction=lambda v:Fraction(v["num"],v["den"])
         start=fraction(value["source_in"]);rate=fraction(value["rate"]);duration=fraction(value["duration"])
-        frames=int(duration*25);width,height=value["width"],value["height"]
+        clock=fraction(value.get("frame_rate",time(25)))
+        frames=int(duration*clock);width,height=value["width"],value["height"]
         selected=[];pixels=bytearray()
         for n in range(frames):
-            t=start if value["freeze"] else start+Fraction(n,25)*rate*(-1 if value["reverse"] else 1)
+            t=start if value["freeze"] else start+Fraction(n,1)/clock*rate*(-1 if value["reverse"] else 1)
             if pts:
-                i=bisect_right(pts,t)-1;selected.append(i)
+                # A frame within half a source tick after t is the frame at t (rounded container times).
+                i=max(bisect_right(pts,t+tb/2)-1,0);selected.append(i)
                 frame=rgb[i*W*H*3:(i+1)*W*H*3]
                 for y in range(height):
                     for x in range(width):
@@ -123,7 +125,11 @@ def run(root):
               ("rgb25.mkv","freeze",{"source_in":time(27,25),"freeze":True,"audio":"mute"}),
               ("rgb25.mkv","rate-min",{"rate":time(1,16),"duration":time(8,25)}),
               ("rgb25.mkv","rate-max",{"rate":time(16),"duration":time(1,25)}),
-              ("rgb25.mkv","resize",{"width":31,"height":17,"duration":time(2,25)})]
+              ("rgb25.mkv","resize",{"width":31,"height":17,"duration":time(2,25)}),
+              # Native output rates keep every source frame: 30000/1001 H.264, 30 fps MOV and 24 fps FFV1.
+              ("fractional.mp4","native-fractional",{"frame_rate":time(30000,1001),"duration":time(1001,1000)}),
+              ("mono.mov","native-30",{"frame_rate":time(30),"duration":time(1)}),
+              ("rgb24.mkv","native-24",{"frame_rate":time(24),"duration":time(1)})]
     for name,label,changes in cases:
         value=recipe(name,label,**changes)
         plan=request({"command":"media.conform.inspect","recipe":value,"input_root":str(sources)})
@@ -134,6 +140,10 @@ def run(root):
         assert actual_rgb==rgb,label
         assert actual_pcm==pcm,label
         assert receipt["source_frame_indices"]==plan["source_frame_indices"]==indices
+        if "frame_rate" in changes:
+            assert indices==list(range(len(indices))),(label,indices)
+            stream=json.loads(subprocess.run(["ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=r_frame_rate","-of","json",str(output/(label+".mkv"))],capture_output=True,check=True).stdout)["streams"][0]
+            assert Fraction(stream["r_frame_rate"])==Fraction(changes["frame_rate"]["num"],changes["frame_rate"]["den"]),stream
         assert receipt["asset"]["identity"]["sha256"]==hashlib.sha256((output/(label+".mkv")).read_bytes()).hexdigest()
         expected_outputs[label]=(rgb,pcm);receipts[label]=receipt
         comparisons.append({"case":label,"source":name,"frames":receipt["frames"],"sample_frames":receipt["samples"]})

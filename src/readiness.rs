@@ -110,7 +110,7 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
         }
     }
     let mut result = json!({"ready":false,"reasons":reasons});
-    match video.map(|v| conform(relative, v, audio)) {
+    match video.map(|v| conform(relative, v, audio, rate)) {
         Some(Ok(recipe)) => {
             result["conform"] = json!({"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),
                 "next":"check the recipe with media.conform.inspect, run it with job.start run media.conform, then media.add the returned asset"})
@@ -155,16 +155,31 @@ fn asset_id(relative: &str) -> String {
     id
 }
 
-/// Exact stream length from `duration_ts` and `time_base`, as whole 25 fps frames.
-fn frames_at_25(stream: &Value) -> Option<u64> {
+/// Exact stream length from `duration_ts` and `time_base`, in whole frames at `rate`.
+fn frames_at(stream: &Value, rate: Time) -> Option<u64> {
     let ticks = stream["duration_ts"].as_u64()?;
     let (num, den) = stream["time_base"].as_str()?.split_once('/')?;
     let (num, den): (u128, u128) = (num.parse().ok()?, den.parse().ok()?);
-    (den > 0).then(|| (ticks as u128 * num * 25 / den) as u64)
+    (den > 0)
+        .then(|| (ticks as u128 * num * u128::from(rate.num) / (den * u128::from(rate.den))) as u64)
+}
+
+/// Frames per step that make a whole number of 48 kHz samples at `rate` (5 at 30000/1001).
+fn sample_step(rate: Time) -> u64 {
+    let (mut a, mut b) = (rate.num, 48_000 * rate.den);
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    rate.num / a
 }
 
 /// A media.conform recipe for the whole source at 25 fps, from its tags, or why there is none.
-fn conform(relative: &str, video: &Value, audio: Option<&Value>) -> Result<Value, &'static str> {
+fn conform(
+    relative: &str,
+    video: &Value,
+    audio: Option<&Value>,
+    rate: Option<Time>,
+) -> Result<Value, &'static str> {
     let tag = |key: &str| {
         video[key]
             .as_str()
@@ -182,16 +197,20 @@ fn conform(relative: &str, video: &Value, audio: Option<&Value>) -> Result<Value
             "the source is tagged with non-BT.709 color, which media.conform does not convert",
         );
     }
+    // Keep the source's own rate when it is a timeline rate, so every frame survives.
+    let rate = rate.unwrap_or(Time { num: 25, den: 1 });
+    let step = sample_step(rate);
     let frames = [Some(video), audio]
         .into_iter()
         .flatten()
-        .map(frames_at_25)
+        .map(|s| frames_at(s, rate))
         .collect::<Option<Vec<_>>>()
         .and_then(|f| f.into_iter().min())
         .ok_or("the stream durations are not exact, so no conform duration can be proposed")?
         .min(CONFORM_FRAMES);
+    let frames = frames / step * step;
     if frames == 0 {
-        return Err("the source is shorter than one 25 fps frame");
+        return Err("the source is shorter than one frame at the proposed rate");
     }
     let (mut width, mut height) = (dimension(&video["width"]), dimension(&video["height"]));
     if width > 4096 || height > 2160 || u64::from(width) * u64::from(height) > 8_294_400 {
@@ -201,8 +220,11 @@ fn conform(relative: &str, video: &Value, audio: Option<&Value>) -> Result<Value
         height = ((f64::from(height) * scale / 2.0).floor() as u32 * 2).max(2);
     }
     let mut recipe = json!({"schema_version":1,"id":asset_id(relative),"source":{"file":{"path":relative}},
-        "source_in":0,"duration":Time{num:frames,den:25},"rate":1,"reverse":false,"freeze":false,
+        "source_in":0,"duration":Time::new(frames * rate.den, rate.num).map_err(|_| "the proposed duration overflows")?,"rate":1,"reverse":false,"freeze":false,
         "width":width,"height":height,"audio":if audio.is_some() {"resample"} else {"mute"}});
+    if rate != (Time { num: 25, den: 1 }) {
+        recipe["frame_rate"] = json!(rate);
+    }
     if video["codec_name"] == "ffv1" && pix_fmt == "bgr0" {
         recipe["source"]["color"] = json!("encoded_rgb");
     } else {
@@ -240,7 +262,9 @@ mod tests {
         assert_eq!(result["reasons"].as_array().unwrap().len(), 2, "{result}");
         let recipe = &result["conform"]["recipe"];
         assert_eq!(recipe["id"], "phone");
-        assert_eq!(recipe["duration"], json!({"num":200,"den":25}));
+        // The 30 fps source keeps its own rate, so all 240 frames survive.
+        assert_eq!(recipe["duration"], json!({"num":8,"den":1}));
+        assert_eq!(recipe["frame_rate"], json!({"num":30,"den":1}));
         assert_eq!(recipe["source"]["sdr"]["range"], "limited");
         assert_eq!(recipe["source"]["sdr"]["missing_tags"], "reject");
         assert_eq!(result["conform"]["output"], "phone-conformed.mkv");

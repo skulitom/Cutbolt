@@ -121,6 +121,7 @@ pub fn generate(request: &Generate) -> Result<Value> {
         .map_err(|_| error("INVALID_PATH", "Source must be inside input root"))?;
     let recipe = conform::Recipe {
         decode: None,
+        frame_rate: None,
         schema_version: 1,
         id: asset.id.clone(),
         source: conform::Source {

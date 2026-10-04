@@ -111,7 +111,8 @@ def run(root):
         if name.endswith('.mp4'):
             pixels = ff(['-i', str(path), '-map', '0:v:0', '-fps_mode', 'passthrough', '-vf', 'scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=accurate_rnd', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
         pcm = list(struct.iter_unpack('<'+'h'*a['channels'], decode(path, True))) if a else []
-        refs[name] = pixels, pts, pcm, int(a['sample_rate']) if a else 0, a['channels'] if a else 0
+        half = F(vs['time_base'])/2 if vs else F(0)
+        refs[name] = pixels, pts, pcm, int(a['sample_rate']) if a else 0, a['channels'] if a else 0, half
         return refs[name]
 
     def recipe(name, spans, mode='linear', mute=False, start=F(1, 10), **fields):
@@ -126,7 +127,7 @@ def run(root):
         return {'command': 'media.conform', 'recipe': value, 'input_root': str(sources), 'output_root': str(out), 'output': str(out/(label+'.mkv'))}
 
     def expected(value):
-        rgb, pts, pcm, rate, channels = reference(value['source']['file']['path'])
+        rgb, pts, pcm, rate, channels, half = reference(value['source']['file']['path'])
         if 'working_transfer' in value:
             mapping = [convert_pixel(v, v, v, 'rgb', 'full', 'srgb', value['working_transfer'])[0] for v in range(256)]
             if 'lut' in value:
@@ -138,8 +139,9 @@ def run(root):
             t = position(value, F(n, 25)); times.append(clock(t))
             if not pts:
                 pixels.extend(bytes(width*height*3)); continue
-            low = bisect_right(pts, t)-1; high = min(low+1, len(pts)-1)
-            weight = (t-pts[low])/(pts[high]-pts[low]) if high != low else F(0)
+            # A frame within half a source tick after t is the frame at t (rounded container times).
+            low = max(bisect_right(pts, t+half)-1, 0); high = min(low+1, len(pts)-1)
+            weight = (t-pts[low])/(pts[high]-pts[low]) if high != low and t >= pts[low] else F(0)
             if mode == 'previous': high = low; weight = F(0)
             elif mode == 'nearest':
                 low = high if weight >= F(1, 2) else low

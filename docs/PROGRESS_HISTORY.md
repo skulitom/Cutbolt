@@ -1,5 +1,13 @@
 # Progress history
 
+## 4 October 2026: media conversion at the source's own frame rate
+
+`media.conform` produced 25 fps assets only, so 30 and 60 fps footage lost or repeated frames even on a native-rate timeline. Recipes now take an optional `frame_rate`, one of the eight native rates, defaulting to 25 so existing recipes keep their fingerprints. `media.inspect` proposes the source's own rate when it is a timeline rate.
+
+Frame selection now reads container timestamps at their own precision. Matroska rounds to whole milliseconds, so frame 1 of a 24 fps source is stored as 42 ms against an exact 41.67 ms. Strict "at or before" therefore repeated a frame and dropped the next. A frame within half a source tick after the output time now counts as at or before it. At 25 fps output times are whole milliseconds, so no 25 fps selection from a millisecond-based source changes.
+
+The conform fixture now converts a 30000/1001 H.264 source, a 30 fps MOV and a 24 fps FFV1 source at their own rates. Every source frame is kept exactly once, and the output declares the native rate. The conform and remapping oracles apply the same selection rule, and all existing cases still match exactly. No scoring changed.
+
 ## 4 October 2026: placed tracks and H.264 at native frame rates
 
 Placed tracks rendered at 25 fps only, and H.264 delivery required a 25 fps timeline. A 30 or 60 fps YouTube edit therefore had to be resampled, which made it judder. Track timelines, their previews, overlays, transitions and chunked renders now run on any of the eight native clocks. 25 fps renders keep their exact previous arguments.
