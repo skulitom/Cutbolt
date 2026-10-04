@@ -1,5 +1,5 @@
 """Authored glyph plans, rational outline coverage and full scene/saved-edit acceptance."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import budgets
 import argparse,copy,hashlib,json,math,subprocess,time as clock
 from fractions import Fraction as F
@@ -183,7 +183,7 @@ def run(root):
 
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         for tool_name,args in [('cutbolt_scene_inspect',{'scene':moving,'input_root':str(sources)}),('cutbolt_captions_scene',{k:v for k,v in request.items() if k!='command'})]:
             tool=next(t for t in catalog if t['name']==tool_name);assert tool['annotations']['readOnlyHint'];Draft202012Validator(tool['inputSchema']).validate(args)
         assert client.call('scene.inspect',scene=moving,input_root=str(sources))==moving_info

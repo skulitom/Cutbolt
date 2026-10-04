@@ -1,5 +1,5 @@
 """Native boundary editing with independent source/transition and byte-splice references."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -164,7 +164,7 @@ def run(root):
     passed.append('track_edits.cross_track_locks_collisions_atomicity')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65;schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS;schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
         client.call('session.create',store_root=str(store),project=base,request_id='create');common={'store_root':str(store),'project_id':base['id']};fields={**common,'expected_revision':0,'request_id':'split','operations':split_ops};Draft202012Validator(schema).validate(fields)
         preview=client.call('session.preview',**{k:v for k,v in fields.items() if k!='request_id'});assert {x['clip_id'] for x in preview['clips']}=={'v0','a0','v0-r','a0-r','v1','a1','v1-r','a1-r'};assert preview['track_layout']['after']['tracks'][0]['transitions'][0]['left_id']=='v0-r'
         saved=client.call('session.get',**common);receipt=client.call('session.apply',**fields);assert client.call('session.apply',**fields)==receipt

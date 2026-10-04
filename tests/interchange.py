@@ -1,5 +1,5 @@
 """Original OTIO fixtures, independent library checks and decoded editorial oracles."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -368,7 +368,7 @@ def run(root, reference_python):
     try:
         client.initialize()
         catalog = client.rpc('tools/list')['result']['tools']
-        assert len(catalog) == 65
+        assert len(catalog) == MCP_TOOLS
         for command, fields, read_only in [('interchange.import',import_fields(authored),True),
             ('interchange.export.inspect',{'project':project,'input_root':str(sources)},True),
             ('interchange.export',{**export_fields,'output':str(output/'mcp.otio')},False)]:

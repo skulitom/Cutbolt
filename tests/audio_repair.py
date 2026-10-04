@@ -1,5 +1,5 @@
 """Original clean/noisy signals and independent whole-buffer spectral references."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import budgets
 import base64
@@ -312,7 +312,7 @@ def run(root):
     assert decode_media(dest, True) == scene_sound.tobytes(); assert decode_media(dest) == bytes((34, 80, 210))*4*4*5
     client = Client(exe)
     try:
-        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == 65
+        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == MCP_TOOLS
         tool = next(t for t in catalog if t['name'] == 'cutbolt_audio_repair_inspect')
         assert not any(t['name'] == 'cutbolt_audio_repair_render' for t in catalog)
         args = {'recipe': scene_recipe, 'input_root': str(sources)}

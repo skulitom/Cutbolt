@@ -1,5 +1,5 @@
 """Original named-channel signals, independent graph algebra and rendered PCM checks."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import budgets
 import copy
@@ -303,7 +303,7 @@ def run(root):
     assert decode_media(dest, True) == pack(panned[1]); assert decode_media(dest) == bytes((25, 90, 170))*4*4*5; video_frames += 5
     client = Client(exe)
     try:
-        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == 65
+        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == MCP_TOOLS
         tool = next(t for t in catalog if t['name'] == 'cutbolt_audio_inspect'); args = {'mix': pan, 'input_root': str(sources)}
         Draft202012Validator(tool['inputSchema']).validate(args); assert tool['annotations']['readOnlyHint']
         assert client.call('audio.inspect', **args)['pcm_sha256'] == panned[0]['pcm_sha256']

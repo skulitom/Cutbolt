@@ -1,5 +1,5 @@
 """Original known-motion images and an independent geometric/alpha output oracle."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import copy
 from fractions import Fraction as F
@@ -238,7 +238,7 @@ def run(root):
     original={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         tool=next(t for t in catalog if t['name']=='cutbolt_tracking_inspect');fields={k:v for k,v in req.items() if k!='command'}
         assert tool['annotations']['readOnlyHint'] is True
         Draft202012Validator(tool['inputSchema']).validate(fields)

@@ -1,5 +1,5 @@
 """Original isolated native capture, exact placement and bounded streaming acceptance."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import budgets
 import argparse,copy,hashlib,json,os,struct,subprocess,time as clock,wave
 from pathlib import Path
@@ -114,7 +114,7 @@ def run(root,native_seconds):
     saved=call(req);assert call(req)==saved
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         for name in ('audio_inputs','audio_record_inspect','audio_record_place'):
             tool=next(t for t in catalog if t['name']=='cutbolt_'+name);assert tool['annotations']['readOnlyHint']
         assert not any(t['name']=='cutbolt_audio_record' for t in catalog)

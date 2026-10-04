@@ -1,5 +1,5 @@
 """Declared multicam sync: independent camera/time signals and retained decision history."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -118,7 +118,7 @@ def run(root):
     passed.append('multicam.dependencies_locks_projection_limits')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65;schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS;schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
         client.call('session.create',store_root=str(store),project=base,request_id='create');common={'store_root':str(store),'project_id':base['id']};fields={**common,'expected_revision':0,'request_id':'switch','operations':[change('cut_set',cut=cut('early',8,'side'))]};Draft202012Validator(schema).validate(fields)
         preview=client.call('session.preview',**{k:v for k,v in fields.items() if k!='request_id'});delta=preview['sequences'][0];assert delta['id']=='program' and delta['before']['multicam']['angles']==delta['after']['multicam']['angles'] and set(delta['root_instances'])=={'program-video','program-audio'}
         receipt=client.call('session.apply',**fields);assert client.call('session.apply',**fields)==receipt;saved=client.call('session.get',**common);history=client.call('session.history',**common)

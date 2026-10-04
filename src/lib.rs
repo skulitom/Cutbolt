@@ -51,6 +51,7 @@ pub mod store;
 pub mod sync;
 pub mod templates;
 pub mod temporal;
+pub(crate) mod thumbnail;
 pub mod time;
 pub mod track_edit;
 mod track_render;

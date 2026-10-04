@@ -1,5 +1,5 @@
 """Independent decoded export clocks, numbered images, large sizes and publication faults."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import copy
 from concurrent.futures import ThreadPoolExecutor
@@ -152,7 +152,7 @@ def run(root):
     call('export.run',error='OUTPUT_EXISTS',**{**req,'output':str(occupied)});assert sha(occupied)==before
     client=Client(exe)
     try:
-        client.initialize();tools=client.rpc('tools/list')['result']['tools'];assert len(tools)==65
+        client.initialize();tools=client.rpc('tools/list')['result']['tools'];assert len(tools)==MCP_TOOLS
         v=client.call('export.inspect',**{**req,'output':str(output/'mcp.frames')});assert v['profile']=='png_sequence' and v['timeline_frames']==30
     finally:client.close()
     assert originals=={name:sha(name) for name in originals}

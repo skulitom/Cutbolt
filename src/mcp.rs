@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 const MAX_LINE: usize = 4 * 1024 * 1024;
 const VERSION: &str = "2025-11-25";
+/// Longest edge of inline preview images: legible text at a modest image-token cost.
+const PREVIEW_EDGE: u32 = 768;
 
 pub(crate) fn description(command: &str) -> &'static str {
     match command {
@@ -143,7 +145,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Evict least-recently-used derived cache entries to explicit byte/count budgets; source media and exported files are not removed."
         }
         "preview.frame" => {
-            "Export one exact frame from a reference project timeline to an unused PNG. Requires absolute input/output roots and rational time on the project's supported native frame boundary. No source or existing output is overwritten."
+            "Export one exact frame from a reference project timeline to an unused PNG and return it as an inline image. Requires absolute input/output roots and rational time on the project's supported native frame boundary. No source or existing output is overwritten."
         }
         "capabilities" => {
             "Discover implemented editing operations, render profile, job limits and unsupported features. Local only."
@@ -209,7 +211,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Produce or reuse one content-checked cached probe, proxy, frame, interval or contact sheet under an explicit cache root and byte/entry policy. Blocking CLI/library command."
         }
         "preview.sheet" => {
-            "Write an uncached contact sheet of exact timeline frames to an unused PNG. Blocking CLI/library command."
+            "Write a contact sheet of exact timeline frames, laid out on a grid, to an unused PNG, and return it as an inline image so the edit can be seen. Uses the saved proxy selection."
         }
         "transcript.transcribe" => {
             "Run optional local speech recognition through the explicitly configured external runtime and return a content-bound transcript document. Blocking CLI/library command."
@@ -250,10 +252,9 @@ pub(crate) fn description(command: &str) -> &'static str {
 pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
 /// Long renders belong in persisted jobs so the MCP connection stays usable.
-const BLOCKING: [&str; 14] = [
+const BLOCKING: [&str; 13] = [
     "image.sequence.compile",
     "cache.run",
-    "preview.sheet",
     "transcript.transcribe",
     "audio.record",
     "audio.repair.render",
@@ -285,8 +286,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
             None => description(command).to_owned(),
         };
         json!({"name":format!("cutbolt_{}",command.replace('.',"_")),"description":text,"inputSchema":input,
-            "outputSchema":{"type":"object","properties":{"ok":{"type":"boolean"},"result":{},"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]}},"required":["ok"],"additionalProperties":false},
-            "annotations":{"readOnlyHint":read_only,"destructiveHint":matches!(command,"job.cancel"|"cache.prune"),"idempotentHint":!matches!(command,"preview.frame"|"captions.export"|"interchange.export"|"session.backup"|"session.recover"),"openWorldHint":false}})
+            "annotations":{"readOnlyHint":read_only,"destructiveHint":matches!(command,"job.cancel"|"cache.prune"),"idempotentHint":!matches!(command,"preview.frame"|"preview.sheet"|"captions.export"|"interchange.export"|"session.backup"|"session.recover"),"openWorldHint":false}})
     }).collect()
 }
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
@@ -307,6 +307,20 @@ impl Server {
     fn catalog(&mut self) -> &[Value] {
         let workspace = self.workspace.as_ref();
         self.catalog.get_or_insert_with(|| tools(workspace))
+    }
+    /// Frame and contact-sheet previews also come back as a downscaled inline image, so a
+    /// multimodal client sees the edit without opening the file.
+    fn preview_image(&self, command: &str, result: &Value) -> Option<Value> {
+        if !matches!(command, "preview.frame" | "preview.sheet") {
+            return None;
+        }
+        let output = std::path::Path::new(result["output"].as_str()?);
+        let path = match &self.workspace {
+            Some(workspace) if output.is_relative() => workspace.root().join(output),
+            _ => output.to_path_buf(),
+        };
+        let png = crate::thumbnail::png(&path, PREVIEW_EDGE).ok()?;
+        Some(json!({"type":"image","data":crate::thumbnail::base64(&png),"mimeType":"image/png"}))
     }
     fn instructions(&self) -> String {
         let mut text = "Cutbolt runs locally. Use session commands for saved editing, durable request IDs for retries, and render.start/job.status/job.cancel for background work. Unsupported editing semantics fail explicitly. No HTTP service is used. Tool listings abbreviate the large shared project, operation, scene, template and audio_routing schemas; cutbolt_schema returns any of them, or any command's arguments, in full. Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision instead of a full snapshot.".to_owned();
@@ -401,6 +415,7 @@ impl Server {
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
+                let command = name.strip_prefix("cutbolt_").unwrap().replace('_', ".");
                 let outcome = (|| {
                     let object = arguments.as_object_mut().ok_or_else(|| {
                         crate::error("INVALID_JSON", "Tool arguments must be an object")
@@ -411,17 +426,20 @@ impl Server {
                             "Do not send command inside tool arguments",
                         ));
                     }
-                    let command = name.strip_prefix("cutbolt_").unwrap().replace('_', ".");
-                    object.insert("command".into(), Value::String(command));
+                    object.insert("command".into(), Value::String(command.clone()));
                     commands::handle_json(arguments, self.workspace.as_ref())
                 })();
                 let value = match outcome {
                     Ok(result) => json!({"ok":true,"result":result}),
                     Err(error) => json!({"ok":false,"error":error}),
                 };
+                let mut content = vec![json!({"type":"text","text":value.to_string()})];
+                if value["ok"] == true {
+                    content.extend(self.preview_image(&command, &value["result"]));
+                }
                 Some(response(
                     id,
-                    json!({"isError":value["ok"]!=true,"structuredContent":value,"content":[{"type":"text","text":value.to_string()}]}),
+                    json!({"isError":value["ok"]!=true,"structuredContent":value,"content":content}),
                 ))
             }
             _ => Some(rpc_error(id, -32601, "Method not found")),

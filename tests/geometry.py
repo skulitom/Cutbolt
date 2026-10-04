@@ -4,7 +4,7 @@ The production renderer intersects camera rays in inverse plane coordinates.
 This reference transforms plane corners forward, clips polygons in camera space,
 triangulates the projected polygons and interpolates depth/texture coordinates.
 """
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import budgets
 import copy
@@ -331,7 +331,7 @@ def run(root):
 
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         tool=next(t for t in catalog if t['name']=='cutbolt_scene_inspect')
         Draft202012Validator(tool['inputSchema']).validate({'scene':scene,'input_root':str(sources)})
         inspected=client.call('scene.inspect',scene=scene,input_root=str(sources));assert inspected['geometry']==receipt['geometry']

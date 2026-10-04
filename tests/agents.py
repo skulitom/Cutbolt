@@ -1,5 +1,5 @@
 """Wire-level MCP and persisted job acceptance against original generated media."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import asyncio
 from datetime import timedelta
@@ -141,7 +141,7 @@ async def sdk_roundtrip(executable):
             initialized = await session.initialize()
             assert initialized.protocolVersion == "2025-06-18"
             listing = await session.list_tools()
-            assert len(listing.tools) == 65
+            assert len(listing.tools) == MCP_TOOLS
             created = await session.call_tool("cutbolt_project_create", {"id": "sdk", "width": 320, "height": 180, "frame_rate": {"num": 25, "den": 1}})
             assert not created.isError and created.structuredContent["result"]["id"] == "sdk"
             invalid = await session.call_tool("cutbolt_project_validate", {"project": {}})
@@ -178,9 +178,10 @@ def run(executable, fixture):
         catalog = normal.rpc("tools/list")["result"]["tools"]
         for tool in catalog:
             Draft202012Validator.check_schema(tool["inputSchema"])
-            Draft202012Validator.check_schema(tool["outputSchema"])
+            # Results are the {ok, result | error} envelope in structuredContent; no per-tool output schema is listed.
+            assert "outputSchema" not in tool
         names = [tool["name"] for tool in catalog]
-        check("mcp.discoverable_schemas", len(names) == len(set(names)) == 65
+        check("mcp.discoverable_schemas", len(names) == len(set(names)) == MCP_TOOLS
               and {"cutbolt_registry_search","cutbolt_registry_status","cutbolt_registry_bind","cutbolt_registry_relink"}.issubset(names)
               and "cutbolt_schema" in names and "cutbolt_render_start" in names and "cutbolt_render_run" not in names
               and "cutbolt_audio_inspect" in names and "cutbolt_audio_render" not in names

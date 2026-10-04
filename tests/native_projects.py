@@ -3,7 +3,7 @@
 Native files and application-specific adapters remain in a reviewed external
 fixture. This replays captured public-interface evidence, not a fresh app launch.
 """
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import copy
 import hashlib
@@ -159,7 +159,7 @@ def run(root, fixture):
     passed.append('native_projects.exact_build_adapter_source_and_boundary_guards')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         tool=next(t for t in catalog if t['name']=='cutbolt_native_import')
         Draft202012Validator(tool['inputSchema']).validate(request)
         assert tool['annotations']['readOnlyHint'] and tool['annotations']['idempotentHint']

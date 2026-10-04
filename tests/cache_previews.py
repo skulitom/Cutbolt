@@ -1,5 +1,5 @@
 """Original content-cache fixtures and independent contact-sheet/interval pixels."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import budgets
 from array import array
@@ -414,9 +414,9 @@ def run(root):
         client.initialize()
         catalog = client.rpc('tools/list')['result']['tools']
         names = {t['name'] for t in catalog}
-        assert len(catalog) == len(names) == 65
+        assert len(catalog) == len(names) == MCP_TOOLS
         assert {'cutbolt_cache_inspect', 'cutbolt_cache_prune'} <= names
-        assert 'cutbolt_cache_run' not in names and 'cutbolt_preview_sheet' not in names
+        assert 'cutbolt_cache_run' not in names and 'cutbolt_preview_sheet' in names
         for name, fields in (('cache.inspect', {'cache_root': str(budget)}), ('cache.prune', {'cache_root': str(budget), 'policy': {'max_bytes': 0, 'max_entries': 0}})):
             schema = next(t['inputSchema'] for t in catalog if t['name'] == 'cutbolt_'+name.replace('.', '_'))
             Draft202012Validator(schema).validate(fields)

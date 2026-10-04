@@ -1,5 +1,5 @@
 """Original placed-track fixtures with independent frame and integer PCM references."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -118,7 +118,7 @@ def run(root):
 
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
         created=client.call('session.create',store_root=str(store),project=base,request_id='create');assert created['changes']['track_layout']['after']['tracks']
         common={'store_root':str(store),'project_id':base['id']};saved=client.call('session.get',**common);assert saved['tracks']==base['tracks']

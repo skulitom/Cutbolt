@@ -1,5 +1,5 @@
 """Original known-clock signals: measured alignment, explicit correction, and camera use."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -139,7 +139,7 @@ def run(root):
     assert decode(path)==expected;frames+=100;samples+=4*R
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         tool=next(t for t in catalog if t['name']=='cutbolt_sync_inspect');assert tool['annotations']['readOnlyHint'] and tool['annotations']['idempotentHint']
         fields={k:v for k,v in base.items() if k!='command'};Draft202012Validator(tool['inputSchema']).validate(fields)
         client.call('session.create',store_root=str(store),project=program,request_id='create');common={'store_root':str(store),'project_id':program['id']};saved=client.call('session.get',**common);history=client.call('session.history',**common)

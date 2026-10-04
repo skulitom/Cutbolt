@@ -3,7 +3,7 @@
 Synthetic coded pixels/PCM expose every exact deletion independently. Authored
 word anchors exercise the editing contract; actual recognizer acceptance is separate.
 """
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -143,7 +143,7 @@ def run(root):
 
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         for command in ['inspect','correct','plan']:
             item=next(t for t in catalog if t['name']=='cutbolt_transcript_'+command)
             assert item['annotations']['readOnlyHint'] and not item['annotations']['openWorldHint']

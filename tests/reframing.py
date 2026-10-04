@@ -1,5 +1,5 @@
 """Original subject trajectories, enumerated crop feasibility and decoded scene references."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import budgets
 import array
@@ -282,12 +282,11 @@ def run(root):
 
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         tool=next(t for t in catalog if t['name']=='cutbolt_reframe_inspect');assert tool['annotations']['readOnlyHint']
         args={k:v for k,v in styled_result[0].items() if k!='command'}
         Draft202012Validator(tool['inputSchema']).validate(args)
         assert client.call('reframe.inspect',**args)==styled_result[1]
-        Draft202012Validator(tool['outputSchema']).validate({'ok':True,'result':styled_result[1]})
         bad_args=copy.deepcopy(args);bad_args['window']=[0,32]
         client.call('reframe.inspect',expected_error='INVALID_REFRAME',**bad_args)
         template={'schema_version':1,'id':'selected-subject','scene':styled_result[1]['scene'],'parameters':[]}

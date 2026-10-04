@@ -4,7 +4,7 @@ This fixture deliberately does not implement an expression interpreter. Its
 authored graphs have explicit Fraction formulae, fixed truth tables and hash
 vectors, then use the existing forward pixel/geometry references.
 """
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 import budgets
 import copy
@@ -246,7 +246,7 @@ def run(root):
 
     client = Client(exe)
     try:
-        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == 65
+        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == MCP_TOOLS
         tool = next(t for t in catalog if t['name'] == 'cutbolt_expression_inspect')
         args = {'scene':scene,'times':[time(0),time(1,10)]}
         Draft202012Validator(tool['inputSchema']).validate(args)

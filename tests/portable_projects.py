@@ -1,5 +1,5 @@
 """Actual previous-engine migration, moved media and complete local history recovery."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from array import array
 import copy
@@ -217,7 +217,7 @@ def run(root,legacy):
 
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         calls=[('project.portable',{'project':get(portable),'expected_revision':26,'input_root':str(moved)},True,True),
                ('session.check',{'store_root':str(portable)},True,True),
                ('session.migrate',{'store_root':str(portable)},False,True),

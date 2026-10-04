@@ -1,5 +1,5 @@
 """Authored speed integrals, complete RGB/PCM references and pitch measurements."""
-from engine import ENGINE
+from engine import ENGINE, MCP_TOOLS
 import argparse
 from bisect import bisect_right
 import copy
@@ -259,7 +259,7 @@ def run(root):
 
     client = Client(exe)
     try:
-        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == 65
+        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == MCP_TOOLS
         tool = next(t for t in catalog if t['name'] == 'cutbolt_media_conform_inspect')
         fields = {'recipe': ramp, 'input_root': str(sources)}
         Draft202012Validator(tool['inputSchema']).validate(fields); assert tool['annotations']['readOnlyHint']
