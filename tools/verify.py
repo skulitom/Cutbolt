@@ -321,6 +321,33 @@ def gate_running():
     return False
 
 
+BACKGROUND = impact.STATE / "background"
+background_started = time.time()
+
+
+def superseded(stage_name):
+    """A newer background run of a descendant commit will verify this fixture; only its result matters."""
+    if not args.background or not args.commit:
+        return False
+    for marker in BACKGROUND.glob("*.json"):
+        try:
+            other = json.loads(marker.read_text(encoding="utf-8"))
+            if int(marker.stem) == os.getpid() or not psutil.pid_exists(int(marker.stem)):
+                continue
+        except (ValueError, OSError):
+            continue
+        if other["started"] > background_started and stage_name in other["fixtures"] and other["commit"] != args.commit:
+            newer = subprocess.run(["git", "merge-base", "--is-ancestor", args.commit, other["commit"]], cwd=ROOT, capture_output=True)
+            if newer.returncode == 0:
+                return True
+    return False
+
+
+if args.background:
+    BACKGROUND.mkdir(parents=True, exist_ok=True)
+    background_marker = BACKGROUND / f"{os.getpid()}.json"
+    background_marker.write_text(json.dumps({"commit": args.commit, "started": background_started,
+                                             "fixtures": [s["name"] for s in STAGES]}), encoding="utf-8")
 if args.gate:
     GATES.mkdir(parents=True, exist_ok=True)
     gate_marker = GATES / f"{os.getpid()}.pid"
@@ -419,6 +446,10 @@ def run_phase(lanes):
                 if args.background and gate_running():
                     break
                 stage = queue.pop(0)
+                if superseded(stage["name"]):
+                    log(f"{stage['name']} skipped: a newer background run of a descendant commit verifies it")
+                    skipped[stage["name"]] = "superseded by a newer background run"
+                    continue
                 log(f"{stage['name']} started")
                 thread = threading.Thread(target=execute, args=(stage,), daemon=True)
                 thread.start()
@@ -441,10 +472,12 @@ if rust_thread:
     rust_thread.join()
 if args.gate:
     gate_marker.unlink(missing_ok=True)
+if args.background:
+    background_marker.unlink(missing_ok=True)
 shutil.rmtree(run_directory, ignore_errors=True)
 failures = {name: outcome for name, outcome in outcomes.items() if not outcome["ok"] and not outcome.get("deferred")}
 deferred += [name for name, outcome in outcomes.items() if outcome.get("deferred")]
-not_run = [s["name"] for s in STAGES if s["name"] not in outcomes]
+not_run = [s["name"] for s in STAGES if s["name"] not in outcomes and s["name"] not in skipped]
 if deadline_passed.is_set():  # Never started because the gate's time ran out: the background runs them.
     deferred += not_run
     not_run = []

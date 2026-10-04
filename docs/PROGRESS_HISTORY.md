@@ -17,6 +17,9 @@ Two smaller fixes:
 - A command that can't be queued is refused before its arguments are checked.
 
 A workspace end-to-end run exported H.264 from a saved-project reference and conformed a phone clip from a path-only identity, both over MCP. The catalog has 68 tools, about 230 KB. No baseline, criteria, evidence, weights, exclusions or denominators changed.
+## 4 October 2026: background runs give way to newer commits
+
+Successive ships had left several background runs verifying overlapping fixtures for successive commits. Each background run now registers its commit and fixtures in the shared state. Before starting a fixture, it skips any fixture that a newer background run of a descendant commit will also verify; only the newest result matters. Skipped fixtures are listed as superseded and are neither passes nor failures.
 
 ## 4 October 2026: one retry for the real-time capture outside thorough runs
 
