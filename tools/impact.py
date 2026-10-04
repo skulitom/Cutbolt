@@ -89,21 +89,34 @@ def python_closure(stage):
 
 # ---------------------------------------------------------------- building the map
 
-def build(jobs, keep=False, device=None):
+def build(jobs, keep=False, device=None, from_profiles=None):
+    target = ROOT / "target" / "coverage"
+    engine = target / "debug" / ENGINE_NAME
+    if from_profiles:
+        profiles = from_profiles
+        commit = (profiles / "commit.txt").read_text(encoding="utf-8").strip()
+        if git("rev-parse", "HEAD").strip() != commit or git("status", "--porcelain", "--", "src").strip():
+            raise SystemExit(f"Reprocessing needs the instrumented engine of {commit[:10]}; check out that commit with clean sources")
+        return process(profiles, engine, commit, keep)
     if git("status", "--porcelain", "--", "src", "Cargo.toml", "Cargo.lock", "build.rs").strip():
         raise SystemExit("Commit or stash Rust source changes first: the map records line numbers of the commit it is built from")
     commit = git("rev-parse", "HEAD").strip()
-    target = ROOT / "target" / "coverage"
     profiles = Path(tempfile.mkdtemp(prefix="cutbolt-coverage-"))
+    (profiles / "commit.txt").write_text(commit, encoding="utf-8")
     # Instrumented build scripts and proc-macros also write profiles; keep them out of the checkout.
     # --cfg cutbolt_coverage makes the engine flush counters before process::exit (see src/main.rs).
     env = {**os.environ, "CARGO_TARGET_DIR": str(target), "RUSTFLAGS": "-C instrument-coverage --cfg cutbolt_coverage",
            "LLVM_PROFILE_FILE": str(profiles / "build" / "%p-%m.profraw")}
     subprocess.run(["cargo", "build", "--locked"], cwd=ROOT, env=env, check=True)
-    engine = target / "debug" / ENGINE_NAME
     report = profiles / "report.json"
     run = subprocess.run([sys.executable, "-X", "utf8", "tools/verify.py", "--engine", str(engine), "--no-rust", "--report", str(report),
                           "--coverage-dir", str(profiles), "--jobs", str(jobs)] + (["--decode-device", str(device)] if device is not None else []), cwd=ROOT)
+    (profiles / "verify-exit.txt").write_text(str(run.returncode), encoding="utf-8")
+    process(profiles, engine, commit, keep)
+
+
+def process(profiles, engine, commit, keep):
+    report = profiles / "report.json"
     summary = json.loads(report.read_text(encoding="utf-8")) if report.exists() else {"ran": [], "failed": []}
     passed = set(summary["ran"]) - set(summary["failed"])
     profdata, cov = llvm_tool("llvm-profdata"), llvm_tool("llvm-cov")
@@ -114,8 +127,9 @@ def build(jobs, keep=False, device=None):
         if not raw or stage not in passed:
             missing.append(stage)
             continue
-        merged = profiles / f"{stage}.profdata"
-        subprocess.run([profdata, "merge", "-sparse", "-o", str(merged), *map(str, raw)], check=True)
+        merged, listing = profiles / f"{stage}.profdata", profiles / f"{stage}.inputs"
+        listing.write_text("\n".join(map(str, raw)) + "\n", encoding="utf-8")  # too many for one command line
+        subprocess.run([profdata, "merge", "-sparse", "-f", str(listing), "-o", str(merged)], check=True)
         export = subprocess.run([cov, "export", "-format=text", "-skip-expansions", f"-instr-profile={merged}",
                                  "-ignore-filename-regex=(\\.cargo|\\.rustup|rustc|registry)", str(engine)],
                                 capture_output=True, text=True, encoding="utf-8", check=True).stdout
@@ -137,7 +151,7 @@ def build(jobs, keep=False, device=None):
     if not keep:
         shutil.rmtree(profiles, ignore_errors=True)
     document = {"commit": commit, "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "stages": stages, "missing": missing, "verify_exit": run.returncode,
+                "stages": stages, "missing": missing,
                 "files": {f: [[s, e, sorted(st)] for (s, e), st in sorted(spans.items())] for f, spans in sorted(files.items())},
                 "covered_files": {s: sorted(f) for s, f in covered.items()}}
     MAP.parent.mkdir(parents=True, exist_ok=True)
@@ -307,11 +321,12 @@ if __name__ == "__main__":
     b.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     b.add_argument("--keep-profiles", action="store_true")
     b.add_argument("--decode-device", type=int, help="CUDA ordinal, so the hardware-decode fixtures are mapped too")
+    b.add_argument("--from-profiles", type=Path, help="Reprocess profiles kept by an earlier build of the current commit")
     s = sub.add_parser("show", help="List fixtures affected by changes since the map's commit")
     s.add_argument("--base", help="Diff against this commit instead of the map's")
     args = parser.parse_args()
     if args.command == "build":
-        build(args.jobs, args.keep_profiles, args.decode_device)
+        build(args.jobs, args.keep_profiles, args.decode_device, args.from_profiles)
     else:
         document = load_map()
         names = sorted(document["covered_files"]) + document.get("missing", []) if document else []

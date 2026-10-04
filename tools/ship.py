@@ -17,12 +17,16 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_NAME = "cutbolt.exe" if os.name == "nt" else "cutbolt"
 CODE = ["src", "tests", "tools", "examples", "Cargo.toml", "Cargo.lock", "build.rs", "docs/MCP_EVALUATION.md"]
-STATE = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "cutbolt-verify"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import impact  # noqa: E402
+
+# Engine copies, logs, reports and background worktrees live with the shared verifier state in the
+# common git directory: visible to every session and worktree, and outside any virtualized app folder.
+STATE = impact.STATE / "ship"
 
 
 def git(*args, check=True):

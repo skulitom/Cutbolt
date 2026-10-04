@@ -304,7 +304,8 @@ def execute(stage):
         if args.coverage_dir:
             profiles = args.coverage_dir / stage["name"]
             profiles.mkdir(parents=True, exist_ok=True)
-            environment = {**fixture_environment, "LLVM_PROFILE_FILE": str(profiles / "%p-%m.profraw")}
+            # %8m: processes merge online into eight pool files instead of one large file each.
+            environment = {**fixture_environment, "LLVM_PROFILE_FILE": str(profiles / "%8m.profraw")}
         for argv in stage["commands"]:
             result = subprocess.run([a.replace("{dir}", str(directory)) for a in argv], cwd=ROOT, capture_output=True,
                                     text=True, encoding="utf-8", errors="replace", env=environment)

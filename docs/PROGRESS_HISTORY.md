@@ -1,5 +1,11 @@
 # Progress history
 
+## 4 October 2026: one packet listing per source inspection
+
+Phase 1a of the [development-loop plan](DEVELOPMENT_LOOP.md). Reference-source inspection used three `ffprobe` runs per source: stream metadata, every decoded video frame, and every decoded audio frame. It now uses one packet listing, which decodes nothing. That listing returns metadata identical to a plain probe, FFV1 video packet timing, and exact PCM16 sample counts from packet sizes. Only strict inspection adds a second run, which decodes the video frames; validation still happens before any decoding, so unsupported media is rejected as before. Alpha overlays reuse the same metadata instead of probing again.
+
+On the `tracks` fixture, engine tool launches fell from 454 to 345 (-24%), with no behaviour change. The impact map selected 59 of 61 fixtures for this core change, so the gate ran what fit in its budget and deferred the rest to background verification.
+
 ## 4 October 2026: two-minute push gate and background verification
 
 A change can now be shipped in about two minutes while the full set of affected fixtures is still verified.

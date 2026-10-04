@@ -505,25 +505,32 @@ pub fn frame_info_controlled(path: &Path, selector: &str, control: &dyn Control)
     frame_info_with_budget(path, selector, None, Duration::from_secs(120), control)
 }
 
-/// Video timing from container packets, shaped like `frame_info` output. Callers must have checked
-/// for a codec without frame reordering or empty packets (FFV1), where packets and frames
-/// correspond one to one in presentation order. Nothing is decoded, so this is only for paths that
-/// never read pictures.
-pub(crate) fn packet_times_controlled(
+/// Stream/format metadata and packet timing from one `ffprobe` run that decodes nothing.
+pub(crate) struct PacketInspection {
+    /// Identical to `probe` output.
+    pub metadata: Value,
+    /// The first video stream's packets, shaped like `frame_info` entries.
+    pub video: Vec<Value>,
+    /// The first audio stream's packets with PCM16 sample counts (bytes / (2 x channels)).
+    pub audio: Vec<Value>,
+}
+
+/// Packets equal frames only for codecs without reordering or empty packets: callers must check
+/// for FFV1 video and PCM s16 audio before relying on `video`/`audio` timing or sample counts.
+pub(crate) fn packet_inspection_controlled(
     path: &Path,
-    selector: &str,
     control: &dyn Control,
-) -> Result<Value> {
+) -> Result<PacketInspection> {
     let args = [
         "-v",
         "error",
         "-protocol_whitelist",
         "file,pipe",
-        "-select_streams",
-        selector,
+        "-show_streams",
+        "-show_format",
         "-show_packets",
         "-show_entries",
-        "packet=pts_time",
+        "packet=stream_index,pts_time,size",
         "-of",
         "json",
     ]
@@ -531,20 +538,58 @@ pub(crate) fn packet_times_controlled(
     .into_iter()
     .chain([path.to_string_lossy().into_owned()])
     .collect::<Vec<_>>();
-    let probed: Value = serde_json::from_slice(&capture_controlled(
+    let mut metadata: Value = serde_json::from_slice(&capture_controlled(
         &control.tool("ffprobe"),
         &args,
         Duration::from_secs(120),
         control,
     )?)?;
-    let packets = probed["packets"]
-        .as_array()
-        .ok_or_else(|| error("UNSUPPORTED_MEDIA", "Missing video packets"))?;
-    let mut frames = Vec::with_capacity(packets.len());
-    for packet in packets {
-        frames.push(serde_json::json!({"best_effort_timestamp_time": packet["pts_time"]}));
+    let packets = metadata
+        .as_object_mut()
+        .and_then(|o| o.remove("packets"))
+        .unwrap_or_default();
+    // Listing packets adds a per-stream counter that a plain probe does not report.
+    for stream in metadata["streams"].as_array_mut().into_iter().flatten() {
+        if let Some(fields) = stream.as_object_mut() {
+            fields.remove("nb_read_packets");
+        }
     }
-    Ok(serde_json::json!({ "frames": frames }))
+    let first = |kind: &str| {
+        metadata["streams"]
+            .as_array()
+            .and_then(|s| s.iter().find(|s| s["codec_type"] == kind))
+            .cloned()
+    };
+    let (video_stream, audio_stream) = (first("video"), first("audio"));
+    let pcm16_frame_bytes = audio_stream
+        .as_ref()
+        .filter(|a| a["codec_name"] == "pcm_s16le")
+        .and_then(|a| a["channels"].as_u64())
+        .map(|channels| channels * 2)
+        .filter(|&bytes| bytes > 0);
+    let (mut video, mut audio) = (Vec::new(), Vec::new());
+    for packet in packets.as_array().into_iter().flatten() {
+        let index = packet["stream_index"].as_u64();
+        if index.is_some() && index == video_stream.as_ref().and_then(|s| s["index"].as_u64()) {
+            video.push(serde_json::json!({"best_effort_timestamp_time": packet["pts_time"]}));
+        } else if index.is_some()
+            && index == audio_stream.as_ref().and_then(|s| s["index"].as_u64())
+        {
+            let size = packet["size"]
+                .as_u64()
+                .or_else(|| packet["size"].as_str().and_then(|s| s.parse().ok()));
+            let samples = pcm16_frame_bytes
+                .zip(size)
+                .filter(|(bytes, size)| size % bytes == 0)
+                .map(|(bytes, size)| size / bytes);
+            audio.push(serde_json::json!({"best_effort_timestamp_time": packet["pts_time"], "nb_samples": samples}));
+        }
+    }
+    Ok(PacketInspection {
+        metadata,
+        video,
+        audio,
+    })
 }
 
 pub(crate) fn frame_info_with_budget(

@@ -107,7 +107,7 @@ pub(crate) fn inspect_overlay(
     height: u32,
     control: &dyn media::Control,
 ) -> Result<(Source, bool)> {
-    let source = inspect_source_at(
+    let (source, metadata) = inspect_source_with(
         path,
         width,
         height,
@@ -116,7 +116,6 @@ pub(crate) fn inspect_overlay(
         true,
         Timing::Decoded,
     )?;
-    let metadata = media::probe_controlled(path, control)?;
     let alpha = metadata["streams"]
         .as_array()
         .and_then(|s| s.iter().find(|s| s["codec_type"] == "video"))
@@ -132,9 +131,24 @@ fn inspect_source_at(
     allow_alpha: bool,
     timing: Timing,
 ) -> Result<Source> {
+    inspect_source_with(path, width, height, rate, control, allow_alpha, timing).map(|(s, _)| s)
+}
+/// One packet listing supplies the metadata, FFV1 video timing and exact PCM16 sample counts without
+/// decoding; strict (`Decoded`) inspection then also decodes every video frame. Metadata is validated
+/// before any decoding, so unsupported media is rejected exactly as by a plain probe.
+fn inspect_source_with(
+    path: &Path,
+    width: u32,
+    height: u32,
+    rate: Time,
+    control: &dyn media::Control,
+    allow_alpha: bool,
+    timing: Timing,
+) -> Result<(Source, serde_json::Value)> {
     let rate = clock::rate(rate)?;
     let before = media::file_hash_controlled(path, control)?;
-    let metadata = media::probe_controlled(path, control)?;
+    let inspection = media::packet_inspection_controlled(path, control)?;
+    let metadata = &inspection.metadata;
     let streams = metadata["streams"]
         .as_array()
         .ok_or_else(|| error("UNSUPPORTED_MEDIA", "Missing streams"))?;
@@ -151,7 +165,7 @@ fn inspect_source_at(
         || !(video["pix_fmt"] == "bgr0" || (allow_alpha && video["pix_fmt"] == "bgra"))
         || video["width"] != width
         || video["height"] != height
-        || !clock::rate_hint(video, &metadata, rate)
+        || !clock::rate_hint(video, metadata, rate)
         || audio["codec_name"] != "pcm_s16le"
         || audio["sample_rate"] != "48000"
         || audio["channels"] != 2
@@ -171,16 +185,25 @@ fn inspect_source_at(
             "Only square pixels are supported",
         ));
     }
-    let decoded = if timing == Timing::Packets {
-        media::packet_times_controlled(path, "v:0", control)?
-    } else if large_raster(width, height) {
-        media::frame_info_with_budget(path, "v:0", Some("16"), Duration::from_secs(900), control)?
+    let decoded;
+    let frames = if timing == Timing::Packets {
+        &inspection.video
     } else {
-        media::frame_info_controlled(path, "v:0", control)?
+        decoded = if large_raster(width, height) {
+            media::frame_info_with_budget(
+                path,
+                "v:0",
+                Some("16"),
+                Duration::from_secs(900),
+                control,
+            )?
+        } else {
+            media::frame_info_controlled(path, "v:0", control)?
+        };
+        decoded["frames"]
+            .as_array()
+            .ok_or_else(|| error("UNSUPPORTED_MEDIA", "Missing video frames"))?
     };
-    let frames = decoded["frames"]
-        .as_array()
-        .ok_or_else(|| error("UNSUPPORTED_MEDIA", "Missing video frames"))?;
     if frames.is_empty() || frames.len() > 180_000 {
         return Err(error(
             "LIMIT_EXCEEDED",
@@ -190,12 +213,8 @@ fn inspect_source_at(
     for (i, frame) in frames.iter().enumerate() {
         clock::timestamp(frame, i, rate, video)?;
     }
-    let decoded_audio = media::frame_info_controlled(path, "a:0", control)?;
-    let audio_frames = decoded_audio["frames"]
-        .as_array()
-        .ok_or_else(|| error("UNSUPPORTED_MEDIA", "Missing audio frames"))?;
     let mut samples = 0u64;
-    for frame in audio_frames {
+    for frame in &inspection.audio {
         let expected = (samples as u128 * 1_000_000 / 48_000) as i64;
         if (micros(&frame["best_effort_timestamp_time"])? - expected).abs() > 1000 {
             return Err(error(
@@ -229,12 +248,13 @@ fn inspect_source_at(
     if media::file_hash_controlled(path, control)? != before {
         return Err(error("MEDIA_CHANGED", "Source changed during inspection"));
     }
-    Ok(Source {
+    let source = Source {
         path: path.into(),
         sha256: before,
         frames: frames.len() as u64,
         samples,
-    })
+    };
+    Ok((source, inspection.metadata))
 }
 
 pub(crate) fn destination(output: &Path, root: &Path) -> Result<PathBuf> {
