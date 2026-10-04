@@ -135,6 +135,11 @@ rust_outcome = {}
 if run_rust and not args.gate:
     tests = rust_checks()
 ENGINE_NAME = "cutbolt.exe" if os.name == "nt" else "cutbolt"
+if args.background:
+    # A fresh worktree has no build artifacts; fixtures that compile helpers against the library or build
+    # examples use this shared, incremental build directory (tests/engine.py BUILD).
+    os.environ["CARGO_TARGET_DIR"] = str(impact.STATE / "target")
+    command(["cargo", "build", "--locked"])
 if args.engine:
     source_engine = args.engine.resolve()
 else:

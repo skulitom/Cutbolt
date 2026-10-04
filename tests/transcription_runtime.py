@@ -1,5 +1,5 @@
 """Maximum native inputs, original negative fixtures and owner cancellation."""
-from engine import ENGINE
+from engine import BUILD, ENGINE
 from array import array
 import copy
 from fractions import Fraction as F
@@ -166,9 +166,9 @@ def failures(root,request,runtime,call,preserved):
     reject('digital-silence-minimum-clock',silence,'NO_WORDS')
     assert hashlib.sha256(silent.read_bytes()).hexdigest()==silent_hash
     helper=root/'cancel.rs';helper.write_text(CANCEL_HELPER,encoding='utf-8');binary=root/'cancel.exe'
-    serde=max((ROOT/'target/debug/deps').glob('libserde_json-*.rlib'),key=lambda p:p.stat().st_mtime)
-    subprocess.run(['rustc','--edition=2024',str(helper),'-o',str(binary),'-L',str(ROOT/'target/debug/deps'),
-        '--extern','cutbolt='+str(ROOT/'target/debug/libcutbolt.rlib'),'--extern','serde_json='+str(serde)],check=True,capture_output=True,timeout=90)
+    serde=max((BUILD/'deps').glob('libserde_json-*.rlib'),key=lambda p:p.stat().st_mtime)
+    subprocess.run(['rustc','--edition=2024',str(helper),'-o',str(binary),'-L',str(BUILD/'deps'),
+        '--extern','cutbolt='+str(BUILD/'libcutbolt.rlib'),'--extern','serde_json='+str(serde)],check=True,capture_output=True,timeout=90)
     for mode in ['library-cancel','native-owner-kill']:
         candidate=copy.deepcopy(request);owned=root/(mode+' scratch');owned.mkdir();candidate['scratch_root']=str(owned)
         cancel=root/(mode+'.signal');command=[str(EXE)]

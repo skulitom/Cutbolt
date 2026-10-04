@@ -1,5 +1,11 @@
 # Progress history
 
+## 4 October 2026: background verification fixes
+
+The first background runs exposed two harness problems, both now fixed:
+
+- **Console windows.** The background verifier was started without a console, so every console program it launched opened its own window. Three fixtures were ended by console-close events. It now runs with one hidden console shared by all its children, in its own process group.
+- **Missing build artifacts.** Fixtures that compile helpers against the library (`transcription`) or build examples (`recording`) expected `target/debug` in the worktree. Background runs now build into a shared, incremental directory in the common git directory, and `tests/engine.py` exposes it as `BUILD`, following `CARGO_TARGET_DIR`.
 ## 4 October 2026: agent usability fixes from MCP-only trials
 
 Three fresh agents worked through an edit, a title card and a music-plus-captions job using only the MCP view. All three finished only by falling back to CLI-only commands, and 60 to 90% of their response bytes went to schema and capability lookups. This batch addresses most of what they hit:

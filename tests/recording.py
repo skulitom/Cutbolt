@@ -1,5 +1,5 @@
 """Original isolated native capture, exact placement and bounded streaming acceptance."""
-from engine import ENGINE, MCP_TOOLS
+from engine import BUILD, ENGINE, MCP_TOOLS
 import budgets
 import argparse,copy,hashlib,json,os,struct,subprocess,time as clock,wave
 from pathlib import Path
@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator
 
 ROOT=Path(__file__).resolve().parents[1]
 EXE=ENGINE
-HELPER=ROOT/'target/debug/examples/recording_fixture.exe'
+HELPER=BUILD/'examples'/'recording_fixture.exe'
 def sha(path):
     h=hashlib.sha256()
     with open(path,'rb') as f:

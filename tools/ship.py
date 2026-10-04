@@ -86,7 +86,9 @@ def main():
                "--engine", str(engine), "--commit", commit, "--jobs", str(args.background_jobs), "--cleanup-worktree"] + device
     flags = 0
     if os.name == "nt":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
+        # A hidden console shared by every child (DETACHED_PROCESS would make each console child open its
+        # own window); a separate process group keeps console control events from reaching the run.
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.BELOW_NORMAL_PRIORITY_CLASS
     with log.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(command, cwd=worktree, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                    creationflags=flags, start_new_session=os.name != "nt")
