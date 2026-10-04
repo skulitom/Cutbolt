@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
 /// Interpolation from a key to the next: `hold` keeps the value, `linear`, or quadratic `ease_in`, `ease_out`, `ease_in_out` without overshoot.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Interpolation {
     Hold,
@@ -15,7 +15,7 @@ pub enum Interpolation {
 }
 
 /// One curve key.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Keyframe {
     /// Layer-local rational seconds, 0..layer duration; reduced denominator at most 1,000,000.
@@ -27,7 +27,7 @@ pub struct Keyframe {
 }
 
 /// Keyframed integer property on the layer-local clock. Endpoint values hold outside the keys; samples round to nearest.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Curve {
     /// 1..128 keys in any order; equal times, including equivalent fractions, are rejected.
@@ -38,7 +38,7 @@ pub struct Curve {
 }
 
 /// Changes when and how fast a curve's keys play, without moving the layer or retiming source frames.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Retime {
     /// Layer-local rational seconds, at most the layer duration; until then the first key holds (last when reversed).
@@ -61,8 +61,18 @@ fn invalid(message: &str) -> crate::Error {
 
 impl Curve {
     pub(crate) fn prepare(&self, duration: Time, minimum: i32, maximum: i32) -> Result<Sampler> {
-        if self.keys.is_empty() || self.keys.len() > 128 {
-            return Err(invalid("Each curve requires 1-128 keys"));
+        self.prepare_keys(duration, minimum, maximum, 128)
+    }
+    /// `prepare` with a different key limit, for long gain automation.
+    pub(crate) fn prepare_keys(
+        &self,
+        duration: Time,
+        minimum: i32,
+        maximum: i32,
+        keys: usize,
+    ) -> Result<Sampler> {
+        if self.keys.is_empty() || self.keys.len() > keys {
+            return Err(invalid(&format!("Each curve requires 1-{keys} keys")));
         }
         let mut keys = self.keys.clone();
         for key in &mut keys {

@@ -43,6 +43,8 @@ pub struct Levels {
     pub gain_milli: u32,
     pub fade_in: Time,
     pub fade_out: Time,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_curve: Option<crate::animation::Curve>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -452,6 +454,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                             gain_milli: clip.gain_milli,
                             fade_in: clip.fade_in,
                             fade_out: clip.fade_out,
+                            gain_curve: clip.gain_curve.clone(),
                         }),
                         transform: clip.transform.clone(),
                     },

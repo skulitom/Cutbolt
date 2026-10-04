@@ -208,6 +208,14 @@ Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool exec
 
 A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. Stills, audio-only files, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
 
+## Ducking music under speech
+
+`audio.duck` is read-only. It renders the `voice_track_id` audio track alone over the timeline and finds speech in 10 ms windows. A window counts as speech when its mean power reaches `threshold_db` (default -45 dBFS), and pauses shorter than `bridge` (default 1 s) stay ducked.
+
+It then proposes a gain curve for every clip on `music_track_id` that overlaps speech. The curve ramps linearly down to `duck_milli` of the clip's `gain_milli` (default 250, about -12 dB) over `attack` (default 0.25 s) before speech starts. It holds there, then ramps back over `release` (default 0.6 s) after speech ends. Ramps that meet merge into one span. Keys are placed on the clip's source clock and may lie just before its start, so a ramp completes as speech begins.
+
+The result lists the speech runs with exact times, a summary per clip, and `clip_audio` `operations`. Check them with `session.preview`, apply them with `session.apply`, and listen back with `timeline.meters` `curve` or a preview range.
+
 ## Reviewing edits and footage
 
 These commands let an agent check its own work from still images and numbers.

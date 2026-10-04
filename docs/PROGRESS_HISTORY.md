@@ -1,5 +1,19 @@
 # Progress history
 
+## 5 October 2026: gain automation and ducking on the timeline
+
+Timeline audio clips had one constant gain plus linear fades, so lowering music under speech meant rendering a separate mix. Audio-track clips now take a `gain_curve` in the mix recipe's curve form, with up to 2,000 keys and any interpolation. Its key times are positions on the clip's source clock, which keeps it aligned through splits, trims and range renders.
+
+The renderer computes each window's per-sample gains with the curve's own sampler and feeds them to the FFmpeg graph as a generated 16-bit stream. The existing single-rounding level expression reads that stream, so graph size does not grow with keys. The stream is written only when a render runs and removed afterwards.
+
+The read-only `audio.duck` analyzes the voice track alone in 10 ms windows and proposes `clip_audio` operations. Each gives a music clip a curve that ramps down before speech, holds, and ramps back after.
+
+The transitions fixture checks the curve and ducking against independent computations:
+- A ramp-and-hold curve, its split, ranges starting inside it, and meters all match the independent PCM oracle exactly.
+- Ducking speech regions and keys recomputed from the oracle's voice-only PCM equal the proposal, and the applied curves render exactly.
+
+In a real-media run, ducking lowered the music bed by 12 dB during speech. Silence and clipping runs from `timeline.meters` now use reduced exact times like every other engine time. No scoring changed.
+
 ## 5 October 2026: one-step preparation of camera files
 
 Getting a phone clip onto a timeline took three steps: inspect it, copy the proposed recipe, and queue a conversion. `media.prepare`, queued with `job.start`, now does this in one call. It returns a fitting ready file unchanged. Anything else it converts with the readiness recipe, at the target project's rate and size, or at the source's own rate. The readiness recipe now reads Matroska duration tags when streams carry no exact tick count.

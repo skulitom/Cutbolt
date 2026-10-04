@@ -40,6 +40,53 @@ pub struct Plan {
         serialize_with = "chunk_summary"
     )]
     pub chunks: Vec<Plan>,
+    /// Gain streams this graph reads, written when it runs.
+    #[serde(skip)]
+    pub(crate) generated: Vec<Generated>,
+}
+/// A per-sample gain stream a track graph reads as an input: a clip's gain curve sampled on its
+/// source clock from `start`, `samples` long, as 16-bit mono PCM (gains are at most 4000, so
+/// every value is exact). Written just before the graph runs and removed after.
+#[derive(Debug, Clone)]
+pub(crate) struct Generated {
+    pub path: PathBuf,
+    pub curve: crate::animation::Curve,
+    pub start: Time,
+    pub samples: u64,
+}
+impl Generated {
+    fn write(&self) -> Result<TempFile> {
+        use std::io::Write;
+        // Keys were validated against the clip's source; the latest key bounds evaluation here.
+        let span = self
+            .curve
+            .keys
+            .iter()
+            .map(|k| k.time)
+            .max_by(|a, b| a.compare(*b).expect("valid key times"))
+            .unwrap_or(Time::ZERO);
+        let sampler = self
+            .curve
+            .prepare_keys(span, 0, 4000, crate::tracks::MAX_GAIN_KEYS)?;
+        let file = TempFile(self.path.clone());
+        let bytes = u32::try_from(self.samples * 2)
+            .map_err(|_| error("LIMIT_EXCEEDED", "Gain automation window exceeds 4 GiB"))?;
+        let mut out = std::io::BufWriter::new(fs::File::create_new(&self.path)?);
+        out.write_all(b"RIFF")?;
+        out.write_all(&(36 + bytes).to_le_bytes())?;
+        out.write_all(b"WAVEfmt ")?;
+        for value in [16u32, 1 | (1 << 16), 48_000, 96_000, 2 | (16 << 16)] {
+            out.write_all(&value.to_le_bytes())?;
+        }
+        out.write_all(b"data")?;
+        out.write_all(&bytes.to_le_bytes())?;
+        for n in 0..self.samples {
+            let gain = sampler.sample(self.start.plus(Time::new(n, 48_000)?)?)?;
+            out.write_all(&(gain as i16).to_le_bytes())?;
+        }
+        out.flush()?;
+        Ok(file)
+    }
 }
 
 /// Chunks are reported by size only; their graphs are internal.
@@ -164,6 +211,7 @@ fn chunked(
         output,
         sources,
         chunks,
+        generated: Vec::new(),
     }))
 }
 
@@ -225,6 +273,11 @@ pub(crate) fn run_plan(
         arguments
     };
     if plan.chunks.is_empty() {
+        let _inputs = plan
+            .generated
+            .iter()
+            .map(Generated::write)
+            .collect::<Result<Vec<_>>>()?;
         media::capture_controlled(&tool, &output(&plan.arguments, temp), timeout, control)?;
         return Ok(());
     }
@@ -240,6 +293,11 @@ pub(crate) fn run_plan(
         if part.0.try_exists()? {
             return Err(error("OUTPUT_EXISTS", "Temporary chunk collision"));
         }
+        let _inputs = chunk
+            .generated
+            .iter()
+            .map(Generated::write)
+            .collect::<Result<Vec<_>>>()?;
         media::capture_controlled(&tool, &output(&chunk.arguments, &part.0), timeout, control)?;
         done += chunk.frames;
         control.frames(done)?;
@@ -751,6 +809,7 @@ fn plan_controlled(
         sources,
         arguments: args,
         chunks: Vec::new(),
+        generated: Vec::new(),
     })
 }
 
@@ -1010,6 +1069,7 @@ pub(crate) fn plan_audio_range(
         sources,
         arguments: args,
         chunks: Vec::new(),
+        generated: Vec::new(),
     })
 }
 

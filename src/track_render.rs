@@ -33,6 +33,12 @@ struct Graph<'a> {
     alpha_assets: BTreeSet<String>,
     /// Audio-only graphs never decode pictures, so sources are timed from packets.
     audio_only: bool,
+    /// Inputs so far, media and generated gain streams alike.
+    inputs: usize,
+    /// Gain streams for clips with gain curves, written when the graph runs.
+    generated: Vec<render::Generated>,
+    /// Distinguishes this graph's generated file names.
+    nonce: u128,
 }
 impl<'a> Graph<'a> {
     fn new(project: &'a Project, root: &'a Path, control: &'a dyn media::Control) -> Self {
@@ -50,6 +56,11 @@ impl<'a> Graph<'a> {
             overlay_assets: BTreeSet::new(),
             alpha_assets: BTreeSet::new(),
             audio_only: false,
+            inputs: 0,
+            generated: Vec::new(),
+            nonce: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos()),
         }
     }
     fn input(
@@ -138,8 +149,8 @@ impl<'a> Graph<'a> {
                 "-i".into(),
                 path.to_string_lossy().into_owned(),
             ]);
-            self.sources
-                .insert(asset.id.clone(), (self.sources.len(), source));
+            self.sources.insert(asset.id.clone(), (self.inputs, source));
+            self.inputs += 1;
         }
         let (input, source) = &self.sources[&clip.asset_id];
         if kind == Kind::Video && source.frames == 0 {
@@ -348,21 +359,59 @@ impl<'a> Graph<'a> {
             self.filters.push(format!("[{input}:a:0]atrim=start_sample={first}:end_sample={end},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{raw}]"));
         }
         if clip.adjusts_audio() {
-            self.level(clip, at, &raw, label)?;
+            self.level(clip, at, duration, &raw, label)?;
         }
         Ok(())
     }
     /// Clip gain and linear fades, rounded once per sample to the nearest PCM16 value with ties
     /// away from zero, as in a pcm-mix-v1 voice. Fades never overlap and last at most 60 s, so
     /// every product stays an exact integer in doubles.
-    fn level(&mut self, clip: &TrackClip, at: Time, input: &str, label: &str) -> Result<()> {
+    fn level(
+        &mut self,
+        clip: &TrackClip,
+        at: Time,
+        duration: Time,
+        input: &str,
+        label: &str,
+    ) -> Result<()> {
         let e = clip.envelope()?;
         // Transition handles read before a clip's start and after its end; validation keeps
         // fades off those edges, so the handles play at the plain gain.
         let offset =
             e.offset as i64 + at.units(SAMPLES)? as i64 - clip.start.units(SAMPLES)? as i64;
-        let (g, fi, fo, samples) = (e.gain_milli, e.fade_in, e.fade_out, e.samples);
-        let (mut weight, mut divisor) = (g.to_string(), "1000".to_string());
+        let (fi, fo, samples) = (e.fade_in, e.fade_out, e.samples);
+        // With a gain curve, a generated stream beside the audio carries each sample's gain in
+        // milli-units (exact as 16-bit PCM); otherwise the gain is the constant `gain_milli`.
+        let (g, input) = match &clip.gain_curve {
+            Some(curve) => {
+                let index = self.inputs;
+                self.inputs += 1;
+                let path = std::env::temp_dir().join(format!(
+                    ".cutbolt-gain-{}-{}-{index}.wav",
+                    std::process::id(),
+                    self.nonce
+                ));
+                self.args
+                    .extend(["-i".into(), path.to_string_lossy().into_owned()]);
+                self.generated.push(render::Generated {
+                    path,
+                    curve: curve.clone(),
+                    start: clip.source_in.plus(at)?.minus(clip.start)?,
+                    samples: duration.units(SAMPLES)?,
+                });
+                self.filters.push(format!(
+                    "[{index}:a:0]aformat=sample_fmts=dblp:channel_layouts=mono[{label}c];[{input}][{label}c]join=inputs=2:channel_layout=3.0:map=0.0-FL|0.1-FR|1.0-FC[{label}j]"
+                ));
+                ("ld(5)".to_string(), format!("{label}j"))
+            }
+            None => (e.gain_milli.to_string(), input.to_string()),
+        };
+        let gain = if clip.gain_curve.is_some() {
+            "st(5,val(2)*32768);"
+        } else {
+            ""
+        };
+        let (mut weight, mut divisor) = (g.clone(), "1000".to_string());
         if fo != 0 {
             let tail = samples - fo;
             weight = format!("if(gte(ld(0),{tail}),{g}*({samples}-ld(0)),{weight})");
@@ -374,7 +423,7 @@ impl<'a> Graph<'a> {
         }
         let channel = |c: usize| {
             format!(
-                "st(0,n{offset:+});st(1,{weight});st(2,{divisor});st(3,val({c})*32768*ld(1));if(lt(ld(3),0),-floor((-ld(3)+ld(2)/2)/ld(2)),floor((ld(3)+ld(2)/2)/ld(2)))/32768"
+                "st(0,n{offset:+});{gain}st(1,{weight});st(2,{divisor});st(3,val({c})*32768*ld(1));if(lt(ld(3),0),-floor((-ld(3)+ld(2)/2)/ld(2)),floor((ld(3)+ld(2)/2)/ld(2)))/32768"
             )
         };
         self.filters.push(format!(
@@ -665,7 +714,7 @@ impl<'a> Graph<'a> {
         values.sort_by(|a, b| a.path.cmp(&b.path));
         values
     }
-    fn finish(mut self) -> (Vec<String>, Vec<Source>) {
+    fn finish(mut self) -> (Vec<String>, Vec<Source>, Vec<render::Generated>) {
         let sources = self.sources();
         self.args.extend([
             "-filter_complex_threads".into(),
@@ -673,7 +722,7 @@ impl<'a> Graph<'a> {
             "-filter_complex".into(),
             self.filters.join(";"),
         ]);
-        (self.args, sources)
+        (self.args, sources, self.generated)
     }
 }
 fn boundaries(track: &Track, begin: Time, end: Time, clock: Time) -> Result<BTreeSet<u64>> {
@@ -787,7 +836,7 @@ pub(crate) fn plan_audio_window(
     duration: Time,
 ) -> Result<Plan> {
     let output = render::destination_extension(output, output_root, "wav")?;
-    let (mut args, sources) = compile(
+    let (mut args, sources, generated) = compile(
         project,
         input_root,
         start,
@@ -822,6 +871,7 @@ pub(crate) fn plan_audio_window(
         sources,
         arguments: args,
         chunks: Vec::new(),
+        generated,
     })
 }
 #[allow(clippy::too_many_arguments)]
@@ -835,7 +885,7 @@ pub(crate) fn plan_window(
     control: &dyn media::Control,
 ) -> Result<Plan> {
     let output = render::destination(output, output_root)?;
-    let (mut args, sources) =
+    let (mut args, sources, generated) =
         compile(project, input_root, start, duration, (true, true), control)?.finish();
     let (level, slices) = media::ffv1_encoding(project.width, project.height);
     args.extend(
@@ -899,6 +949,7 @@ pub(crate) fn plan_window(
         sources,
         arguments: args,
         chunks: Vec::new(),
+        generated,
     })
 }
 pub(crate) fn read_frame(
@@ -906,7 +957,7 @@ pub(crate) fn read_frame(
     root: &Path,
     time: Time,
 ) -> Result<(Vec<u8>, Vec<Source>)> {
-    let (mut args, sources) = compile(
+    let (mut args, sources, _) = compile(
         project,
         root,
         time,

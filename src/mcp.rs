@@ -228,6 +228,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         "preview.cuts" => {
             "Review the edit: write a sheet of the last frame before and first frame after each cut (16 per page, two cuts per row), return it as an inline image, and list each cut's time, clips and source times. Continue with `next`."
         }
+        "audio.duck" => {
+            "Lower music under speech: analyze the voice track alone in 10 ms windows and propose gain curves for the music track's clips (ramp down before speech, hold, ramp back up after), as clip_audio operations to apply with session.apply. Read-only; nothing is changed until the operations are applied."
+        }
         "media.prepare" => {
             "Turn any decodable video file, such as a phone or camera MP4, into a timeline asset in one step: a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. Run it with job.start; the result's asset goes to media.add."
         }
@@ -329,7 +332,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 input["properties"]["save_as"] = json!({"type":"string","description":"Write the whole result to this new .json file in the workspace and return a short summary; later arguments can name it as {\"file\": path, \"select\": field}."});
             }
         }
-        let read_only=matches!(command,"timeline.meters"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
+        let read_only=matches!(command,"audio.duck"|"timeline.meters"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         let text = match workspace {
             Some(_) => crate::schema::workspace_wording(description(command)),
             None => description(command).to_owned(),
@@ -480,7 +483,7 @@ impl Server {
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
-            "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, fade_in and fade_out with tracks.edit clip_audio. ",
+            "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech. ",
             "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
             "Review your work: preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",

@@ -90,6 +90,7 @@ Audio-track clips carry three optional fields, also accepted in a `place` clip. 
 - `gain_milli`: linear gain from 0 to 4000, where 1000 (the default) is unity.
 - `fade_in`: a linear fade from the clip start.
 - `fade_out`: a linear fade ending at the clip end.
+- `gain_curve`: gain automation that replaces `gain_milli`. It uses the [keyframe curve](SCENES.md#property-keyframes), as in [mix recipes](AUDIO.md) form, with 1-2,000 keys, values 0-4000 milli-units and any interpolation. Key times are positions on the clip's source clock: a key at the clip's `source_in` plays at the clip's start. Splits, trims and range renders therefore stay aligned with the audio without rewriting keys. Each sample's gain is the curve's value at that source position, rounded as curves round. Fades then apply on top, with the same single rounding per sample. The renderer feeds the gains to the graph as a generated 16-bit stream, so the cost does not grow with the number of keys. `clip_audio` sets `gain_curve` or clears it with `clear_gain_curve`.
 
 Fades align to the 48 kHz clock and last at most 60 seconds each. Together they must fit the clip, so they never overlap. The semantics match a [mix recipe](AUDIO.md) voice. At clip sample `i` of `n`, the weight is `gain_milli x min(i, fade_in) / fade_in` inside the fade-in, `gain_milli x min(n - i, fade_out) / fade_out` inside the fade-out, and `gain_milli` elsewhere, divided by 1000. Each sample is rounded once to the nearest PCM16 value, ties away from zero. This happens before transitions and track summation, so every product stays an exact integer.
 
@@ -105,7 +106,7 @@ Edits keep the audible result:
 
 `timeline.meters` measures levels without exporting. It takes a `project`, `input_root`, an optional frame-aligned `start` and `duration` (at most 600 seconds; by default to the timeline end), and `tracks` (default true). It renders the range's audio exactly as an audio-only export would. It then reports sample peak, RMS and BS.1770 integrated loudness (`integrated_lkfs`) for the mix of enabled audio tracks and, with `tracks`, for each enabled audio track played alone. Each track costs one more audio pass. Use it to set `gain_milli` against a loudness target. Halving a clip's gain lowers its measured loudness by 6.02 dB.
 
-Session diffs and previews list a clip's `levels` (`gain_milli`, `fade_in`, `fade_out`) when it has gain or fades, so a `clip_audio` change appears as a clip change.
+Session diffs and previews list a clip's `levels` (`gain_milli`, `fade_in`, `fade_out`, `gain_curve`) when it has gain or fades, so a `clip_audio` change appears as a clip change.
 
 ## Sessions, previews and export
 

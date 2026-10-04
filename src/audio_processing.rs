@@ -305,7 +305,8 @@ pub(crate) fn profile(pcm: &[i16]) -> Value {
     let mut energy = 0.0;
     let (mut silent_from, mut silent) = (None, Vec::new());
     let (mut clipped_from, mut clipped, mut clipped_samples) = (None, Vec::new(), 0usize);
-    let time = |n: usize| json!({"num":n,"den":48000});
+    // Exact sample times, reduced like every other engine time.
+    let time = |n: usize| json!(crate::time::Time::new(n as u64, 48_000).expect("sample time"));
     for (n, pair) in pcm.as_chunks::<2>().0.iter().enumerate() {
         for (ch, &sample) in pair.iter().enumerate() {
             let x = sample as f64 / 32768.0;
@@ -504,13 +505,13 @@ mod tests {
         // The run ends one sample into the loud tone, whose first sample, sin(0), is silent.
         assert_eq!(
             profile["silence"]["runs"],
-            json!([{"start":{"num":96000,"den":48000},"end":{"num":192001,"den":48000}}])
+            json!([{"start":{"num":2,"den":1},"end":{"num":192001,"den":48000}}])
         );
         assert_eq!(profile["clipping"]["clipped_samples"], 6);
         assert_eq!(profile["clipping"]["count"], 2);
         assert_eq!(
             profile["clipping"]["runs"][0],
-            json!({"start":{"num":193000,"den":48000},"end":{"num":193002,"den":48000}})
+            json!({"start":{"num":193,"den":48},"end":{"num":32167,"den":8000}})
         );
     }
 }

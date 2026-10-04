@@ -273,13 +273,13 @@ def run(root):
             if test(pcm[2*n],pcm[2*n+1]):
                 if start is None:start=n
             elif start is not None:
-                if n-start>=minimum:found.append({'start':{'num':start,'den':48000},'end':{'num':n,'den':48000}})
+                if n-start>=minimum:found.append({'start':time(start,48000),'end':time(n,48000)})
                 start=None
-        if start is not None and len(pcm)//2-start>=minimum:found.append({'start':{'num':start,'den':48000},'end':{'num':len(pcm)//2,'den':48000}})
+        if start is not None and len(pcm)//2-start>=minimum:found.append({'start':time(start,48000),'end':time(len(pcm)//2,48000)})
         return found
     silent=runs(lambda l,r:abs(l)<=32 and abs(r)<=32,24000)
     assert silent and profile['silence']['runs']==silent[:50] and profile['silence']['count']==len(silent),(profile['silence'],silent)
-    assert silent[0]['start']=={'num':24*1920,'den':48000}
+    assert silent[0]['start']==time(24*1920,48000)
     full=lambda v:v in (32767,-32768)
     clipped=runs(lambda l,r:full(l) or full(r),1)
     assert clipped and profile['clipping']['clipped_samples']==sum(1 for v in pcm if full(v)) and profile['clipping']['runs']==clipped[:50]

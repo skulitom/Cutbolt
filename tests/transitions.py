@@ -51,6 +51,14 @@ def run(root):
     def effect(name,before,after,kind):return {'id':name,'left_id':name[0]+'l','right_id':name[0]+'r','before':before,'after':after,'kind':kind}
     def effects(kind,b=2,a=3):
         return [edit('transition_set',track_id='v',transition=effect('vt',time(b,25),time(a,25),kind)),edit('transition_set',track_id='a',transition=effect('at',time(b*1920+7,48000),time(a*1920+11,48000),'dip_black' if kind=='dip_black' else 'dissolve'))]
+    def curve_value(curve,t):
+        keys=sorted((seconds(k['time']),k['value'],k['interpolation']) for k in curve['keys'])
+        if t<=keys[0][0]:return keys[0][1]
+        if t>=keys[-1][0]:return keys[-1][1]
+        j=max(i for i,k in enumerate(keys) if k[0]<=t);(ta,va,mode),(tb,vb,_)=keys[j],keys[j+1]
+        if mode=='hold':return va
+        u=(t-ta)/(tb-ta);w=va*(u.denominator-u.numerator)+vb*u.numerator
+        return (1 if w>=0 else -1)*((abs(w)+u.denominator//2)//u.denominator)
     def oracle(project,scale=1):
         width,height=W//scale,H//scale;count=int(seconds(project['tracks']['duration'])*25);video=[];audio=[0]*(count*1920*2)
         def image(c,t):
@@ -83,7 +91,7 @@ def run(root):
             video.append(pixels)
         for layer in project['tracks']['tracks']:
             if layer['kind']!='audio' or not layer['enabled']:continue
-            clips={c['id']:(int(c['asset_id']),int(seconds(c['start'])*48000),int((seconds(c['start'])+seconds(c['duration']))*48000),int(seconds(c['source_in'])*48000),c.get('gain_milli',1000),int(seconds(c.get('fade_in',time(0)))*48000),int(seconds(c.get('fade_out',time(0)))*48000)) for c in layer['clips']}
+            clips={c['id']:(int(c['asset_id']),int(seconds(c['start'])*48000),int((seconds(c['start'])+seconds(c['duration']))*48000),int(seconds(c['source_in'])*48000),c.get('gain_milli',1000),int(seconds(c.get('fade_in',time(0)))*48000),int(seconds(c.get('fade_out',time(0)))*48000),c.get('gain_curve')) for c in layer['clips']}
             effects=[]
             for e in layer.get('transitions',[]):
                 l,r=clips[e['left_id']],clips[e['right_id']];effects.append((r[1]-int(seconds(e['before'])*48000),r[1]+int(seconds(e['after'])*48000),l,r,e['kind']))
@@ -93,7 +101,9 @@ def run(root):
                 for ch in range(2):
                     def value(c):
                         # Clip gain and linear fades on the clip's own sample clock, one signed rounding.
-                        s=sounds[c[0]][(c[3]+n-c[1])*2+ch];g,fi,fo=c[4:];i=n-c[1];total=c[2]-c[1]
+                        s=sounds[c[0]][(c[3]+n-c[1])*2+ch];g,fi,fo,curve=c[4:];i=n-c[1];total=c[2]-c[1]
+                        # A gain curve replaces gain_milli, sampled on the clip's source clock.
+                        if curve:g=curve_value(curve,F(c[3]+n-c[1],48000))
                         if fi and i<fi:w,d=g*i,1000*fi
                         elif fo and i>=total-fo:w,d=g*(total-i),1000*fo
                         else:w,d=g,1000
@@ -131,8 +141,12 @@ def run(root):
     for op in [effects('dip_black')[0],edit('transition_remove',track_id='v',id='vt')]:apply(locked,[op],'TRACK_LOCKED')
     passed.append('transitions.edit_dependencies_locks')
     # Clip gain and fades apply per clip before transitions and track summation; cuts keep them.
-    levels=apply(p,[edit('clip_audio',clip_ids=['al'],gain_milli=1500,fade_in=time(5003,48000)),edit('clip_audio',clip_ids=['ar'],gain_milli=600,fade_out=time(3*1920+11,48000))])
-    assert [c.get('gain_milli') for c in levels['tracks']['tracks'][1]['clips']]==[1500,600]
+    # al's gain curve (ramps and holds on its source clock, which starts at sample 3*1920+7) replaces its gain.
+    source=3*1920+7
+    ramp={'keys':[{'time':time(source+2400,48000),'value':1000,'interpolation':'linear'},{'time':time(source+7200,48000),'value':300,'interpolation':'hold'},
+                  {'time':time(source+9600,48000),'value':2600,'interpolation':'linear'},{'time':time(source+14000,48000),'value':800,'interpolation':'linear'}]}
+    levels=apply(p,[edit('clip_audio',clip_ids=['al'],gain_milli=1500,fade_in=time(5003,48000),gain_curve=ramp),edit('clip_audio',clip_ids=['ar'],gain_milli=600,fade_out=time(3*1920+11,48000))])
+    assert [c.get('gain_milli') for c in levels['tracks']['tracks'][1]['clips']]==[1500,600] and levels['tracks']['tracks'][1]['clips'][0]['gain_curve']==ramp
     leveled=render(levels,'clip-gain-fades-with-transition');assert leveled[1]!=expected[1]
     cut=apply(levels,[edit('split',clip_ids=['al'],at=time(6,25),links='include',right_clip_ids=[{'id':'al','new_id':'al2'},{'id':'vl','new_id':'vl2'}],right_link_ids=[{'id':'left','new_id':'left2'}])])
     assert render(cut,'split-keeps-clip-fades')==leveled
@@ -158,6 +172,39 @@ def run(root):
     part=call({'command':'timeline.meters','project':levels,'input_root':str(root),'start':time(5,25),'duration':time(10,25),'tracks':False})
     assert part['mix']==metered(leveled[1][5*1920*4:15*1920*4],'levels-part') and part['tracks']==[]
     passed.append('transitions.timeline_meters_match_rendered_pcm')
+    # Ducking: speech on the dialogue track lowers a music bed. Regions and keys are recomputed here
+    # from the oracle's voice-only PCM, and the applied curves render exactly.
+    ducking=apply(base,[edit('unlink',id='right'),edit('remove',clip_ids=['ar'],links='reject_partial'),edit('add',track=track('m','audio')),
+                        edit('place',track_id='m',clip=placement('bed',2,0,20,0),collision='reject')])
+    settings={'threshold_db':-45,'duck_milli':300,'attack':time(960,48000),'release':time(1920,48000),'bridge':time(4800,48000)}
+    proposal=call({'command':'audio.duck','project':ducking,'input_root':str(root),'voice_track_id':'a','music_track_id':'m',**settings})
+    voice=copy.deepcopy(ducking);next(t for t in voice['tracks']['tracks'] if t['id']=='m')['enabled']=False
+    pcm=array('h',oracle(voice)[1]);limit=2*480*32768**2*10**(-45/10);windows=[]
+    for w in range(len(pcm)//960):
+        energy=sum(v*v for v in pcm[w*960:(w+1)*960])
+        if energy>=limit:
+            if windows and windows[-1][1]==w*480:windows[-1][1]=(w+1)*480
+            else:windows.append([w*480,(w+1)*480])
+    regions=[]
+    for region in windows:
+        if regions and region[0]-regions[-1][1]<4800:regions[-1][1]=region[1]
+        else:regions.append(region)
+    assert [(r['start'],r['end']) for r in proposal['speech']['runs']]==[(time(a,48000),time(b,48000)) for a,b in regions] and regions,proposal['speech']
+    spans=[]
+    for a,b in regions:
+        span=[a-960,a,b,b+1920]
+        if span[3]<=0 or span[0]>=20*1920:continue
+        if spans and span[0]<=spans[-1][3]:spans[-1][2:]=span[2:]
+        else:spans.append(span)
+    keys=[]
+    for down,low,high,up in spans:
+        for t,value,mode in ([(down,1000,'linear')] if down<low else [])+[(low,300,'hold')]+([(high,300,'linear'),(up,1000,'hold')] if high<up else [(high,1000,'hold')]):
+            if 0<=t<=30*1920:keys.append({'time':time(t,48000),'value':value,'interpolation':mode})
+    assert proposal['operations']==[{'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':['bed'],'gain_curve':{'keys':keys}}}],proposal['operations']
+    ducked=apply(ducking,proposal['operations']);render(ducked,'ducked-music')
+    call({'command':'audio.duck','project':ducking,'input_root':str(root),'voice_track_id':'a','music_track_id':'a'},'INVALID_ARGUMENT')
+    call({'command':'audio.duck','project':ducking,'input_root':str(root),'voice_track_id':'v','music_track_id':'m'},'MISSING_TRACK')
+    passed.append('transitions.ducking_proposal_renders_exactly')
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS

@@ -13,6 +13,7 @@ pub mod composite;
 pub mod conform;
 pub mod delivery;
 pub mod documents;
+pub mod duck;
 pub mod effects;
 pub mod expressions;
 pub mod files;
