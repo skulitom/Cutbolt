@@ -325,17 +325,26 @@ fn replay(
     request_id: &str,
     payload_hash: &str,
 ) -> Result<Option<Receipt>> {
+    match recorded(connection, project_id, request_id)? {
+        Some((recorded, _)) if recorded != payload_hash => Err(error(
+            "REQUEST_ID_CONFLICT",
+            "Request ID was already committed with different arguments",
+        )),
+        found => Ok(found.map(|(_, receipt)| receipt)),
+    }
+}
+
+/// The committed request fingerprint and verified receipt for a request ID, if any.
+fn recorded(
+    connection: &Connection,
+    project_id: &str,
+    request_id: &str,
+) -> Result<Option<(String, Receipt)>> {
     let row: Option<(String, String, String)> = connection.query_row(
         "SELECT payload_hash,receipt,receipt_hash FROM requests WHERE project_id=?1 AND request_id=?2",
         params![project_id,request_id], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))
     ).optional()?;
     if let Some((recorded, receipt, hash)) = row {
-        if recorded != payload_hash {
-            return Err(error(
-                "REQUEST_ID_CONFLICT",
-                "Request ID was already committed with different arguments",
-            ));
-        }
         if digest(receipt.as_bytes()) != hash {
             return Err(error("STORE_CORRUPT", "Receipt checksum mismatch"));
         }
@@ -345,9 +354,26 @@ fn replay(
             return Err(error("STORE_CORRUPT", "Saved receipt identity mismatch"));
         }
         integrity::verify_row(connection, project_id, receipt.revision)?;
-        return Ok(Some(receipt));
+        return Ok(Some((recorded, receipt)));
     }
     Ok(None)
+}
+
+/// Read-only lookup of a committed request: lets an agent resuming after a lost response or crash
+/// learn whether a request ID took effect, without resending its arguments.
+pub fn receipt(root: &Path, project_id: &str, request_id: &str) -> Result<Receipt> {
+    check_id(request_id)?;
+    let mut connection = connect(root, false)?;
+    let tx = connection.transaction()?;
+    head(&tx, project_id)?;
+    recorded(&tx, project_id, request_id)?
+        .map(|(_, receipt)| receipt)
+        .ok_or_else(|| {
+            error(
+                "REQUEST_NOT_FOUND",
+                format!("No committed request {request_id:?} in project {project_id:?}"),
+            )
+        })
 }
 
 fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {

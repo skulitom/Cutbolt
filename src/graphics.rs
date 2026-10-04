@@ -13,6 +13,7 @@ use std::{
 };
 pub use unicode::{BaseDirection, TextLayout};
 
+/// Horizontal alignment of each line's advance width inside the text box: `left`, `center` or `right`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Align {
@@ -20,6 +21,7 @@ pub enum Align {
     Center,
     Right,
 }
+/// Line breaking: `none` (LF only), `character` (before a scalar or grapheme that would overflow the box) or `word` (Unicode line-break opportunities; requires `layout`).
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Wrap {
@@ -27,45 +29,68 @@ pub enum Wrap {
     Character,
     Word,
 }
+/// Text outside the box: `reject` fails with TEXT_OVERFLOW; `clip` discards and counts out-of-box coverage.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Overflow {
     Reject,
     Clip,
 }
+/// Shape primitive: `rectangle` or `ellipse` (inscribed in the rectangle), hard-edged at pixel centers.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Shape {
     Rectangle,
     Ellipse,
 }
+/// Inside stroke painted over the fill between the shape and the shape inset by `width`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Stroke {
+    /// Stroke width in pixels, 1..=256.
     pub width: u32,
+    /// Straight-alpha RGBA color as `[r, g, b, a]` bytes.
     pub color: [u8; 4],
 }
+/// Generated layer source for scene `graphics`, tagged by `kind`; drawn on the layer canvas with straight alpha.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Graphic {
+    /// Text laid out in a box with explicitly supplied external TrueType fonts.
     Text {
+        /// Text with LF line breaks; 1..=1024 Unicode scalars and at most 4096 UTF-8 bytes.
         text: String,
+        /// Ordered font identities under `input_root`, 1..=4; each scalar or grapheme uses the first font that has it.
         fonts: Vec<Identity>,
+        /// Font em size in pixels, 1..=512; the first baseline is `rect` y plus size.
         size: u16,
+        /// Straight-alpha RGBA text color as `[r, g, b, a]` bytes.
         color: [u8; 4],
+        /// Text box `[x, y, width, height]` in canvas pixels, sizes 1..=4096; must lie wholly inside the layer canvas.
         rect: [i32; 4],
+        /// Baseline spacing between lines in pixels, 1..=2048.
         line_height: u16,
+        /// Extra pixels between scalars (or shaped clusters) on a line, 0..=128.
         letter_spacing: u16,
+        /// Line alignment inside the box.
         align: Align,
+        /// Line breaking mode.
         wrap: Wrap,
+        /// Out-of-box policy.
         overflow: Overflow,
+        /// Optional Unicode shaping/bidi layout; omit for the left-to-right scalar layout `ltr_scalar_v1`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layout: Option<TextLayout>,
     },
+    /// Filled rectangle or ellipse with an optional inside stroke.
     Shape {
+        /// Primitive to draw.
         shape: Shape,
+        /// Bounding rectangle `[x, y, width, height]` in canvas pixels; x/y -32768..=32768, sizes 1..=4096; clips to the canvas.
         rect: [i32; 4],
+        /// Straight-alpha RGBA fill color as `[r, g, b, a]` bytes.
         fill: [u8; 4],
+        /// Optional inside stroke; omit or null for none.
         stroke: Option<Stroke>,
     },
 }
@@ -144,6 +169,22 @@ impl Cache {
 }
 fn invalid(message: &str) -> crate::Error {
     error("INVALID_GRAPHIC", message)
+}
+/// Glyph-space y of a rasterized bitmap's top edge. The rasterizer positions the outline with a
+/// sub-pixel offset `fract(1 - fract(height) - fract(ymin))` (wrapped into 0..1) below the bitmap top,
+/// while reporting `ymin` as a floor. When f32 scaling leaves bounds a hair from an integer, that offset
+/// approaches 1 and `ymin + height` sits one row below where the outline was drawn. Recompute the same
+/// offset with identical f32 operations and round the true top edge, so placement follows the drawing.
+pub(crate) fn bitmap_top(m: &fontdue::Metrics) -> i32 {
+    let fract = |v: f32| v - v.trunc();
+    let mut offset = fract(1.0 - fract(m.bounds.height) - fract(m.bounds.ymin));
+    if offset < 0.0 {
+        offset += 1.0;
+    }
+    if m.height == 0 {
+        return m.ymin + m.height as i32;
+    }
+    (m.bounds.ymin + m.bounds.height + offset).round() as i32
 }
 fn rect_valid(rect: [i32; 4]) -> bool {
     rect[..2].iter().all(|v| (-32768..=32768).contains(v))
@@ -249,8 +290,8 @@ pub(crate) fn rasterize(
                 || text.chars().count() > 1024
                 || fonts.is_empty()
                 || fonts.len() > 4
-                || !(1..=128).contains(size)
-                || !(1..=512).contains(line_height)
+                || !(1..=crate::scene::MAX_TEXT_SIZE).contains(size)
+                || !(1..=2048).contains(line_height)
                 || *letter_spacing > 128
                 || !rect_valid(*rect)
                 || rect[0] < 0
@@ -259,7 +300,7 @@ pub(crate) fn rasterize(
                 || rect[1] as u64 + rect[3] as u64 > height as u64
             {
                 return Err(invalid(
-                    "Text requires 1-1024 scalars/4096 bytes, 1-4 fonts, size 1-128, line height 1-512, spacing 0-128 and a box inside the canvas",
+                    "Text requires 1-1024 scalars/4096 bytes, 1-4 fonts, size 1-512, line height 1-2048, spacing 0-128 and a box inside the canvas",
                 ));
             }
             if layout.is_some() {
@@ -300,10 +341,10 @@ pub(crate) fn rasterize(
                 let metrics = cache.fonts[&fonts[index].path]
                     .font
                     .metrics(c, *size as f32);
-                if metrics.width > 512
-                    || metrics.height > 512
+                if metrics.width > crate::scene::MAX_GLYPH
+                    || metrics.height > crate::scene::MAX_GLYPH
                     || !metrics.advance_width.is_finite()
-                    || !(0.0..=512.0).contains(&metrics.advance_width)
+                    || !(0.0..=crate::scene::MAX_GLYPH as f32).contains(&metrics.advance_width)
                     || metrics.xmin.unsigned_abs() > 32768
                     || metrics.ymin.unsigned_abs() > 32768
                 {
@@ -359,15 +400,15 @@ pub(crate) fn rasterize(
                 for glyph in line {
                     let m = &glyph.metrics;
                     let x = rect[0] + (glyph.x + offset).round() as i32 + m.xmin;
-                    let y = baseline - m.ymin - m.height as i32;
+                    let y = baseline - bitmap_top(m);
                     if let std::collections::hash_map::Entry::Vacant(entry) =
                         cache_glyphs.entry((glyph.font, glyph.c))
                     {
                         glyph_pixels += m.width * m.height;
-                        if glyph_pixels > 16_000_000 {
+                        if glyph_pixels > crate::scene::MAX_DECODED_PIXELS {
                             return Err(error(
                                 "LIMIT_EXCEEDED",
-                                "Glyph coverage cache exceeds 16M pixels",
+                                "Glyph coverage cache exceeds 64M pixels",
                             ));
                         }
                         entry.insert(

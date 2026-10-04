@@ -11,6 +11,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// Color channel whose spill is suppressed: `red`, `green` or `blue`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
@@ -27,25 +28,37 @@ impl Channel {
         }
     }
 }
+/// Spill suppression: lowers the named channel's excess above the larger of the other two channels.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Spill {
+    /// Channel to suppress.
     pub channel: Channel,
+    /// Share of the excess removed in thousandths, 0..1000.
     pub strength_milli: u16,
 }
+/// Chroma key lowering alpha by opponent-channel distance from a screen color, with optional unmix and spill suppression.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChromaKey {
+    /// Screen color as encoded sRGB `[r, g, b]` bytes; must not be gray (all three equal).
     pub key_rgb: [u8; 3],
+    /// Distance in thousandths at or below which pixels are fully removed; at most `outer_milli`.
     pub inner_milli: u16,
+    /// Distance in thousandths at or above which pixels are fully kept, 0..1000; equal to inner for a hard key.
     pub outer_milli: u16,
+    /// Key strength in thousandths, 0..1000; 0 disables the key, including spill and unmix.
     pub strength_milli: u16,
+    /// Screen-color subtraction from soft edges in thousandths, 0..1000; default 0.
     #[serde(default)]
     pub unmix_milli: u16,
+    /// Optional spill suppression, applied throughout the mask, including fully kept pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spill: Option<Spill>,
+    /// Curve overriding `strength_milli` on the layer-local clock, 0..1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strength_curve: Option<Curve>,
+    /// Optional source-canvas mask limiting where the key applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<Box<Mask>>,
 }
@@ -163,6 +176,7 @@ impl Stage<'_> {
     }
 }
 
+/// Chroma key preset: `green_soft`/`blue_soft` use thresholds 60/180, `green_hard`/`blue_hard` 100/100, keying and de-spilling pure green or blue.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {

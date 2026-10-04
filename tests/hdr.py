@@ -273,7 +273,7 @@ def run(root):
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools']
-        assert len(catalog)==63 and not any(t['name']=='cutbolt_hdr_conform' for t in catalog)
+        assert len(catalog)==65 and not any(t['name']=='cutbolt_hdr_conform' for t in catalog)
         tool=next(t for t in catalog if t['name']=='cutbolt_hdr_inspect');assert tool['annotations']['readOnlyHint']
         assert client.rpc('tools/call',{'name':'cutbolt_hdr_conform','arguments':{}})['error']['code']==-32602
         arguments={'recipe':recipes['retime'],'input_root':str(sources)};Draft202012Validator(tool['inputSchema']).validate(arguments)

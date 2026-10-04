@@ -2,7 +2,7 @@
 
 `media.conform.inspect` accepts optional `recipe.remap` through CLI/library and the existing read-only MCP tool. `media.conform` compiles the same recipe to a new identity-bound reference asset. Keep the source and recipe outside the repository. Register the returned asset to trim, assemble, preview or queue ordinary saved-session edits. Re-editing the speed map requires a new conversion; session undo does not regenerate media.
 
-The existing [source matrix, color interpretation and publication rules](CONFORM.md) apply. Output remains 25 fps FFV1/RGB8 with 48 kHz stereo PCM16, up to 1,500 frames/60 seconds and 4 GiB of raw RGB. Source duration and decoding limits are unchanged. This feature does not change native timeline frame rates or the separate long-form synchronization acceptance criterion.
+The existing [source matrix, color interpretation and publication rules](CONFORM.md) apply. Output remains 25 fps FFV1/RGB8 with 48 kHz stereo PCM16, up to 45,000 frames/30 minutes. Source duration, streaming and random-access window limits are those of [media conversion](CONFORM.md). This feature does not change native timeline frame rates or the separate long-form synchronization acceptance criterion.
 
 ## Recipe
 

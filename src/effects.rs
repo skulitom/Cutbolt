@@ -9,9 +9,11 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// Piecewise-linear tone curve on normalized linear light; output knots need not be monotonic.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToneCurve {
+    /// 2..32 `[input, output]` knots where 0..65535 means 0..1; inputs strictly increase from 0 to 65535.
     pub points: Vec<[u16; 2]>,
 }
 impl ToneCurve {
@@ -42,53 +44,78 @@ impl ToneCurve {
     }
 }
 
+/// Primary grade in linear sRGB: exposure and white balance, contrast around 0.18, clamp to 0..1, then master and channel curves.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Grade {
+    /// Exposure in thousandths of a stop, -8000..8000; 1000 doubles linear light, 0 is neutral.
     pub exposure_milli: i32,
+    /// Contrast slope around linear 0.18 in thousandths, 0..4000; 1000 is neutral.
     pub contrast_milli: u16,
+    /// Linear `[r, g, b]` gains in thousandths, each 100..4000; `[1000, 1000, 1000]` is neutral.
     pub white_balance_milli: [u16; 3],
+    /// Tone curve applied to all channels after contrast; omit for identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub master_curve: Option<ToneCurve>,
+    /// Red tone curve applied after the master curve; omit for identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub red_curve: Option<ToneCurve>,
+    /// Green tone curve applied after the master curve; omit for identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub green_curve: Option<ToneCurve>,
+    /// Blue tone curve applied after the master curve; omit for identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blue_curve: Option<ToneCurve>,
+    /// Optional curves overriding the numeric controls on the layer-local clock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<GradeAnimation>,
 }
+/// Keyframe curves overriding grade controls, using the same ranges; declare at least one.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GradeAnimation {
+    /// Curve for `exposure_milli`, -8000..8000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exposure_milli: Option<Curve>,
+    /// Curve for `contrast_milli`, 0..4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contrast_milli: Option<Curve>,
+    /// Curve for the red white-balance gain, 100..4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub red_balance_milli: Option<Curve>,
+    /// Curve for the green white-balance gain, 100..4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub green_balance_milli: Option<Curve>,
+    /// Curve for the blue white-balance gain, 100..4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blue_balance_milli: Option<Curve>,
 }
+/// One ordered layer effect, tagged by `kind`. Effects run in list order on source pixels before compositing.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    /// Primary grade of every layer pixel; alpha is preserved.
     Grade(Grade),
+    /// Grade limited by a color qualifier and/or correction mask, blended by mix; alpha is preserved.
     SelectiveGrade(SelectiveGrade),
+    /// Chroma key that lowers alpha near a screen color.
     ChromaKey(crate::keying::ChromaKey),
 }
+/// Grade applied only where a color qualifier and/or correction mask select pixels.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SelectiveGrade {
+    /// Grade controls, as in a `grade` effect but without `kind`.
     pub grade: Grade,
+    /// Correction strength in thousandths, 0..1000; 0 bypasses, 1000 applies the full selected grade.
     pub mix_milli: u16,
+    /// Curve overriding `mix_milli` on the layer-local clock, 0..1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mix_curve: Option<Curve>,
+    /// HSL color selection; at least one of `qualifier` or `mask` is required.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qualifier: Option<crate::selection::Qualifier>,
+    /// Source-canvas correction mask; it weights the grade and never changes alpha.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<Box<crate::selection::Mask>>,
 }

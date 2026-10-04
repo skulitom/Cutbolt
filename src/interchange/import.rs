@@ -130,6 +130,7 @@ pub(super) fn prepare(request: &Import, document: &Value, a: &mut Analysis) -> R
             enabled: boolean(&value["enabled"], &path)?,
             clips: vec![],
             transitions: vec![],
+            composite: Default::default(),
         };
         named(a, value, &path, &track.id);
         let values = children(value, &path)?;

@@ -40,6 +40,7 @@ pub mod registry;
 pub mod remap;
 pub mod render;
 pub mod scene;
+pub mod schema;
 pub mod scopes;
 pub mod selection;
 pub mod sequences;
@@ -72,6 +73,19 @@ pub fn error(code: &'static str, message: impl Into<String>) -> Error {
     Error {
         code,
         message: message.into(),
+    }
+}
+
+/// Prefix an error with the JSON path of the request field that caused it, keeping its code.
+pub(crate) trait At<T> {
+    fn at(self, path: impl FnOnce() -> String) -> Result<T>;
+}
+impl<T> At<T> for Result<T> {
+    fn at(self, path: impl FnOnce() -> String) -> Result<T> {
+        self.map_err(|e| Error {
+            code: e.code,
+            message: format!("{}: {}", path(), e.message),
+        })
     }
 }
 

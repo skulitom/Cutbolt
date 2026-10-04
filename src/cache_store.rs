@@ -17,10 +17,13 @@ const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_ENTRIES: u32 = 4096;
 pub(crate) const FILE: &str = "cutbolt-cache.sqlite";
 
+/// Cache budget; least recently used entries are evicted until both limits hold. Results over the budget are produced but not stored.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
+    /// Maximum total payload bytes, 0 to 1073741824 (1 GiB); database overhead is extra.
     pub max_bytes: u64,
+    /// Maximum number of entries, 0 to 4096.
     pub max_entries: u32,
 }
 

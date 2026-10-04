@@ -21,50 +21,85 @@ use std::{
 };
 include!(concat!(env!("OUT_DIR"), "/engine_sources.rs"));
 
+/// Cacheable task, tagged by `type`; file tasks copy the cached result to a new unused `output` inside `output_root`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Task {
+    /// Probe metadata and content identity of one source file.
     Probe {
+        /// Absolute path of a file inside `input_root`.
         path: PathBuf,
+        /// Existing absolute directory containing `path`.
         input_root: PathBuf,
     },
+    /// Lossless proxy for one bound asset, like proxy.generate; returns operations to attach it.
     Proxy {
+        /// Project snapshot containing the asset.
         project: Project,
+        /// Must equal `project.revision`.
         expected_revision: u64,
+        /// ID of an asset with a bound identity.
         asset_id: String,
+        /// Size divisor 2, 4 or 8; project dimensions must divide exactly (25 fps only).
         scale: u32,
+        /// Existing absolute directory that project media paths resolve against.
         input_root: PathBuf,
+        /// Existing absolute directory that must contain `output`.
         output_root: PathBuf,
+        /// Unused absolute `.mkv` path inside `output_root`.
         output: PathBuf,
     },
+    /// One timeline frame as PNG, like preview.frame.
     Frame {
+        /// Project snapshot to preview.
         project: Project,
+        /// Frame time in rational seconds; a frame boundary before the timeline end.
         time: Time,
+        /// Existing absolute directory that project media paths resolve against.
         input_root: PathBuf,
+        /// Existing absolute directory that must contain `output`.
         output_root: PathBuf,
+        /// Unused absolute `.png` path inside `output_root`.
         output: PathBuf,
     },
+    /// Timeline interval as a lossless MKV, like preview.range.
     Interval {
+        /// Project snapshot to preview.
         project: Project,
+        /// Interval start in rational seconds on a frame boundary.
         start: Time,
+        /// Positive interval length in rational seconds, ending inside the timeline.
         duration: Time,
+        /// Existing absolute directory that project media paths resolve against.
         input_root: PathBuf,
+        /// Existing absolute directory that must contain `output`.
         output_root: PathBuf,
+        /// Unused absolute `.mkv` path inside `output_root`.
         output: PathBuf,
     },
+    /// Contact sheet PNG, like preview.sheet.
     Sheet {
+        /// Project snapshot to sample.
         project: Project,
+        /// Sheet times and layout.
         spec: preview::Sheet,
+        /// Existing absolute directory that project media paths resolve against.
         input_root: PathBuf,
+        /// Existing absolute directory that must contain `output`.
         output_root: PathBuf,
+        /// Unused absolute `.png` path inside `output_root`.
         output: PathBuf,
     },
 }
+/// cache.run request: performs or reuses one task through an identity-keyed local cache.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
+    /// Existing absolute directory holding the cache database; keep it apart from media.
     pub cache_root: PathBuf,
+    /// Cache budget, applied before the task runs.
     pub policy: Policy,
+    /// Task to perform or reuse.
     pub task: Task,
 }
 

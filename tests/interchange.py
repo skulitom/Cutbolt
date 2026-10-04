@@ -367,7 +367,7 @@ def run(root, reference_python):
     try:
         client.initialize()
         catalog = client.rpc('tools/list')['result']['tools']
-        assert len(catalog) == 63
+        assert len(catalog) == 65
         for command, fields, read_only in [('interchange.import',import_fields(authored),True),
             ('interchange.export.inspect',{'project':project,'input_root':str(sources)},True),
             ('interchange.export',{**export_fields,'output':str(output/'mcp.otio')},False)]:

@@ -27,22 +27,38 @@ const MODEL_BYTES: u64 = 483617219;
 const PROTOCOL: &str = "cutbolt-transcription-v1";
 const PROFILE: &str = "local-en-el-context-v1";
 
+/// Trusted local speech runtime configuration; nothing is installed or downloaded.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Runtime {
+    /// WSL distribution name: 1-64 ASCII letters, digits, `-`, `_` or `.`.
     pub distribution: String,
+    /// Absolute Linux path of the Python interpreter inside the distribution.
     pub python: String,
+    /// 1-8 absolute Linux package directories added to the Python path.
     pub python_paths: Vec<String>,
+    /// Absolute Windows path of the profile's pinned speech model file.
     pub model: PathBuf,
+    /// Absolute Windows directory holding the acoustic alignment model for `language`.
     pub alignment_root: PathBuf,
+    /// Worker thread count, 1-8.
     pub threads: u32,
 }
+/// Source media profile, tagged by `type`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Format {
+    /// 48 kHz stereo PCM16 WAV file.
     StereoWav,
-    ReferenceMovie { width: u32, height: u32 },
+    /// Reference movie in the 25 fps FFV1/PCM profile.
+    ReferenceMovie {
+        /// Frame width in pixels.
+        width: u32,
+        /// Frame height in pixels.
+        height: u32,
+    },
 }
+/// Analysed channel: `left`, `right`, or `mean` (equal mix of both).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
@@ -50,19 +66,31 @@ pub enum Channel {
     Right,
     Mean,
 }
+/// Request for transcript.transcribe: local speech recognition of one source interval into a transcript document.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transcribe {
+    /// ID of the returned transcript document, 1-128 bytes.
     pub id: String,
+    /// Identity-bound source; its duration must equal the actual 48 kHz sample count.
     pub source: transcript::Source,
+    /// Source media profile.
     pub format: Format,
+    /// Absolute source start, reduced rational seconds on the 48 kHz clock.
     pub start: Time,
+    /// Analysed length, 25 ms to 120 s on the 48 kHz clock; must end within the source.
     pub duration: Time,
+    /// Source channel to analyse.
     pub channel: Channel,
+    /// Spoken language.
     pub language: transcript::Language,
+    /// Absolute directory containing the source.
     pub input_root: PathBuf,
+    /// Existing absolute directory for an owned scratch directory, removed afterwards.
     pub scratch_root: PathBuf,
+    /// Local speech runtime configuration.
     pub runtime: Runtime,
+    /// Analysis deadline in seconds, 1-600.
     pub timeout_seconds: u32,
 }
 fn invalid(message: &str) -> crate::Error {

@@ -22,6 +22,7 @@ use std::{
 };
 const FPS: Time = Time { num: 25, den: 1 };
 const RAW_LIMIT: u64 = 4 * 1024 * 1024 * 1024;
+/// Source sample matrix: `rgb` (planar RGB, or bgr0 for SDR), `bt709` or `bt2020_ncl` (YUV444, non-constant luminance); a YUV matrix must match the declared primaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Matrix {
@@ -29,43 +30,68 @@ pub enum Matrix {
     Bt709,
     Bt2020Ncl,
 }
+/// Output sample depth: `rgb16` keeps HDR or wide gamut; `rgb8` requires SDR BT.709 output and returns a timeline asset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Depth {
     Rgb8,
     Rgb16,
 }
+/// Identity-bound HDR or high-bit-depth source (25 fps FFV1 with 48 kHz stereo PCM16 in MKV) and its declared interpretation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
+    /// Source file identity; path relative to `input_root`.
     pub file: Identity,
+    /// Declared transfer, primaries and display of the source values.
     pub encoding: Encoding,
+    /// Sample matrix of the stored pixels.
     pub matrix: Matrix,
+    /// Code range, scaled to the native bit depth.
     pub range: Range,
+    /// Policy for absent or unknown color tags.
     pub missing_tags: MissingTags,
 }
+/// Target encoding and sample depth of an HDR conversion.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Output {
+    /// Target transfer, primaries and display.
     pub encoding: Encoding,
+    /// Output RGB sample depth.
     pub depth: Depth,
 }
+/// HDR conversion recipe for hdr.inspect and hdr.conform; writes a tagged 25 fps FFV1/PCM16 MKV. Every field is required.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
+    /// Recipe format version; must be 1.
     pub schema_version: u32,
+    /// Asset ID for the asset returned by RGB8 output (1-128 bytes, not blank).
     pub id: String,
+    /// Source file and its declared interpretation.
     pub source: Source,
+    /// Target encoding and depth.
     pub output: Output,
+    /// Source position in rational seconds at output time zero; on a 48 kHz sample when `audio` is resample.
     pub source_in: Time,
+    /// Output duration in rational seconds; whole 25 fps frames, 1 to 1500 frames.
     pub duration: Time,
+    /// Constant speed factor from 1/16 to 16; must be 1 with `freeze`.
     pub rate: Time,
+    /// Play backwards from `source_in`; requires `audio: mute`.
     pub reverse: bool,
+    /// Hold `source_in` for every frame; requires unit `rate`, `reverse: false` and `audio: mute`.
     pub freeze: bool,
+    /// Output width in pixels; at most 4096 and 8M pixels in total.
     pub width: u32,
+    /// Output height in pixels; at most 2160 and 8M pixels in total.
     pub height: u32,
+    /// Exposure gain on absolute light in milli-EV, -8000 to 8000 (1000 is one stop).
     pub exposure_milliev: i32,
+    /// Tone-mapping policy; HDR to SDR needs `clip` or `reinhard`.
     pub tone: Tone,
+    /// Audio policy; reverse and freeze require `mute`.
     pub audio: Audio,
 }
 #[derive(Clone, Copy)]

@@ -13,50 +13,72 @@ use std::{
     path::Path,
 };
 
+/// Cut boundary clock: `video` (project frame rate) or `audio` (48 kHz samples).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Clock {
     Video,
     Audio,
 }
+/// Boundary rounding: `strict` rejects word boundaries off the clock; `outward` widens each cut to the surrounding ticks.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Rounding {
     Strict,
     Outward,
 }
+/// `reject` fails the plan; `allow_reported` proceeds and lists the affected word IDs in the result.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Policy {
     Reject,
     AllowReported,
 }
+/// Inclusive selection of consecutive transcript words to cut.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WordRange {
+    /// ID of the first selected word.
     pub first_id: String,
+    /// ID of the last selected word; not before `first_id` in document order.
     pub last_id: String,
 }
+/// Word-based cut request for transcript.plan, bound to one native media clip.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Spec {
+    /// ID of a concrete media clip (not a nested sequence) whose asset matches the transcript source identity and duration.
     pub clip_id: String,
+    /// Tracks to ripple-delete on; must include the bound clip's track.
     pub track_ids: Vec<String>,
+    /// 1-128 word selections; overlapping or touching selections merge into one cut.
     pub ranges: Vec<WordRange>,
+    /// Clock that cut boundaries must align to.
     pub clock: Clock,
+    /// How boundaries that are off the clock are handled.
     pub rounding: Rounding,
+    /// Policy for selected words whose origin is `estimated`.
     pub estimates: Policy,
+    /// Policy for unselected words that rounding would cut.
     pub collateral: Policy,
+    /// Linked-clip policy for the ripple delete.
     pub links: tracks::Linked,
+    /// Whether the timeline end shrinks with the cut.
     pub end_policy: track_edit::EndPolicy,
+    /// Handling of transitions touched by a cut.
     pub transitions: track_edit::TransitionPolicy,
 }
+/// Content-bound cut plan returned by transcript.plan; apply it unchanged in a transcript.cut operation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Plan {
+    /// Plan format version; must be 1.
     pub schema_version: u32,
+    /// SHA-256 hex of the planned project; any later project change makes the plan stale.
     pub project_fingerprint: String,
+    /// SHA-256 hex fingerprint of the transcript document the plan was made from.
     pub document_fingerprint: String,
+    /// Cut request the plan recomputes when applied.
     pub spec: Spec,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -501,6 +523,7 @@ mod tests {
                     enabled: true,
                     clips: vec![clip.clone()],
                     transitions: Vec::new(),
+                    composite: Default::default(),
                 })
                 .collect(),
             links: vec![tracks::Link {

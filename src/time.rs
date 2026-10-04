@@ -4,11 +4,13 @@ use std::cmp::Ordering;
 
 const MAX: u128 = 9_007_199_254_740_991;
 
-/// Nonnegative rational seconds (or a rational rate); no floating-point timeline math.
+/// Exact nonnegative rational seconds `num/den` (or a rational rate such as frames per second); `{"num":1,"den":25}` is one frame at 25 fps.
 #[derive(schemars::JsonSchema, Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Time {
+    /// Numerator, 0 to 9007199254740991 (2^53-1).
     pub num: u64,
+    /// Positive denominator, at most 9007199254740991 (2^53-1).
     pub den: u64,
 }
 
@@ -87,9 +89,21 @@ impl Time {
         let n = self.num as u128 * rate.num as u128;
         let d = self.den as u128 * rate.den as u128;
         if !n.is_multiple_of(d) {
+            let (mut a, mut b) = (n, d);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
             return Err(error(
                 "UNALIGNED_TIME",
-                "Time does not fall on an exact frame/sample boundary",
+                format!(
+                    "Time does not fall on an exact frame/sample boundary: {}/{} s is {}/{} units at {}/{} per second",
+                    self.num,
+                    self.den,
+                    n / a,
+                    d / a,
+                    rate.num,
+                    rate.den
+                ),
             ));
         }
         u64::try_from(n / d).map_err(|_| error("TIME_OVERFLOW", "Unit count overflow"))

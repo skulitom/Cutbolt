@@ -84,6 +84,8 @@ Observed on this machine on 2 October 2026; repeat preflight before implementati
 | GPU | NVIDIA GeForce RTX 4090, reported 24,564 MiB, driver 591.86; not an inference benchmark |
 | FFmpeg/ffprobe | Existing external tools and verified build are recorded in [DEPENDENCIES.md](DEPENDENCIES.md) |
 
+Later observation, 4 October 2026: PixelForge `pixelforge-agent` 0.7.0 at commit `d1dcb2a9d1aaadeb86663e997efc050a71881d44` worked unchanged with `tools/pixelforge_handoff.py` in an external demonstration. This is an observed compatibility, not a new acceptance result; record and test the exact commit again before relying on it.
+
 Keep the Qwen inference environment separate from the system Python and the Rust engine. Resolve, pin and record its actual Python/PyTorch/CUDA/package combination during the inference slice. The inventory above is not a recommendation to reuse those installed versions. FlashAttention is optional upstream; do not make a difficult Windows extension build a prerequisite for initial correctness.
 
 ### Model setup
@@ -109,7 +111,21 @@ This uses the separately installed `huggingface-hub` package (0.23.4 used for pr
 
 For a production worker, pass the absolute model directory to `Qwen3TTSModel.from_pretrained`, use a local reference WAV, and set `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` in that worker's environment. Test with networking unavailable; missing files must fail with an actionable error instead of triggering setup. Flags and downloaded files alone are not evidence of an offline inference test.
 
-The Base checkpoint uses reference-audio voice cloning. Obtain a short user-owned or otherwise permitted reference voice and its accurate transcript before the first real narration test. Do not silently download the upstream demo speaker. Preset speakers would require a separately selected CustomVoice checkpoint. Generated audio must be inspected for its real sample rate and channel count; `12Hz` in the model name is not its WAV sample rate. Qwen output is not evidence of word-level caption timing; alignment is a separate task.
+The Base checkpoint uses reference-audio voice cloning. Obtain a short user-owned or otherwise permitted reference voice and its accurate transcript before the first real narration test. Do not silently download the upstream demo speaker. For preset speakers without a reference recording, use the CustomVoice checkpoint below. Generated audio must be inspected for its real sample rate and channel count; `12Hz` in the model name is not its WAV sample rate. Qwen output is not evidence of word-level caption timing; alignment is a separate task.
+
+### Preset-speaker model (CustomVoice)
+
+`tools/download_qwen.py --repository` selects one of the pinned snapshots; the default remains Base:
+
+```powershell
+python tools/download_qwen.py --output-root C:\DEV\CutboltData\models --repository Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+```
+
+- Repository: `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`, revision `85e237c12c027371202489a0ec509ded67b5e4b5`; the model card reports Apache-2.0.
+- External directory: `C:\DEV\CutboltData\models\Qwen3-TTS-12Hz-0.6B-CustomVoice\85e237c12c027371202489a0ec509ded67b5e4b5`. All 13 snapshot files (2,498,388,392 bytes) verified against upstream digests on 4 October 2026, with the same receipt format as Base. Main model SHA-256 `bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb`; the bundled speech tokenizer has the same digest as Base.
+- Built-in speakers: aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu and vivian.
+
+An external demonstration ran this checkpoint under WSL with its own package directory (`qwen-tts` 0.1.1, `transformers` 4.57.3, `accelerate` 1.12.0, `torchaudio` 2.3.1+cu121 and `numpy` 1.26.4, reusing `torch` 2.3.1+cu121), with networking disabled. It loaded in 15 s, generated 54.8 s of speech in 89.8 s and peaked at 2.58 GB of GPU memory. Output is 24 kHz mono WAV, which scene and audio recipes convert to 48 kHz stereo. These are observations from one run, not acceptance evidence for Y06.
 
 ### External working directories
 

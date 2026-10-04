@@ -3,6 +3,7 @@ use crate::{Result, error, time::Time};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
+/// Interpolation from a key to the next: `hold` keeps the value, `linear`, or quadratic `ease_in`, `ease_out`, `ease_in_out` without overshoot.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Interpolation {
@@ -13,27 +14,38 @@ pub enum Interpolation {
     EaseInOut,
 }
 
+/// One curve key.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Keyframe {
+    /// Layer-local rational seconds, 0..layer duration; reduced denominator at most 1,000,000.
     pub time: Time,
+    /// Integer property value within the animated property's range.
     pub value: i32,
+    /// Interpolation toward the next key; unused on the last key.
     pub interpolation: Interpolation,
 }
 
+/// Keyframed integer property on the layer-local clock. Endpoint values hold outside the keys; samples round to nearest.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Curve {
+    /// 1..128 keys in any order; equal times, including equivalent fractions, are rejected.
     pub keys: Vec<Keyframe>,
+    /// Optional delay, speed and direction for evaluating the keys; omit to use key times as authored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retime: Option<Retime>,
 }
 
+/// Changes when and how fast a curve's keys play, without moving the layer or retiming source frames.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Retime {
+    /// Layer-local rational seconds, at most the layer duration; until then the first key holds (last when reversed).
     pub start: Time,
+    /// Positive rational speed multiplier, 1/16..16; denominators reduce to at most 1,000,000.
     pub rate: Time,
+    /// Play the keys from last to first; default false.
     #[serde(default)]
     pub reverse: bool,
 }

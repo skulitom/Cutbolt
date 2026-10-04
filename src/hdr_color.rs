@@ -2,6 +2,7 @@
 use crate::{Result, error};
 use serde::{Deserialize, Serialize};
 
+/// Transfer function: `pq` and `hlg` (HDR, BT.2020 primaries required), `srgb` or `bt709` (SDR, relative to display peak).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Transfer {
@@ -10,34 +11,49 @@ pub enum Transfer {
     Srgb,
     Bt709,
 }
+/// Color primaries with D65 white: `bt709` or `bt2020`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Primaries {
     Bt709,
     Bt2020,
 }
+/// Declared display luminance used to interpret or encode values; not measured from content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Display {
+    /// Peak luminance in nits, 48 to 10000; SDR at most 400, HLG 400 to 2000.
     pub peak_nits: u32,
+    /// Black level in millinits (5 is 0.005 nit), 0 to 1000 and below the peak.
     pub black_millinits: u32,
 }
+/// Declared transfer, primaries and display of a signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Encoding {
+    /// Transfer function of the encoded values.
     pub transfer: Transfer,
+    /// Color primaries; PQ and HLG require `bt2020`.
     pub primaries: Primaries,
+    /// Declared display peak and black level.
     pub display: Display,
 }
+/// Tone-mapping policy applied after exposure and gamut conversion, tagged by `mode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Tone {
+    /// Keep absolute light; not allowed for HDR to SDR conversion.
     Preserve,
+    /// Divide by reference white, clamp to 1 and scale to the target peak; SDR output only.
     Clip {
+        /// Source luminance in nits mapped to the target display peak, 48 to 1000.
         reference_white_nits: u32,
     },
+    /// Global extended Reinhard curve on max(R,G,B); SDR output only.
     Reinhard {
+        /// Luminance in nits that normalizes the curve input (x = max(R,G,B)/white), 48 to 1000.
         reference_white_nits: u32,
+        /// Source luminance in nits mapped to the target display peak, from reference white to 10000.
         source_peak_nits: u32,
     },
 }

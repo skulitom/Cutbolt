@@ -280,7 +280,7 @@ def run(root):
 
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         tool=next(t for t in catalog if t['name']=='cutbolt_reframe_inspect');assert tool['annotations']['readOnlyHint']
         args={k:v for k,v in styled_result[0].items() if k!='command'}
         Draft202012Validator(tool['inputSchema']).validate(args)

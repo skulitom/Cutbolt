@@ -278,7 +278,7 @@ def run(root):
     bad(lambda l:l.update(frames=[{"image":fonts[0],"hold":time(1,25),"offset":[0,0],"anchor":[0,0]}]),"INVALID_SCENE")
     for field,value in [("end","loop"),("timing","sample_start"),("alpha_mode","premultiplied")]:
         bad(lambda l,f=field,v=value:l.update({f:v}),"INVALID_SCENE")
-    for key,value in [("text",""),("text","A"*1025),("size",0),("size",129),("line_height",0),("letter_spacing",129),("fonts",[]),("fonts",fonts*3),("rect",[-1,0,30,30]),("rect",[0,0,97,64])]:
+    for key,value in [("text",""),("text","A"*1025),("size",0),("size",513),("line_height",0),("letter_spacing",129),("fonts",[]),("fonts",fonts*3),("rect",[-1,0,30,30]),("rect",[0,0,97,64])]:
         bad(lambda l,k=key,v=value:l["graphics"].update({k:v}))
     for value in ["A\tB","A\rB","A\u0301","مرحبا","A\u202eB","😀"]:
         bad(lambda l,v=value:l["graphics"].update(text=v),"UNSUPPORTED_TEXT")

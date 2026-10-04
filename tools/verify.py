@@ -5,15 +5,21 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+
+import psutil
 
 from progress import ROOT, source_hashes
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y-%m-%d"), help="Verification date; pass the user's local date when different from UTC")
 parser.add_argument("--decode-device", type=int, required=True, help="Explicit local CUDA device ordinal for real hardware-decode acceptance; no software substitution")
+parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2), help="Concurrent correctness fixtures; budget-gated fixtures always run in their own lane")
 args = parser.parse_args()
 datetime.strptime(args.date, "%Y-%m-%d")
 if not 0 <= args.decode_device < 31:
@@ -57,188 +63,144 @@ tests = [name for name in tests if name not in {"rust:store::tests::crash_worker
 if not tests:
     raise SystemExit("No Rust test evidence was collected")
 command(["cargo", "build", "--locked"])
-with tempfile.TemporaryDirectory(prefix="cutbolt-verify-") as directory:
-    command([sys.executable, "tests/integration.py", "--output", directory])
-    integration = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-    command([sys.executable, "tests/agents.py", "--fixture", directory])
-    agents = json.loads((Path(directory) / "agents/verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-queue-recovery-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/queue_recovery.py", "--output", directory])
-    queue_recovery = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-interchange-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/interchange.py", "--output", directory, "--reference-python", otio_python])
-    interchange = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-native-projects-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/native_projects.py", "--output", directory, "--fixture", native_fixture])
-    native_projects = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-portable-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/portable_projects.py", "--output", directory, "--legacy-engine", legacy_store_engine])
-    portable_projects = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-render-failures-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/render_failures.py", "--output", directory])
-    render_failures = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-delivery-profiles-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/delivery_profiles.py", "--output", directory, "--device", str(args.decode_device)])
-    delivery_profiles = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-native-timing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/native_timing.py", "--output", directory, "--long-form"])
-    native_timing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-    if not native_timing["long_form"]:
-        raise SystemExit("Full timing verification requires the complete long-form fractional render")
-with tempfile.TemporaryDirectory(prefix="cutbolt-export-formats-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/export_formats.py", "--output", directory])
-    export_formats = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-image-sequences-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/image_sequences.py", "--output", directory, "--long-form"])
-    image_sequences = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-    if not image_sequences["long_form"]:
-        raise SystemExit("Full lossless alpha acceptance requires the complete long-form render")
-with tempfile.TemporaryDirectory(prefix="cutbolt-long-form-4k-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/long_form_4k.py", "--output", directory, "--long-form"])
-    long_form_4k = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-    if not long_form_4k["long_gate_passed"]:
-        raise SystemExit("Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")
-with tempfile.TemporaryDirectory(prefix="cutbolt-long-form-stress-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/long_form_stress.py", "--output", directory])
-    long_form_stress = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-sessions-") as directory:
-    output = Path(directory) / "sessions"
-    command([sys.executable, "tests/sessions.py", "--output", str(output)])
-    sessions = json.loads((output / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-scenes-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/scenes.py", "--output", directory])
-    scenes = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-expressions-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/expressions.py", "--output", directory])
-    expressions = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-temporal-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/temporal.py", "--output", directory])
-    temporal = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-geometry-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/geometry.py", "--output", directory])
-    geometry = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-segmentation-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/segmentation.py", "--output", directory, "--runtime-python", segmentation_python])
-    segmentation = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-animation-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/animation.py", "--output", directory])
-    animation = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-compositing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/compositing.py", "--output", directory])
-    compositing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-easing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/easing.py", "--output", directory])
-    easing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-registry-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/registry.py", "--output", directory])
-    registry = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-editing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/editing.py", "--output", directory])
-    editing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-audio-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/audio.py", "--output", directory])
-    audio = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-audio-processing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/audio_processing.py", "--output", directory])
-    audio_processing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-conform-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/conform.py", "--output", directory])
-    conform = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-acceleration-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/acceleration.py", "--output", directory, "--device", str(args.decode_device)])
-    acceleration = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-proxies-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/proxies.py", "--output", directory])
-    proxies = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-timeline-edges-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/timeline_edges.py", "--output", directory])
-    timeline_edges = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-graphics-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/graphics.py", "--output", directory])
-    graphics = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-templates-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/templates.py", "--output", directory])
-    templates = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-unicode-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/unicode_text.py", "--output", directory])
-    unicode_text = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-captions-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/captions.py", "--output", directory])
-    captions = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-grading-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/grading.py", "--output", directory])
-    grading = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-selection-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/selection.py", "--output", directory])
-    selection = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-keying-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/keying.py", "--output", directory])
-    keying = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-delivery-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/delivery.py", "--output", directory])
-    delivery = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-color-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/color.py", "--output", directory])
-    color = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-luts-scopes-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/luts_scopes.py", "--output", directory])
-    luts_scopes = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-hdr-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/hdr.py", "--output", directory])
-    hdr = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-tracks-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/tracks.py", "--output", directory])
-    tracks = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-transitions-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/transitions.py", "--output", directory])
-    transitions = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-track-edits-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/track_edits.py", "--output", directory])
-    track_edits = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-sequences-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/sequences.py", "--output", directory])
-    sequences = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-multicam-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/multicam.py", "--output", directory])
-    multicam = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-synchronization-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/synchronization.py", "--output", directory])
-    synchronization = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-spatial-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/spatial.py", "--output", directory])
-    spatial = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-tracking-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/tracking.py", "--output", directory])
-    tracking = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-stabilization-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/stabilization.py", "--output", directory])
-    stabilization = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-reframing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/reframing.py", "--output", directory])
-    reframing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-transcripts-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/transcripts.py", "--output", directory])
-    transcripts = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-cache-previews-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/cache_previews.py", "--output", directory])
-    cache_previews = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-transcription-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/transcription.py", "--output", directory, "--runtime", speech_runtime])
-    transcription = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-remapping-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/remapping.py", "--output", directory])
-    remapping = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-audio-routing-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/audio_routing.py", "--output", directory])
-    audio_routing = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-audio-repair-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/audio_repair.py", "--output", directory])
-    audio_repair = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-with tempfile.TemporaryDirectory(prefix="cutbolt-recording-") as directory:
-    command([sys.executable, "-X", "utf8", "tests/recording.py", "--output", directory])
-    recording = json.loads((Path(directory) / "verification.json").read_text(encoding="utf-8"))
-    if not recording["sustained"]["long_gate_passed"]:
-        raise SystemExit("Full recording verification requires the sustained native capture gate")
+
+# Fixture scheduling. Correctness fixtures share the machine in a memory-aware pool. Fixtures that
+# assert wall-clock or memory budgets, or report throughput, run afterwards in one sequential lane;
+# the long-form 4K render, whose budget leaves a wide margin, runs beside that lane rather than beside
+# the pool. The registry edit-latency budget and the sustained real-time capture run last on a quiet
+# machine: beside other work the 5-second edit budget is marginal, and a delayed capture packet is
+# (correctly) rejected as a discontinuity. Every failure is reported as soon as it happens.
+PY = [sys.executable, "-X", "utf8"]
+
+
+def fixture(name, *extra, lane="pool", result="verification.json", check=None, utf8=True):
+    script = (PY if utf8 else [sys.executable]) + [f"tests/{name}.py"]
+    output = "{dir}" if result == "verification.json" else "{dir}/" + result.split("/")[0]
+    return {"name": name, "lane": lane, "commands": [script + ["--output", output, *extra]], "results": {name: result}, "check": check}
+
+
+def value_at(value, field):
+    for key in field.split("."):
+        value = value[key]
+    return value
+
+
+def require(field, message):
+    return lambda values: None if all(value_at(v, field) for v in values.values()) else message
+
+
+STAGES = [
+    {"name": "integration", "lane": "pool", "check": None,
+     "commands": [[sys.executable, "tests/integration.py", "--output", "{dir}"], [sys.executable, "tests/agents.py", "--fixture", "{dir}"]],
+     "results": {"integration": "verification.json", "agents": "agents/verification.json"}},
+    fixture("native_timing", "--long-form", check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
+    fixture("image_sequences", "--long-form", check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
+    fixture("queue_recovery"),
+    fixture("interchange", "--reference-python", otio_python),
+    fixture("native_projects", "--fixture", native_fixture),
+    fixture("portable_projects", "--legacy-engine", legacy_store_engine),
+    fixture("render_failures"),
+    fixture("delivery_profiles", "--device", str(args.decode_device)),
+    fixture("export_formats"),
+    fixture("sessions", result="sessions/verification.json", utf8=False),
+    fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
+    fixture("audio_processing"), fixture("conform"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
+    fixture("templates"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
+    fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("track_edits"),
+    fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
+    fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
+    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime), fixture("remapping"),
+    fixture("recording", lane="quiet", check=require("sustained.long_gate_passed", "Full recording verification requires the sustained native capture gate")),
+    fixture("long_form_4k", "--long-form", lane="long", check=require("long_gate_passed", "Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")),
+    fixture("long_form_stress", lane="gated"), fixture("expressions", lane="gated"), fixture("temporal", lane="gated"),
+    fixture("geometry", lane="gated"), fixture("segmentation", "--runtime-python", segmentation_python, lane="gated"),
+    fixture("registry", lane="quiet"), fixture("acceleration", "--device", str(args.decode_device), lane="gated"),
+    fixture("unicode_text", lane="gated"), fixture("reframing", lane="gated"), fixture("cache_previews", lane="gated"),
+    fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated"),
+    fixture("native_scenes", lane="gated", result="run/verification.json"),
+    fixture("agent_ergonomics", lane="gated", result="run/verification.json"),
+]
+assert len({s["name"] for s in STAGES}) == len(STAGES)
+try:
+    previous = json.loads((ROOT / "verification/latest.json").read_text(encoding="utf-8"))["verification_timing"]["stages"]
+except (OSError, KeyError, ValueError):
+    previous = {}
+started_at = time.monotonic()
+lock = threading.Lock()
+outcomes = {}
+
+
+def log(message):
+    elapsed = int(time.monotonic() - started_at)
+    with lock:
+        print(f"[{elapsed // 60:3d}:{elapsed % 60:02d}] {message}", flush=True)
+
+
+def execute(stage):
+    directory = Path(tempfile.mkdtemp(prefix=f"cutbolt-{stage['name'].replace('_', '-')}-"))
+    began = time.monotonic()
+    outcome = {"ok": False}
+    try:
+        for argv in stage["commands"]:
+            result = subprocess.run([a.replace("{dir}", str(directory)) for a in argv], cwd=ROOT, capture_output=True,
+                                    text=True, encoding="utf-8", errors="replace")
+            if result.returncode:
+                outcome["log"] = f"exit {result.returncode}\n{result.stdout[-4000:]}\n{result.stderr[-8000:]}"
+                return
+        values = {key: json.loads((directory / path).read_text(encoding="utf-8")) for key, path in stage["results"].items()}
+        problem = stage["check"](values) if stage["check"] else None
+        if problem:
+            outcome["log"] = problem
+            return
+        outcome.update(ok=True, values=values)
+    except Exception as error:  # Report harness problems with the other failures.
+        outcome["log"] = f"{type(error).__name__}: {error}"
+    finally:
+        outcome["seconds"] = round(time.monotonic() - began, 3)
+        shutil.rmtree(directory, ignore_errors=True)
+        with lock:
+            outcomes[stage["name"]] = outcome
+        log(f"{stage['name']} {'passed' if outcome['ok'] else 'FAILED'} in {outcome['seconds']:.0f} s")
+        if not outcome["ok"]:
+            with lock:
+                print(f"----- {stage['name']} output -----\n{outcome['log']}\n-----", flush=True)
+
+
+def run_phase(lanes):
+    """Run lanes concurrently; each lane starts its stages in order up to its own concurrency limit."""
+    queues = [(list(stages), limit, memory_aware) for stages, limit, memory_aware in lanes]
+    running = [[] for _ in queues]
+    while any(queue for queue, _, _ in queues) or any(t.is_alive() for active in running for t in active):
+        for (queue, limit, memory_aware), active in zip(queues, running):
+            active[:] = [t for t in active if t.is_alive()]
+            while queue and len(active) < limit:
+                if memory_aware and active and psutil.virtual_memory().available < 6 * 1024**3:
+                    break
+                stage = queue.pop(0)
+                log(f"{stage['name']} started")
+                thread = threading.Thread(target=execute, args=(stage,), daemon=True)
+                thread.start()
+                active.append(thread)
+        time.sleep(0.5)
+
+
+def lane(name):
+    stages = [s for s in STAGES if s["lane"] == name]
+    # Longest first, using the previous verified run's stage times when available.
+    return sorted(stages, key=lambda s: -previous.get(s["name"], 0)) if name == "pool" else stages
+
+
+run_phase([(lane("pool"), args.jobs, True)])
+run_phase([(lane("long"), 1, False), (lane("gated"), 1, False)])
+run_phase([(lane("quiet"), 1, False)])
+failures = {name: outcome for name, outcome in outcomes.items() if not outcome["ok"]}
+if failures or len(outcomes) != len(STAGES):
+    raise SystemExit(f"{len(failures)} of {len(STAGES)} verification stages failed: {', '.join(failures)}")
+results = {key: value for outcome in outcomes.values() for key, value in outcome["values"].items()}
+# The report below refers to each fixture's evidence by its stage name.
+globals().update(results)
+verification_timing = {"jobs": args.jobs, "fixture_wall_seconds": round(time.monotonic() - started_at, 3),
+                       "stages": {name: outcome["seconds"] for name, outcome in sorted(outcomes.items())}}
 if source_hashes() != starting_hashes:
     raise SystemExit("Source changed during verification; rerun against a stable checkout")
 report = {
@@ -308,6 +270,11 @@ report = {
     "image_sequence_evidence": image_sequences,
     "long_form_4k_evidence": long_form_4k,
     "long_form_stress_evidence": long_form_stress,
+    "verification_timing": verification_timing,
+    "native_scene_evidence": native_scenes,
+    "overlay_evidence": overlays,
+    "large_import_evidence": large_imports,
+    "agent_ergonomics_evidence": agent_ergonomics,
 }
 report["passed"] += cache_previews["passed"]
 report["passed"] += expressions["passed"]
@@ -345,6 +312,10 @@ report["passed"] += audio_repair["passed"]
 report["passed"] += recording["passed"]
 report["passed"] += unicode_text["passed"]
 report["passed"] += reframing["passed"]
+report["passed"] += native_scenes["passed"]
+report["passed"] += overlays["passed"]
+report["passed"] += large_imports["passed"]
+report["passed"] += agent_ergonomics["passed"]
 (ROOT / "verification").mkdir(exist_ok=True)
 (ROOT / "verification/latest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 print(command([sys.executable, "tools/progress.py"]).strip())
@@ -372,6 +343,8 @@ print(f"Passed {len(audio_repair['passed'])} dialogue repair checks.")
 print(f"Passed {len(recording['passed'])} recording checks, including sustained native capture.")
 print(f"Passed {len(unicode_text['passed'])} Unicode layout and rendered-integration checks.")
 print(f"Passed {len(reframing['passed'])} subject-reframing checks.")
+print(f"Passed {len(native_scenes['passed'])} native-resolution scene/tilemap checks and {len(overlays['passed'])} alpha overlay-track checks.")
+print(f"Passed {len(large_imports['passed'])} large-import checks and {len(agent_ergonomics['passed'])} agent-ergonomics checks.")
 print(f"Passed {len(transcripts['passed'])} transcript-editing checks; recognition acceptance is separate.")
 print(f"Passed {len(transcription['passed'])} native offline recognition, correction and lifetime checks.")
 print(f"Passed {len(cache_previews['passed'])} cache, contact-sheet and cold/warm latency checks.")

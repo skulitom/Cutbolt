@@ -30,33 +30,49 @@ fn sample_index(time: Time) -> Result<usize> {
         .map_err(|_| error("TIME_OVERFLOW", "Sample index exceeds the platform range"))
 }
 
+/// Caller-declared noise-only interval of the original source, used to learn the noise profile.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Region {
+    /// Start in the original source (not the output), rational seconds on the 48 kHz grid.
     pub start: Time,
+    /// Length, rational seconds on the 48 kHz grid; at least 4096 samples.
     pub duration: Time,
 }
+/// Fixed-profile spectral noise suppression learned from declared noise-only regions.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Noise {
+    /// 1..8 non-overlapping regions inside the source, at most 10 seconds combined.
     pub regions: Vec<Region>,
+    /// Noise-power subtraction scale, 0..3000 (1000 subtracts the estimate once; 0 bypasses); default 1250.
     #[serde(default = "strength")]
     pub strength_milli: u32,
+    /// Minimum amplitude gain per bin, 0..1000 (1000 bypasses); default 100.
     #[serde(default = "floor")]
     pub floor_milli: u32,
 }
+/// Dialogue-repair recipe (`pcm-dialogue-repair-v1`) for a 48 kHz mono or stereo PCM16 WAV; output keeps the selected sample count and layout.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
+    /// Recipe schema version; must be 1.
     pub schema_version: u32,
+    /// Recipe ID, 1..128 bytes, not blank.
     pub id: String,
+    /// Source WAV: path relative to `input_root`, lowercase SHA-256 hex and byte count, at most 64 MiB.
     pub source: Identity,
+    /// Start of the repaired range in the source, rational seconds on the 48 kHz grid.
     pub source_in: Time,
+    /// Output length, rational seconds on the 48 kHz grid; 1 sample to 60 seconds, inside the source.
     pub duration: Time,
+    /// Optional spectral noise suppression; omit to skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise: Option<Noise>,
+    /// Subtract each channel's mean over the output after suppression; default false.
     #[serde(default)]
     pub remove_dc: bool,
+    /// Ordered EQ/compression run after rounding, at most 8; default empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
 }

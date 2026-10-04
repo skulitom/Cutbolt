@@ -329,7 +329,7 @@ def run(root):
 
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         tool=next(t for t in catalog if t['name']=='cutbolt_scene_inspect')
         Draft202012Validator(tool['inputSchema']).validate({'scene':scene,'input_root':str(sources)})
         inspected=client.call('scene.inspect',scene=scene,input_root=str(sources));assert inspected['geometry']==receipt['geometry']

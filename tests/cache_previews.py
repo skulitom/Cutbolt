@@ -412,7 +412,7 @@ def run(root):
         client.initialize()
         catalog = client.rpc('tools/list')['result']['tools']
         names = {t['name'] for t in catalog}
-        assert len(catalog) == len(names) == 63
+        assert len(catalog) == len(names) == 65
         assert {'cutbolt_cache_inspect', 'cutbolt_cache_prune'} <= names
         assert 'cutbolt_cache_run' not in names and 'cutbolt_preview_sheet' not in names
         for name, fields in (('cache.inspect', {'cache_root': str(budget)}), ('cache.prune', {'cache_root': str(budget), 'policy': {'max_bytes': 0, 'max_entries': 0}})):

@@ -2,10 +2,13 @@
 use crate::{Result, error};
 use serde::{Deserialize, Serialize};
 
+/// Exact signed rational `num/den`; once reduced, the numerator magnitude is at most 9007199254740991 and den at most 1000000000000.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Number {
+    /// Signed numerator.
     pub num: i64,
+    /// Positive denominator; zero rejects.
     pub den: u64,
 }
 
@@ -104,6 +107,7 @@ impl Number {
     }
 }
 
+/// Expression value type: `scalar` (exact rational), `vector2` (two rationals) or `boolean`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
@@ -112,6 +116,7 @@ pub enum Kind {
     Boolean,
 }
 
+/// Typed expression value as `{"type": ..., "value": ...}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "type",
@@ -120,9 +125,21 @@ pub enum Kind {
     deny_unknown_fields
 )]
 pub enum Value {
-    Scalar(Number),
-    Vector2([Number; 2]),
-    Boolean(bool),
+    /// Scalar value.
+    Scalar(
+        /// Exact rational `{num, den}`.
+        Number,
+    ),
+    /// Two-component vector value.
+    Vector2(
+        /// Exact rationals as `[x, y]`.
+        [Number; 2],
+    ),
+    /// Boolean value.
+    Boolean(
+        /// True or false.
+        bool,
+    ),
 }
 
 impl Value {

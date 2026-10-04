@@ -1,6 +1,7 @@
 //! Bounded, explicit delivery settings; no arbitrary encoder arguments.
 use super::*;
 
+/// H.264 stream profile: `baseline720p` (Constrained Baseline 3.1, up to 1280x720), `main_hd` (Main 4.0, up to 1920x1080), `high_hd` (High 4.0, up to 1920x1080). Dimensions must be even; no resizing.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Compatibility {
@@ -38,17 +39,26 @@ impl Compatibility {
     }
 }
 
+/// H.264 rate control, tagged by `mode`. Maximum bitrate is 100000 to 12000000 bits/s (baseline720p) or 20000000; buffer is at least the maximum and at most 14000000 or 25000000 bits.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RateControl {
+    /// Constant-quality encoding with a buffering cap.
     Quality {
+        /// Constant rate factor, 10 to 35; lower means higher quality and larger output.
         crf: u8,
+        /// Encoder maximum rate in bits/s.
         maximum_bitrate: u32,
+        /// Rate-control buffer in bits.
         buffer_size: u32,
     },
+    /// Two-pass encoding toward an average video bitrate.
     TwoPass {
+        /// Target average video bitrate in bits/s, 100000 to `maximum_bitrate`.
         bitrate: u32,
+        /// Encoder maximum rate in bits/s.
         maximum_bitrate: u32,
+        /// Rate-control buffer in bits.
         buffer_size: u32,
     },
 }
@@ -73,10 +83,13 @@ impl RateControl {
     }
 }
 
+/// Explicit H.264 encoder settings; omitting them selects high_hd with CRF 18, 12000000 bits/s maximum and a 24000000-bit buffer.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct H264 {
+    /// Stream profile and level, which bound dimensions and rates.
     pub compatibility: Compatibility,
+    /// Quality or two-pass bitrate control.
     pub rate_control: RateControl,
 }
 impl Default for H264 {

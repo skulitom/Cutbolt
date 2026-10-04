@@ -30,6 +30,7 @@ pub(crate) fn id_ok(id: &str) -> bool {
     !id.trim().is_empty() && id.len() <= 128
 }
 
+/// Clip channel policy: `duplicate_mono` copies mono input to both stereo channels; `preserve_stereo` keeps stereo input; `preserve_mono` keeps mono input and `preserve_layout` keeps the source's named layout (these two require mix routing).
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Channels {
@@ -39,45 +40,69 @@ pub enum Channels {
     PreserveLayout,
 }
 
+/// Cut of one PCM16 WAV placed on a mix track, with gain, linear fades and optional gain automation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Clip {
+    /// Clip ID unique across every track of the mix; 1..128 bytes, not blank.
     pub id: String,
+    /// Source WAV: path relative to `input_root`, lowercase SHA-256 hex and byte count (mono/stereo PCM16 at 24, 44.1 or 48 kHz).
     pub file: Identity,
+    /// Channel policy; must match the decoded source layout.
     pub channels: Channels,
+    /// Placement in the mix, rational seconds on the 48 kHz sample grid.
     pub start: Time,
+    /// Cut start in the source, rational seconds aligned to the source's sample rate.
     pub source_in: Time,
+    /// Positive length, rational seconds on the 48 kHz grid; must fit both the source and the mix.
     pub duration: Time,
+    /// Linear amplitude gain, 1000 = unity, 0..4000; default 1000. `gain_curve` replaces it when set.
     #[serde(default = "unity")]
     pub gain_milli: u32,
+    /// Silence the clip while still validating it; default false.
     #[serde(default)]
     pub mute: bool,
+    /// Linear fade-in from the clip start, rational seconds on the 48 kHz grid, at most `duration`; default zero.
     #[serde(default = "zero")]
     pub fade_in: Time,
+    /// Linear fade-out ending at the clip end, rational seconds on the 48 kHz grid, at most `duration`; default zero.
     #[serde(default = "zero")]
     pub fade_out: Time,
+    /// Optional gain automation in linear milli-units 0..4000 on a clip-local clock; replaces `gain_milli`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain_curve: Option<Curve>,
 }
+/// Mix track; its gain and mute apply to every clip on it.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Track {
+    /// Track ID unique within the mix; 1..128 bytes, not blank.
     pub id: String,
+    /// Linear gain multiplied into each clip, 1000 = unity, 0..4000; default 1000.
     #[serde(default = "unity")]
     pub gain_milli: u32,
+    /// Silence the whole track; default false.
     #[serde(default)]
     pub mute: bool,
+    /// Clips on this track; overlapping clips sum.
     pub clips: Vec<Clip>,
 }
+/// Sample-based PCM mix recipe (`pcm-mix-v1`) rendered as 48 kHz PCM16; stereo unless `routing` selects another layout.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Mix {
+    /// Recipe schema version; must be 1.
     pub schema_version: u32,
+    /// Mix ID, 1..128 bytes, not blank.
     pub id: String,
+    /// Output length, rational seconds on the 48 kHz grid; 1 sample to 60 seconds.
     pub duration: Time,
+    /// Up to 16 tracks, with at most 128 clips and 8,000,000 summed clip samples in total.
     pub tracks: Vec<Track>,
+    /// Ordered master effects, at most 8, run after summation and before final PCM16 saturation; default empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<crate::audio_processing::Effect>,
+    /// Optional bus and channel routing graph; omit for the plain stereo mix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<crate::audio_routing::Routing>,
 }

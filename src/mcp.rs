@@ -1,14 +1,14 @@
 //! Local MCP tools over newline-delimited JSON-RPC, pinned to the 2025-11-25 contract.
-use crate::{
-    Result,
-    commands::{self, Request},
-};
+use crate::{Result, commands};
 use serde_json::{Value, json};
-use std::io::{self, BufRead, Write};
+use std::{
+    io::{self, BufRead, Write},
+    sync::OnceLock,
+};
 const MAX_LINE: usize = 4 * 1024 * 1024;
 const VERSION: &str = "2025-11-25";
 
-fn description(command: &str) -> &'static str {
+pub(crate) fn description(command: &str) -> &'static str {
     match command {
         "native.import" => {
             "Validate an actual native project identity, an external public-interface transfer and its reviewed exact-build acceptance matrix. Return a proposed editing snapshot only after all nonblocking host/editorial losses are acknowledged. Does not parse the proprietary format, execute the adapter, fetch media or modify files/sessions."
@@ -178,6 +178,9 @@ fn description(command: &str) -> &'static str {
         "session.restore" => {
             "Restore target_revision as a new undoable revision. Use history to choose a state. Reuse request_id only for an identical retry."
         }
+        "session.receipt" => {
+            "Look up whether a request ID was committed, without resending its arguments. Returns the original receipt, or REQUEST_NOT_FOUND if it never took effect. Use after a lost response or restart before deciding to retry."
+        }
         "session.history" => {
             "Read newest-first revision summaries. limit defaults to 50 (1-200). Pass next_before_revision as before_revision for the next page; null means finished."
         }
@@ -199,27 +202,88 @@ fn description(command: &str) -> &'static str {
         "job.resume" => {
             "Reconcile saved publication and wake a Windows worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
         }
-        _ => "Unsupported command",
+        "schema" => {
+            "Return the complete JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template or audio_routing. Read-only."
+        }
+        "image.sequence.compile" => {
+            "Compile a validated numbered PNG recipe into a transparent lossless movie or an explicitly flattened native editing asset at an unused output path. Blocking CLI/library command."
+        }
+        "cache.run" => {
+            "Produce or reuse one content-checked cached probe, proxy, frame, interval or contact sheet under an explicit cache root and byte/entry policy. Blocking CLI/library command."
+        }
+        "preview.sheet" => {
+            "Write an uncached contact sheet of exact timeline frames to an unused PNG. Blocking CLI/library command."
+        }
+        "transcript.transcribe" => {
+            "Run optional local speech recognition through the explicitly configured external runtime and return a content-bound transcript document. Blocking CLI/library command."
+        }
+        "audio.record" => {
+            "Capture an explicitly selected local input to a new 48 kHz stereo PCM16 WAV for the requested duration. Blocking CLI/library command."
+        }
+        "audio.repair.render" => {
+            "Publish the inspected dialogue-cleanup recipe as a fresh verified PCM WAV at an unused output path. Blocking CLI/library command."
+        }
+        "hdr.conform" => {
+            "Convert an inspected high-bit-depth/HDR recipe into a tagged 16-bit intermediate or an explicitly tone-mapped 8-bit SDR editing asset at an unused output path. Blocking CLI/library command."
+        }
+        "export.run" => {
+            "Export an inspected timeline range as reference, lossless PNG or H.264/AAC output at an unused path, validating timing and decoded counts. Blocking CLI/library command."
+        }
+        "proxy.generate" => {
+            "Generate an identity-bound half, quarter or eighth-size preview variant of a reference asset with unchanged timing and audio. Blocking CLI/library command."
+        }
+        "media.conform" => {
+            "Convert a supported source into a new verified reference editing asset using an inspected conform recipe. Sources are preserved. Blocking CLI/library command."
+        }
+        "audio.render" => {
+            "Render an inspected PCM mix, including optional routing to named layouts, to a new verified WAV. Blocking CLI/library command."
+        }
+        "render.run" => {
+            "Render a reference project synchronously to an unused FFV1/PCM .mkv and verify decoded frame and sample counts. Blocking; use render.start for background work."
+        }
+        "scene.render" => {
+            "Compile an inspected pixel scene to a new reference editing asset at an unused output path. Blocking CLI/library command."
+        }
+        "preview.range" => {
+            "Export an exact timeline interval as a reference .mkv preview, following the saved proxy selection. Blocking CLI/library command."
+        }
+        _ => UNDESCRIBED,
     }
 }
+pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
-pub fn tools() -> Vec<Value> {
-    let schema = serde_json::to_value(schemars::schema_for!(Request)).expect("request schema");
-    schema["oneOf"].as_array().expect("tagged request variants").iter().filter_map(|variant| {
-        let command=variant["properties"]["command"]["const"].as_str().expect("command tag");
-        // Long renders belong in persisted jobs so the MCP connection stays usable.
-        if matches!(command,"image.sequence.compile"|"cache.run"|"preview.sheet"|"transcript.transcribe"|"audio.record"|"audio.repair.render"|"hdr.conform"|"export.run"|"proxy.generate"|"media.conform"|"audio.render"|"render.run"|"scene.render"|"preview.range") { return None; }
-        let mut input=variant.clone();
-        input.as_object_mut().unwrap().remove("description");
-        input["properties"].as_object_mut().unwrap().remove("command");
-        input["required"].as_array_mut().unwrap().retain(|p|p!="command");
-        input["$defs"]=schema["$defs"].clone();
-        input["$schema"]=schema["$schema"].clone();
-        let read_only=matches!(command,"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"media.inspect"|"render.plan"|"scene.inspect");
-        Some(json!({"name":format!("cutbolt_{}",command.replace('.',"_")),"description":description(command),"inputSchema":input,
+/// Long renders belong in persisted jobs so the MCP connection stays usable.
+const BLOCKING: [&str; 14] = [
+    "image.sequence.compile",
+    "cache.run",
+    "preview.sheet",
+    "transcript.transcribe",
+    "audio.record",
+    "audio.repair.render",
+    "hdr.conform",
+    "export.run",
+    "proxy.generate",
+    "media.conform",
+    "audio.render",
+    "render.run",
+    "scene.render",
+    "preview.range",
+];
+
+/// Whether a command is offered as an MCP tool.
+pub(crate) fn exposed(command: &str) -> bool {
+    !BLOCKING.contains(&command)
+}
+
+pub fn tools() -> &'static [Value] {
+    static TOOLS: OnceLock<Vec<Value>> = OnceLock::new();
+    TOOLS.get_or_init(|| crate::schema::commands().filter(|c| exposed(c)).map(|command| {
+        let input = crate::schema::arguments(command, true).expect("command schema");
+        let read_only=matches!(command,"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
+        json!({"name":format!("cutbolt_{}",command.replace('.',"_")),"description":description(command),"inputSchema":input,
             "outputSchema":{"type":"object","properties":{"ok":{"type":"boolean"},"result":{},"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]}},"required":["ok"],"additionalProperties":false},
-            "annotations":{"readOnlyHint":read_only,"destructiveHint":matches!(command,"job.cancel"|"cache.prune"),"idempotentHint":!matches!(command,"preview.frame"|"captions.export"|"interchange.export"|"session.backup"|"session.recover"),"openWorldHint":false}}))
-    }).collect()
+            "annotations":{"readOnlyHint":read_only,"destructiveHint":matches!(command,"job.cancel"|"cache.prune"),"idempotentHint":!matches!(command,"preview.frame"|"captions.export"|"interchange.export"|"session.backup"|"session.recover"),"openWorldHint":false}})
+    }).collect())
 }
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
@@ -284,7 +348,7 @@ impl Server {
                 id,
                 json!({"protocolVersion":if params["protocolVersion"]=="2025-06-18" {"2025-06-18"} else {VERSION},"capabilities":{"tools":{"listChanged":false}},
                 "serverInfo":{"name":"cutbolt","version":env!("CARGO_PKG_VERSION")},
-                "instructions":"Cutbolt runs locally. Use session commands for saved editing, durable request IDs for retries, and render.start/job.status/job.cancel for background work. Unsupported editing semantics fail explicitly. No HTTP service is used."}),
+                "instructions":"Cutbolt runs locally. Use session commands for saved editing, durable request IDs for retries, and render.start/job.status/job.cancel for background work. Unsupported editing semantics fail explicitly. No HTTP service is used. Tool listings abbreviate the large shared project, operation, scene, template and audio_routing schemas; cutbolt_schema returns any of them, or any command's arguments, in full."}),
             ));
         }
         if !self.ready {
@@ -395,4 +459,64 @@ pub fn serve() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Agents load the whole catalog into context, so listings stay within explicit budgets.
+    const TOOL_BYTES: usize = 16 * 1024;
+    const CATALOG_BYTES: usize = 240 * 1024;
+
+    /// Listed properties, including those of generated stubs, all describe themselves.
+    fn undescribed(schema: &Value) -> usize {
+        match schema {
+            Value::Object(object) => {
+                let own = object
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .map_or(0, |p| {
+                        p.values()
+                            .filter(|p| p.get("const").is_none() && p.get("description").is_none())
+                            .count()
+                    });
+                own + object.values().map(undescribed).sum::<usize>()
+            }
+            Value::Array(items) => items.iter().map(undescribed).sum(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn tool_listings_fit_agent_context() {
+        let mut total = 0;
+        for tool in tools() {
+            let bytes = tool.to_string().len();
+            assert!(bytes <= TOOL_BYTES, "{} uses {bytes} bytes", tool["name"]);
+            total += bytes;
+            let schema = &tool["inputSchema"];
+            for target in crate::schema::references(schema) {
+                assert!(
+                    schema["$defs"][&target].is_object(),
+                    "{} lacks {target}",
+                    tool["name"]
+                );
+                assert!(
+                    !crate::schema::DEFERRED.iter().any(|(_, d)| *d == target),
+                    "{} embeds deferred {target}",
+                    tool["name"]
+                );
+            }
+            assert_ne!(tool["description"], UNDESCRIBED);
+            assert_eq!(
+                undescribed(schema),
+                0,
+                "{} has undescribed fields",
+                tool["name"]
+            );
+        }
+        eprintln!("catalog: {} tools, {total} bytes", tools().len());
+        assert!(total <= CATALOG_BYTES, "catalog uses {total} bytes");
+    }
 }

@@ -1,5 +1,5 @@
 //! Frame and range previews for sequential timelines and placed tracks, including gaps.
-use crate::{Result, error, media, model::Project, render, scene, time::Time};
+use crate::{At, Result, error, media, model::Project, render, scene, time::Time};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
@@ -45,7 +45,7 @@ pub(crate) fn read_frame(
     let mapped = crate::proxy::preview_project(project, input_root)?;
     let project = &mapped;
     let total = validate(project)?;
-    let selected = time.units(project.frame_rate)?;
+    let selected = time.units(project.frame_rate).at(|| "time".into())?;
     if selected >= total {
         return Err(error(
             "INVALID_RANGE",
@@ -74,6 +74,27 @@ pub(crate) fn read_frame(
             return Ok((
                 pixels,
                 json!({"project_revision":project.revision,"time":time,"timeline_frame":selected,"track_id":visible.map(|(t,_)| &t.id),"sequence_id":visible.and_then(|(_,c)| c.sequence_id.as_ref()),"transition_id":transition_id,"source":null,"sources":sources,"width":project.width,"height":project.height,"source_quality":if preview_scale.is_some(){"proxy"}else{"original"},"preview_scale":preview_scale}),
+            ));
+        }
+        // Alpha overlays need the composited graph rather than the single-clip fast path.
+        let mut overlays = Vec::new();
+        for track in a
+            .tracks
+            .iter()
+            .filter(|t| t.enabled && !t.composite.is_opaque())
+        {
+            for clip in &track.clips {
+                if !time.compare(clip.start)?.is_lt() && time.compare(clip.end()?)?.is_lt() {
+                    overlays.push(&track.id);
+                }
+            }
+        }
+        if !overlays.is_empty() {
+            let (pixels, sources) = crate::track_render::read_frame(project, input_root, time)?;
+            let visible = a.visible(time)?;
+            return Ok((
+                pixels,
+                json!({"project_revision":project.revision,"time":time,"timeline_frame":selected,"track_id":visible.map(|(t,_)| &t.id),"overlay_track_ids":overlays,"transition_id":visible.map(|(t,_)| t.transition_at(time)).transpose()?.flatten().map(|e| &e.id),"source":null,"sources":sources,"width":project.width,"height":project.height,"source_quality":if preview_scale.is_some(){"proxy"}else{"original"},"preview_scale":preview_scale}),
             ));
         }
         if let Some((track, _)) = a.visible(time)?
@@ -252,8 +273,10 @@ pub fn range(
     let mapped = crate::proxy::preview_project(project, input_root)?;
     let project = &mapped;
     let total = validate(project)?;
-    let begin = start.units(project.frame_rate)?;
-    let count = duration.units(project.frame_rate)?;
+    let begin = start.units(project.frame_rate).at(|| "start".into())?;
+    let count = duration
+        .units(project.frame_rate)
+        .at(|| "duration".into())?;
     if count == 0 || begin as u128 + count as u128 > total as u128 {
         return Err(error(
             "INVALID_RANGE",
@@ -274,14 +297,21 @@ pub fn range(
     Ok(receipt)
 }
 
+/// Contact-sheet layout: frames are fitted and centered in tiles, filled row by row; the sheet is at most 8M pixels.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Sheet {
+    /// 1 to 64 rational timeline times in cell order; frame boundaries before the end, duplicates allowed.
     pub times: Vec<Time>,
+    /// Cells per row, 1 to 8.
     pub columns: u32,
+    /// Cell width in pixels, 1 to 1920.
     pub tile_width: u32,
+    /// Cell height in pixels, 1 to 1080.
     pub tile_height: u32,
+    /// Spacing between cells in pixels, 0 to 32.
     pub gap: u32,
+    /// `[r, g, b]` fill (0-255) for gaps, letterboxing and unused cells.
     pub background: [u8; 3],
 }
 impl Sheet {

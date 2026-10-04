@@ -163,11 +163,26 @@ def run(root, long_form):
     assert receipt['frames']==count and receipt['samples']==count*1920,receipt
     measurements['render']={**measurement,'gates':{'seconds':max_seconds,'tree_bytes':4*1024**3}}
     timeline=[None if first is None else first+n for first,length in segments for n in range(length)]
-    destination=Path(request['output']); digest=output/'decoded.framemd5'
+    destination=Path(request['output'])
     started=clock.monotonic()
-    ff(['-threads','16','-i',str(destination),'-map','0:v:0','-an','-fps_mode','passthrough',
-        '-pix_fmt','rgb24','-threads','1','-f','framemd5',str(digest)],timeout=2100)
-    rows=[line for line in digest.read_text().splitlines() if line and not line.startswith('#')]
+    # Hash every decoded frame in parallel segments. Accurate input seeking with copied timestamps
+    # keeps each row's absolute frame index, which is checked for every frame below.
+    parts=8;per=-(-count//parts);jobs=[]
+    for k in range(parts):
+        first=k*per;n=min(per,count-first)
+        if n<=0:break
+        digest=output/f'decoded-{k}.framemd5'
+        jobs.append((n,digest,subprocess.Popen(['ffmpeg','-v','error','-nostdin','-n','-threads','4','-copyts','-ss',f'{first*40//1000}.{first*40%1000:03d}',
+            '-i',str(destination),'-map','0:v:0','-an','-fps_mode','passthrough','-frames:v',str(n),'-pix_fmt','rgb24','-threads','1','-f','framemd5',str(digest)],
+            stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)))
+    rows=[];header=None
+    for n,digest,job in jobs:
+        _,errors=job.communicate(timeout=2100);assert job.returncode==0,errors
+        lines=digest.read_bytes().splitlines(keepends=True)
+        head=[line for line in lines if line.startswith(b'#')];part=[line for line in lines if line.strip() and not line.startswith(b'#')]
+        assert header in (None,head) and len(part)==n,(digest,len(part),n);header=head;rows.extend(part)
+    # Reassemble the single-pass framemd5, which later repeated renders are compared against.
+    (output/'decoded.framemd5').write_bytes(b''.join(header+rows));rows=[line.decode() for line in rows]
     assert len(rows)==count
     black=hashlib.md5(bytes(WIDTH*HEIGHT*3)).hexdigest()
     for i,(line,index) in enumerate(zip(rows,timeline)):

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 mod number;
 pub use number::{Kind, Number, Value};
 
+/// Bindable layer property: `position` (vector2 pixels, bound components -32768..=32768) or `opacity` (scalar, bound 0..=255).
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
 )]
@@ -23,6 +24,7 @@ impl Property {
         }
     }
 }
+/// Vector component to extract: `x` or `y`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Axis {
@@ -30,117 +32,193 @@ pub enum Axis {
     Y,
 }
 
+/// Expression node operation, tagged by `op`; operands are node IDs in the same program.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Expr {
+    /// Constant value; its type must match the node `kind`.
     Literal {
+        /// Constant as a tagged scalar, vector2 or boolean.
         value: Value,
     },
+    /// Scalar time in exact seconds: scene time, or signed unclamped layer-local time.
     Time {
+        /// Scene layer ID whose start is subtracted; omit for scene time.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         layer: Option<String>,
     },
+    /// Layer's ordinary static or keyframed value before expressions, sampled at clamped layer time.
     Base {
+        /// Scene layer ID.
         layer: String,
+        /// Property to read.
         property: Property,
     },
+    /// Layer property's exact expression value when bound, otherwise its base value.
     Property {
+        /// Scene layer ID.
         layer: String,
+        /// Property to read.
         property: Property,
     },
+    /// Copies another node's value and type.
     Link {
+        /// ID of the source node.
         node: String,
     },
+    /// Builds a vector2 from two scalar nodes.
     Vector {
+        /// ID of the scalar node for x.
         x: String,
+        /// ID of the scalar node for y.
         y: String,
     },
+    /// Extracts one scalar component of a vector2 node.
     Component {
+        /// ID of the vector2 node.
         vector: String,
+        /// Component to extract.
         axis: Axis,
     },
+    /// Computes `a + b`; both scalar or both vector2 (component-wise).
     Add {
+        /// ID of the left operand node.
         a: String,
+        /// ID of the right operand node.
         b: String,
     },
+    /// Computes `a - b`; both scalar or both vector2 (component-wise).
     Subtract {
+        /// ID of the left operand node.
         a: String,
+        /// ID of the right operand node.
         b: String,
     },
+    /// Computes `a * b` for scalar or vector2 `a` and scalar `b`.
     Multiply {
+        /// ID of the scalar or vector2 node.
         a: String,
+        /// ID of the scalar factor node.
         b: String,
     },
+    /// Computes `a / b` for scalar or vector2 `a` and nonzero scalar `b`.
     Divide {
+        /// ID of the scalar or vector2 dividend node.
         a: String,
+        /// ID of the nonzero scalar divisor node.
         b: String,
     },
+    /// Computes scalar `a - b * floor(a / b)`; `b` must be positive.
     Modulo {
+        /// ID of the scalar dividend node.
         a: String,
+        /// ID of the positive scalar divisor node.
         b: String,
     },
+    /// Smaller of two scalars.
     Minimum {
+        /// ID of the first scalar node.
         a: String,
+        /// ID of the second scalar node.
         b: String,
     },
+    /// Larger of two scalars.
     Maximum {
+        /// ID of the first scalar node.
         a: String,
+        /// ID of the second scalar node.
         b: String,
     },
+    /// Rounds a scalar toward negative infinity.
     Floor {
+        /// ID of the scalar node.
         value: String,
     },
+    /// Boolean `a < b` for two scalars.
     Less {
+        /// ID of the left scalar node.
         a: String,
+        /// ID of the right scalar node.
         b: String,
     },
+    /// Boolean exact equality of two same-typed values.
     Equal {
+        /// ID of the first node.
         a: String,
+        /// ID of the second node, same type as `a`.
         b: String,
     },
+    /// Boolean conjunction; both operands are always evaluated.
     And {
+        /// ID of the first boolean node.
         a: String,
+        /// ID of the second boolean node.
         b: String,
     },
+    /// Boolean negation.
     Not {
+        /// ID of the boolean node.
         value: String,
     },
+    /// Returns `yes` when the condition is true, else `no`; both arms are always evaluated.
     Select {
+        /// ID of the boolean condition node.
         condition: String,
+        /// ID of the node returned when true.
         yes: String,
+        /// ID of the node returned when false; same type as `yes`.
         no: String,
     },
+    /// Reproducible scalar in `[0, 1)` from SHA-256 of program seed, stream and index.
     Seeded {
+        /// Stream number separating independent sequences.
         stream: u32,
+        /// ID of a scalar node that evaluates to an exact integer in 0..=4294967295.
         index: String,
     },
 }
+/// Named, statically typed node in an expression program.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
+    /// Unique node ID: non-empty, at most 128 bytes, no control characters.
     pub id: String,
+    /// Declared result type; must equal the type inferred from the expression.
     pub kind: Kind,
+    /// Operation computing this node's value.
     pub expression: Expr,
 }
+/// Drives one layer property from a program node.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
+    /// ID of an existing scene layer.
     pub layer: String,
+    /// Target property; each layer property may be bound at most once.
     pub property: Property,
+    /// ID of the node supplying the value; its kind must match the property (position: vector2, opacity: scalar).
     pub node: String,
 }
+/// Scene `expressions` program: a pure typed graph computing layer position and opacity.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Program {
+    /// Program format version; must be 1.
     pub schema_version: u32,
+    /// Seed for `seeded` nodes; any unsigned 64-bit value.
     pub seed: u64,
+    /// Graph nodes, 1..=256; order does not matter, cycles reject, dependency depth at most 64.
     pub nodes: Vec<Node>,
+    /// Property bindings, 1..=32.
     pub bindings: Vec<Binding>,
 }
+/// Request for `expression.inspect`: evaluate a scene's expression graph without reading media.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
+    /// Scene recipe whose `expressions` program is evaluated.
     pub scene: Scene,
+    /// Scene times in rational seconds within 0..=duration; 1..=256 samples, at most 65536 node evaluations.
     pub times: Vec<Time>,
 }
 

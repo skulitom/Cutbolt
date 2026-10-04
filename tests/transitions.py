@@ -124,7 +124,7 @@ def run(root):
     passed.append('transitions.edit_dependencies_locks')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
         client.call('session.create',store_root=str(store),project=base,request_id='create');common={'store_root':str(store),'project_id':base['id']}
         fields={**common,'expected_revision':0,'request_id':'effects','operations':effects('dissolve')};Draft202012Validator(schema).validate(fields)

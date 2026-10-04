@@ -161,7 +161,7 @@ def run(root):
     passed.append('sequences.cycles_locks_missing_bounds_limits')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63;schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65;schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_session_apply')
         client.call('session.create',store_root=str(store),project=deep,request_id='create');common={'store_root':str(store),'project_id':deep['id']};fields={**common,'expected_revision':0,'request_id':'child-edit','operations':[change]};Draft202012Validator(schema).validate(fields)
         preview=client.call('session.preview',**{k:v for k,v in fields.items() if k!='request_id'});assert not preview['clips'] and preview['sequences'][0]['id']=='shot' and set(preview['sequences'][0]['root_instances'])=={'r0','r1','ra0','ra1'}
         receipt=client.call('session.apply',**fields);assert client.call('session.apply',**fields)==receipt

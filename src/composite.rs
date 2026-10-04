@@ -7,6 +7,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+/// How PNG RGB relates to alpha: `straight` (default, ordinary PNG) or `premultiplied` (RGB already multiplied by alpha; no channel may exceed alpha).
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AlphaMode {
@@ -20,6 +21,7 @@ impl AlphaMode {
     }
 }
 
+/// Blend with the backdrop in encoded sRGB: `normal` (default) uses the source, `multiply` uses `s*d`, `screen` uses `1-(1-s)*(1-d)`.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BlendMode {
@@ -92,18 +94,24 @@ pub(crate) fn masked_channel(
     ((numerator + denominator / 2) / denominator) as u8
 }
 
+/// Rectangle limiting layer opacity, in source-canvas pixels before crop and transform.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RectMask {
+    /// `[x, y, width, height]`; x/y -32768..32768, size 0..32768; may extend outside the canvas.
     pub rect: [i32; 4],
+    /// Keep pixels outside the rectangle instead; default false.
     #[serde(default)]
     pub inverted: bool,
+    /// Optional curves overriding rectangle components on the layer-local clock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<MaskAnimation>,
+    /// Optional soft edge; omit for a hard edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feather: Option<Feather>,
 }
 
+/// Feather ramp placement: `inner` fades in inside the edge, `centered` straddles it, `outer` fades out beyond it.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatherEdge {
@@ -112,22 +120,30 @@ pub enum FeatherEdge {
     Outer,
 }
 
+/// Linear soft edge for a layer mask, with square corners.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Feather {
+    /// Ramp width in source pixels, 1..4096.
     pub radius: u16,
+    /// Ramp placement relative to the rectangle edge.
     pub edge: FeatherEdge,
 }
 
+/// Keyframe curves overriding mask rectangle components; declare at least one.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MaskAnimation {
+    /// Curve for the left edge in source pixels, -32768..32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<Curve>,
+    /// Curve for the top edge in source pixels, -32768..32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y: Option<Curve>,
+    /// Curve for the width in source pixels, 0..32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<Curve>,
+    /// Curve for the height in source pixels, 0..32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<Curve>,
 }

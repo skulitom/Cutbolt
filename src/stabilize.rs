@@ -10,15 +10,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf};
 
+/// Editable rigid camera correction applied to the source canvas before the layer's authored spatial mapping; produced by `stabilization.inspect`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Compensation {
+    /// Fixed rotation and zoom center `[x, y]` in source-canvas millipixels, each within ±32768000.
     pub center_milli: [i32; 2],
+    /// Horizontal correction curve in millipixels, ±32768000, on the layer-local clock.
     pub translation_x_milli: Curve,
+    /// Vertical correction curve in millipixels, ±32768000, on the layer-local clock.
     pub translation_y_milli: Curve,
+    /// Roll correction curve in millidegrees, ±3600000, on the layer-local clock.
     pub rotation_mdeg: Curve,
+    /// Constant zoom about `center_milli`, 1000..4000 (1000 = no zoom).
     pub zoom_milli: u32,
-    /// Clip in compensated source-canvas coordinates, before the authored spatial transform.
+    /// Clip `[x, y, width, height]` in compensated source-canvas pixels, before the authored spatial transform; position ±32768, size 1..32768.
     pub viewport: [i32; 4],
 }
 
@@ -140,6 +146,7 @@ pub(crate) fn compose(a: [f64; 6], b: [f64; 6]) -> [f64; 6] {
     ]
 }
 
+/// Camera motion model: `translation` fits shift only; `rigid` fits shift plus roll about the crop center.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Model {
@@ -147,52 +154,87 @@ pub enum Model {
     Rigid,
 }
 
+/// Measurement segment beginning at a declared cut, with its own reference patches; smoothing never crosses segments.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Segment {
+    /// Layer-local start, frame-aligned rational seconds at 25 fps; increasing, the first is zero.
     pub start: Time,
+    /// 3..8 stationary background patches `[x, y, width, height]` in source-canvas pixels, sides 4..64, inside the canvas; centers must span a triangle of at least 64 square pixels.
     pub regions: Vec<[u32; 4]>,
 }
 
+/// Patch-tracking controls applied to every tracked patch.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Tracking {
+    /// Search radius in pixels around the previous accepted integer location, 1..32.
     pub search_radius: u32,
+    /// Maximum Euclidean displacement between consecutive frames in pixels, 1..`search_radius`.
     pub maximum_step: u32,
+    /// Maximum Euclidean change in step between frames in pixels, 1..64.
     pub maximum_acceleration: u32,
+    /// Minimum normalized correlation of a match, 850..1000 milli.
     pub minimum_correlation_milli: u16,
+    /// Minimum score margin over the next distinct peak, 20..1000 milli.
     pub minimum_margin_milli: u16,
+    /// Maximum normalized mean absolute frame-to-frame change, 1..1000 milli.
     pub maximum_frame_change_milli: u16,
 }
 
+/// Target camera path within each segment, tagged by `mode`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Smoothing {
+    /// Hold each segment's initial pose.
     Lock,
-    Smooth { radius: u8 },
+    /// Follow a triangular moving average of the measured path.
+    Smooth {
+        /// Half-window in frames, 1..32; truncated at segment boundaries.
+        radius: u8,
+    },
 }
 
+/// Border handling for the corrected image, tagged by `mode`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Crop {
+    /// Keep zoom at 1000; moving edges may reveal the backdrop.
     Preserve,
-    Zoom { maximum_zoom_milli: u32 },
+    /// Use the smallest constant zoom that keeps the viewport inside every source frame.
+    Zoom {
+        /// Largest accepted zoom, 1000..4000; if none fits, inspection fails with `STABILIZATION_CROP_LIMIT`.
+        maximum_zoom_milli: u32,
+    },
 }
 
+/// `stabilization.inspect` request: measures camera motion on one image layer and returns a compensated replacement scene; read-only.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
+    /// Complete scene containing the layer.
     pub scene: scene::Scene,
+    /// Absolute directory containing the scene's bound source files.
     pub input_root: PathBuf,
+    /// ID of an image layer with 2..128 active frames at 25 fps and no existing compensation.
     pub layer_id: String,
+    /// Camera motion model.
     pub model: Model,
+    /// 1..16 measurement segments, each covering at least two frames.
     pub segments: Vec<Segment>,
+    /// Patch-tracking controls.
     pub tracking: Tracking,
+    /// Maximum RMS patch-center fit error per frame in millipixels, 1..2000.
     pub maximum_fit_error_milli: u32,
+    /// Maximum measured roll relative to the segment's first frame in millidegrees, 0..15000.
     pub maximum_roll_mdeg: u32,
+    /// Target camera path.
     pub smoothing: Smoothing,
+    /// Blend from the measured path (0) to the target path (1000), 0..1000.
     pub strength_milli: u16,
+    /// Border handling.
     pub crop: Crop,
+    /// Sampler written to the returned spatial transform.
     pub sampling: spatial::Sampling,
 }
 
@@ -343,6 +385,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     let start = layer.start.units(fps)?;
     let count = layer.duration.units(fps)?;
     if layer.graphics.is_some()
+        || layer.tilemap.is_some()
         || !(2..=128).contains(&count)
         || request.segments.is_empty()
         || request.segments.len() > 16

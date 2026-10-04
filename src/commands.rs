@@ -15,14 +15,23 @@ pub enum Request {
     NativeImport(crate::native_project::Import),
     #[serde(rename = "project.portable")]
     ProjectPortable {
+        /// Project snapshot whose media paths to make relative.
         project: Project,
+        /// Must equal the supplied project's revision.
         expected_revision: u64,
+        /// Existing absolute media root; proposed relative paths resolve inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "session.check")]
-    SessionCheck { store_root: PathBuf },
+    SessionCheck {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
+        store_root: PathBuf,
+    },
     #[serde(rename = "session.migrate")]
-    SessionMigrate { store_root: PathBuf },
+    SessionMigrate {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
+        store_root: PathBuf,
+    },
     #[serde(rename = "session.backup")]
     SessionBackup(store::Backup),
     #[serde(rename = "session.recover")]
@@ -33,7 +42,9 @@ pub enum Request {
     /// Inspect the OTIO export document and exact unsupported-feature report without writing a file.
     #[serde(rename = "interchange.export.inspect")]
     InterchangeInspect {
+        /// Project snapshot to describe as OTIO.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     /// Publish an OTIO timeline to an unused local output after explicit loss acknowledgement.
@@ -42,48 +53,72 @@ pub enum Request {
     #[serde(rename = "cache.run")]
     CacheRun(crate::cache::Request),
     #[serde(rename = "cache.inspect")]
-    CacheInspect { cache_root: PathBuf },
+    CacheInspect {
+        /// Absolute local cache directory used by cache.run.
+        cache_root: PathBuf,
+    },
     #[serde(rename = "cache.prune")]
     CachePrune {
+        /// Absolute local cache directory used by cache.run.
         cache_root: PathBuf,
+        /// Byte and entry budgets; least-recently-used derived entries are evicted until both are met.
         policy: crate::cache::Policy,
     },
     #[serde(rename = "preview.sheet")]
     PreviewSheet {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Frame times and grid layout of the contact sheet.
         spec: preview::Sheet,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .png file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "transcript.transcribe")]
     Transcribe(crate::transcribe::Transcribe),
     #[serde(rename = "transcript.inspect")]
     TranscriptInspect {
+        /// Transcript document as returned by transcript.transcribe or transcript.correct.
         document: crate::transcript::Document,
+        /// Existing absolute directory containing the transcript's bound source media.
         input_root: PathBuf,
     },
     #[serde(rename = "transcript.correct")]
     TranscriptCorrect {
+        /// Transcript document as returned by transcript.transcribe or transcript.correct.
         document: crate::transcript::Document,
+        /// Fingerprint of the supplied document as reported by transcript.inspect; a mismatch rejects the edit.
         expected_fingerprint: String,
+        /// Word text and timing corrections, applied in order.
         edits: Vec<crate::transcript::Edit>,
+        /// Existing absolute directory containing the transcript's bound source media.
         input_root: PathBuf,
     },
     #[serde(rename = "transcript.plan")]
     TranscriptPlan {
+        /// Project snapshot containing the clip to cut.
         project: Project,
+        /// Transcript document as returned by transcript.transcribe or transcript.correct.
         document: crate::transcript::Document,
+        /// Must equal the supplied project's revision.
         expected_revision: u64,
+        /// Fingerprint of the supplied transcript as reported by transcript.inspect.
         expected_document_fingerprint: String,
+        /// The clip and the words to cut from it.
         spec: crate::transcript_cut::Spec,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "audio.inputs")]
     AudioInputs {},
     #[serde(rename = "audio.record.inspect")]
     AudioRecordInspect {
+        /// Explicit capture endpoint or process selection, as listed by audio.inputs.
         input: crate::recording::Input,
+        /// Recording length in rational seconds.
         duration: Time,
     },
     #[serde(rename = "audio.record")]
@@ -92,14 +127,20 @@ pub enum Request {
     AudioRecordPlace(crate::recording::Place),
     #[serde(rename = "audio.repair.inspect")]
     AudioRepairInspect {
+        /// Cleanup recipe: bound PCM source, output and noise-only ranges, and processing settings.
         recipe: crate::audio_repair::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "audio.repair.render")]
     AudioRepairRender {
+        /// Cleanup recipe, normally checked first with audio.repair.inspect.
         recipe: crate::audio_repair::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .wav file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "stabilization.inspect")]
@@ -112,20 +153,29 @@ pub enum Request {
     SyncInspect(crate::sync::Inspect),
     #[serde(rename = "hdr.inspect")]
     HdrInspect {
+        /// Conversion recipe: bound source, color and display interpretation, tone policy and frame mapping.
         recipe: crate::hdr::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "hdr.conform")]
     HdrConform {
+        /// Conversion recipe, normally checked first with hdr.inspect.
         recipe: crate::hdr::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "lut.inspect")]
     LutInspect {
+        /// Identity-bound .cube file and its interpolation.
         transform: crate::lut::Transform,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Up to 256 RGB input colors to evaluate through the table; omit for none.
         #[serde(default)]
         samples: Vec<[f64; 3]>,
     },
@@ -137,122 +187,185 @@ pub enum Request {
     ExportRun(crate::delivery::Export),
     #[serde(rename = "effects.preset")]
     EffectsPreset {
+        /// Preset to return: green or blue screen, with a soft or hard edge.
         name: crate::keying::Preset,
+        /// Key strength from 0 to 1000, where 1000 removes the key color fully.
         strength_milli: u16,
+        /// Spill suppression strength from 0 to 1000.
         spill_milli: u16,
     },
     #[serde(rename = "captions.import")]
     CaptionsImport {
+        /// Identity-bound subtitle file: path inside input_root, SHA-256 and byte count.
         source: scene::Identity,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Format of the source file.
         format: crate::captions::Format,
+        /// ID for the new caption document.
         id: String,
+        /// Whether cues may overlap in time (allow) or are rejected when they do (reject).
         overlap: crate::captions::Overlap,
     },
     #[serde(rename = "captions.inspect")]
-    CaptionsInspect { document: crate::captions::Document },
+    CaptionsInspect {
+        /// Caption document as returned by captions.import or captions.apply.
+        document: crate::captions::Document,
+    },
     #[serde(rename = "captions.apply")]
     CaptionsApply {
+        /// Caption document as returned by captions.import or captions.apply.
         document: crate::captions::Document,
+        /// Must equal the supplied document's revision.
         expected_revision: u64,
+        /// Caption edits applied in order as one atomic batch.
         operations: Vec<crate::captions::Operation>,
     },
     #[serde(rename = "captions.encode")]
     CaptionsEncode {
+        /// Caption document as returned by captions.import or captions.apply.
         document: crate::captions::Document,
+        /// Sidecar format to preview.
         format: crate::captions::Format,
     },
     #[serde(rename = "captions.export")]
     CaptionsExport {
+        /// Caption document as returned by captions.import or captions.apply.
         document: crate::captions::Document,
+        /// Sidecar format to write.
         format: crate::captions::Format,
+        /// reject fails on any reported formatting loss; allow_reported accepts losses already reviewed with captions.encode.
         loss_policy: crate::captions::LossPolicy,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .srt or .vtt file (matching format) inside output_root; never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "captions.scene")]
     CaptionsScene(crate::captions::SceneRequest),
     #[serde(rename = "graphics.instantiate")]
     GraphicsInstantiate {
+        /// Template to expand: a scene with typed, bound parameters.
         template: crate::templates::Template,
+        /// ID for the returned scene instance.
         instance_id: String,
+        /// Values keyed by parameter ID; a parameter without a value uses its declared default.
         values: std::collections::BTreeMap<String, crate::templates::ParameterValue>,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "proxy.generate")]
     ProxyGenerate(proxy::Generate),
     #[serde(rename = "proxy.status")]
     ProxyStatus {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "proxy.relink")]
     ProxyRelink {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Must equal the supplied project's revision.
         expected_revision: u64,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Asset whose proxy to find.
         asset_id: String,
+        /// Absolute candidate proxy paths inside input_root; exactly one must match the bound identity.
         candidates: Vec<PathBuf>,
     },
     #[serde(rename = "media.conform.inspect")]
     ConformInspect {
+        /// Conversion recipe: bound source, speed/reverse/freeze or remap, audio policy and optional color normalization.
         recipe: conform::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "media.conform")]
     Conform {
+        /// Conversion recipe, normally checked first with media.conform.inspect.
         recipe: conform::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "audio.inspect")]
     AudioInspect {
+        /// PCM mix recipe: tracks, clips, gain and fades, optional routing and master effects.
         mix: audio::Mix,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "audio.render")]
     AudioRender {
+        /// PCM mix recipe, normally checked first with audio.inspect.
         mix: audio::Mix,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .wav file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "registry.search")]
     RegistrySearch {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Text, bin prefix, tag filters and pagination.
         query: registry::Query,
     },
     #[serde(rename = "registry.status")]
     RegistryStatus {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "registry.bind")]
     RegistryBind {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Must equal the supplied project's revision.
         expected_revision: u64,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// 1-1000 unique asset IDs to hash and bind.
         asset_ids: Vec<String>,
     },
     #[serde(rename = "registry.relink")]
     RegistryRelink {
+        /// Project snapshot as returned by project.create, timeline.apply or session.get.
         project: Project,
+        /// Must equal the supplied project's revision.
         expected_revision: u64,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Bound asset to relink.
         asset_id: String,
+        /// Absolute candidate paths inside input_root; exactly one must match the bound identity.
         candidates: Vec<PathBuf>,
     },
     #[serde(rename = "image.sequence.inspect")]
     ImageSequenceInspect {
+        /// Numbered PNG recipe: frames, source window, repeat, rate, alpha and color interpretation.
         recipe: crate::image_sequence::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "image.sequence.compile")]
     ImageSequenceCompile {
+        /// Numbered PNG recipe, normally checked first with image.sequence.inspect.
         recipe: crate::image_sequence::Recipe,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new file inside output_root: .mov for the rgba_png_mov profile, otherwise .mkv; never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "expression.inspect")]
@@ -262,130 +375,229 @@ pub enum Request {
     },
     #[serde(rename = "scene.inspect")]
     SceneInspect {
+        /// Scene to validate and sample.
         scene: scene::Scene,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "scene.render")]
     SceneRender {
+        /// Scene to compile, normally checked first with scene.inspect.
         scene: scene::Scene,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "preview.frame")]
     PreviewFrame {
+        /// Project snapshot to preview; its saved proxy selection applies.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .png file inside output_root; existing files are never overwritten.
         output: PathBuf,
+        /// Timeline time in rational seconds; must fall on a frame boundary of the project rate.
         time: Time,
     },
     #[serde(rename = "preview.range")]
     PreviewRange {
+        /// Project snapshot to preview; its saved proxy selection applies.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
+        /// Range start in rational seconds, on a frame boundary.
         start: Time,
+        /// Positive range length in rational seconds, on frame boundaries; the range must end inside the timeline.
         duration: Time,
     },
     #[serde(rename = "capabilities")]
     Capabilities {},
+    #[serde(rename = "schema")]
+    Schema {
+        /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template` or `audio_routing`.
+        name: String,
+    },
     #[serde(rename = "project.create")]
     Create {
+        /// Project ID, 1-128 bytes.
         id: String,
+        /// Frame width in pixels, 1-8192.
         width: u32,
+        /// Frame height in pixels, 1-8192.
         height: u32,
+        /// Frame rate as a rational, for example {num:25,den:1} or {num:30000,den:1001}.
         frame_rate: Time,
     },
     #[serde(rename = "project.validate")]
-    Validate { project: Project },
+    Validate {
+        /// Project snapshot to check.
+        project: Project,
+    },
     #[serde(rename = "timeline.apply")]
     Apply {
+        /// Caller-owned project snapshot to transform; it is not modified.
         project: Project,
+        /// Must equal the supplied project's revision.
         expected_revision: u64,
+        /// Editing operations applied in order as one atomic batch; any failure commits nothing.
         operations: Vec<Operation>,
     },
     #[serde(rename = "session.create")]
     SessionCreate {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// Valid snapshot saved as revision 0 of a new project; its own revision is ignored.
         project: Project,
+        /// Caller-chosen ID for this change, 1-128 bytes, unique within the project. Resend identical arguments with it to retry safely.
         request_id: String,
     },
     #[serde(rename = "session.get")]
     SessionGet {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// ID of a project saved in store_root.
         project_id: String,
+        /// Saved revision to read; omit for the current head.
         revision: Option<u64>,
     },
     #[serde(rename = "session.apply")]
     SessionApply {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// ID of a project saved in store_root.
         project_id: String,
+        /// Caller-chosen ID for this change, 1-128 bytes, unique within the project. Resend identical arguments with it to retry safely.
         request_id: String,
+        /// Head revision this change was prepared against; a different head fails with REVISION_CONFLICT.
         expected_revision: u64,
+        /// Editing operations applied in order as one atomic batch; any failure commits nothing.
         operations: Vec<Operation>,
     },
     #[serde(rename = "session.undo")]
     SessionUndo {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// ID of a project saved in store_root.
         project_id: String,
+        /// Caller-chosen ID for this change, 1-128 bytes, unique within the project. Resend identical arguments with it to retry safely.
         request_id: String,
+        /// Head revision this change was prepared against; a different head fails with REVISION_CONFLICT.
         expected_revision: u64,
     },
     #[serde(rename = "session.restore")]
     SessionRestore {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// ID of a project saved in store_root.
         project_id: String,
+        /// Caller-chosen ID for this change, 1-128 bytes, unique within the project. Resend identical arguments with it to retry safely.
         request_id: String,
+        /// Head revision this change was prepared against; a different head fails with REVISION_CONFLICT.
         expected_revision: u64,
+        /// Saved revision whose state becomes the new head.
         target_revision: u64,
     },
     #[serde(rename = "session.preview")]
     SessionPreview {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// ID of a project saved in store_root.
         project_id: String,
+        /// Head revision this change was prepared against; a different head fails with REVISION_CONFLICT.
         expected_revision: u64,
+        /// Editing operations applied in order as one atomic batch; any failure commits nothing.
         operations: Vec<Operation>,
+    },
+    /// Look up the committed receipt for a request ID; REQUEST_NOT_FOUND when it never took effect.
+    #[serde(rename = "session.receipt")]
+    SessionReceipt {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
+        store_root: PathBuf,
+        /// ID of a project saved in store_root.
+        project_id: String,
+        /// Request ID of the change to look up.
+        request_id: String,
     },
     #[serde(rename = "session.history")]
     SessionHistory {
+        /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
+        /// ID of a project saved in store_root.
         project_id: String,
+        /// Return entries older than this revision; pass the previous page's next_before_revision. Omit for the newest page.
         before_revision: Option<u64>,
+        /// Maximum entries to return, 1-200; default 50.
         #[serde(default = "history_limit")]
         limit: u16,
     },
     /// Queue a render and return a durable ticket immediately. Reuse request_id only with identical arguments. Poll job.status; use job.cancel to stop it.
     #[serde(rename = "render.start")]
     Start {
+        /// Existing absolute local directory holding the job queue (jobs.sqlite3).
         job_root: PathBuf,
+        /// Caller-chosen ID unique within job_root, 1-128 bytes. An identical resubmission returns the original ticket.
         request_id: String,
+        /// Render to queue: project snapshot, roots, output path and optional retry policy.
         render: jobs::RenderRequest,
     },
     /// Return saved job state, rendering frame progress, result receipt or failure. Reconcile workers that have exited.
     #[serde(rename = "job.status")]
-    JobStatus { job_root: PathBuf, job_id: String },
+    JobStatus {
+        /// Job queue directory used with render.start.
+        job_root: PathBuf,
+        /// Job ID from the render.start ticket.
+        job_id: String,
+    },
     /// Cancel a queued/running job. Poll status until terminal; completion may win a simultaneous cancel.
     #[serde(rename = "job.cancel")]
-    JobCancel { job_root: PathBuf, job_id: String },
+    JobCancel {
+        /// Job queue directory used with render.start.
+        job_root: PathBuf,
+        /// Job ID from the render.start ticket.
+        job_id: String,
+    },
     /// Reconcile saved publication and wake queued work, including explicitly opted-in interrupted retries within the saved attempt limit.
     #[serde(rename = "job.resume")]
-    JobResume { job_root: PathBuf },
+    JobResume {
+        /// Job queue directory used with render.start.
+        job_root: PathBuf,
+    },
     #[serde(rename = "media.inspect")]
-    Inspect { path: PathBuf, input_root: PathBuf },
+    Inspect {
+        /// Absolute path of the file to probe; it must lie inside input_root.
+        path: PathBuf,
+        /// Existing absolute directory; every source file must lie inside it.
+        input_root: PathBuf,
+    },
     #[serde(rename = "render.plan")]
     Plan {
+        /// Project snapshot to plan; use session.get at a fixed revision for a stable render.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
     #[serde(rename = "render.run")]
     Render {
+        /// Project snapshot to render; use session.get at a fixed revision for a stable render.
         project: Project,
+        /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+        /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
+        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
     },
 }
@@ -614,7 +826,7 @@ pub fn handle(request: Request) -> Result<Value> {
             let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
             "interchange":crate::interchange::capabilities(),
             "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-            "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume"],
+            "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume"],
             "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
             "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
             "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
@@ -622,7 +834,7 @@ pub fn handle(request: Request) -> Result<Value> {
             "audio_repair":crate::audio_repair::capabilities(),
             "audio_recording":{"platform":"windows","sample_rate":48000,"channels":2,"sample_format":"s16le","maximum_seconds":7200,"input_selection":"explicit_endpoint_or_process","recording":"blocking_cli_library","placement":"existing_native_audio_tracks","latency_compensation":"explicit_exact_shift","source_preservation":true},
             "stabilization":crate::stabilize::capabilities(),
-            "native_projects":crate::native_project::capabilities(),"image_sequences":crate::image_sequence::capabilities(),"scenes":{"spatial":crate::spatial::capabilities(),"profile":"pixel-scene-v1","maximum_seconds":10,"color":"srgb_straight_encoded","render_mode":"blocking CLI/library","alpha_modes":["straight","premultiplied"],"blend_modes":["normal","multiply","screen"],"mask":{"shape":"rectangle","space":"source_canvas_before_transform","inversion":true,"animated_properties":["x","y","width","height"],"maximum_per_layer":1,"feather":{"radius":[1,4096],"edges":["inner","centered","outer"],"coverage_grid":65536},"tracking":crate::tracking::capabilities()},"animation":{"properties":["position_x","position_y","opacity"],"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"easing_profile":"quadratic","clock":"layer_local","retime":{"scope":"per_property_or_mask_curve","start":"layer_local_playback_anchor","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"changes_media_time":false},"rounding":"nearest_ties_away_from_zero","maximum_keys_per_curve":128,"maximum_reduced_time_denominator":1000000,"precision":"checked_exact_integer_overflow_rejected"}},"renderer":{"profile":"reference-ffv1-pcm-v1","frame_rate":25,"sequential_frame_rates":[{"num":24,"den":1},{"num":25,"den":1},{"num":30,"den":1},{"num":50,"den":1},{"num":60,"den":1},{"num":24000,"den":1001},{"num":30000,"den":1001},{"num":60000,"den":1001}],"sequential_cut_policy":"whole_video_frames_and_48000_hz_samples","placed_track_frame_rate":25,"maximum_sequential_frames":180000,"large_raster":{"minimum_pixels":8000000,"minimum_dimension":4,"sequential_encoder_threads":16,"sequential_slices":16,"sequential_input_decoder_threads":4,"video_inspection_threads":16,"video_inspection_timeout_seconds":900,"sequential_encode_timeout_seconds":1800},"audio_rate":48000,"channels":2,"maximum_clips":64,"gaps":{"explicit":true,"video":"black","audio":"silence","maximum_frames":180000}},
+            "native_projects":crate::native_project::capabilities(),"image_sequences":crate::image_sequence::capabilities(),"scenes":{"spatial":crate::spatial::capabilities(),"profile":"pixel-scene-v1","maximum_seconds":10,"limits":crate::scene::limits(),"color":"srgb_straight_encoded","render_mode":"blocking CLI/library","alpha_modes":["straight","premultiplied"],"blend_modes":["normal","multiply","screen"],"mask":{"shape":"rectangle","space":"source_canvas_before_transform","inversion":true,"animated_properties":["x","y","width","height"],"maximum_per_layer":1,"feather":{"radius":[1,4096],"edges":["inner","centered","outer"],"coverage_grid":65536},"tracking":crate::tracking::capabilities()},"animation":{"properties":["position_x","position_y","opacity"],"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"easing_profile":"quadratic","clock":"layer_local","retime":{"scope":"per_property_or_mask_curve","start":"layer_local_playback_anchor","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"changes_media_time":false},"rounding":"nearest_ties_away_from_zero","maximum_keys_per_curve":128,"maximum_reduced_time_denominator":1000000,"precision":"checked_exact_integer_overflow_rejected"}},"renderer":{"profile":"reference-ffv1-pcm-v1","frame_rate":25,"sequential_frame_rates":[{"num":24,"den":1},{"num":25,"den":1},{"num":30,"den":1},{"num":50,"den":1},{"num":60,"den":1},{"num":24000,"den":1001},{"num":30000,"den":1001},{"num":60000,"den":1001}],"sequential_cut_policy":"whole_video_frames_and_48000_hz_samples","placed_track_frame_rate":25,"maximum_sequential_frames":180000,"large_raster":{"minimum_pixels":8000000,"minimum_dimension":4,"sequential_encoder_threads":16,"sequential_slices":16,"sequential_input_decoder_threads":4,"video_inspection_threads":16,"video_inspection_timeout_seconds":900,"sequential_encode_timeout_seconds":1800},"audio_rate":48000,"channels":2,"maximum_clips":64,"gaps":{"explicit":true,"video":"black","audio":"silence","maximum_frames":180000}},
             "graphics":crate::graphics::capabilities(),
             "tracks":crate::tracks::capabilities(),"sequences":crate::sequences::capabilities(),"multicam":crate::multicam::capabilities(),"synchronization":crate::sync::capabilities(),
             "templates":crate::templates::capabilities(),
@@ -637,6 +849,7 @@ pub fn handle(request: Request) -> Result<Value> {
             result["frame_matte"] = json!({"profile":"binary-source-matte-v1","field":"scene.layers[].frames[].matte","identity":"relative path, SHA-256 and bytes","pixels":"opaque black/white RGB or RGBA PNG matching source dimensions","processing":"held with source, before effects and transforms","limits":"included in existing source byte and decoded/derived pixel budgets","optional_producer":"tools/segmentation.py; annotated frames; external pinned CPU runtime; no automatic tracking"});
             Ok(result)
         }
+        Request::Schema { name } => crate::schema::lookup(&name),
         Request::Create {
             id,
             width,
@@ -733,6 +946,15 @@ pub fn handle(request: Request) -> Result<Value> {
             &project_id,
             before_revision,
             limit,
+        )?)?),
+        Request::SessionReceipt {
+            store_root,
+            project_id,
+            request_id,
+        } => Ok(serde_json::to_value(store::receipt(
+            &store_root,
+            &project_id,
+            &request_id,
         )?)?),
         Request::Start {
             job_root,

@@ -9,18 +9,26 @@ use std::{
 };
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
+/// session.backup request: writes a checked, consistent copy of a session store's history (up to 256 MiB).
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Backup {
+    /// Existing session store directory to copy.
     pub store_root: PathBuf,
+    /// Existing absolute directory that must contain `output`.
     pub output_root: PathBuf,
+    /// Unused absolute `.sqlite3` path inside `output_root`.
     pub output: PathBuf,
 }
+/// session.recover request: restores a backup as `projects.sqlite3` in an empty store location, without migration.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recover {
+    /// Backup file identity (bytes, SHA-256); path absolute or relative, inside `input_root`; at most 256 MiB.
     pub source: scene::Identity,
+    /// Existing absolute directory containing the backup.
     pub input_root: PathBuf,
+    /// Existing absolute directory with no projects.sqlite3 or journal, WAL or shared-memory sidecar.
     pub store_root: PathBuf,
 }
 

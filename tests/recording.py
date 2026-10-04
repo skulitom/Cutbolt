@@ -112,7 +112,7 @@ def run(root,native_seconds):
     saved=call(req);assert call(req)==saved
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         for name in ('audio_inputs','audio_record_inspect','audio_record_place'):
             tool=next(t for t in catalog if t['name']=='cutbolt_'+name);assert tool['annotations']['readOnlyHint']
         assert not any(t['name']=='cutbolt_audio_record' for t in catalog)

@@ -16,12 +16,14 @@ pub(crate) const RATE: Time = Time {
 pub(crate) const MAX_WORDS: usize = 2048;
 pub(crate) const MAX_RANGE: Time = Time { num: 120, den: 1 };
 
+/// Spoken language: `en` (English) or `el` (Greek).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Language {
     En,
     El,
 }
+/// Word provenance: `estimated` (recognizer output, needs review) or `corrected` (text and times supplied by the caller).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {
@@ -29,66 +31,107 @@ pub enum Origin {
     Corrected,
 }
 
+/// Identity-bound local source media of a transcript.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
+    /// Relative path of normal components under `input_root`.
     pub path: PathBuf,
+    /// Content identity: SHA-256 hex plus byte count of the source file.
     pub identity: Identity,
+    /// Positive total source duration in rational seconds, a whole number of 48 kHz samples.
     pub duration: Time,
 }
+/// Caller-asserted recognition provenance; it does not authenticate a recognizer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recognition {
+    /// Recognition profile name, 1-128 bytes without control characters.
     pub profile: String,
+    /// Content identity of the recognition model file.
     pub model: Identity,
+    /// SHA-256 hex of the recognition worker.
     pub worker_sha256: String,
+    /// Optional SHA-256 hex of the worker supervisor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supervisor_sha256: Option<String>,
+    /// SHA-256 hex of the analysis audio given to the recognizer.
     pub analysis_sha256: String,
+    /// 1-64 component name to version entries, each string 1-128 bytes.
     pub versions: BTreeMap<String, String>,
+    /// Optional acoustic alignment provenance; required for words carrying `alignment`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alignment: Option<AlignmentProfile>,
 }
+/// Acoustic alignment models and the context added around estimated word intervals.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AlignmentProfile {
+    /// 1-8 alignment model files keyed by name (1-128 bytes), as content identities.
     pub files: BTreeMap<String, Identity>,
+    /// Context added before each word, rational seconds on the 48 kHz clock; at most 0.5 s.
     pub leading_context: Time,
+    /// Context added after each word, rational seconds on the 48 kHz clock; at most 0.5 s.
     pub trailing_context: Time,
 }
+/// Raw acoustic evidence for one estimated word, in absolute source time within the analysis range.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WordAlignment {
+    /// Raw CTC alignment start, rational seconds on the 48 kHz clock.
     pub ctc_start: Time,
+    /// Raw CTC alignment end; after `ctc_start`.
     pub ctc_end: Time,
+    /// Energy-refined start, rational seconds on the 48 kHz clock.
     pub acoustic_start: Time,
+    /// Energy-refined end; after `acoustic_start`.
     pub acoustic_end: Time,
+    /// Alignment score in milli-units, 0-1000.
     pub score_milli: u16,
 }
+/// One transcript word with exact absolute source times.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Word {
+    /// Unique word ID within the document, 1-128 bytes.
     pub id: String,
+    /// One whitespace-separated token with a letter or digit, at most 512 bytes; punctuation is kept.
     pub text: String,
+    /// Absolute source start, reduced rational seconds on the 48 kHz clock; not before the previous word's end.
     pub start: Time,
+    /// Absolute source end; after `start` and within the analysis range.
     pub end: Time,
+    /// Whether the word is a recognizer estimate or a caller correction.
     pub origin: Origin,
+    /// Model confidence in milli-units 0-1000, not a probability of correctness; null for corrected words.
     pub probability_milli: Option<u16>,
+    /// Optional raw acoustic evidence; only on estimated words with recognition alignment provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alignment: Option<WordAlignment>,
 }
+/// Content-bound transcript of one source range; returned by transcript.transcribe and edited by transcript.correct.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    /// Document format version; must be 1.
     pub schema_version: u32,
+    /// Document ID, 1-128 bytes.
     pub id: String,
+    /// 0 for a new document; each transcript.correct increments it.
     pub revision: u64,
+    /// SHA-256 hex fingerprint of the previous revision; null exactly when `revision` is 0.
     pub parent_fingerprint: Option<String>,
+    /// Source media the word times refer to.
     pub source: Source,
+    /// Absolute source start of the analysed range, rational seconds on the 48 kHz clock.
     pub range_start: Time,
+    /// Positive analysed duration, at most 120 s; the range must end within the source.
     pub range_duration: Time,
+    /// Spoken language.
     pub language: Language,
+    /// Recognition provenance, preserved by corrections.
     pub recognition: Recognition,
+    /// Up to 2048 ordered, nonoverlapping words; at most 128 KiB of text in total.
     pub words: Vec<Word>,
 }
 pub(crate) fn invalid(message: impl Into<String>) -> crate::Error {
@@ -295,12 +338,17 @@ pub fn capabilities() -> Value {
             "leading_context":{"num":2,"den":25},"trailing_context":{"num":1,"den":50},"review_required":true},"writes_state":false})
 }
 
+/// Caller-supplied word for transcript.correct; the result is marked `corrected` with no model confidence.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Correction {
+    /// Word ID: an existing ID for `replace`, a fresh ID for `insert`.
     pub id: String,
+    /// One whitespace-separated token with a letter or digit, at most 512 bytes.
     pub text: String,
+    /// Absolute source start, reduced rational seconds on the 48 kHz clock.
     pub start: Time,
+    /// Absolute source end; after `start` and within the analysis range.
     pub end: Time,
 }
 impl Correction {
@@ -316,17 +364,25 @@ impl Correction {
         }
     }
 }
+/// One word edit in a transcript.correct batch of 1-128, tagged by `op`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Edit {
+    /// Replace the existing word that has the same ID.
     Replace {
+        /// Complete replacement word; its `id` selects the word.
         word: Correction,
     },
+    /// Insert a new word.
     Insert {
+        /// ID of the existing word to insert before; null appends.
         before_id: Option<String>,
+        /// New word with an unused ID.
         word: Correction,
     },
+    /// Remove an existing word.
     Remove {
+        /// ID of the word to remove.
         id: String,
     },
 }

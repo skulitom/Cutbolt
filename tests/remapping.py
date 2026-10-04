@@ -258,7 +258,7 @@ def run(root):
 
     client = Client(exe)
     try:
-        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == 63
+        client.initialize(); catalog = client.rpc('tools/list')['result']['tools']; assert len(catalog) == 65
         tool = next(t for t in catalog if t['name'] == 'cutbolt_media_conform_inspect')
         fields = {'recipe': ramp, 'input_root': str(sources)}
         Draft202012Validator(tool['inputSchema']).validate(fields); assert tool['annotations']['readOnlyHint']

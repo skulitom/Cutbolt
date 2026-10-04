@@ -20,6 +20,7 @@ mod import;
 const LIMIT: u64 = 4 * 1024 * 1024;
 const MAX_INTEGER: f64 = 9_007_199_254_740_991.0;
 
+/// Maps one media reference in the interchange document to an identity-bound local asset.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
@@ -28,27 +29,43 @@ pub struct Binding {
     /// Explicit local asset, including a bound content identity.
     pub asset: Asset,
 }
+/// Request for interchange.import: map a bounded OTIO document to a proposed native project.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Import {
+    /// `.otio` file identity `{path, bytes, sha256}` relative to `input_root`; at most 4 MiB.
     pub source: scene::Identity,
+    /// Existing absolute directory containing the source document.
     pub input_root: PathBuf,
+    /// Existing absolute directory that every bound asset and proxy path must resolve inside.
     pub media_root: PathBuf,
+    /// ID of the proposed project.
     pub id: String,
+    /// Project canvas width in pixels.
     pub width: u32,
+    /// Project canvas height in pixels.
     pub height: u32,
+    /// Timeline frame rate in frames per second as a rational `{num, den}`.
     pub frame_rate: Time,
+    /// Up to 1000 media bindings, one per distinct document reference; unused ones are ignored.
     pub bindings: Vec<Binding>,
+    /// Unique IDs of reported nonblocking losses to accept; default none.
     #[serde(default)]
     pub acknowledged_losses: Vec<String>,
 }
+/// Request for interchange.export: write a project as a new OTIO file.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Export {
+    /// Project snapshot to export.
     pub project: Project,
+    /// Absolute directory containing every registered asset; each asset identity is checked.
     pub input_root: PathBuf,
+    /// Existing absolute directory that must contain `output`.
     pub output_root: PathBuf,
+    /// Absolute path of the new `.otio` file; existing files are never replaced.
     pub output: PathBuf,
+    /// Unique IDs of reported nonblocking losses to accept; default none.
     #[serde(default)]
     pub acknowledged_losses: Vec<String>,
 }

@@ -6,96 +6,151 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+/// Explicit ID for the right-hand survivor when a clip or link is split.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NewId {
+    /// Existing clip or link ID; its left survivor keeps this ID.
     pub id: String,
+    /// New ID for the right survivor, 1-128 bytes and unused in this arrangement.
     pub new_id: String,
 }
+/// Split edit: cut every selected clip at one absolute timeline time.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Split {
+    /// Clips to split, 1-1000 unique IDs.
     pub clip_ids: Vec<String>,
+    /// Absolute timeline time strictly inside every selected and included clip.
     pub at: Time,
+    /// Linked-partner policy.
     pub links: Linked,
+    /// One mapping per split clip, including link-included partners; missing or surplus mappings fail.
     pub right_clip_ids: Vec<NewId>,
+    /// One mapping per link whose members are split; the right-side group gets the new ID.
     pub right_link_ids: Vec<NewId>,
 }
+/// Slip edit: shift selected clips' source ranges without moving them.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Slip {
+    /// Clips to slip, 1-1000 unique IDs.
     pub clip_ids: Vec<String>,
+    /// Offset applied to each `source_in`; forward shows later source content.
     pub shift: Shift,
+    /// Linked-partner policy.
     pub links: Linked,
 }
+/// Roll edit: move the cuts after the selected clips.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Roll {
+    /// Clips before the cuts, 1-1000 unique IDs; each needs an exactly adjacent next clip.
     pub left_ids: Vec<String>,
+    /// Cut movement; forward lengthens the left clips and shortens their next neighbors.
     pub shift: Shift,
+    /// Linked-partner policy; `include` also adds linked neighbors.
     pub links: Linked,
 }
+/// Slide edit: move middle clips between their neighbors.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Slide {
+    /// Middle clips to move, 1-1000 unique IDs; each needs exactly adjacent previous and next clips.
     pub clip_ids: Vec<String>,
+    /// Timeline offset; forward lengthens the previous neighbors and shortens the next ones.
     pub shift: Shift,
+    /// Linked-partner policy; `include` also adds linked neighbors.
     pub links: Linked,
 }
+/// Arrangement end after an interval edit: `keep` leaves the explicit end unchanged; `resize` adds an insert's duration, extends to an overwrite's end if later, or subtracts a ripple deletion's duration.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EndPolicy {
     Keep,
     Resize,
 }
+/// Handling of transitions an interval edit touches: `reject_affected` fails; `remove_affected` removes each such transition entirely first.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionPolicy {
     RejectAffected,
     RemoveAffected,
 }
+/// New clip placed inside an insert or overwrite interval; it is not linked automatically.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Placement {
+    /// Selected or link-expanded track that receives the clip.
     pub track_id: String,
+    /// New clip with an unused ID, lying entirely inside the edited interval.
     pub clip: TrackClip,
 }
+/// Insert edit: open space on selected tracks and optionally fill it.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Insert {
+    /// Tracks to edit, 1-32 unique IDs; `links` may add more.
     pub track_ids: Vec<String>,
+    /// Insertion time in rational seconds; not after the arrangement end.
     pub at: Time,
+    /// Positive length of the opened space.
     pub duration: Time,
+    /// New clips placed inside the opened space; may be empty.
     pub clips: Vec<Placement>,
+    /// Linked-partner policy.
     pub links: Linked,
+    /// New IDs for right parts of clips that straddle `at`.
     pub right_clip_ids: Vec<NewId>,
+    /// New IDs for right-side groups of links whose members are split.
     pub right_link_ids: Vec<NewId>,
+    /// Arrangement end policy.
     pub end_policy: EndPolicy,
+    /// Policy for transitions the insertion point falls strictly inside.
     pub transitions: TransitionPolicy,
 }
+/// Overwrite edit: replace an interval on selected tracks.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Overwrite {
+    /// Tracks to edit, 1-32 unique IDs; `links` may add more.
     pub track_ids: Vec<String>,
+    /// Interval start in rational seconds; not after the arrangement end.
     pub at: Time,
+    /// Positive length of the replaced interval.
     pub duration: Time,
+    /// Replacement clips inside the interval; may be empty, leaving empty space.
     pub clips: Vec<Placement>,
+    /// Linked-partner policy.
     pub links: Linked,
+    /// New IDs for right parts of clips that survive on both sides of the interval.
     pub right_clip_ids: Vec<NewId>,
+    /// New IDs for right-side groups of links whose members survive on both sides.
     pub right_link_ids: Vec<NewId>,
+    /// Arrangement end policy.
     pub end_policy: EndPolicy,
+    /// Policy for transitions overlapping the interval.
     pub transitions: TransitionPolicy,
 }
+/// Ripple-delete edit: remove an interval on selected tracks and close it.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RippleDelete {
+    /// Tracks to edit, 1-32 unique IDs; `links` may add more.
     pub track_ids: Vec<String>,
+    /// Interval start in rational seconds.
     pub start: Time,
+    /// Positive length; the interval must end within the arrangement.
     pub duration: Time,
+    /// Linked-partner policy.
     pub links: Linked,
+    /// New IDs for right parts of clips that survive on both sides of the interval.
     pub right_clip_ids: Vec<NewId>,
+    /// New IDs for right-side groups of links whose members survive on both sides.
     pub right_link_ids: Vec<NewId>,
+    /// Arrangement end policy.
     pub end_policy: EndPolicy,
+    /// Policy for transitions overlapping the interval.
     pub transitions: TransitionPolicy,
 }
 fn invalid(message: impl Into<String>) -> crate::Error {

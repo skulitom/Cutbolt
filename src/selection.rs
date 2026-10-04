@@ -7,18 +7,26 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Circular hue band in millidegrees: weight 1 within `inner` of center, falling linearly to 0 at `outer`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HueBand {
+    /// Center hue in millidegrees, 0..359999.
     pub center: u32,
+    /// Full-weight radius in millidegrees; at most `outer`.
     pub inner: u32,
+    /// Zero-weight radius in millidegrees, at most 180000; equal to inner for a hard edge.
     pub outer: u32,
 }
+/// Scalar band in thousandths: weight 1 inside the inclusive low..high range, falling linearly to 0 over `feather`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Band {
+    /// Inclusive lower bound in thousandths, 0..1000; at most `high`.
     pub low: u16,
+    /// Inclusive upper bound in thousandths, 0..1000.
     pub high: u16,
+    /// Falloff distance outside each bound in thousandths, 0..1000; 0 is a hard edge.
     pub feather: u16,
 }
 impl Band {
@@ -40,15 +48,20 @@ impl Band {
         }
     }
 }
+/// HSL color selection measured on 8-bit encoded sRGB; weight is the product of present bands. Needs at least one band.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Qualifier {
+    /// Hue band; black, white and exact gray have no hue and get weight 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hue: Option<HueBand>,
+    /// HSL saturation band in thousandths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saturation: Option<Band>,
+    /// HSL lightness band in thousandths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lightness: Option<Band>,
+    /// Use 1 minus the combined weight; default false.
     #[serde(default)]
     pub inverted: bool,
 }
@@ -126,13 +139,18 @@ fn hsl(rgb: [u8; 3]) -> (Option<u32>, u16, u16) {
     (Some(hue), saturation, lightness)
 }
 
+/// Correction mask weighting a selective grade or chroma key, in source-canvas pixels before crop and transform.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Mask {
+    /// `[x, y, width, height]`; x/y -32768..32768, size 0..32768; may extend outside the canvas.
     pub rect: [i32; 4],
+    /// Inward linear ramp from each edge in source pixels, 0..4096; 0 is a hard edge.
     pub feather: u16,
+    /// Use 1 minus coverage; default false.
     #[serde(default)]
     pub inverted: bool,
+    /// Optional curves overriding rectangle components on the layer-local clock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<MaskAnimation>,
 }

@@ -20,48 +20,68 @@ use std::{
 const LIMIT: usize = 2 * 1024 * 1024;
 const FPS: Time = Time { num: 25, den: 1 };
 const DAY: Time = Time { num: 86400, den: 1 };
+/// Subtitle file format: `srt` (plain-text SRT profile) or `webvtt` (bounded WebVTT profile).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Format {
     Srt,
     Webvtt,
 }
+/// Simultaneous-cue policy: `allow` keeps overlapping cues; `reject` fails validation if any cues overlap.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Overlap {
     Allow,
     Reject,
 }
+/// Export loss policy: `reject` refuses a format that drops cue fields; `allow_reported` permits the losses captions.encode reports.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LossPolicy {
     Reject,
     AllowReported,
 }
+/// Caption style: a whole-cue text color.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
+    /// Text color as `[r, g, b]`, each 0-255 (sRGB).
     pub color: [u8; 3],
 }
+/// One timed caption over the half-open interval `[start, end)`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Cue {
+    /// Unique cue ID: 1-64 ASCII letters, digits, `_` or `-`; not `STYLE`, `NOTE` or `REGION`.
     pub id: String,
+    /// Inclusive start in rational seconds `{num, den}`; cues must be in nondecreasing start order.
     pub start: Time,
+    /// Exclusive end in rational seconds; after `start` and at most 24 hours.
     pub end: Time,
+    /// 1-1024 Unicode scalars (at most 4096 bytes); LF between nonblank lines, no other control characters.
     pub text: String,
+    /// ID of a style defined in the document's `styles`.
     pub style: String,
+    /// Horizontal alignment of each line within the caption box.
     pub align: Align,
+    /// Optional speaker metadata, 1-128 trimmed bytes without controls, `<`, `>` or `&`; never rendered.
     pub speaker: Option<String>,
 }
+/// Native caption document: styles and time-ordered cues, edited immutably by captions.apply.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    /// Document format version; must be 1.
     pub schema_version: u32,
+    /// Document ID: 1-64 ASCII letters, digits, `_` or `-`.
     pub id: String,
+    /// Edit counter incremented by each captions.apply; pass it as `expected_revision`.
     pub revision: u64,
+    /// Whether cues may overlap in time.
     pub overlap: Overlap,
+    /// Up to 32 styles keyed by style ID (cue ID rules, starting with a letter or `_`).
     pub styles: BTreeMap<String, Style>,
+    /// Up to 4096 cues sorted by start; at most 1 MiB of text in total.
     pub cues: Vec<Cue>,
 }
 fn invalid(message: &str) -> crate::Error {
@@ -507,25 +527,57 @@ pub fn import(
         json!({"inspection":inspect(&document)?,"document":document,"source":source,"format":format}),
     )
 }
+/// One caption edit for captions.apply, tagged by `op`; the final document must validate.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", deny_unknown_fields)]
+#[schemars(rename = "CaptionOperation")]
 pub enum Operation {
+    /// Add a complete cue whose ID is not already used.
     #[serde(rename = "cue.add")]
-    Add { cue: Cue },
+    Add {
+        /// The new cue.
+        cue: Cue,
+    },
+    /// Replace the existing cue that has the same ID.
     #[serde(rename = "cue.replace")]
-    Replace { cue: Cue },
+    Replace {
+        /// Complete replacement cue; its `id` selects the cue to replace.
+        cue: Cue,
+    },
+    /// Remove an existing cue.
     #[serde(rename = "cue.remove")]
-    Remove { cue_id: String },
+    Remove {
+        /// ID of the cue to remove.
+        cue_id: String,
+    },
+    /// Add or replace a style definition.
     #[serde(rename = "style.set")]
-    SetStyle { style_id: String, style: Style },
+    SetStyle {
+        /// Style ID to add or replace.
+        style_id: String,
+        /// New style definition.
+        style: Style,
+    },
+    /// Remove a style; no cue in the final document may still reference it.
     #[serde(rename = "style.remove")]
-    RemoveStyle { style_id: String },
+    RemoveStyle {
+        /// ID of an existing style.
+        style_id: String,
+    },
+    /// Change the document's overlap policy.
     #[serde(rename = "overlap.set")]
-    SetOverlap { overlap: Overlap },
+    SetOverlap {
+        /// New overlap policy.
+        overlap: Overlap,
+    },
+    /// Move existing cues by an exact time offset.
     #[serde(rename = "cues.shift")]
     Shift {
+        /// 1-4096 unique IDs of existing cues to move.
         cue_ids: Vec<String>,
+        /// Nonnegative shift in rational seconds `{num, den}`.
         offset: Time,
+        /// True moves cues earlier; false moves them later.
         backward: bool,
     },
 }
@@ -702,9 +754,10 @@ pub fn encode(document: &Document, format: Format) -> Result<Value> {
                 lost.push("speaker");
             }
             if cue.text.contains(['<', '>', '&']) {
-                return Err(unsupported(
-                    "SRT plain-text profile cannot encode angle brackets or ampersands",
-                ));
+                return Err(unsupported(&format!(
+                    "Cue {:?}: the SRT plain-text profile cannot encode angle brackets or ampersands; use WebVTT",
+                    cue.id
+                )));
             }
         }
         if !lost.is_empty() {
@@ -783,34 +836,53 @@ pub fn export(
     report["output"] = json!(output);
     Ok(report)
 }
+/// Text layout applied to every visible cue of one style in captions.scene.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Layout {
+    /// 1-4 font file identities `{path, bytes, sha256}` under `input_root`, in fallback order.
     pub fonts: Vec<Identity>,
+    /// Font em size in pixels, 1-512.
     pub size: u16,
+    /// Text box `[x, y, width, height]` in scene pixels; must lie inside the canvas.
     pub rect: [i32; 4],
+    /// Baseline-to-baseline distance in pixels, 1-2048.
     pub line_height: u16,
+    /// Extra pixels between characters on the same line, 0-128.
     pub letter_spacing: u16,
+    /// Line wrapping mode.
     pub wrap: Wrap,
+    /// Behavior when text does not fit the box.
     pub overflow: Overflow,
+    /// Optional Unicode text profile for shaping and mixed directions; omit for the scalar layout.
     #[serde(default)]
     pub text_layout: Option<crate::graphics::TextLayout>,
 }
+/// Caption sampling policy; only `sample_start`: output frame n shows caption time `offset + n/25`.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Sampling {
     SampleStart,
 }
+/// Request for captions.scene: render one caption window as text layers appended to a base scene.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SceneRequest {
+    /// Caption document to sample; it is not changed.
     pub document: Document,
+    /// Base scene to extend; duration must be 1-250 whole frames at 25 fps.
     pub scene: Scene,
+    /// ID of the returned scene.
     pub scene_id: String,
+    /// Caption time in rational seconds `{num, den}` shown at output frame 0; at most 24 hours.
     pub offset: Time,
+    /// Layout per style ID; keys must be defined styles, and every style with a sampled cue needs one.
     pub layouts: BTreeMap<String, Layout>,
+    /// Frame sampling policy.
     pub sampling: Sampling,
+    /// Prefix for generated layer IDs `<prefix>-<cue_id>`: 1-32 ASCII letters, digits, `_` or `-`.
     pub layer_prefix: String,
+    /// Absolute directory containing the base scene's media and the layout fonts.
     pub input_root: PathBuf,
 }
 fn ceil_frames(t: Time) -> u64 {
@@ -873,6 +945,7 @@ pub fn to_scene(request: &SceneRequest) -> Result<Value> {
             start: Time::new(first, 25)?,
             duration: Time::new(last - first, 25)?,
             frames: Vec::new(),
+            tilemap: None,
             graphics: Some(Graphic::Text {
                 text: cue.text.clone(),
                 fonts: layout.fonts.clone(),

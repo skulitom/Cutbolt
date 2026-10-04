@@ -16,6 +16,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+/// Output profile: `rgba_ffv1` (straight RGBA FFV1 `.mkv`), `rgba_png_mov` (straight RGBA PNG `.mov`), `reference_rgb` (FFV1/bgr0 `.mkv` flattened over `background`; returns a timeline asset). All include silent 48 kHz stereo PCM16.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Profile {
@@ -23,26 +24,42 @@ pub enum Profile {
     RgbaPngMov,
     ReferenceRgb,
 }
+/// One numbered PNG source image.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Frame {
+    /// Image number; must equal `first_number` plus this entry's index.
     pub number: u32,
+    /// PNG file identity; path relative to `input_root`.
     pub image: Identity,
 }
+/// Numbered PNG sequence recipe for image.sequence.inspect and image.sequence.compile.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
+    /// Recipe format version; must be 1.
     pub schema_version: u32,
+    /// Asset ID for the asset returned by `reference_rgb` (1-128 bytes).
     pub id: String,
+    /// Number of the first image; the last number must stay below 1000000.
     pub first_number: u32,
+    /// Complete ordered source list, 1 to 1024 same-size PNGs; all are validated.
     pub frames: Vec<Frame>,
+    /// Output frame rate as a rational; one of the supported native rates.
     pub frame_rate: Time,
+    /// Index in `frames` of the first image in the half-open selected window.
     pub source_start: u32,
+    /// Number of images in the selected window; at least 1 and within `frames`.
     pub source_count: u32,
+    /// Times to play the window; at least 1, at most 180000 output frames in total.
     pub repeat: u32,
+    /// Declared transfer of the PNG RGB values; sRGB-tagged PNGs reject `bt709`.
     pub input_transfer: Transfer,
+    /// Whether source RGB is straight or premultiplied by alpha.
     pub alpha_mode: AlphaMode,
+    /// Output container, codec and alpha handling.
     pub profile: Profile,
+    /// Opaque `[r, g, b]` background (0-255); required for `reference_rgb`, omitted otherwise.
     #[serde(default)]
     pub background: Option<[u8; 3]>,
 }

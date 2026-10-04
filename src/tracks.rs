@@ -1,12 +1,13 @@
 //! Native placed tracks and transactional linked editing. Times are exact rationals.
 use crate::{
-    Result, error,
+    At, Result, error,
     model::{Clip, Project},
     time::Time,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Track media kind: `video` uses the project frame clock; `audio` (stereo) uses the 48 kHz sample clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
@@ -22,16 +23,23 @@ impl Kind {
         }
     }
 }
+/// Clip placed at an explicit time on a native track, reading either a media asset or a child sequence. Times align to the track clock.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TrackClip {
+    /// Clip ID unique across all tracks of this arrangement, 1-128 bytes.
     pub id: String,
+    /// Asset added with media.add; omit when `sequence_id` is set. Exactly one of the two is required.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub asset_id: String,
+    /// Child sequence created by sequence.create or multicam.create; omit for media clips.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence_id: Option<String>,
+    /// Timeline position in rational seconds; the clip must end by the arrangement duration.
     pub start: Time,
+    /// Source (or child sequence) position played at `start`, in rational seconds.
     pub source_in: Time,
+    /// Positive length in rational seconds; `source_in + duration` must fit the source.
     pub duration: Time,
 }
 impl TrackClip {
@@ -63,17 +71,45 @@ impl TrackClip {
         }
     }
 }
+/// Native video or audio track. The highest enabled opaque video track with a clip supplies the frame; enabled audio tracks are summed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Track {
+    /// Track ID unique within this arrangement, 1-128 bytes.
     pub id: String,
+    /// Media kind; it sets the clock for clip and transition times.
     pub kind: Kind,
+    /// True protects the track's clips, transitions, order position and enabled state from edits.
     pub locked: bool,
+    /// False excludes the track from playback and rendering.
     pub enabled: bool,
+    /// Placed clips; they may touch but not overlap. Array order does not affect playback.
     pub clips: Vec<TrackClip>,
+    /// Transitions between adjacent clips on this track; omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<Transition>,
+    /// Video only: `alpha_over` composites this track's straight-alpha clips over the result below.
+    #[serde(default, skip_serializing_if = "Composite::is_opaque")]
+    pub composite: Composite,
 }
+/// How a video track combines with lower tracks.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Composite {
+    /// The clip supplies the entire frame (original behaviour).
+    #[default]
+    Opaque,
+    /// Straight-alpha "over" in encoded RGB: round((s*a + d*(255-a)) / 255), ties up.
+    AlphaOver,
+}
+impl Composite {
+    pub fn is_opaque(&self) -> bool {
+        *self == Composite::Opaque
+    }
+}
+/// Transition style: `dissolve` crossfades; `dip_black` fades out to black or silence and back in; `wipe_left`/`wipe_right` reveal the incoming clip from that edge. Audio supports only `dissolve` and `dip_black`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionKind {
@@ -82,14 +118,21 @@ pub enum TransitionKind {
     WipeLeft,
     WipeRight,
 }
+/// Effect across the cut between two exactly adjacent clips on one track, covering `[cut - before, cut + after)`. Both sources need real handles; none are synthesized.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transition {
+    /// Transition ID unique within this arrangement, 1-128 bytes.
     pub id: String,
+    /// Outgoing clip on this track; its end is the cut.
     pub left_id: String,
+    /// Incoming clip on this track, starting exactly where `left_id` ends.
     pub right_id: String,
+    /// Length before the cut, aligned to the track clock; the incoming clip needs this much source before its `source_in`.
     pub before: Time,
+    /// Length after the cut, aligned to the track clock; the outgoing clip needs this much source after its end. `before + after` must be positive.
     pub after: Time,
+    /// Transition style.
     pub kind: TransitionKind,
 }
 impl Track {
@@ -151,110 +194,176 @@ impl Track {
         Ok(None)
     }
 }
+/// Link member: a clip and its `start` and `source_in` recorded when the link was made.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Anchor {
+    /// Linked clip in this arrangement.
     pub clip_id: String,
+    /// Clip start recorded at link time, in rational seconds.
     pub start: Time,
+    /// Clip source_in recorded at link time, in rational seconds.
     pub source_in: Time,
 }
+/// Synchronization group created by the `link` edit. Every member must keep the same change in `start - source_in` relative to its anchor, or edits fail with SYNC_CONFLICT.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Link {
+    /// Link ID unique within this arrangement, 1-128 bytes.
     pub id: String,
+    /// 2-32 members; a clip belongs to at most one link.
     pub members: Vec<Anchor>,
 }
+/// Native placed-track timeline, used for the project's `tracks` and for each child sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Arrangement {
+    /// Explicit timeline end in rational seconds, aligned to the project frame rate; includes leading and trailing gaps.
     pub duration: Time,
+    /// Tracks in bottom-to-top order, at most 32.
     pub tracks: Vec<Track>,
+    /// Synchronization links between clips, at most 500.
     pub links: Vec<Link>,
 }
+/// Overlap policy on destination tracks: `reject` fails on any overlap with an existing clip; `replace_clips` removes each whole colliding clip together with its linked partners.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Collision {
     Reject,
     ReplaceClips,
 }
+/// Linked-partner policy: `include` adds the linked partners of affected clips (whole partner tracks for interval edits); `reject_partial` fails unless the caller selects them.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Linked {
     Include,
     RejectPartial,
 }
+/// Time offset given as a direction and a nonnegative magnitude.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Shift {
+    /// True moves earlier (subtracts `amount`); false moves later.
     pub backward: bool,
+    /// Offset size in rational seconds; zero is allowed. Resulting times must stay aligned to each track's clock.
     pub amount: Time,
 }
+/// Destination track for one clip in a `move` edit.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Target {
+    /// Selected or link-included clip to retarget.
     pub clip_id: String,
+    /// Unlocked destination track of the same kind.
     pub track_id: String,
 }
+/// Native track edit, tagged by `op`, used by tracks.edit and sequence.edit. Locked tracks reject changes, and the result must stay valid.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Edit {
+    /// Split every selected clip at one absolute timeline time; left parts keep their IDs and right parts need new ones.
     Split(crate::track_edit::Split),
+    /// Shift the selected clips' source ranges; timeline starts and durations stay.
     Slip(crate::track_edit::Slip),
+    /// Move the cut after each selected clip; the exactly adjacent next clip's start, source_in and duration compensate.
     Roll(crate::track_edit::Roll),
+    /// Move each selected middle clip in time; its previous neighbor lengthens or shortens and its next neighbor compensates.
     Slide(crate::track_edit::Slide),
+    /// Open space on selected tracks, splitting crossing clips and shifting later content right, then place new clips in it.
     Insert(crate::track_edit::Insert),
+    /// Clear an interval on selected tracks and place new clips in it; content outside keeps its timeline position.
     Overwrite(crate::track_edit::Overwrite),
+    /// Remove an interval on selected tracks and shift later content on them left.
     RippleDelete(crate::track_edit::RippleDelete),
+    /// Add a transition to a track, or replace the one with the same ID.
     TransitionSet {
+        /// Unlocked track holding both endpoint clips.
         track_id: String,
+        /// Complete transition definition.
         transition: Transition,
     },
+    /// Remove a transition; its underlying cut remains.
     TransitionRemove {
+        /// Unlocked track holding the transition.
         track_id: String,
+        /// ID of the transition to remove.
         id: String,
     },
+    /// Create an empty arrangement; requires a project without tracks or sequential clips.
     Create {
+        /// Explicit timeline end in rational seconds, aligned to the project frame rate.
         duration: Time,
     },
+    /// Convert the sequential timeline into one video and one audio track of linked clip pairs with identical playback; gaps become empty space.
     Promote {
+        /// ID for the new video track; its clips keep the original clip IDs.
         video_track_id: String,
+        /// ID for the new audio track; its clips get `promoted-audio-N` IDs.
         audio_track_id: String,
     },
+    /// Add an empty track above all existing tracks.
     Add {
+        /// Track to add; its `clips` and `transitions` must be empty.
         track: Track,
     },
+    /// Set a track's lock and enabled state.
     State {
+        /// Track to change.
         track_id: String,
+        /// New lock state.
         locked: bool,
+        /// New enabled state; a currently locked track must be unlocked first to change it.
         enabled: bool,
     },
+    /// Reorder tracks; locked tracks cannot change position.
     Order {
+        /// Every track ID exactly once, in new bottom-to-top order.
         track_ids: Vec<String>,
     },
+    /// Change the explicit timeline end without truncating clips; an end before any clip's end fails.
     Duration {
+        /// New end in rational seconds, aligned to the project frame rate.
         duration: Time,
     },
+    /// Place one new clip on a track.
     Place {
+        /// Unlocked track that receives the clip.
         track_id: String,
+        /// New clip whose ID is unused in this arrangement.
         clip: TrackClip,
+        /// Policy for overlaps with existing clips.
         collision: Collision,
     },
+    /// Shift a clip selection by one common offset, optionally retargeting clips to other tracks of the same kind.
     Move {
+        /// Clips to move, 1-1000 unique IDs.
         clip_ids: Vec<String>,
+        /// Common timeline offset for every moved clip.
         shift: Shift,
+        /// Per-clip destination tracks; clips without an entry stay on their track. May be empty.
         targets: Vec<Target>,
+        /// Linked-partner policy.
         links: Linked,
+        /// Policy for overlaps at the destinations.
         collision: Collision,
     },
+    /// Remove a clip selection, leaving empty space; transitions and links of removed clips are removed too.
     Remove {
+        /// Clips to remove, 1-1000 unique IDs.
         clip_ids: Vec<String>,
+        /// Linked-partner policy.
         links: Linked,
     },
+    /// Link clips, recording their current start and source_in as sync anchors.
     Link {
+        /// New link ID unique within this arrangement, 1-128 bytes.
         id: String,
+        /// 2-32 clips that are not already linked.
         clip_ids: Vec<String>,
     },
+    /// Remove a link so its clips can be edited independently; the clips stay in place.
     Unlink {
+        /// ID of the link to remove.
         id: String,
     },
 }
@@ -284,7 +393,9 @@ fn overlaps(a: &TrackClip, b: &TrackClip) -> Result<bool> {
 }
 impl Arrangement {
     pub(crate) fn validate(&self, project: &Project) -> Result<()> {
-        self.duration.units(project.frame_rate)?;
+        self.duration
+            .units(project.frame_rate)
+            .at(|| "tracks.duration".into())?;
         if self.tracks.len() > 32
             || self.tracks.iter().map(|t| t.clips.len()).sum::<usize>() > 1000
             || self.links.len() > 500
@@ -307,8 +418,13 @@ impl Arrangement {
                 if clips.insert(&clip.id, (track, clip)).is_some() {
                     return Err(error("DUPLICATE_ID", &clip.id));
                 }
-                for t in [clip.start, clip.source_in, clip.duration] {
-                    t.units(track.kind.clock(project.frame_rate))?;
+                for (field, t) in [
+                    ("start", clip.start),
+                    ("source_in", clip.source_in),
+                    ("duration", clip.duration),
+                ] {
+                    t.units(track.kind.clock(project.frame_rate))
+                        .at(|| format!("track {:?} clip {:?} {field}", track.id, clip.id))?;
                 }
                 let source_duration = clip.source_duration(project)?;
                 if clip.duration.num == 0
@@ -338,6 +454,19 @@ impl Arrangement {
                     ));
                 }
             }
+            if !track.composite.is_opaque()
+                && (track.kind != Kind::Video
+                    || !track.transitions.is_empty()
+                    || track.clips.iter().any(|c| c.sequence_id.is_some()))
+            {
+                return Err(error(
+                    "UNSUPPORTED_TIMELINE",
+                    format!(
+                        "Track {:?}: alpha_over applies to video tracks of asset clips without transitions",
+                        track.id
+                    ),
+                ));
+            }
             if track.transitions.len() > 1000 {
                 return Err(error("LIMIT_EXCEEDED", "Too many transitions"));
             }
@@ -348,8 +477,14 @@ impl Arrangement {
                     return Err(error("DUPLICATE_ID", &effect.id));
                 }
                 let clock = track.kind.clock(project.frame_rate);
-                effect.before.units(clock)?;
-                effect.after.units(clock)?;
+                effect
+                    .before
+                    .units(clock)
+                    .at(|| format!("transition {:?} before", effect.id))?;
+                effect
+                    .after
+                    .units(clock)
+                    .at(|| format!("transition {:?} after", effect.id))?;
                 let (left, right) = track.endpoints(effect)?;
                 if left.end()?.compare(right.start)?.is_ne()
                     || effect.before.plus(effect.after)?.num == 0
@@ -564,7 +699,7 @@ impl Arrangement {
             .tracks
             .iter()
             .rev()
-            .filter(|t| t.kind == Kind::Video && t.enabled)
+            .filter(|t| t.kind == Kind::Video && t.enabled && t.composite.is_opaque())
         {
             for clip in &track.clips {
                 if !time.compare(clip.start)?.is_lt() && time.compare(clip.end()?)?.is_lt() {
@@ -652,6 +787,7 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                         enabled: true,
                         clips: vec![],
                         transitions: vec![],
+                        composite: Default::default(),
                     },
                     Track {
                         id: audio_track_id,
@@ -660,6 +796,7 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                         enabled: true,
                         clips: vec![],
                         transitions: vec![],
+                        composite: Default::default(),
                     },
                 ],
                 links: vec![],

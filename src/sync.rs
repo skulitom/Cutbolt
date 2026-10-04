@@ -11,62 +11,96 @@ use std::{
 const RATE: Time = Time { num: 48000, den: 1 };
 const FPS: Time = Time { num: 25, den: 1 };
 
+/// Audio search window pairing approximate positions of one distinctive event in both sources; the full search interval must fit each source.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Window {
+    /// Window center in the reference source, rational seconds on the 48 kHz grid.
     pub reference_center: Time,
+    /// Approximate matching position in the candidate source, rational seconds on the 48 kHz grid.
     pub candidate_center: Time,
+    /// Correlation window length, an even 2048..8192 samples, as rational seconds.
     pub length: Time,
+    /// Lag searched either side of `candidate_center`, 32..48000 samples, as rational seconds.
     pub search_radius: Time,
 }
+/// Accepted correlation sign: `same` requires positive correlation; `either` also accepts inverted polarity, which is reported but not corrected.
 #[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Polarity {
     Same,
     Either,
 }
+/// Mapped candidate start policy: `reject` requires an exactly sample-aligned start; `nearest_sample` rounds to the nearest 48 kHz sample, half ties upward.
 #[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Rounding {
     Reject,
     NearestSample,
 }
+/// Declared 25 fps non-drop clock label at one position in a source.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Stamp {
+    /// Explicit day number, 0..1000000; midnight wrap is never inferred.
     pub day: u32,
+    /// Clock label `HH:MM:SS:FF`: hours 0..23, minutes and seconds 0..59, frames 0..24.
     pub label: String,
+    /// In-source position the label names, frame-aligned rational seconds at 25 fps, inside the source.
     pub media_at: Time,
 }
+/// How the clock mapping is obtained, tagged by `mode`.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Method {
+    /// Estimate offset and constant drift by correlating audio in declared windows.
     Audio {
+        /// 3..8 windows; reference centers must be distinct and span at least one second.
         windows: Vec<Window>,
+        /// Reference source channel, 0 (left) or 1 (right).
         reference_channel: u8,
+        /// Candidate source channel, 0 (left) or 1 (right).
         candidate_channel: u8,
+        /// Accepted correlation sign.
         polarity: Polarity,
+        /// Minimum peak correlation per window, 500..1000 milli.
         minimum_correlation_milli: u16,
+        /// Minimum lead of the best peak over the next separated peak, 1..1000 milli.
         minimum_margin_milli: u16,
+        /// Maximum accepted clock drift in parts per million, 0..5000.
         maximum_drift_ppm: u32,
+        /// Maximum disagreement of any window with the fitted linear clock, 0..16 samples.
         maximum_residual_samples: u32,
     },
+    /// Align by declared equal-rate clock labels; drift is not measured.
     Timecode {
+        /// Clock label in the reference source.
         reference: Stamp,
+        /// Clock label in the candidate source.
         candidate: Stamp,
     },
 }
+/// `sync.inspect` request: maps a candidate source clock onto a reference and returns `media.conform` recipes; read-only.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
+    /// Alignment ID used to name the returned recipes; 1..100 bytes, not blank.
     pub id: String,
+    /// Project snapshot at 25 fps that contains both content-bound assets.
     pub project: Project,
+    /// Absolute directory containing both asset files.
     pub input_root: PathBuf,
+    /// ID of the reference asset in `project.assets`; 25 fps video with 48 kHz stereo PCM16, at most 60 seconds.
     pub reference_asset_id: String,
+    /// ID of the asset to align, with the same source profile.
     pub candidate_asset_id: String,
+    /// Interval start on the reference clock, frame-aligned rational seconds at 25 fps.
     pub start: Time,
+    /// Interval length, frame-aligned at 25 fps, 1..1500 frames.
     pub duration: Time,
+    /// Rounding policy for the mapped candidate start.
     pub rounding: Rounding,
+    /// Audio-correlation or declared-timecode method.
     pub method: Method,
 }
 #[derive(Clone, Debug, Serialize)]

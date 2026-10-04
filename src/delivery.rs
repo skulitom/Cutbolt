@@ -14,6 +14,7 @@ const FPS: Time = Time { num: 25, den: 1 };
 mod sequence;
 mod settings;
 pub use settings::{Compatibility, H264, RateControl};
+/// Export profile: `reference` (FFV1/bgr0 and PCM16 `.mkv`, audio-only `.wav`), `h264_aac` (25 fps `.mp4`, audio-only `.m4a`), `png_mov` (PNG RGB and optional PCM16 `.mov`), `png_sequence` (new `.frames` directory of numbered PNGs, manifest and optional WAV; Windows only).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Profile {
@@ -22,6 +23,7 @@ pub enum Profile {
     PngMov,
     PngSequence,
 }
+/// Streams to write: `audio_video`, `video` or `audio` (48 kHz stereo); PNG profiles need video.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Streams {
@@ -37,6 +39,7 @@ impl Streams {
         self != Self::Video
     }
 }
+/// Declared transfer of encoded RGB values, `srgb` or `bt709`. For H.264, `srgb` converts to BT.709 transfer first and `bt709` passes values unchanged; lossless outputs keep values and tag the choice.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Transfer {
@@ -60,29 +63,44 @@ impl Transfer {
         }
     }
 }
+/// Half-open timeline interval to export; both values on project frame boundaries.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Range {
+    /// Interval start in rational timeline seconds.
     pub start: Time,
+    /// Interval length in rational seconds; 1 to 180000 frames, ending inside the timeline.
     pub duration: Time,
 }
+/// Export request for export.inspect and export.run: a timeline range in a declared profile, never overwriting.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Export {
+    /// Project snapshot to export, e.g. from session.get; original media is always used.
     pub project: Project,
+    /// Existing absolute directory that project media paths resolve against.
     pub input_root: PathBuf,
+    /// Existing absolute directory that must contain `output`.
     pub output_root: PathBuf,
+    /// Unused absolute output path inside `output_root`; extension must match the profile and streams.
     pub output: PathBuf,
+    /// Output format profile.
     pub profile: Profile,
+    /// Streams to include.
     pub streams: Streams,
+    /// Timeline interval to export; omit or null for the whole timeline.
     #[serde(default)]
     pub range: Option<Range>,
+    /// Required for H.264 and PNG outputs with video; omit for reference and audio-only exports.
     #[serde(default)]
     pub input_transfer: Option<Transfer>,
+    /// H.264 encoder settings, only for `h264_aac` with video; omit for High profile CRF 18.
     #[serde(default)]
     pub h264: Option<H264>,
+    /// AAC bitrate in bits/s, 192000, 256000 or 320000 (default); only for `h264_aac` with audio.
     #[serde(default)]
     pub aac_bitrate: Option<u32>,
+    /// First image number for `png_sequence` only (default 0); all numbers must fit six digits.
     #[serde(default)]
     pub sequence_first: Option<u32>,
 }
@@ -197,8 +215,19 @@ impl Export {
             render::destination_extension(&self.output, &self.output_root, self.extension())?;
         let parent = output.parent().expect("validated output parent");
         // Plan the lossless intermediate without creating it or exposing a random path in the report.
-        let virtual_output = parent.join(format!(".cutbolt-export-plan-{}.mkv", nonce()?));
-        let reference = render::plan_range(
+        // Audio-only exports never composite or encode video: their intermediate is a PCM WAV.
+        let audio_only = self.streams == Streams::Audio;
+        let virtual_output = parent.join(format!(
+            ".cutbolt-export-plan-{}.{}",
+            nonce()?,
+            if audio_only { "wav" } else { "mkv" }
+        ));
+        let plan = if audio_only {
+            render::plan_audio_range
+        } else {
+            render::plan_range
+        };
+        let reference = plan(
             &project,
             &self.input_root,
             parent,
@@ -239,6 +268,7 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         for name in [
             "reference.mkv",
+            "reference.wav",
             "encoded.mkv",
             "encoded.mp4",
             "encoded.m4a",
@@ -766,8 +796,18 @@ fn validate_output(
 pub fn run(request: &Export) -> Result<Value> {
     let c = request.check()?;
     let scratch = Scratch::new(c.output.parent().expect("validated output parent"))?;
-    let reference = scratch.0.join("reference.mkv");
-    render::run_range(
+    let audio_only = request.streams == Streams::Audio;
+    let reference = scratch.0.join(if audio_only {
+        "reference.wav"
+    } else {
+        "reference.mkv"
+    });
+    let render = if audio_only {
+        render::run_audio_range
+    } else {
+        render::run_range
+    };
+    render(
         &c.project,
         &request.input_root,
         &scratch.0,

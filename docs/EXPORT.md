@@ -60,7 +60,9 @@ Encoding uses one video thread. Source chapters and copied metadata are removed;
 
 ### Explicit color interpretation
 
-H.264 exports containing video require `input_transfer: "srgb" | "bt709"`. Omit it for reference exports and audio-only delivery. This is an explicit interpretation of the reference timeline's encoded RGB values; it does not infer a per-asset color space from names or metadata. The caller must supply a consistently interpreted sequence. Existing scene RGB normally uses the declared sRGB scene contract; media conformed from BT.709 sources can retain BT.709-encoded RGB values. Use [explicit SDR normalization](COLOR.md) to bring mixed interpretations into one working transfer before assembly. The timeline does not infer or enforce that normalization automatically.
+H.264 exports containing video require `input_transfer: "srgb" | "bt709"`. Omit it for reference exports and audio-only delivery.
+
+Choosing between them: `bt709` passes the timeline's encoded RGB values through unchanged before the matrix conversion, so ordinary players show approximately the code values that were authored. Prefer it for screen-designed material such as PNG artwork, pixel art, text and UI captures. `srgb` converts transfer functions (sRGB decode, then BT.709 encode), which lowers dark and mid-tone code values, so typical players display shadows darker than designed; in one dark scene a sky value of about 28 dropped to about 13 levels, while `bt709` stayed within 1.5 levels of the design. Use `srgb` only when the downstream workflow explicitly expects that conversion. This is an explicit interpretation of the reference timeline's encoded RGB values; it does not infer a per-asset color space from names or metadata. The caller must supply a consistently interpreted sequence. Existing scene RGB normally uses the declared sRGB scene contract; media conformed from BT.709 sources can retain BT.709-encoded RGB values. Use [explicit SDR normalization](COLOR.md) to bring mixed interpretations into one working transfer before assembly. The timeline does not infer or enforce that normalization automatically.
 
 For `srgb`, the engine specifies the public piecewise sRGB decode followed by the BT.709 opto-electronic transfer function. Each resulting encoded RGB channel is rounded to an 8-bit value before the matrix conversion. For `bt709`, encoded RGB is unchanged at this step. Both paths then apply a declared BT.709 RGB-to-YCbCr matrix and limited-range conversion, using bilinear chroma reduction with horizontal position 0 and vertical position 128 in units of 1/256 luma pixels. H.264 receives YUV 4:2:0 and matching color tags. Conversion is performed, not merely indicated by changing tags.
 
@@ -78,7 +80,11 @@ The one-frame fixture is 1,920 presentation sample frames and decodes to 2,048; 
 
 ## Verification and publication
 
-Inspection reports the selected range, dimensions, stream policy, source identities, full-quality selection and profile settings. It does not create an intermediate or output file. Rendering then:
+Inspection reports the selected range, dimensions, stream policy, source identities, full-quality selection and profile settings. It does not create an intermediate or output file.
+
+Audio-only exports (`streams: "audio"`) never decode, composite or encode pictures. Sequential timelines are trimmed and concatenated directly from source PCM with exact silence for gaps; track timelines mix only their enabled audio tracks with the same placement and saturation rules as a full render. Sources are still identity-checked and their stream metadata, audio samples and video timestamps validated, but video timing is read from FFV1 packets instead of decoding every frame. The intermediate is a lossless PCM WAV, so cost scales with audio duration rather than picture size.
+
+Rendering then:
 
 1. Compiles the selected full-quality reference interval under a private scratch directory beside the output.
 2. Extracts reference streams or encodes the fixed delivery profile.

@@ -11,13 +11,19 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 const FPS: Time = Time { num: 25, den: 1 };
 
+/// Preview proxy bound to an asset, usually as returned by proxy.generate. Previews use it only when preview.proxy selects its scale.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
+    /// Proxy file path: absolute, or relative normal components resolved under `input_root`.
     pub path: String,
+    /// Content identity of the proxy file.
     pub identity: Identity,
+    /// Identity of the full-quality source; must equal the asset's bound identity.
     pub source_identity: Identity,
+    /// Dimension divisor 2, 4 or 8; project width and height must divide exactly.
     pub scale: u32,
+    /// Proxy frame count; must equal the asset duration in 25 fps frames.
     pub frames: u64,
 }
 pub(crate) fn dimensions(project: &Project, scale: u32) -> Result<(u32, u32)> {
@@ -62,15 +68,23 @@ fn asset<'a>(project: &'a Project, id: &str) -> Result<&'a Asset> {
         .find(|a| a.id == id)
         .ok_or_else(|| error("MISSING_MEDIA", id))
 }
+/// proxy.generate request: write a reduced-size FFV1/PCM proxy of one asset and propose a media.proxy.attach operation. The project is not saved.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Generate {
+    /// Project snapshot containing the asset; it must be 25 fps.
     pub project: Project,
+    /// Must equal `project.revision`.
     pub expected_revision: u64,
+    /// Asset to proxy; it needs a bound identity and a 25 fps reference source covering its full duration.
     pub asset_id: String,
+    /// Dimension divisor 2, 4 or 8; project width and height must divide exactly.
     pub scale: u32,
+    /// Existing absolute directory that contains the source.
     pub input_root: PathBuf,
+    /// Existing absolute directory that receives the output.
     pub output_root: PathBuf,
+    /// New absolute `.mkv` path inside `output_root`; existing files are never overwritten.
     pub output: PathBuf,
 }
 pub fn generate(request: &Generate) -> Result<Value> {
@@ -211,6 +225,16 @@ pub(crate) fn preview_project(project: &Project, root: &Path) -> Result<Project>
     let Some(scale) = project.preview_scale else {
         return Ok(project.clone());
     };
+    if project.tracks.as_ref().is_some_and(|a| {
+        a.tracks
+            .iter()
+            .any(|t| !t.composite.is_opaque() && t.enabled && !t.clips.is_empty())
+    }) {
+        return Err(error(
+            "UNSUPPORTED_PREVIEW",
+            "Proxy previews do not support alpha_over tracks; select full quality with preview.proxy null",
+        ));
+    }
     let (width, height) = dimensions(project, scale)?;
     let used = crate::sequences::used_assets(project)?;
     let mut mapped = project.clone();

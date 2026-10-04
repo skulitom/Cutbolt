@@ -3,18 +3,24 @@ use crate::{Result, error, expressions::Number, scene::Scene, time::Time};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// How shutter samples combine; only `encoded_rgb`: an equal-weight average of complete encoded sRGB frames.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Integration {
     EncodedRgb,
 }
 
+/// Shutter sampling: composites several exact subframe samples per output frame and averages them. Audio is unchanged.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Exposure {
+    /// Shutter angle in degrees as a signed rational, 0..360; 360 spans one full frame.
     pub shutter_angle: Number,
+    /// Shutter opening offset from the frame time in degrees as a signed rational, -360..360; minus half the angle centers it.
     pub phase: Number,
+    /// Midpoint samples per output frame, 1..32; a zero angle requires 1.
     pub samples: u8,
+    /// Sample combination method.
     pub integration: Integration,
 }
 

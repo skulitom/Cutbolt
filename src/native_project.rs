@@ -8,6 +8,7 @@ use std::{collections::BTreeSet, path::PathBuf};
 const PROTOCOL: &str = "cutbolt-native-transfer-v1";
 const PROFILE: &str = "native-flat-timeline-v1";
 
+/// Request for native.import: validate a content-bound native-project transfer and propose a native snapshot.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Import {
@@ -17,10 +18,15 @@ pub struct Import {
     pub transfer: scene::Identity,
     /// An explicitly reviewed, content-bound adapter/build acceptance manifest.
     pub acceptance: scene::Identity,
+    /// Existing absolute directory containing the three distinct `source`, `transfer` and `acceptance` files.
     pub input_root: PathBuf,
+    /// Existing absolute directory that every bound asset and proxy path must resolve inside.
     pub media_root: PathBuf,
+    /// ID of the proposed project.
     pub id: String,
+    /// Up to 1000 media bindings, as for interchange.import.
     pub bindings: Vec<interchange::Binding>,
+    /// Unique IDs of nonblocking `host:` issues and editorial losses to accept; default none.
     #[serde(default)]
     pub acknowledged_losses: Vec<String>,
 }

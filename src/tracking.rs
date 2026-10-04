@@ -11,28 +11,40 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf};
 
+/// Tracking motion model; only `translation` (integer-pixel patch displacement) is supported.
 #[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Model {
     Translation,
 }
 
+/// Request for `tracking.inspect`: track an image patch and return a moving mask plus a replacement scene, saving nothing. Work is limited to 64000000 patch-pixel comparisons.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
+    /// Scene recipe containing the tracked layer; validated before and after analysis.
     pub scene: Scene,
+    /// Absolute directory containing the scene's relative image paths.
     pub input_root: PathBuf,
+    /// ID of an image-frame layer with 2..=128 active frames at 25 fps; graphics and tilemap layers reject.
     pub layer_id: String,
+    /// Motion model.
     pub model: Model,
-    /// Initial reference patch in the full untransformed source canvas.
+    /// Initial reference patch `[x, y, width, height]` in source canvas pixels before effects and transforms; width/height 4..=64, inside the canvas.
     pub region: [u32; 4],
+    /// Search distance in pixels around the previous accepted position, 1..=32.
     pub search_radius: u32,
+    /// Maximum Euclidean move between consecutive frames in pixels, 1..=`search_radius`.
     pub maximum_step: u32,
+    /// Maximum Euclidean change between consecutive steps in pixels, 1..=64.
     pub maximum_acceleration: u32,
+    /// Minimum normalized correlation with the fixed initial patch, in thousandths, 850..=1000.
     pub minimum_correlation_milli: u16,
+    /// Minimum correlation lead over every other candidate, in thousandths, 20..=1000.
     pub minimum_margin_milli: u16,
+    /// Cut threshold: maximum mean absolute luminance change over the canvas, in thousandths of 255, 1..=1000.
     pub maximum_frame_change_milli: u16,
-    /// A static mask to translate with the measured patch.
+    /// Static rectangle mask (no `animation`), optionally feathered; returned with hold x/y curves following the patch.
     pub mask: RectMask,
 }
 
@@ -188,6 +200,7 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
     let count = layer.duration.units(Time::new(25, 1)?)?;
     let start = layer.start.units(Time::new(25, 1)?)?;
     if layer.graphics.is_some()
+        || layer.tilemap.is_some()
         || !(2..=128).contains(&count)
         || u64::from(x) + u64::from(w) > u64::from(layer.canvas[0])
         || u64::from(y) + u64::from(h) > u64::from(layer.canvas[1])

@@ -4,14 +4,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
+/// Numerical scopes request: histograms, waveform/parade and vectorscope of one full-quality timeline frame.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
+    /// Project snapshot to sample; frames up to 8M pixels, originals used even if a proxy is selected.
     pub project: Project,
+    /// Existing absolute directory that project media paths resolve against.
     pub input_root: PathBuf,
+    /// Frame time in rational seconds; a frame boundary before the timeline end.
     pub time: Time,
+    /// Declared transfer of the full-range RGB source values.
     pub input_transfer: color::Transfer,
+    /// Policy for absent source color tags.
     pub missing_tags: color::MissingTags,
+    /// Horizontal waveform bins, 1 to min(width, 256).
     pub columns: usize,
 }
 #[derive(Serialize)]
@@ -96,13 +103,19 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
                     "Source video disappeared during scope inspection",
                 )
             })?;
+        // An alpha_over source (FFV1 bgra) shares the RGB colour contract of bgr0; its alpha
+        // plane is consumed by compositing and does not change the interpretation of RGB codes.
+        let mut video = video.clone();
+        if video["pix_fmt"] == "bgra" {
+            video["pix_fmt"] = "bgr0".into();
+        }
         let (_, report) = color::Input {
             matrix: color::Matrix::Rgb,
             range: color::Range::Full,
             transfer: request.input_transfer,
             missing_tags: request.missing_tags,
         }
-        .inspect(video, true, false)?;
+        .inspect(&video, true, false)?;
         if media::file_hash(path)? != source["sha256"].as_str().expect("source identity") {
             return Err(error(
                 "MEDIA_CHANGED",

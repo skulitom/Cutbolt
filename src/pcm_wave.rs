@@ -7,6 +7,7 @@ use std::{
     path::Path,
 };
 
+/// Named PCM channel layout and sample order: `mono` FC; `stereo` FL FR; `quad` FL FR BL BR; `5.1` FL FR FC LFE BL BR; `5.1(side)` FL FR FC LFE SL SR; `7.1` FL FR FC LFE BL BR SL SR.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]

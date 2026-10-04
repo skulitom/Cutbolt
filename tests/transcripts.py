@@ -142,7 +142,7 @@ def run(root):
 
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         for command in ['inspect','correct','plan']:
             item=next(t for t in catalog if t['name']=='cutbolt_transcript_'+command)
             assert item['annotations']['readOnlyHint'] and not item['annotations']['openWorldHint']

@@ -5,29 +5,42 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+/// External source media declared in a project with media.add; files are referenced, never copied.
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Asset {
+    /// Unique asset ID within the project, 1-128 bytes; clips refer to it as `asset_id`.
     pub id: String,
+    /// Source file path: absolute, or relative normal components resolved under `input_root`.
     pub path: String,
+    /// Complete source duration in rational seconds; positive, and clip ranges must fit inside it.
     pub duration: Time,
+    /// Searchable title, bin, tags and custom fields; omitted when empty.
     #[serde(default, skip_serializing_if = "crate::registry::Metadata::is_empty")]
     pub metadata: crate::registry::Metadata,
+    /// Bound content identity set by media.bind; required for relinking and proxies. Omitted when unbound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<crate::registry::Identity>,
+    /// Preview proxy attached with media.proxy.attach; omitted when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<crate::proxy::Binding>,
 }
 
+/// Item of the sequential timeline: a source interval of an asset, or an explicit gap of black and silence.
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Clip {
+    /// Unique clip ID among the sequential clips, 1-128 bytes.
     pub id: String,
+    /// ID of an asset added with media.add; omit for a gap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
+    /// True for an explicit gap with no `asset_id` and zero `source_in`; default false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub gap: bool,
+    /// Source start in rational seconds, aligned to the project frame rate; zero for gaps.
     pub source_in: Time,
+    /// Positive frame-aligned length in rational seconds; `source_in + duration` must fit the asset.
     pub duration: Time,
 }
 fn is_false(value: &bool) -> bool {
@@ -42,132 +55,255 @@ impl Clip {
     }
 }
 
+/// Versioned project snapshot: canvas, frame rate, media and either a sequential clip list or native tracks. Returned by project.create and session.get; change it only through operations.
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
+    /// Snapshot schema version; must be 1.
     pub schema_version: u32,
+    /// Project ID, 1-128 bytes.
     pub id: String,
+    /// Revision number, incremented once per applied batch; pass it as `expected_revision`.
     pub revision: u64,
+    /// Frame width in pixels, 1-8192.
     pub width: u32,
+    /// Frame height in pixels, 1-8192.
     pub height: u32,
+    /// Frames per second as a positive rational such as 25/1 or 30000/1001; video times align to it.
     pub frame_rate: Time,
+    /// Declared source media, at most 1000; add with media.add.
     pub assets: Vec<Asset>,
+    /// Sequential timeline in playback order, at most 1000 items; must be empty when `tracks` is set.
     pub clips: Vec<Clip>,
+    /// Native placed-track timeline, created by tracks.edit `create` or `promote`; omitted for sequential projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<crate::tracks::Arrangement>,
+    /// Reusable child sequence definitions, at most 32; omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sequences: Vec<crate::sequences::Sequence>,
+    /// Proxy preview divisor 2, 4 or 8 set by preview.proxy; omitted for full-quality previews.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_scale: Option<u32>,
 }
 
+/// One edit in an atomic timeline.apply or session.apply batch, tagged by `op`; each must leave a valid project. The clip.* operations and timeline.ripple_delete edit the sequential `clips` list and are rejected once native tracks exist.
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
+#[schemars(rename = "Operation")]
 pub enum Operation {
+    /// Change an identity-bound asset's original and optional proxy paths, as proposed by project.portable.
     #[serde(rename = "media.paths")]
     Paths {
+        /// Asset to update; it must have a bound identity.
         asset_id: String,
+        /// New source path: absolute, or relative normal components resolved under `input_root`.
         path: String,
+        /// New proxy path in the same form; requires an attached proxy. Omit to keep the current one.
         #[serde(default)]
         proxy_path: Option<String>,
     },
+    /// Apply a transcript.plan result, ripple-deleting the planned word ranges. Fails if the project or document changed since planning.
     #[serde(rename = "transcript.cut")]
     TranscriptCut {
+        /// Transcript document the plan was made from, as returned by transcript.plan.
         document: Box<crate::transcript::Document>,
+        /// Fingerprint-bound cut plan returned by transcript.plan.
         plan: crate::transcript_cut::Plan,
     },
+    /// Create a camera group as a managed child sequence that can be placed by `sequence_id`.
     #[serde(rename = "multicam.create")]
     MulticamCreate {
+        /// New sequence ID, unique among the project's sequences, 1-128 bytes.
         id: String,
+        /// Camera angles, cuts and audio policy.
         group: crate::multicam::Group,
     },
+    /// Change one camera group's cuts, angles, audio policy, duration or lock state.
     #[serde(rename = "multicam.edit")]
     MulticamEdit {
+        /// ID of a sequence created with multicam.create.
         id: String,
+        /// Camera-group edit to apply.
         edit: crate::multicam::Edit,
     },
+    /// Add an empty reusable child sequence with native tracks.
     #[serde(rename = "sequence.create")]
-    SequenceCreate { id: String, duration: Time },
+    SequenceCreate {
+        /// New sequence ID, unique among the project's sequences, 1-128 bytes.
+        id: String,
+        /// Child timeline length in rational seconds, aligned to the project frame rate.
+        duration: Time,
+    },
+    /// Apply one native track edit inside a child sequence; every instance changes. Camera groups use multicam.edit.
     #[serde(rename = "sequence.edit")]
     SequenceEdit {
+        /// ID of the child sequence to edit.
         id: String,
+        /// Track edit, as in tracks.edit; `create` and `promote` are rejected.
         edit: crate::tracks::Edit,
     },
+    /// Remove a child sequence that nothing references and whose tracks are unlocked.
     #[serde(rename = "sequence.remove")]
-    SequenceRemove { id: String },
+    SequenceRemove {
+        /// ID of the child sequence to remove.
+        id: String,
+    },
+    /// Edit the project's native placed-track timeline.
     #[serde(rename = "tracks.edit")]
-    Tracks { edit: crate::tracks::Edit },
+    Tracks {
+        /// Track edit to apply, tagged by its own `op`.
+        edit: crate::tracks::Edit,
+    },
+    /// Attach or replace an asset's preview proxy, usually one returned by proxy.generate.
     #[serde(rename = "media.proxy.attach")]
     ProxyAttach {
+        /// Asset that receives the proxy; it must have a bound identity.
         asset_id: String,
+        /// Proxy binding; its `source_identity` must equal the asset's identity.
         proxy: crate::proxy::Binding,
     },
+    /// Remove an asset's proxy binding; no files are deleted.
     #[serde(rename = "media.proxy.detach")]
-    ProxyDetach { asset_id: String },
+    ProxyDetach {
+        /// Asset whose proxy binding is removed.
+        asset_id: String,
+    },
+    /// Replace only an attached proxy's path, usually as proposed by proxy.relink.
     #[serde(rename = "media.proxy.relink")]
-    ProxyRelink { asset_id: String, path: String },
+    ProxyRelink {
+        /// Asset whose proxy moves; it must have a proxy binding.
+        asset_id: String,
+        /// New absolute proxy file path.
+        path: String,
+    },
+    /// Select the proxy scale for frame and range previews; final renders always use full quality.
     #[serde(rename = "preview.proxy")]
-    PreviewProxy { scale: Option<u32> },
+    PreviewProxy {
+        /// Dimension divisor 2, 4 or 8; null or omitted selects full-quality sources.
+        scale: Option<u32>,
+    },
+    /// Declare an external source; rendering verifies its actual contents.
     #[serde(rename = "media.add")]
-    AddMedia { asset: Asset },
+    AddMedia {
+        /// Asset to add, with an ID not already used by another asset.
+        asset: Asset,
+    },
+    /// Replace one asset's complete metadata.
     #[serde(rename = "media.metadata")]
     Metadata {
+        /// Asset to update.
         asset_id: String,
+        /// New metadata; omitted parts become empty.
         metadata: crate::registry::Metadata,
     },
+    /// Bind an asset's content identity, usually as proposed by registry.bind.
     #[serde(rename = "media.bind")]
     Bind {
+        /// Asset to bind.
         asset_id: String,
+        /// Content identity; an existing different identity cannot be replaced.
         identity: crate::registry::Identity,
     },
+    /// Change an identity-bound asset's source path, usually as proposed by registry.relink.
     #[serde(rename = "media.relink")]
-    Relink { asset_id: String, path: String },
+    Relink {
+        /// Asset to relink; it must have a bound identity.
+        asset_id: String,
+        /// New absolute source path.
+        path: String,
+    },
+    /// Append a media clip or gap to the end of the sequential timeline.
     #[serde(rename = "clip.append")]
-    Append { clip: Clip },
+    Append {
+        /// Clip to append, with a new unique ID.
+        clip: Clip,
+    },
+    /// Split a clip in two at an offset from its start; the left part keeps `clip_id`.
     #[serde(rename = "clip.split")]
     Split {
+        /// Clip to split.
         clip_id: String,
+        /// New unique ID for the right part.
         new_clip_id: String,
+        /// Split point from the clip's start, frame-aligned and strictly inside the clip.
         offset: Time,
     },
+    /// Replace a clip's source interval; later clips shift by the duration change.
     #[serde(rename = "clip.trim")]
     Trim {
+        /// Clip to trim.
         clip_id: String,
+        /// New source start in rational seconds, frame-aligned; zero for gaps.
         source_in: Time,
+        /// New positive frame-aligned duration; `source_in + duration` must fit the asset.
         duration: Time,
     },
+    /// Remove a clip and close the gap; later clips shift earlier.
     #[serde(rename = "clip.remove")]
-    Remove { clip_id: String },
+    Remove {
+        /// Clip to remove.
+        clip_id: String,
+    },
+    /// Move a clip to another position in the sequential order.
     #[serde(rename = "clip.move")]
-    Move { clip_id: String, to_index: usize },
+    Move {
+        /// Clip to move.
+        clip_id: String,
+        /// Zero-based index in the resulting list; must be less than the clip count.
+        to_index: usize,
+    },
+    /// Insert a clip at a timeline time, splitting any clip there and shifting later content right.
     #[serde(rename = "clip.insert")]
     Insert {
+        /// Timeline time in rational seconds, frame-aligned and at most the current end.
         at: Time,
+        /// New clip with a unique ID.
         clip: Clip,
+        /// New ID for the right fragment when a clip is split at `at`; omit otherwise.
         right_id: Option<String>,
     },
+    /// Replace the interval from `at` for the clip's duration; later content keeps its position and the end may extend.
     #[serde(rename = "clip.overwrite")]
     Overwrite {
+        /// Timeline start in rational seconds, frame-aligned and at most the current end.
         at: Time,
+        /// New clip with a unique ID; its duration sets the replaced length.
         clip: Clip,
+        /// New ID for the right fragment when one clip survives on both sides; omit otherwise.
         right_id: Option<String>,
     },
+    /// Remove a timeline interval and close it; later content shifts earlier.
     #[serde(rename = "timeline.ripple_delete")]
     RippleDelete {
+        /// Interval start in rational seconds, frame-aligned.
         start: Time,
+        /// Positive frame-aligned length; the interval must lie inside the timeline.
         duration: Time,
+        /// New ID for the right fragment when one clip survives on both sides; omit otherwise.
         right_id: Option<String>,
     },
+    /// Change a media clip's source start while keeping its placement and duration; gaps cannot slip.
     #[serde(rename = "clip.slip")]
-    Slip { clip_id: String, source_in: Time },
+    Slip {
+        /// Media clip to slip.
+        clip_id: String,
+        /// New source start in rational seconds, frame-aligned; the range must fit the asset.
+        source_in: Time,
+    },
+    /// Move the cut between a clip and the next one; their combined duration stays the same.
     #[serde(rename = "clip.roll")]
     Roll {
+        /// Clip before the cut; it needs a following clip.
         left_id: String,
+        /// New duration of the left clip; the next clip's source_in and duration compensate.
         left_duration: Time,
     },
+    /// Move a middle clip by trimming its neighbors; its content, its duration and the total duration stay.
     #[serde(rename = "clip.slide")]
     Slide {
+        /// Middle clip to move; it needs clips on both sides.
         clip_id: String,
+        /// New duration of the previous clip; the next clip's source_in and duration compensate.
         previous_duration: Time,
     },
 }

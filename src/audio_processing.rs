@@ -4,27 +4,44 @@ use crate::{Result, error};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// One EQ or compression stage, tagged by `type`, for mix masters, buses and repair recipes. All values must be finite.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
+    /// Two-pole low-pass filter.
     LowPass {
+        /// Cutoff frequency in Hz, 20..20000.
         frequency_hz: f64,
+        /// Filter Q, 0.1..20.
         q: f64,
     },
+    /// Two-pole high-pass filter.
     HighPass {
+        /// Cutoff frequency in Hz, 20..20000.
         frequency_hz: f64,
+        /// Filter Q, 0.1..20.
         q: f64,
     },
+    /// Two-pole peaking EQ band.
     Peaking {
+        /// Center frequency in Hz, 20..20000.
         frequency_hz: f64,
+        /// Filter Q, 0.1..20.
         q: f64,
+        /// Band gain in dB, -24..24.
         gain_db: f64,
     },
+    /// Hard-knee peak compressor; detection is linked across all channels.
     Compressor {
+        /// Threshold in dBFS, -60..0.
         threshold_db: f64,
+        /// Compression ratio, 1..20.
         ratio: f64,
+        /// Attack time in milliseconds, 0..1000; 0 applies the reduction immediately.
         attack_ms: f64,
+        /// Release time in milliseconds, 0..5000.
         release_ms: f64,
+        /// Makeup gain in dB applied after reduction, 0..24.
         makeup_db: f64,
     },
 }

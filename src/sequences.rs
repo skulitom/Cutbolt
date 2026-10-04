@@ -8,11 +8,15 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Reusable child sequence; native track clips place it by `sequence_id`, and editing it changes every instance.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Sequence {
+    /// Sequence ID unique within the project, 1-128 bytes.
     pub id: String,
+    /// The child's native tracks, sharing the project's dimensions, frame rate and assets.
     pub arrangement: Arrangement,
+    /// Camera group for sequences made by multicam.create; `arrangement` must match its projection. Omitted otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multicam: Option<crate::multicam::Group>,
 }

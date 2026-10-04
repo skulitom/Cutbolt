@@ -29,11 +29,20 @@ mod windows {
 }
 
 const RATE: Time = Time { num: 48000, den: 1 };
+/// Explicitly selected capture input, tagged by `type`; there is no default or fallback input.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Input {
-    Endpoint { id: String },
-    Process { pid: u32 },
+    /// A capture endpoint listed by `audio.inputs`.
+    Endpoint {
+        /// Endpoint ID returned by `audio.inputs`; 1..1024 bytes, no NUL.
+        id: String,
+    },
+    /// Windows process loopback of one live process and its descendants.
+    Process {
+        /// Nonzero ID of the process to capture; it must stay alive until capture completes.
+        pid: u32,
+    },
 }
 impl Input {
     fn validate(&self) -> Result<()> {
@@ -52,26 +61,42 @@ impl Input {
         }
     }
 }
+/// `audio.record` request: blocking capture of a new 48 kHz stereo PCM16 WAV from an explicit input.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Record {
+    /// Input to capture.
     pub input: Input,
+    /// Capture length, rational seconds on the 48 kHz grid; 1 sample to 2 hours.
     pub duration: Time,
+    /// Existing absolute directory that must contain `output`.
     pub output_root: PathBuf,
+    /// New absolute `.wav` path inside `output_root` with an existing parent; never overwritten.
     pub output: PathBuf,
 }
+/// `audio.record.place` request: returns operations that add a recorded WAV and place it on an existing audio track; writes nothing.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Place {
+    /// Saved project snapshot to place into.
     pub project: crate::model::Project,
+    /// Recorded WAV from the `audio.record` receipt: absolute path, SHA-256 hex and byte count.
     pub source: scene::Identity,
+    /// Absolute directory that must contain `source.path`.
     pub input_root: PathBuf,
+    /// New asset ID for the recording; 1..128 bytes, not blank.
     pub asset_id: String,
+    /// New clip ID for the placed take; 1..128 bytes, not blank.
     pub clip_id: String,
+    /// ID of an existing audio track; 1..128 bytes.
     pub track_id: String,
+    /// Child sequence that owns the track; null to use the project's top-level tracks.
     pub sequence_id: Option<String>,
+    /// Uncompensated placement time, rational seconds on the 48 kHz grid.
     pub start: Time,
+    /// Exact latency correction added to `start` (sample-aligned); `backward: true` moves the take earlier.
     pub compensation: crate::tracks::Shift,
+    /// Policy when the placed clip overlaps existing clips on the track.
     pub collision: crate::tracks::Collision,
 }
 fn count(duration: Time) -> Result<u64> {

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashSet, path::Path};
 
+/// LUT sampling: `nearest` (1D or 3D), `linear` (1D only), `trilinear` or `tetrahedral` (3D only).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Interpolation {
@@ -15,10 +16,13 @@ pub enum Interpolation {
     Trilinear,
     Tetrahedral,
 }
+/// Identity-bound .cube LUT (one 1D or 3D table) applied to encoded working-transfer RGB.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
+    /// Table file identity; `.cube` path relative to `input_root`, at most 8 MiB.
     pub file: Identity,
+    /// Sampling method; must suit the table's dimensionality.
     pub interpolation: Interpolation,
 }
 pub struct Loaded {

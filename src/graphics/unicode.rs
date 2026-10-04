@@ -20,6 +20,7 @@ const MAX_WORK: usize = 1_048_576;
 const MAX_GLYPHS: usize = 8192;
 const MAX_DRAW_PIXELS: usize = 32_000_000;
 
+/// Paragraph base direction: `auto` (from the first strong character), `ltr` or `rtl`; embedded runs keep their own direction.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BaseDirection {
@@ -31,12 +32,16 @@ pub enum BaseDirection {
 fn und() -> String {
     "und".into()
 }
+/// Optional text layout profile, tagged by `profile`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "profile", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TextLayout {
+    /// Unicode layout: grapheme font fallback, OpenType shaping, bidi and word wrapping.
     UnicodeV1 {
+        /// Paragraph base direction; default `auto`.
         #[serde(default)]
         direction: BaseDirection,
+        /// ASCII language tag for shaping, such as `sr`; hyphen-separated 1..=8 character subtags, at most 63 characters. Default `und`.
         #[serde(default = "und")]
         language: String,
     },
@@ -212,7 +217,7 @@ impl Paragraph<'_, '_> {
                     }
                     if info.glyph_id > u16::MAX as u32
                         || position.y_advance != 0
-                        || position.x_advance.unsigned_abs() > 512 * 64
+                        || position.x_advance.unsigned_abs() > crate::scene::MAX_GLYPH as u32 * 64
                         || position.x_offset.unsigned_abs() > 32768 * 64
                         || position.y_offset.unsigned_abs() > 32768 * 64
                     {
@@ -489,10 +494,10 @@ pub(super) fn rasterize(
             }
             if let std::collections::hash_map::Entry::Vacant(entry) = glyph_cache.entry(key) {
                 let metrics = font.metrics_indexed(glyph.id, *size as f32);
-                if metrics.width > 512
-                    || metrics.height > 512
+                if metrics.width > crate::scene::MAX_GLYPH
+                    || metrics.height > crate::scene::MAX_GLYPH
                     || !metrics.advance_width.is_finite()
-                    || metrics.advance_width.abs() > 512.0
+                    || metrics.advance_width.abs() > crate::scene::MAX_GLYPH as f32
                     || metrics.xmin.unsigned_abs() > 32768
                     || metrics.ymin.unsigned_abs() > 32768
                 {
@@ -506,10 +511,10 @@ pub(super) fn rasterize(
                     ));
                 }
                 cached_pixels += metrics.width * metrics.height;
-                if cached_pixels > 16_000_000 {
+                if cached_pixels > crate::scene::MAX_DECODED_PIXELS {
                     return Err(error(
                         "LIMIT_EXCEEDED",
-                        "Glyph coverage cache exceeds 16M pixels",
+                        "Glyph coverage cache exceeds 64M pixels",
                     ));
                 }
                 entry.insert((metrics, font.rasterize_indexed(glyph.id, *size as f32).1));
@@ -524,7 +529,7 @@ pub(super) fn rasterize(
             }
             let origin_128 = rect[0] as i64 * 128 + offset_128 + glyph.x_64 * 2;
             let x = rect[0] + pixel(offset_128 + glyph.x_64 * 2) + metrics.xmin;
-            let y = baseline - pixel(glyph.y_64 as i64 * 2) - metrics.ymin - metrics.height as i32;
+            let y = baseline - pixel(glyph.y_64 as i64 * 2) - super::bitmap_top(metrics);
             for by in 0..metrics.height {
                 for bx in 0..metrics.width {
                     let coverage = bitmap[by * metrics.width + bx];

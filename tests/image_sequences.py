@@ -97,7 +97,7 @@ def run(root,long_form):
     call('session.undo',store_root=str(store),project_id='compiled',expected_revision=1,request_id='undo')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63 and not any(x['name']=='cutbolt_image_sequence_compile' for x in catalog)
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65 and not any(x['name']=='cutbolt_image_sequence_compile' for x in catalog)
         assert client.call('image.sequence.inspect',recipe=base,input_root=str(sources))['complete_sequence_validated']
     finally:client.close()
     passed.append('image_sequence.opaque_composition_saved_edits_and_typed_inspection')

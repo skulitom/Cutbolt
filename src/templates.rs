@@ -15,6 +15,7 @@ use std::{
     path::Path,
 };
 
+/// Typed template parameter value as `{"type": ..., "value": ...}`; the type must match the parameter definition.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "type",
@@ -23,13 +24,41 @@ use std::{
     deny_unknown_fields
 )]
 pub enum ParameterValue {
-    Text(String),
-    Integer(i32),
-    Color([u8; 4]),
-    Fonts(Vec<Identity>),
-    Curve(Curve),
-    Time(Time),
-    Rect([i32; 4]),
+    /// Value for a `text` parameter.
+    Text(
+        /// Nonempty string within the definition's `max_chars` and 4096 UTF-8 bytes.
+        String,
+    ),
+    /// Value for an `integer` parameter.
+    Integer(
+        /// Signed 32-bit integer within the definition's inclusive `min`..=`max`.
+        i32,
+    ),
+    /// Value for a `color` parameter.
+    Color(
+        /// Straight-alpha RGBA color as `[r, g, b, a]` bytes.
+        [u8; 4],
+    ),
+    /// Value for a `fonts` parameter.
+    Fonts(
+        /// Ordered external font identities, 1..=4.
+        Vec<Identity>,
+    ),
+    /// Value for a `curve` parameter.
+    Curve(
+        /// Ordinary scene keyframe curve with 1..=128 keys.
+        Curve,
+    ),
+    /// Value for a `time` parameter.
+    Time(
+        /// Rational seconds `{num, den}`; frame alignment is checked in the resolved scene.
+        Time,
+    ),
+    /// Value for a `rect` parameter.
+    Rect(
+        /// Rectangle `[x, y, width, height]` in pixels; x/y -32768..=32768, sizes 1..=4096.
+        [i32; 4],
+    ),
 }
 impl ParameterValue {
     fn kind(&self) -> &'static str {
@@ -45,31 +74,49 @@ impl ParameterValue {
     }
 }
 
+/// Parameter type and constraints, tagged by `type`; a null or omitted `default` makes the parameter required.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Definition {
+    /// Text parameter.
     Text {
+        /// Default string, checked against `max_chars`; omit or null to require a value.
         default: Option<String>,
+        /// Maximum Unicode scalars, 1..=1024.
         max_chars: u16,
     },
+    /// Signed 32-bit integer parameter.
     Integer {
+        /// Default within `min`..=`max`; omit or null to require a value.
         default: Option<i32>,
+        /// Inclusive minimum.
         min: i32,
+        /// Inclusive maximum; must not be less than `min`.
         max: i32,
     },
+    /// RGBA color parameter.
     Color {
+        /// Default `[r, g, b, a]` bytes; omit or null to require a value.
         default: Option<[u8; 4]>,
     },
+    /// Ordered font list parameter.
     Fonts {
+        /// Default 1..=4 font identities; omit or null to require a value.
         default: Option<Vec<Identity>>,
     },
+    /// Keyframe curve parameter.
     Curve {
+        /// Default curve with 1..=128 keys; omit or null to require a value.
         default: Option<Curve>,
     },
+    /// Rational time parameter.
     Time {
+        /// Default rational seconds `{num, den}`; omit or null to require a value.
         default: Option<Time>,
     },
+    /// Rectangle parameter.
     Rect {
+        /// Default `[x, y, width, height]`; x/y -32768..=32768, sizes 1..=4096; omit or null to require a value.
         default: Option<[i32; 4]>,
     },
 }
@@ -153,6 +200,7 @@ impl Definition {
     }
 }
 
+/// Binding target (parameter type): scene-level `scene_background` (color, alpha 255), `scene_duration` (time); layer `layer_start`, `layer_duration` (time); text `text` (text), `text_color` (color), `fonts` (fonts), `font_size`, `line_height`, `letter_spacing` (integer); shape `shape_fill`, `stroke_color` (color), `stroke_width` (integer), strokes must already exist; `rect` (rect); static `position_x`, `position_y`, `opacity` (integer); animated `position_x_curve`, `position_y_curve`, `opacity_curve` (curve).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Property {
@@ -201,26 +249,38 @@ impl Property {
     }
 }
 
+/// Writes a parameter value into one scene or layer property; each target may be bound only once per template.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
+    /// Target property; static and curve bindings of the same property conflict.
     pub property: Property,
+    /// ID of a base scene layer for layer properties; omit for `scene_background` and `scene_duration`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layer: Option<String>,
 }
+/// Named typed template input applied through one or more bindings.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Parameter {
+    /// Unique name of 1..=64 ASCII letters, digits, `_` or `-`; the key in `values`.
     pub name: String,
+    /// Type, constraints and optional default.
     pub definition: Definition,
+    /// At least one target; every binding's property type must match the definition.
     pub bindings: Vec<Binding>,
 }
+/// Reusable scene template for `graphics.instantiate`: a base scene plus typed parameters and bindings.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Template {
+    /// Template format version; must be 1.
     pub schema_version: u32,
+    /// Nonblank template ID, at most 128 bytes.
     pub id: String,
+    /// Base scene recipe; bound fields may hold placeholders, and layer IDs must be unique.
     pub scene: Scene,
+    /// Up to 64 parameters with at most 256 bindings in total.
     pub parameters: Vec<Parameter>,
 }
 

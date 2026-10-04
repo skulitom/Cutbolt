@@ -19,20 +19,27 @@ use std::{
 };
 mod recovery;
 
+/// Retry policy for a queued render.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Retry {
-    /// Total attempts, including the first. Only transient tool failure or interruption retries.
+    /// Total attempts including the first, 1 to 3. Only transient tool failure or interruption retries.
     pub max_attempts: u32,
 }
 
+/// Background reference render request queued by render.start.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenderRequest {
+    /// Project snapshot to render, e.g. from session.get.
     pub project: Project,
+    /// Existing absolute directory that project media paths resolve against.
     pub input_root: PathBuf,
+    /// Existing absolute directory that must contain `output`.
     pub output_root: PathBuf,
+    /// Unused absolute `.mkv` path inside `output_root`, not reserved by another active job.
     pub output: PathBuf,
+    /// Attempt policy; omit for a single attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<Retry>,
 }

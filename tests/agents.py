@@ -140,7 +140,7 @@ async def sdk_roundtrip(executable):
             initialized = await session.initialize()
             assert initialized.protocolVersion == "2025-06-18"
             listing = await session.list_tools()
-            assert len(listing.tools) == 63
+            assert len(listing.tools) == 65
             created = await session.call_tool("cutbolt_project_create", {"id": "sdk", "width": 320, "height": 180, "frame_rate": {"num": 25, "den": 1}})
             assert not created.isError and created.structuredContent["result"]["id"] == "sdk"
             invalid = await session.call_tool("cutbolt_project_validate", {"project": {}})
@@ -179,9 +179,9 @@ def run(executable, fixture):
             Draft202012Validator.check_schema(tool["inputSchema"])
             Draft202012Validator.check_schema(tool["outputSchema"])
         names = [tool["name"] for tool in catalog]
-        check("mcp.discoverable_schemas", len(names) == len(set(names)) == 63
+        check("mcp.discoverable_schemas", len(names) == len(set(names)) == 65
               and {"cutbolt_registry_search","cutbolt_registry_status","cutbolt_registry_bind","cutbolt_registry_relink"}.issubset(names)
-              and "cutbolt_render_start" in names and "cutbolt_render_run" not in names
+              and "cutbolt_schema" in names and "cutbolt_render_start" in names and "cutbolt_render_run" not in names
               and "cutbolt_audio_inspect" in names and "cutbolt_audio_render" not in names
               and "cutbolt_proxy_status" in names and "cutbolt_proxy_relink" in names and "cutbolt_proxy_generate" not in names
               and "cutbolt_media_conform_inspect" in names and "cutbolt_media_conform" not in names

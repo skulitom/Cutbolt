@@ -28,7 +28,7 @@ The first fixture-generation attempt used the wrong PixelForge `pixels` shape an
 | Y03 | passed | Reordered/repeated 40/80/120 ms holds, 100 ms strict rejection and explicit output-frame-start sampling; loop/hold-last/transparent endings and nonzero layer start. Rational selection without accumulated drift. |
 | Y04 | passed for declared input matrix | PCM16 mono/stereo at 24/44.1/48 kHz; every decoded output sample checked, including signed impulses, channel mapping, endpoint extension, count rounding and silence. Narration overflow rejected. Tolerance is exact integer equality for this deterministic linear converter. This does not establish perceptual resampling quality. |
 | Y05 | partial | Exact timeline frame previews and cross-cut range preview agree with final reference pixels/audio. MCP preview checked. Contact-sheet sampling and cache behavior remain unimplemented. |
-| Y06 | not_run | No real speech inference or listening review. Local weights alone do not count. |
+| Y06 | not_run | No accepted speech inference or listening review. Local weights alone do not count. A later external demonstration ran the CustomVoice checkpoint offline (see [YOUTUBE_PIPELINE.md](../YOUTUBE_PIPELINE.md)); that is an observation, not this acceptance case. |
 | Y07 | not_run | Caption alignment remains unimplemented. |
 | Y08 | not_run | No selective production rebuild/cache or approval invalidation. |
 | Y09 | partial | Oversized narration explicitly fails; regeneration, scene-four replacement and coordinated retiming remain unimplemented. |

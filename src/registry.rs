@@ -11,15 +11,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Project-owned asset metadata for organizing and registry.search; at most 4096 UTF-8 bytes in total, no NUL characters. Media files are never tagged.
 #[derive(schemars::JsonSchema, Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
+    /// Display title, at most 1024 bytes; default empty.
     #[serde(default)]
     pub title: String,
+    /// Bin path from outermost component, at most 8 nonblank components of up to 128 bytes; default empty.
     #[serde(default)]
     pub bin: Vec<String>,
+    /// At most 32 unique case-sensitive tags, each nonblank and up to 128 bytes; default empty.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// At most 32 custom name/value pairs; names nonblank and up to 128 bytes, values up to 1024 bytes.
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
 }
@@ -63,12 +68,15 @@ impl Metadata {
     }
 }
 
+/// Content identity of a media file, checked before the file is used.
 #[derive(
     schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[serde(deny_unknown_fields)]
 pub struct Identity {
+    /// SHA-256 of the file content as 64 lowercase hex characters.
     pub sha256: String,
+    /// File size in bytes; positive.
     pub bytes: u64,
 }
 impl Identity {
@@ -90,17 +98,23 @@ impl Identity {
     }
 }
 
+/// Asset filter for registry.search; every supplied filter must match, and results sort by asset ID.
 #[derive(schemars::JsonSchema, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Query {
+    /// Case-insensitive substring of ID, path, title, bin, tag or field name/value; at most 1024 bytes. Empty matches all.
     #[serde(default)]
     pub text: String,
+    /// Bin path prefix, at most 8 components; matches that bin and its descendants.
     #[serde(default)]
     pub bin: Vec<String>,
+    /// Tags every result must have (exact match), at most 32.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Number of results to skip, 0-1000; default 0. Use the returned `next_offset` to page.
     #[serde(default)]
     pub offset: usize,
+    /// Maximum results to return, 1-200; default 50.
     #[serde(default = "default_limit")]
     pub limit: usize,
 }

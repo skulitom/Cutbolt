@@ -8,7 +8,9 @@ The [property-expression contract](EXPRESSIONS.md) describes optional scene grap
 
 The executable accepts one JSON request on stdin, or a request-file path as its only argument. `cutbolt capabilities` is a shorthand. It returns one JSON object on stdout: `{"ok":true,"result":...}` on success or `{"ok":false,"error":{"code":"...","message":"..."}}` with exit code 1 on failure. Unknown fields and operations are rejected. Requests are limited to 4 MiB.
 
-Snapshot/media commands: `capabilities`, `project.create`, `project.validate`, `timeline.apply`, `media.inspect`, `render.plan`, `render.run`, `export.inspect`, and `export.run`. Saved editing sessions add `session.create`, `session.get`, `session.apply`, `session.preview`, `session.undo`, `session.restore`, and `session.history`. Background commands are `render.start`, `job.status`, `job.cancel`, and `job.resume`. `cutbolt mcp` provides a local stdio adapter. There is no listening socket, installed service, or network request in the engine's normal execution path. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md) for jobs and MCP setup.
+Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.validate`, `timeline.apply`, `media.inspect`, `render.plan`, `render.run`, `export.inspect`, and `export.run`. Saved editing sessions add `session.create`, `session.get`, `session.apply`, `session.preview`, `session.undo`, `session.restore`, `session.history`, and `session.receipt`. Background commands are `render.start`, `job.status`, `job.cancel`, and `job.resume`. `cutbolt mcp` provides a local stdio adapter. There is no listening socket, installed service, or network request in the engine's normal execution path. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md) for jobs and MCP setup.
+
+`{"command":"schema","name":"scene.render"}` returns a command's complete argument schema, with a description on every field. It also accepts the shared types `project`, `operation`, `scene`, `template` and `audio_routing`.
 
 ## Project snapshots
 
@@ -114,6 +116,7 @@ Sessions use one `projects.sqlite3` file in an explicit, existing absolute `stor
 | `session.undo` | `project_id`, `request_id`, `expected_revision` | Restore the preceding undo state as a new revision |
 | `session.restore` | `project_id`, `request_id`, `expected_revision`, `target_revision` | Restore a chosen saved revision as a new revision |
 | `session.history` | `project_id`, optional `before_revision`, optional `limit` | Newest-first summaries; limit defaults to 50, allowed range 1-200 |
+| `session.receipt` | `project_id`, `request_id` | The stored receipt of a committed request, or `REQUEST_NOT_FOUND`; read-only, never replays |
 
 Create a saved session from the supplied empty-project example:
 
@@ -127,7 +130,7 @@ $project = (.\target\debug\cutbolt.exe examples/create-project.json | ConvertFro
     ConvertTo-Json -Compress | .\target\debug\cutbolt.exe
 ```
 
-Use the same operation objects listed above for `session.apply`; omit the entire `project` field and instead send its ID and the revision read from `session.get`. A receipt contains `project_id`, `request_id`, `action`, `revision`, `parent_revision`, `restored_from` and `changes`. Fetch that exact receipt revision with `session.get` when a renderer needs a stable snapshot. Send the retrieved snapshot to the existing `render.plan` / `render.run` commands.
+Use the same operation objects listed above for `session.apply`; omit the entire `project` field and instead send its ID and the revision read from `session.get`. A receipt contains `project_id`, `request_id`, `action`, `revision`, `parent_revision`, `restored_from` and `changes`. Fetch that exact receipt revision with `session.get` when a renderer needs a stable snapshot. If a response is lost, `session.receipt` with the same `request_id` reports whether the request committed without sending its operations again. Validation errors name the field path and exact value, for example `track "picture" clip "late" source_in` with the unaligned time and clock. Send the retrieved snapshot to the existing `render.plan` / `render.run` commands.
 
 `changes` includes exact old/new sequence duration, changed clip IDs with before/after placements (index, rational timeline start, and full clip), and added/removed/modified asset IDs. Removing or shortening a clip reports shifted subsequent placements too. `session.preview` previews edit semantics, not video pixels. A preview does not reserve a revision: apply with the same `expected_revision` and handle a conflict if another writer commits first.
 
@@ -201,7 +204,9 @@ Add `transform.spatial` to a scene layer for animated axis scales, rotation and 
 
 ## Verification and demo
 
-Full verification requires explicit external acceptance dependencies: `CUTBOLT_TRANSCRIPTION_RUNTIME` (speech runtime JSON), `CUTBOLT_OTIO_PYTHON` (pinned interchange-reference Python), `CUTBOLT_LEGACY_STORE_ENGINE` (retained original schema-1 store writer), `CUTBOLT_NATIVE_PROJECT_FIXTURE` (private reviewed exact-build capture fixture) and `CUTBOLT_SEGMENTATION_PYTHON` (pinned local foreground worker Python). The corresponding capability documents specify their versions and contracts. Verification never installs or downloads them; missing evidence fails rather than silently skipping a criterion. Use an idle machine for fixed performance gates.
+Full verification requires explicit external acceptance dependencies: `CUTBOLT_TRANSCRIPTION_RUNTIME` (speech runtime JSON), `CUTBOLT_OTIO_PYTHON` (pinned interchange-reference Python), `CUTBOLT_LEGACY_STORE_ENGINE` (retained original schema-1 store writer), `CUTBOLT_NATIVE_PROJECT_FIXTURE` (private reviewed exact-build capture fixture) and `CUTBOLT_SEGMENTATION_PYTHON` (pinned local foreground worker Python). The corresponding capability documents specify their versions and contracts. Verification never installs or downloads them; missing evidence fails rather than silently skipping a criterion. Use an otherwise idle machine for fixed performance gates.
+
+The verifier schedules fixtures itself. Correctness fixtures run concurrently (`--jobs`, default half the logical processors), and no new fixture starts while less than 6 GiB of memory is free. Fixtures that assert wall-clock or memory budgets, or report throughput, then run one at a time, with the long-form 4K render in a second lane beside them. The registry edit-latency fixture and the 15-minute real-time recording capture run last on a quiet machine: beside other work the five-second edit budget is marginal, and scheduling delays are correctly rejected as capture discontinuities. Every failing fixture's output tail is printed as soon as it fails, and the run continues to report all failures. The report records each stage's wall time under `verification_timing`, and the next run uses those times to start the longest correctness fixtures first.
 
 ```powershell
 cargo build --locked

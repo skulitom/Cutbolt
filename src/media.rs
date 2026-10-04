@@ -183,6 +183,240 @@ pub fn capture_controlled(
     Ok(out)
 }
 
+/// Run a tool whose stdin receives bytes from `produce`, so large raw inputs never touch disk.
+/// A watchdog enforces the timeout even while a write is blocked; diagnostics stay bounded.
+pub(crate) fn feed_stdin(
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
+) -> Result<()> {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| error("TOOL_UNAVAILABLE", format!("{program}: {e}")))?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let out_thread = thread::spawn(move || drain(stdout, 64 * 1024, None));
+    let err_thread = thread::spawn(move || drain(stderr, 64 * 1024, None));
+    let child = Arc::new(Mutex::new(ChildGuard(child)));
+    let finished = Arc::new(AtomicBool::new(false));
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let watchdog = {
+        let (child, finished, timed_out) = (child.clone(), finished.clone(), timed_out.clone());
+        thread::spawn(move || {
+            let start = Instant::now();
+            while !finished.load(Ordering::SeqCst) {
+                if start.elapsed() > timeout {
+                    timed_out.store(true, Ordering::SeqCst);
+                    let _ = child.lock().expect("child lock").0.kill();
+                    return;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        })
+    };
+    let produced = produce(&mut stdin);
+    drop(stdin);
+    let status = loop {
+        if let Some(status) = child.lock().expect("child lock").0.try_wait()? {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    finished.store(true, Ordering::SeqCst);
+    let _ = watchdog.join();
+    let _ = out_thread.join();
+    let (err, _) = err_thread
+        .join()
+        .map_err(|_| error("TOOL_FAILED", "Diagnostic reader failed"))?;
+    if timed_out.load(Ordering::SeqCst) {
+        return Err(error(
+            "TOOL_TIMEOUT",
+            format!("{program} exceeded {} seconds", timeout.as_secs()),
+        ));
+    }
+    if !status.success() {
+        return Err(error(
+            "TOOL_FAILED",
+            String::from_utf8_lossy(&err).into_owned(),
+        ));
+    }
+    // A producer failure (e.g. a composition error) wins over a broken pipe from the tool.
+    produced
+}
+
+/// A tool whose stdout is read incrementally (e.g. decoded frames), so large outputs never reach disk.
+/// A watchdog kills the tool on timeout; `finish` checks its exit status and bounded diagnostics.
+pub(crate) struct StreamReader {
+    child: std::sync::Arc<std::sync::Mutex<ChildGuard>>,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    errors: Option<thread::JoinHandle<(Vec<u8>, bool)>>,
+    finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    timed_out: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    program: String,
+    timeout: Duration,
+}
+impl StreamReader {
+    pub(crate) fn spawn(program: &str, args: &[String], timeout: Duration) -> Result<Self> {
+        use std::sync::{Arc, Mutex, atomic::AtomicBool, atomic::Ordering};
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| error("TOOL_UNAVAILABLE", format!("{program}: {e}")))?;
+        let stdout = std::io::BufReader::with_capacity(
+            4 * 1024 * 1024,
+            child.stdout.take().expect("piped stdout"),
+        );
+        let stderr = child.stderr.take().expect("piped stderr");
+        let errors = thread::spawn(move || drain(stderr, 64 * 1024, None));
+        let child = Arc::new(Mutex::new(ChildGuard(child)));
+        let finished = Arc::new(AtomicBool::new(false));
+        let timed_out = Arc::new(AtomicBool::new(false));
+        {
+            let (child, finished, timed_out) = (child.clone(), finished.clone(), timed_out.clone());
+            thread::spawn(move || {
+                let start = Instant::now();
+                while !finished.load(Ordering::SeqCst) {
+                    if start.elapsed() > timeout {
+                        timed_out.store(true, Ordering::SeqCst);
+                        let _ = child.lock().expect("child lock").0.kill();
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+            });
+        }
+        Ok(Self {
+            child,
+            stdout,
+            errors: Some(errors),
+            finished,
+            timed_out,
+            program: program.into(),
+            timeout,
+        })
+    }
+    /// Fill `buffer` exactly. A short stream reports the tool's timeout or failed exit when it has
+    /// one, and otherwise a validation failure.
+    pub(crate) fn read_exact(&mut self, buffer: &mut [u8]) -> Result<()> {
+        use std::io::Read;
+        use std::sync::atomic::Ordering;
+        if self.stdout.read_exact(buffer).is_ok() {
+            return Ok(());
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            match self.child.lock().expect("child lock").0.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) if Instant::now() < deadline => {}
+                _ => break None,
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        self.finished.store(true, Ordering::SeqCst);
+        if self.timed_out.load(Ordering::SeqCst) {
+            return Err(error(
+                "TOOL_TIMEOUT",
+                format!(
+                    "{} exceeded {} seconds",
+                    self.program,
+                    self.timeout.as_secs()
+                ),
+            ));
+        }
+        if let Some(status) = status
+            && !status.success()
+        {
+            let diagnostics = self
+                .errors
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .map(|(err, _)| String::from_utf8_lossy(&err).into_owned())
+                .unwrap_or_default();
+            return Err(error("TOOL_FAILED", diagnostics));
+        }
+        Err(error(
+            "RENDER_VALIDATION_FAILED",
+            format!("{} produced fewer bytes than expected", self.program),
+        ))
+    }
+    /// Require the tool to end cleanly with no unread output.
+    pub(crate) fn finish(mut self) -> Result<()> {
+        use std::io::Read;
+        let mut extra = [0u8; 1];
+        let trailing = self.stdout.read(&mut extra).unwrap_or(0);
+        let status = loop {
+            if let Some(status) = self.child.lock().expect("child lock").0.try_wait()? {
+                break status;
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let (err, _) = self
+            .errors
+            .take()
+            .expect("diagnostic reader")
+            .join()
+            .map_err(|_| error("TOOL_FAILED", "Diagnostic reader failed"))?;
+        if self.timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(error(
+                "TOOL_TIMEOUT",
+                format!(
+                    "{} exceeded {} seconds",
+                    self.program,
+                    self.timeout.as_secs()
+                ),
+            ));
+        }
+        if !status.success() {
+            return Err(error(
+                "TOOL_FAILED",
+                String::from_utf8_lossy(&err).into_owned(),
+            ));
+        }
+        if trailing != 0 {
+            return Err(error(
+                "RENDER_VALIDATION_FAILED",
+                format!("{} produced more output than expected", self.program),
+            ));
+        }
+        Ok(())
+    }
+}
+impl Drop for StreamReader {
+    fn drop(&mut self) {
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub(crate) fn input_root(root: &Path) -> Result<PathBuf> {
     if !root.is_absolute() || !root.is_dir() {
         return Err(error(
@@ -269,6 +503,48 @@ pub fn frame_info(path: &Path, selector: &str) -> Result<Value> {
 }
 pub fn frame_info_controlled(path: &Path, selector: &str, control: &dyn Control) -> Result<Value> {
     frame_info_with_budget(path, selector, None, Duration::from_secs(120), control)
+}
+
+/// Video timing from container packets, shaped like `frame_info` output. Callers must have checked
+/// for a codec without frame reordering or empty packets (FFV1), where packets and frames
+/// correspond one to one in presentation order. Nothing is decoded, so this is only for paths that
+/// never read pictures.
+pub(crate) fn packet_times_controlled(
+    path: &Path,
+    selector: &str,
+    control: &dyn Control,
+) -> Result<Value> {
+    let args = [
+        "-v",
+        "error",
+        "-protocol_whitelist",
+        "file,pipe",
+        "-select_streams",
+        selector,
+        "-show_packets",
+        "-show_entries",
+        "packet=pts_time",
+        "-of",
+        "json",
+    ]
+    .map(str::to_owned)
+    .into_iter()
+    .chain([path.to_string_lossy().into_owned()])
+    .collect::<Vec<_>>();
+    let probed: Value = serde_json::from_slice(&capture_controlled(
+        &control.tool("ffprobe"),
+        &args,
+        Duration::from_secs(120),
+        control,
+    )?)?;
+    let packets = probed["packets"]
+        .as_array()
+        .ok_or_else(|| error("UNSUPPORTED_MEDIA", "Missing video packets"))?;
+    let mut frames = Vec::with_capacity(packets.len());
+    for packet in packets {
+        frames.push(serde_json::json!({"best_effort_timestamp_time": packet["pts_time"]}));
+    }
+    Ok(serde_json::json!({ "frames": frames }))
 }
 
 pub(crate) fn frame_info_with_budget(

@@ -6,6 +6,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
     fs::{self, File},
@@ -15,48 +16,84 @@ use std::{
 };
 
 const FPS: Time = Time { num: 25, den: 1 };
+/// Random-access decode window (reverse/freeze/non-monotonic speed maps) kept in scratch.
 const VIDEO_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const AUDIO_BYTES: u64 = 128 * 1024 * 1024;
+/// Decoded PCM window held in memory for resampling.
+const AUDIO_BYTES: u64 = 512 * 1024 * 1024;
+/// Sources are hashed by streaming, never loaded whole.
+const SOURCE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// One hour at 30 fps of decoded source timestamps.
+const SOURCE_FRAMES: usize = 108_000;
+const SOURCE_AUDIO_SECONDS: u64 = 3600;
+/// Thirty minutes of 25 fps output, streamed into the encoder.
+const OUTPUT_FRAMES: u64 = 45_000;
+
+/// Tool time grows with media length; bounded so a stuck tool still fails.
+fn tool_timeout(seconds: f64) -> Duration {
+    Duration::from_secs((180.0 + 2.0 * seconds.max(0.0)).min(4.0 * 3600.0) as u64)
+}
+/// Legacy video interpretation: `encoded_rgb` keeps MKV FFV1/bgr0 values as stored; `bt709_limited` converts tagged limited-range BT.709 H.264 yuv420p MP4/MOV to full-range RGB.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Color {
     EncodedRgb,
     Bt709Limited,
 }
+/// Audio policy: `resample` linearly resamples source audio (pitch follows speed); `mute` writes exact silence and is required for reverse or freeze.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Audio {
     Resample,
     Mute,
 }
+/// Identity-bound conform source and its declared color interpretation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
+    /// Source file identity; path relative to `input_root`, at most 16 GiB (MKV, MP4, MOV or WAV).
     pub file: Identity,
+    /// Legacy interpretation; null for audio-only WAV and when `sdr` is used (never both).
     pub color: Option<Color>,
+    /// Explicit SDR normalization; requires recipe `working_transfer`. Omit for the legacy path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdr: Option<color::Input>,
 }
+/// Media conversion recipe for media.conform: samples a source into a new 25 fps FFV1/PCM16 editing asset.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
+    /// Recipe format version; must be 1.
     pub schema_version: u32,
+    /// Asset ID for the returned asset (1-128 bytes, not blank).
     pub id: String,
+    /// Source file and color interpretation.
     pub source: Source,
+    /// Source position in rational seconds at output time zero; on a source audio sample when resampling without remap.
     pub source_in: Time,
+    /// Output duration in rational seconds; whole 25 fps frames, 1 to 45000 frames.
     pub duration: Time,
+    /// Constant speed factor from 1/16 to 16; must be 1 with `freeze` or `remap`.
     pub rate: Time,
+    /// Play backwards from `source_in`; requires `audio: mute`.
     pub reverse: bool,
+    /// Hold `source_in` for every frame; requires unit `rate`, `reverse: false` and `audio: mute`.
     pub freeze: bool,
+    /// Output width in pixels; at most 4096 and 8M pixels in total.
     pub width: u32,
+    /// Output height in pixels; at most 2160 and 8M pixels in total.
     pub height: u32,
+    /// Audio policy; must agree with `remap.audio_pitch` when remapping.
     pub audio: Audio,
+    /// Variable speed map replacing constant `rate`; omit for constant speed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remap: Option<remap::Remap>,
+    /// Output RGB transfer; required with `source.sdr` and omitted otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_transfer: Option<color::Transfer>,
+    /// Optional .cube LUT applied after SDR normalization; requires `source.sdr`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lut: Option<crate::lut::Transform>,
+    /// Source video decode backend; omit for CPU decoding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decode: Option<crate::acceleration::Decode>,
 }
@@ -94,7 +131,9 @@ fn ratio(value: &Value) -> Result<Time> {
             .map_err(|_| unsupported("Invalid time denominator"))?,
     )
 }
-fn frames(path: &Path, selector: &str) -> Result<Vec<Value>> {
+/// Decoded frame list in compact `key=value|...` lines (one per frame), converted to JSON objects.
+/// Numeric values become numbers and unavailable values are omitted, matching ffprobe's JSON writer.
+fn frames(path: &Path, selector: &str, timeout: Duration) -> Result<Vec<Value>> {
     let args = [
         "-v",
         "error",
@@ -102,23 +141,44 @@ fn frames(path: &Path, selector: &str) -> Result<Vec<Value>> {
         "file,pipe",
         "-select_streams",
         selector,
-        "-show_frames",
         "-show_entries",
         "frame=best_effort_timestamp,duration,pkt_duration,nb_samples,width,height,interlaced_frame,color_space,color_range,color_primaries,color_transfer,chroma_location",
         "-of",
-        "json",
+        "compact=p=0:nk=0",
     ];
     let mut args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     args.push(path.to_string_lossy().into_owned());
-    let value: Value = serde_json::from_slice(&media::capture(
-        &media::tool("ffprobe"),
-        &args,
-        Duration::from_secs(120),
-    )?)?;
-    value["frames"]
-        .as_array()
-        .cloned()
-        .ok_or_else(|| unsupported("Decoded frame list required"))
+    let output = media::capture(&media::tool("ffprobe"), &args, timeout)?;
+    let mut result = Vec::new();
+    for line in String::from_utf8_lossy(&output).lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut object = serde_json::Map::new();
+        for field in line.split('|') {
+            let Some((key, value)) = field.split_once('=') else {
+                continue;
+            };
+            if value == "N/A" || value.is_empty() {
+                continue;
+            }
+            object.insert(
+                key.into(),
+                value
+                    .parse::<u64>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| Value::from(value)),
+            );
+        }
+        result.push(Value::Object(object));
+        if result.len() > SOURCE_FRAMES * 2 {
+            return Err(error(
+                "LIMIT_EXCEEDED",
+                "Decoded frame list exceeds the source bound",
+            ));
+        }
+    }
+    Ok(result)
 }
 fn input_args(path: &Path) -> Vec<String> {
     [
@@ -147,9 +207,13 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
             "Use either legacy color or explicit sdr, never both",
         ));
     }
-    let (path, bytes) = scene::identity_bytes(&source.file, root)?;
-    drop(bytes);
+    let path = scene::identity_file(&source.file, root, SOURCE_BYTES)?;
     let metadata = media::probe(&path)?;
+    let seconds = metadata["format"]["duration"]
+        .as_str()
+        .and_then(|d| d.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let timeout = tool_timeout(seconds);
     let streams = metadata["streams"]
         .as_array()
         .ok_or_else(|| unsupported("Streams required"))?;
@@ -265,19 +329,11 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
             return Err(unsupported("Video dimensions exceed 4096x2160/8M pixels"));
         }
         let tb = ratio(&v["time_base"])?;
-        let decoded = frames(&checked.path, "v:0")?;
-        if decoded.is_empty()
-            || decoded.len() > 36000
-            || decoded.len() as u64
-                * checked.layout.map_or(
-                    checked.width as usize * checked.height as usize * 3,
-                    |layout| layout.bytes(checked.width, checked.height),
-                ) as u64
-                > VIDEO_BYTES
-        {
+        let decoded = frames(&checked.path, "v:0", timeout)?;
+        if decoded.is_empty() || decoded.len() > SOURCE_FRAMES {
             return Err(error(
                 "LIMIT_EXCEEDED",
-                "Decoded video exceeds 36000 frames or 4 GiB native samples",
+                format!("Decoded video exceeds {SOURCE_FRAMES} frames"),
             ));
         }
         for (i, f) in decoded.iter().enumerate() {
@@ -348,7 +404,7 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
             ));
         }
         let tb = ratio(&a["time_base"])?;
-        let decoded = frames(&checked.path, "a:0")?;
+        let decoded = frames(&checked.path, "a:0", timeout)?;
         for f in decoded {
             let t = Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?;
             let expected = Time::new(checked.samples, checked.audio_rate)?;
@@ -369,14 +425,8 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
                 .samples
                 .checked_add(n)
                 .ok_or_else(|| unsupported("Audio count overflow"))?;
-            if n == 0
-                || checked.samples > checked.audio_rate * 600
-                || checked.samples * checked.channels * 2 > AUDIO_BYTES
-            {
-                return Err(error(
-                    "LIMIT_EXCEEDED",
-                    "Decoded audio exceeds ten minutes or 128 MiB",
-                ));
+            if n == 0 || checked.samples > checked.audio_rate * SOURCE_AUDIO_SECONDS {
+                return Err(error("LIMIT_EXCEEDED", "Decoded audio exceeds one hour"));
             }
         }
         if checked.samples == 0 {
@@ -386,8 +436,8 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
     // Probe output alone can conceal recoverable codec errors; require a strict full decode.
     let mut args = input_args(&checked.path);
     args.extend(["-map", "0", "-f", "null", "-"].map(str::to_owned));
-    media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(180))?;
-    scene::identity_bytes(&source.file, root)?;
+    media::capture(&media::tool("ffmpeg"), &args, timeout)?;
+    scene::identity_file(&source.file, root, SOURCE_BYTES)?;
     Ok(checked)
 }
 #[derive(Serialize)]
@@ -420,19 +470,18 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
         || recipe.id.trim().is_empty()
         || recipe.id.len() > 128
         || count == 0
-        || count > 1500
+        || count > OUTPUT_FRAMES
         || recipe.width == 0
         || recipe.height == 0
         || recipe.width > 4096
         || recipe.height > 2160
         || recipe.width as u64 * recipe.height as u64 > 8_000_000
-        || count * recipe.width as u64 * recipe.height as u64 * 3 > VIDEO_BYTES
         || recipe.rate.compare(Time::new(1, 16)?)? == Ordering::Less
         || recipe.rate.compare(Time::new(16, 1)?)? == Ordering::Greater
     {
         return Err(error(
             "INVALID_CONFORM",
-            "Conform v1 requires 1..1500 frames, bounded dimensions/4 GiB output and rate 1/16..16",
+            "Conform v1 requires 1..45000 output frames (30 minutes), dimensions up to 4096x2160/8M pixels and rate 1/16..16",
         ));
     }
     recipe.source_in.validate()?;
@@ -581,7 +630,7 @@ pub fn inspect(recipe: &Recipe, root: &Path) -> Result<Value> {
         .unwrap_or(Value::Null);
     Ok(result)
 }
-fn decoded_hash(path: &Path, video: bool) -> Result<String> {
+fn decoded_hash(path: &Path, video: bool, timeout: Duration) -> Result<String> {
     let mut args = input_args(path);
     args.extend(
         if video {
@@ -593,13 +642,61 @@ fn decoded_hash(path: &Path, video: bool) -> Result<String> {
         .map(str::to_owned),
     );
     args.extend(["-f", "hash", "-hash", "sha256", "-"].map(str::to_owned));
-    let value = media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(180))?;
+    let value = media::capture(&media::tool("ffmpeg"), &args, timeout)?;
     String::from_utf8_lossy(&value)
         .trim()
         .strip_prefix("SHA256=")
         .map(str::to_owned)
         .ok_or_else(|| error("RENDER_VALIDATION_FAILED", "Decoded hash missing"))
 }
+
+fn seconds(t: Time) -> f64 {
+    t.num as f64 / t.den as f64
+}
+
+/// Inclusive source sample range read by the resampler (each output sample interpolates a, a+1).
+fn audio_window(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Result<(u64, u64)> {
+    let rate = Time::new(source.audio_rate, 1)?;
+    let (first, last) = if let Some(remap) = &mapped.remap {
+        // Speed is non-negative with a fixed direction within each span, so every source
+        // position lies between the extreme span endpoints.
+        let mut low: Option<Time> = None;
+        let mut high: Option<Time> = None;
+        for span in &remap.spans {
+            for t in [span.source_start, span.source_end] {
+                if low.is_none_or(|l| t.compare(l).expect("rational").is_lt()) {
+                    low = Some(t);
+                }
+                if high.is_none_or(|h| t.compare(h).expect("rational").is_gt()) {
+                    high = Some(t);
+                }
+            }
+        }
+        let low = low.expect("spans").times(rate)?;
+        let high = high.expect("spans").times(rate)?;
+        (low.num / low.den, high.num.div_ceil(high.den) + 1)
+    } else {
+        let start = recipe.source_in.units(rate)?;
+        let last_output = recipe.duration.units(Time::new(48000, 1)?)? - 1;
+        let numerator = last_output as u128 * source.audio_rate as u128 * recipe.rate.num as u128;
+        let denominator = 48000u128 * recipe.rate.den as u128;
+        (start, start + (numerator / denominator) as u64 + 1)
+    };
+    Ok((first.min(source.samples - 1), last.min(source.samples - 1)))
+}
+
+/// Decoded source frames, read in nondecreasing index order (stream) or by random access (window).
+enum SourceFrames {
+    Window {
+        file: File,
+        first: usize,
+    },
+    Stream {
+        reader: media::StreamReader,
+        next: usize,
+    },
+}
+
 pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> Result<Value> {
     let started = Instant::now();
     let output = render::destination(output, output_root)?;
@@ -610,153 +707,55 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
     let source_video = scratch.0.join("source.rgb");
     let source_audio = scratch.0.join("source.pcm");
+    let count = recipe.duration.units(FPS)?;
+    let media_seconds = seconds(source.video_end)
+        .max(source.samples as f64 / source.audio_rate.max(1) as f64)
+        + count as f64 / 25.0;
+    let timeout = tool_timeout(media_seconds);
     let mut decode_video_micros = 0;
-    if !source.pts.is_empty() {
-        let mut args = input_args(&source.path);
-        decoder.input_args(&mut args);
-        args.extend(["-map", "0:v:0", "-an", "-fps_mode", "passthrough"].map(str::to_owned));
-        let mut filters = decoder.filter().into_iter().collect::<Vec<_>>();
-        if matches!(recipe.source.color, Some(Color::Bt709Limited)) {
-            filters.push("scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=accurate_rnd");
-        }
-        if !filters.is_empty() {
-            args.extend(["-vf".into(), filters.join(",")]);
-        }
-        let native_format = if source.layout.is_some() {
-            source.metadata["streams"]
-                .as_array()
-                .expect("checked streams")
-                .iter()
-                .find(|s| s["codec_type"] == "video")
-                .expect("video")["pix_fmt"]
-                .as_str()
-                .expect("pixel format")
-        } else {
-            "rgb24"
-        };
-        args.extend(["-pix_fmt", native_format, "-f", "rawvideo"].map(str::to_owned));
-        args.push(source_video.to_string_lossy().into_owned());
-        let decoding = Instant::now();
-        media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(180))?;
-        decode_video_micros = decoding.elapsed().as_micros();
-        if fs::metadata(&source_video)?.len()
-            != source.pts.len() as u64
-                * source
-                    .layout
-                    .map_or(source.width as usize * source.height as usize * 3, |l| {
-                        l.bytes(source.width, source.height)
-                    }) as u64
-        {
+
+    // Audio: decode only the sample window the resampler reads.
+    let mut decoded = Vec::new();
+    let mut audio_first = 0u64;
+    if source.samples > 0 && matches!(recipe.audio, Audio::Resample) {
+        let (first, last) = audio_window(recipe, &source, &selected)?;
+        let bytes = (last - first + 1) * source.channels * 2;
+        if bytes > AUDIO_BYTES {
             return Err(error(
-                "RENDER_VALIDATION_FAILED",
-                "Decoded source video count changed",
+                "LIMIT_EXCEEDED",
+                "The source audio read by this recipe exceeds the 512 MiB decode window",
             ));
         }
-    }
-    let mut decoded = Vec::new();
-    if source.samples > 0 && matches!(recipe.audio, Audio::Resample) {
         let mut args = input_args(&source.path);
-        args.extend(
-            ["-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", "-f", "s16le"].map(str::to_owned),
-        );
+        args.extend([
+            "-map".into(),
+            "0:a:0".into(),
+            "-vn".into(),
+            "-af".into(),
+            format!("atrim=start_sample={first}:end_sample={}", last + 1),
+            "-c:a".into(),
+            "pcm_s16le".into(),
+            "-f".into(),
+            "s16le".into(),
+        ]);
         args.push(source_audio.to_string_lossy().into_owned());
-        media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(180))?;
-        if fs::metadata(&source_audio)?.len() != source.samples * source.channels * 2 {
+        media::capture(&media::tool("ffmpeg"), &args, timeout)?;
+        if fs::metadata(&source_audio)?.len() != bytes {
             return Err(error(
                 "RENDER_VALIDATION_FAILED",
                 "Decoded source audio count changed",
             ));
         }
-        let bytes = fs::read(&source_audio)?;
-        decoded = bytes
+        let raw = fs::read(&source_audio)?;
+        decoded = raw
             .as_chunks::<2>()
             .0
             .iter()
             .map(|v| i16::from_le_bytes(*v))
             .collect::<Vec<_>>();
+        audio_first = first;
     }
-    let raw_video = scratch.0.join("video.rgb");
     let raw_audio = scratch.0.join("audio.pcm");
-    let mut video = BufWriter::new(File::create_new(&raw_video)?);
-    let mut input = if source.pts.is_empty() {
-        None
-    } else {
-        Some(File::open(&source_video)?)
-    };
-    let source_size = source.width as usize * source.height as usize * 3;
-    let mut first_pixels = vec![0u8; source_size];
-    let mut second_pixels = vec![0u8; source_size];
-    let mut first_index = None;
-    let mut second_index = None;
-    let mut native_pixels = vec![
-        0u8;
-        source
-            .layout
-            .map_or(source_size, |l| l.bytes(source.width, source.height))
-    ];
-    let mut pixels = vec![0u8; recipe.width as usize * recipe.height as usize * 3];
-    for n in 0..recipe.duration.units(FPS)? {
-        if let Some(input) = &mut input {
-            let sample = &selected.frames[n as usize];
-            let mut load = |index: usize, buffer: &mut [u8]| -> Result<()> {
-                input.seek(SeekFrom::Start(index as u64 * native_pixels.len() as u64))?;
-                input.read_exact(&mut native_pixels)?;
-                if let Some(layout) = source.layout {
-                    recipe.source.sdr.expect("checked SDR").convert(
-                        layout,
-                        source.width,
-                        source.height,
-                        &native_pixels,
-                        recipe.working_transfer.expect("checked working transfer"),
-                        buffer,
-                    );
-                } else {
-                    buffer.copy_from_slice(&native_pixels);
-                }
-                if let Some(lut) = &lut {
-                    lut.apply_rgb(buffer)?;
-                }
-                Ok(())
-            };
-            if first_index != Some(sample.first) {
-                if second_index == Some(sample.first) {
-                    std::mem::swap(&mut first_pixels, &mut second_pixels);
-                    std::mem::swap(&mut first_index, &mut second_index);
-                } else {
-                    load(sample.first, &mut first_pixels)?;
-                    first_index = Some(sample.first);
-                }
-            }
-            if sample.second != sample.first && second_index != Some(sample.second) {
-                load(sample.second, &mut second_pixels)?;
-                second_index = Some(sample.second);
-            }
-            let weight = sample.second_weight;
-            for y in 0..recipe.height as usize {
-                for x in 0..recipe.width as usize {
-                    let p = ((y * source.height as usize / recipe.height as usize)
-                        * source.width as usize
-                        + x * source.width as usize / recipe.width as usize)
-                        * 3;
-                    let out = (y * recipe.width as usize + x) * 3;
-                    for c in 0..3 {
-                        pixels[out + c] = if weight.num == 0 {
-                            first_pixels[p + c]
-                        } else {
-                            let sum = first_pixels[p + c] as u128
-                                * (weight.den - weight.num) as u128
-                                + second_pixels[p + c] as u128 * weight.num as u128;
-                            ((sum + weight.den as u128 / 2) / weight.den as u128) as u8
-                        };
-                    }
-                }
-            }
-        }
-        video.write_all(&pixels)?;
-    }
-    video.flush()?;
-    drop(video);
-    drop(input);
     let mut audio = BufWriter::new(File::create_new(&raw_audio)?);
     let source_in = if decoded.is_empty() || selected.remap.is_some() {
         0
@@ -796,8 +795,8 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             } else {
                 let b = (a + 1).min(source.samples - 1);
                 let ch = if source.channels == 1 { 0 } else { channel };
-                let x = decoded[(a * source.channels + ch) as usize] as i128;
-                let y = decoded[(b * source.channels + ch) as usize] as i128;
+                let x = decoded[((a - audio_first) * source.channels + ch) as usize] as i128;
+                let y = decoded[((b - audio_first) * source.channels + ch) as usize] as i128;
                 let sum = x * (denominator - remainder) + y * remainder;
                 ((sum.abs() + denominator / 2) / denominator * sum.signum()) as i16
             };
@@ -806,12 +805,99 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     }
     audio.flush()?;
     drop(audio);
+    drop(decoded);
+
+    // Video: decode only frames lo..=hi. Forward mappings stream through a pipe; reverse and
+    // other non-monotonic mappings use a bounded random-access window in scratch.
+    let native_size = source
+        .layout
+        .map_or(source.width as usize * source.height as usize * 3, |l| {
+            l.bytes(source.width, source.height)
+        });
+    let mut frames_in = None;
+    if !selected.frames.is_empty() {
+        let lo = selected
+            .frames
+            .iter()
+            .map(|f| f.first)
+            .min()
+            .expect("frames");
+        let hi = selected
+            .frames
+            .iter()
+            .map(|f| f.first.max(f.second))
+            .max()
+            .expect("frames");
+        let monotonic = selected
+            .frames
+            .windows(2)
+            .all(|w| w[1].first >= w[0].first && w[1].second >= w[0].second);
+        let window = (hi - lo + 1) as u64 * native_size as u64;
+        // CPU decoding of forward/freeze mappings streams; hardware decoding keeps its verified
+        // scratch-file stage, so it shares the random-access window bound.
+        let stream = monotonic && !decoder.hardware();
+        if !stream && window > VIDEO_BYTES {
+            return Err(error(
+                "LIMIT_EXCEEDED",
+                "Reverse, non-monotonic or hardware-decoded mappings decode at most 4 GiB of source frames; shorten the range",
+            ));
+        }
+        let mut args = input_args(&source.path);
+        decoder.input_args(&mut args);
+        args.extend(["-map", "0:v:0", "-an", "-fps_mode", "passthrough"].map(str::to_owned));
+        let mut filters = decoder
+            .filter()
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        filters.push(format!("trim=start_frame={lo}:end_frame={}", hi + 1));
+        if matches!(recipe.source.color, Some(Color::Bt709Limited)) {
+            filters.push(
+                "scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=accurate_rnd".into(),
+            );
+        }
+        args.extend(["-vf".into(), filters.join(",")]);
+        let native_format = if source.layout.is_some() {
+            source.metadata["streams"]
+                .as_array()
+                .expect("checked streams")
+                .iter()
+                .find(|s| s["codec_type"] == "video")
+                .expect("video")["pix_fmt"]
+                .as_str()
+                .expect("pixel format")
+        } else {
+            "rgb24"
+        };
+        args.extend(["-pix_fmt", native_format, "-f", "rawvideo"].map(str::to_owned));
+        if stream {
+            args.push("pipe:1".into());
+            frames_in = Some(SourceFrames::Stream {
+                reader: media::StreamReader::spawn(&media::tool("ffmpeg"), &args, timeout)?,
+                next: lo,
+            });
+        } else {
+            args.push(source_video.to_string_lossy().into_owned());
+            let decoding = Instant::now();
+            media::capture(&media::tool("ffmpeg"), &args, timeout)?;
+            decode_video_micros = decoding.elapsed().as_micros();
+            if fs::metadata(&source_video)?.len() != window {
+                return Err(error(
+                    "RENDER_VALIDATION_FAILED",
+                    "Decoded source video count changed",
+                ));
+            }
+            frames_in = Some(SourceFrames::Window {
+                file: File::open(&source_video)?,
+                first: lo,
+            });
+        }
+    }
     let temp = scratch.0.join("output.mkv");
     let (ffv1_level, ffv1_slices) = media::ffv1_encoding(recipe.width, recipe.height);
     let mut args = vec![
         "-v".into(),
         "error".into(),
-        "-nostdin".into(),
         "-n".into(),
         "-f".into(),
         "rawvideo".into(),
@@ -822,7 +908,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         "-framerate".into(),
         "25".into(),
         "-i".into(),
-        raw_video.to_string_lossy().into_owned(),
+        "pipe:0".into(),
         "-f".into(),
         "s16le".into(),
         "-ar".into(),
@@ -842,7 +928,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         "-pix_fmt".into(),
         "bgr0".into(),
         "-threads".into(),
-        "1".into(),
+        ffv1_slices.into(),
         "-c:a".into(),
         "pcm_s16le".into(),
         "-map_metadata".into(),
@@ -866,13 +952,107 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         );
     }
     args.push(temp.to_string_lossy().into_owned());
-    media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(180))?;
+    let source_size = source.width as usize * source.height as usize * 3;
+    let mut video_hash = Sha256::new();
+    media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, |stdin| {
+        let mut first_pixels = vec![0u8; source_size];
+        let mut second_pixels = vec![0u8; source_size];
+        let mut first_index = None;
+        let mut second_index = None;
+        let mut native_pixels = vec![0u8; native_size];
+        let mut pixels = vec![0u8; recipe.width as usize * recipe.height as usize * 3];
+        for n in 0..count {
+            if let Some(frames_in) = &mut frames_in {
+                let sample = &selected.frames[n as usize];
+                let mut load = |index: usize, buffer: &mut [u8]| -> Result<()> {
+                    match frames_in {
+                        SourceFrames::Window { file, first } => {
+                            file.seek(SeekFrom::Start(
+                                (index - *first) as u64 * native_pixels.len() as u64,
+                            ))?;
+                            file.read_exact(&mut native_pixels)?;
+                        }
+                        SourceFrames::Stream { reader, next } => {
+                            let waiting = Instant::now();
+                            if index < *next {
+                                return Err(error(
+                                    "RENDER_VALIDATION_FAILED",
+                                    "Streamed source frames were requested out of order",
+                                ));
+                            }
+                            while *next <= index {
+                                reader.read_exact(&mut native_pixels)?;
+                                *next += 1;
+                            }
+                            decode_video_micros += waiting.elapsed().as_micros();
+                        }
+                    }
+                    if let Some(layout) = source.layout {
+                        recipe.source.sdr.expect("checked SDR").convert(
+                            layout,
+                            source.width,
+                            source.height,
+                            &native_pixels,
+                            recipe.working_transfer.expect("checked working transfer"),
+                            buffer,
+                        );
+                    } else {
+                        buffer.copy_from_slice(&native_pixels);
+                    }
+                    if let Some(lut) = &lut {
+                        lut.apply_rgb(buffer)?;
+                    }
+                    Ok(())
+                };
+                if first_index != Some(sample.first) {
+                    if second_index == Some(sample.first) {
+                        std::mem::swap(&mut first_pixels, &mut second_pixels);
+                        std::mem::swap(&mut first_index, &mut second_index);
+                    } else {
+                        load(sample.first, &mut first_pixels)?;
+                        first_index = Some(sample.first);
+                    }
+                }
+                if sample.second != sample.first && second_index != Some(sample.second) {
+                    load(sample.second, &mut second_pixels)?;
+                    second_index = Some(sample.second);
+                }
+                let weight = sample.second_weight;
+                for y in 0..recipe.height as usize {
+                    for x in 0..recipe.width as usize {
+                        let p = ((y * source.height as usize / recipe.height as usize)
+                            * source.width as usize
+                            + x * source.width as usize / recipe.width as usize)
+                            * 3;
+                        let out = (y * recipe.width as usize + x) * 3;
+                        for c in 0..3 {
+                            pixels[out + c] = if weight.num == 0 {
+                                first_pixels[p + c]
+                            } else {
+                                let sum = first_pixels[p + c] as u128
+                                    * (weight.den - weight.num) as u128
+                                    + second_pixels[p + c] as u128 * weight.num as u128;
+                                ((sum + weight.den as u128 / 2) / weight.den as u128) as u8
+                            };
+                        }
+                    }
+                }
+            }
+            video_hash.update(&pixels);
+            stdin.write_all(&pixels)?;
+        }
+        Ok(())
+    })?;
+    if let Some(SourceFrames::Stream { reader, .. }) = frames_in {
+        reader.finish()?;
+    }
+    let video_hash = format!("{:x}", video_hash.finalize());
     let verified =
         render::inspect_reference(&temp, recipe.width, recipe.height, &media::Uncontrolled)?;
-    if verified.frames != recipe.duration.units(FPS)?
+    if verified.frames != count
         || verified.samples != verified.frames * 1920
-        || decoded_hash(&temp, true)? != media::file_hash(&raw_video)?
-        || decoded_hash(&temp, false)? != media::file_hash(&raw_audio)?
+        || decoded_hash(&temp, true, timeout)? != video_hash
+        || decoded_hash(&temp, false, timeout)? != media::file_hash(&raw_audio)?
     {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
@@ -901,7 +1081,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             )
         })?;
     }
-    scene::identity_bytes(&recipe.source.file, root)?;
+    scene::identity_file(&recipe.source.file, root, SOURCE_BYTES)?;
     if let Some(lut) = &recipe.lut {
         scene::identity_bytes(&lut.file, root)?;
     }
@@ -918,7 +1098,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","maximum_seconds":60,"maximum_decoded_video_bytes":VIDEO_BYTES,"source_maximum_bytes":67108864,"rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
+    let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
     value
 }

@@ -4,18 +4,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+/// Policy when the CUDA device fails to initialize: `error` returns DEVICE_UNAVAILABLE; `cpu` decodes in software and reports the reason.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Unavailable {
     Error,
     Cpu,
 }
+/// Source video decode backend, tagged by `backend`; only source decoding moves to the GPU.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "backend", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Decode {
+    /// Software decoding (the default when `decode` is omitted).
     Cpu,
+    /// CUDA hardware decoding; supports progressive H.264 yuv420p at even sizes 128x128 to 1920x1080.
     Cuda {
+        /// Local CUDA device ordinal, 0 to 31.
         device: u32,
+        /// Behavior when device initialization fails.
         unavailable: Unavailable,
     },
 }
@@ -44,6 +50,10 @@ impl Selected {
                 ],
             );
         }
+    }
+    /// Whether frames come from a hardware decoder (always decoded into a bounded scratch window).
+    pub(crate) fn hardware(&self) -> bool {
+        self.selected_backend == "cuda"
     }
     pub(crate) fn filter(&self) -> Option<&'static str> {
         // Requiring a hardware frame here prevents an unnoticed software decode.

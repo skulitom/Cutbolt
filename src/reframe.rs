@@ -12,47 +12,73 @@ use std::path::PathBuf;
 
 const FPS: Time = Time { num: 25, den: 1 };
 
+/// Keyframe of an authored subject box.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BoxKey {
+    /// Segment-local time, rational seconds; keys must lie within the segment.
     pub time: Time,
+    /// Subject box `[x, y, width, height]` in source-canvas pixels; positive size, inside the canvas.
     pub rect: [i32; 4],
+    /// Interpolation from this key to the next.
     pub interpolation: Interpolation,
 }
 
+/// How a segment's subject boxes are obtained, tagged by `mode`.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Selection {
+    /// Authored boxes interpolated over the segment.
     Manual {
+        /// 1..128 keys, including one at segment time zero.
         keys: Vec<BoxKey>,
     },
+    /// Translate a fixed focus box by a tracked patch's measured integer displacement; needs at least two frames.
     Track {
+        /// Subject box `[x, y, width, height]` at the segment start, in source-canvas pixels; with padding it must fit the canvas.
         focus: [i32; 4],
+        /// Reference patch `[x, y, width, height]` inside `focus`, sides 4..64 pixels.
         region: [u32; 4],
+        /// Patch-tracking controls.
         controls: crate::stabilize::Tracking,
     },
 }
 
+/// Subject segment covering frames from `start` to the next segment start or scene end.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Segment {
+    /// Scene time, frame-aligned rational seconds at 25 fps, before the scene end; unique, one must be zero.
     pub start: Time,
+    /// Subject label, 1..64 ASCII letters, digits, `_` or `-`.
     pub subject_id: String,
+    /// Reset crop smoothing and movement limits at `start`; the segment at time zero must set true.
     pub cut: bool,
+    /// How the subject boxes are obtained.
     pub selection: Selection,
 }
 
+/// `reframe.inspect` request: plans a constant-size crop that follows subjects and returns a replacement scene; read-only.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Inspect {
+    /// Scene with exactly one full-duration, untransformed image layer starting at zero; 1..128 frames at 25 fps.
     pub scene: scene::Scene,
+    /// Absolute directory containing the scene's bound source files.
     pub input_root: PathBuf,
+    /// Crop window `[width, height]` in source pixels; fits the canvas and has exactly the `output_size` aspect ratio.
     pub window: [u32; 2],
+    /// Logical output `[width, height]` in pixels, each 1..512.
     pub output_size: [u32; 2],
+    /// Margin added on every side of each subject box in source pixels, 0..4096.
     pub padding: u32,
+    /// Maximum crop-origin movement per frame `[x, y]` in source pixels, each 1..4096.
     pub maximum_step: [u32; 2],
+    /// Triangular smoothing half-window in frames, 0..16; 0 disables smoothing.
     pub smoothing_radius: u8,
+    /// Sampler written to the returned spatial fit.
     pub sampling: spatial::Sampling,
+    /// 1..16 subject segments; input order does not matter.
     pub segments: Vec<Segment>,
 }
 
@@ -225,6 +251,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     }
     let layer = &request.scene.layers[0];
     if layer.graphics.is_some()
+        || layer.tilemap.is_some()
         || layer.start.units(FPS)? != 0
         || layer.duration.compare(request.scene.duration)?.is_ne()
         || layer.transform.position != [0, 0]

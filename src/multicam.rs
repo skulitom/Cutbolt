@@ -11,49 +11,102 @@ use std::collections::BTreeSet;
 const FPS: Time = Time { num: 25, den: 1 };
 const AUDIO: Time = Time { num: 48000, den: 1 };
 
+/// One camera alternative: a child sequence mapped onto group time. At group time `t` video reads `source_in + t - start` and audio reads `audio_in + t - start`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Angle {
+    /// Angle ID unique within the group, 1-128 bytes.
     pub id: String,
+    /// Child sequence holding this camera's video and audio.
     pub sequence_id: String,
+    /// Group time where coverage begins, 25 fps aligned and before the group end.
     pub start: Time,
+    /// Positive coverage length, 25 fps aligned.
     pub duration: Time,
+    /// Child video position at `start`, 25 fps aligned; `source_in + duration` must fit the child.
     pub source_in: Time,
+    /// Child audio position at `start`, 48 kHz sample aligned; `audio_in + duration` must fit the child.
     pub audio_in: Time,
 }
+/// Camera decision: from `at` until the next cut, the group shows `angle_id`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Cut {
+    /// Cut ID unique within the group, 1-120 bytes.
     pub id: String,
+    /// Group time, 25 fps aligned and before the group end; one cut must be at zero and times are unique.
     pub at: Time,
+    /// Angle selected from `at`; it must cover the whole interval until the next cut.
     pub angle_id: String,
 }
+/// Group audio source, tagged by `mode`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AudioPolicy {
+    /// Silence throughout the group.
     Mute,
+    /// Each cut's angle also supplies the audio, read from its `audio_in` mapping.
     FollowVideo,
-    Fixed { angle_id: String },
+    /// One angle supplies the audio across every cut.
+    Fixed {
+        /// Angle whose audio plays; it must cover the whole group.
+        angle_id: String,
+    },
 }
+/// Camera group: synchronized angles, cut decisions and audio policy, projected into the managed sequence's video and audio tracks. Requires a 25 fps project.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Group {
+    /// Positive group length, 25 fps aligned.
     pub duration: Time,
+    /// True blocks every multicam.edit except `state`.
     pub locked: bool,
+    /// 2-16 camera alternatives, kept even when no cut selects them.
     pub angles: Vec<Angle>,
+    /// 1-128 camera decisions; projected in time order.
     pub cuts: Vec<Cut>,
+    /// Audio policy.
     pub audio: AudioPolicy,
 }
+/// Camera-group edit for multicam.edit, tagged by `op`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Edit {
-    CutSet { cut: Cut },
-    CutRemove { id: String },
-    AngleSet { angle: Angle },
-    AngleRemove { id: String },
-    Audio { policy: AudioPolicy },
-    Duration { duration: Time },
-    State { locked: bool },
+    /// Add a cut, or replace the cut with the same ID.
+    CutSet {
+        /// Complete cut decision.
+        cut: Cut,
+    },
+    /// Remove a cut; the previous selection continues. The cut at zero cannot be removed.
+    CutRemove {
+        /// ID of the cut to remove.
+        id: String,
+    },
+    /// Add an angle, or replace the angle with the same ID.
+    AngleSet {
+        /// Complete angle declaration.
+        angle: Angle,
+    },
+    /// Remove an angle that no cut or fixed audio policy uses.
+    AngleRemove {
+        /// ID of the angle to remove.
+        id: String,
+    },
+    /// Replace the audio policy.
+    Audio {
+        /// New audio policy.
+        policy: AudioPolicy,
+    },
+    /// Change the group length; cuts and angles must still fit.
+    Duration {
+        /// New positive length, 25 fps aligned.
+        duration: Time,
+    },
+    /// Lock or unlock the group; the only edit allowed while it is locked.
+    State {
+        /// New lock state.
+        locked: bool,
+    },
 }
 fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_MULTICAM", message)
@@ -170,6 +223,7 @@ pub(crate) fn project(group: &Group, project: &Project) -> Result<Arrangement> {
         locked: group.locked,
         clips: vec![],
         transitions: vec![],
+        composite: Default::default(),
     };
     let mut video = make_track("multicam-video", Kind::Video);
     let mut audio = make_track("multicam-audio", Kind::Audio);

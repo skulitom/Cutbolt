@@ -216,7 +216,7 @@ def run(root,legacy):
 
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         calls=[('project.portable',{'project':get(portable),'expected_revision':26,'input_root':str(moved)},True,True),
                ('session.check',{'store_root':str(portable)},True,True),
                ('session.migrate',{'store_root':str(portable)},False,True),

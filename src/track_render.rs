@@ -23,6 +23,12 @@ struct Graph<'a> {
     filters: Vec<String>,
     serial: usize,
     inspected: usize,
+    /// Assets inspected as straight-alpha overlay sources (bgra allowed).
+    overlay_assets: BTreeSet<String>,
+    /// Overlay assets whose decoded frames carry an alpha plane.
+    alpha_assets: BTreeSet<String>,
+    /// Audio-only graphs never decode pictures, so sources are timed from packets.
+    audio_only: bool,
 }
 impl<'a> Graph<'a> {
     fn new(project: &'a Project, root: &'a Path, control: &'a dyn media::Control) -> Self {
@@ -37,6 +43,9 @@ impl<'a> Graph<'a> {
             filters: vec![],
             serial: 0,
             inspected: 0,
+            overlay_assets: BTreeSet::new(),
+            alpha_assets: BTreeSet::new(),
+            audio_only: false,
         }
     }
     fn input(
@@ -46,7 +55,28 @@ impl<'a> Graph<'a> {
         duration: Time,
         kind: Kind,
     ) -> Result<(usize, u64, u64)> {
+        self.input_with(clip, at, duration, kind, false)
+    }
+    fn input_with(
+        &mut self,
+        clip: &TrackClip,
+        at: Time,
+        duration: Time,
+        kind: Kind,
+        overlay: bool,
+    ) -> Result<(usize, u64, u64)> {
         self.control.check()?;
+        if self.overlay_assets.contains(&clip.asset_id) != overlay
+            && self.sources.contains_key(&clip.asset_id)
+        {
+            return Err(error(
+                "UNSUPPORTED_TIMELINE",
+                format!(
+                    "Asset {:?} is used both as an alpha overlay and as an opaque source",
+                    clip.asset_id
+                ),
+            ));
+        }
         if !self.sources.contains_key(&clip.asset_id) {
             let asset = self
                 .project
@@ -67,6 +97,26 @@ impl<'a> Graph<'a> {
                     frames: 0,
                     samples: wave.frames,
                 }
+            } else if overlay {
+                let (source, alpha) = render::inspect_overlay(
+                    &path,
+                    self.project.width,
+                    self.project.height,
+                    self.control,
+                )?;
+                self.overlay_assets.insert(clip.asset_id.clone());
+                if alpha {
+                    self.alpha_assets.insert(clip.asset_id.clone());
+                }
+                source
+            } else if self.audio_only {
+                render::inspect_reference_audio(
+                    &path,
+                    self.project.width,
+                    self.project.height,
+                    FPS,
+                    self.control,
+                )?
             } else {
                 render::inspect_reference(
                     &path,
@@ -133,6 +183,51 @@ impl<'a> Graph<'a> {
         }
         let (input, first, end) = self.input(clip, at, duration, Kind::Video)?;
         self.filters.push(format!("[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr=1/25,setpts=N,format=pix_fmts=gbrp[{label}]"));
+        Ok(())
+    }
+    /// A clip on an alpha_over track, keeping its straight alpha plane (opaque sources read as 255).
+    fn overlay_source(
+        &mut self,
+        clip: &TrackClip,
+        at: Time,
+        duration: Time,
+        label: &str,
+    ) -> Result<()> {
+        let (input, first, end) = self.input_with(clip, at, duration, Kind::Video, true)?;
+        let source = format!(
+            "[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr=1/25,setpts=N"
+        );
+        if self.alpha_assets.contains(&clip.asset_id) {
+            // Planar conversion of packed alpha through the scaler is not value-exact, so split the
+            // decoded bgra planes and reassemble them as gbrap (G, B, R, A) without any arithmetic.
+            self.filters.push(format!(
+                "{source},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{label}]"
+            ));
+        } else {
+            // Opaque bgr0 overlays: exact RGB conversion with a constant 255 alpha plane.
+            self.filters
+                .push(format!("{source},format=pix_fmts=gbrap[{label}]"));
+        }
+        Ok(())
+    }
+    /// Straight-alpha "over" in encoded RGB with exact integer rounding (ties up):
+    /// out = floor((2*(s*a + d*(255-a)) + 255) / 510). Base and overlay are stacked side by side
+    /// so the per-pixel expression can read both; values stay exact in double precision.
+    fn over(&mut self, base: &str, overlay: &str, output: &str) -> Result<()> {
+        let width = self.project.width;
+        let channel = |c: &str| {
+            format!(
+                "floor((2*({c}(X+{width},Y)*alpha(X+{width},Y)+{c}(X,Y)*(255-alpha(X+{width},Y)))+255)/510)"
+            )
+        };
+        let stacked = self.label()?;
+        self.filters.push(format!(
+            "[{base}]format=pix_fmts=gbrap[{stacked}b];[{stacked}b][{overlay}]hstack=inputs=2,geq=r='{}':g='{}':b='{}':a='255':interpolation=nearest,crop={width}:{}:0:0,format=pix_fmts=gbrp,settb=expr=1/25,setpts=N[{output}]",
+            channel("r"),
+            channel("g"),
+            channel("b"),
+            self.project.height
+        ));
         Ok(())
     }
     fn audio_source(
@@ -262,7 +357,12 @@ impl<'a> Graph<'a> {
         for t in a.tracks.iter().filter(|t| t.enabled && t.kind == kind) {
             for c in &t.clips {
                 if c.start.compare(end)?.is_lt() && c.end()?.compare(start)?.is_gt() {
-                    self.check_clip(c, c.start, c.duration, kind)?;
+                    if t.composite.is_opaque() {
+                        self.check_clip(c, c.start, c.duration, kind)?;
+                    } else {
+                        // Validated alpha_over tracks hold asset clips only, inspected with alpha.
+                        self.input_with(c, c.start, c.duration, kind, true)?;
+                    }
                 }
             }
             // Even covered effects must have valid decoded handles and identities.
@@ -322,14 +422,55 @@ impl<'a> Graph<'a> {
                 let length = Time::new(n, 25)?;
                 let label = self.label()?;
                 labels.push_str(&format!("[{label}]"));
-                if let Some((track, clip)) = a.visible(at)? {
+                let visible = a.visible(at)?;
+                let base_index = visible.map(|(track, _)| {
+                    a.tracks
+                        .iter()
+                        .position(|t| std::ptr::eq(t, track))
+                        .expect("visible track")
+                });
+                let mut overlays = Vec::new();
+                for (index, track) in a.tracks.iter().enumerate() {
+                    if track.kind == Kind::Video
+                        && track.enabled
+                        && !track.composite.is_opaque()
+                        && base_index.is_none_or(|b| index > b)
+                        && let Some(clip) = track.clips.iter().find(|c| {
+                            !at.compare(c.start).expect("validated").is_lt()
+                                && at
+                                    .compare(c.end().expect("validated"))
+                                    .expect("validated")
+                                    .is_lt()
+                        })
+                    {
+                        overlays.push(clip);
+                    }
+                }
+                let base = if overlays.is_empty() {
+                    label.clone()
+                } else {
+                    self.label()?
+                };
+                if let Some((track, clip)) = visible {
                     if let Some(fx) = track.transition_at(at)? {
-                        self.effect(track, fx, at, length, &label)?;
+                        self.effect(track, fx, at, length, &base)?;
                     } else {
-                        self.video_source(clip, at, length, &label)?;
+                        self.video_source(clip, at, length, &base)?;
                     }
                 } else {
-                    self.filters.push(format!("color=c=black:s={}x{}:r=25,format=pix_fmts=gbrp,trim=end_frame={n},settb=expr=1/25,setpts=N[{label}]", self.project.width, self.project.height));
+                    self.filters.push(format!("color=c=black:s={}x{}:r=25,format=pix_fmts=gbrp,trim=end_frame={n},settb=expr=1/25,setpts=N[{base}]", self.project.width, self.project.height));
+                }
+                let mut below = base;
+                for (i, clip) in overlays.iter().enumerate() {
+                    let source = self.label()?;
+                    self.overlay_source(clip, at, length, &source)?;
+                    let output = if i + 1 == overlays.len() {
+                        label.clone()
+                    } else {
+                        self.label()?
+                    };
+                    self.over(&below, &source, &output)?;
+                    below = output;
                 }
             }
             self.filters.push(format!(
@@ -426,7 +567,7 @@ fn compile<'a>(
     root: &'a Path,
     start: Time,
     duration: Time,
-    audio: bool,
+    (video, audio): (bool, bool),
     control: &'a dyn media::Control,
 ) -> Result<Graph<'a>> {
     project.validate()?;
@@ -447,8 +588,11 @@ fn compile<'a>(
         ));
     }
     let mut graph = Graph::new(project, root, control);
-    graph.check_arrangement(a, start, duration, Kind::Video)?;
-    graph.compose(a, start, duration, Kind::Video, "vout")?;
+    graph.audio_only = !video;
+    if video {
+        graph.check_arrangement(a, start, duration, Kind::Video)?;
+        graph.compose(a, start, duration, Kind::Video, "vout")?;
+    }
     if audio {
         graph.check_arrangement(a, start, duration, Kind::Audio)?;
         graph.compose(a, start, duration, Kind::Audio, "aout")?;
@@ -472,6 +616,53 @@ pub(crate) fn plan(
         control,
     )
 }
+/// Mix only the enabled audio tracks of a window into a lossless stereo PCM WAV, with the same
+/// clip/sample placement, transitions and saturation as a full reference render, but no video work.
+pub(crate) fn plan_audio_window(
+    project: &Project,
+    input_root: &Path,
+    output_root: &Path,
+    output: &Path,
+    start: Time,
+    duration: Time,
+) -> Result<Plan> {
+    let output = render::destination_extension(output, output_root, "wav")?;
+    let (mut args, sources) = compile(
+        project,
+        input_root,
+        start,
+        duration,
+        (false, true),
+        &media::Uncontrolled,
+    )?
+    .finish();
+    args.extend(
+        [
+            "-map",
+            "[aout]",
+            "-c:a",
+            "pcm_s16le",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-f",
+            "wav",
+        ]
+        .map(str::to_owned),
+    );
+    args.push(output.to_string_lossy().into_owned());
+    Ok(Plan {
+        profile: "reference-tracks-pcm-audio-v1",
+        source_quality: "original",
+        project_revision: project.revision,
+        frames: duration.units(FPS)?,
+        samples: duration.units(SAMPLES)?,
+        output,
+        sources,
+        arguments: args,
+    })
+}
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_window(
     project: &Project,
@@ -484,7 +675,7 @@ pub(crate) fn plan_window(
 ) -> Result<Plan> {
     let output = render::destination(output, output_root)?;
     let (mut args, sources) =
-        compile(project, input_root, start, duration, true, control)?.finish();
+        compile(project, input_root, start, duration, (true, true), control)?.finish();
     let (level, slices) = media::ffv1_encoding(project.width, project.height);
     args.extend(
         [
@@ -543,7 +734,7 @@ pub(crate) fn read_frame(
         root,
         time,
         Time::new(1, 25)?,
-        false,
+        (true, false),
         &media::Uncontrolled,
     )?
     .finish();

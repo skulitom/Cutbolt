@@ -226,7 +226,7 @@ def run(root):
     passed.append('spatial.graphics_mask_effect_order')
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_scene_inspect');fields={'scene':animate[0],'input_root':str(sources)};Draft202012Validator(schema).validate(fields);assert client.call('scene.inspect',**fields)==animate[1]
         copied=client.call('graphics.instantiate',template={'schema_version':1,'id':'spatial-template','scene':animate[0],'parameters':[]},values={},instance_id='spatial-copy',input_root=str(sources))
         assert copied['scene']['layers'][0]['transform']['spatial']==animate[0]['layers'][0]['transform']['spatial']

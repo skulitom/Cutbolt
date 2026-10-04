@@ -13,18 +13,21 @@ const Q: i64 = 65536;
 const WEIGHT: u128 = (Q as u128) * (Q as u128);
 const TOTAL: u128 = WEIGHT * crate::composite::MASK_WEIGHT as u128;
 
+/// Source sampling filter: `nearest` (containing source pixel) or `bilinear` (four neighboring pixel centers).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Sampling {
     Nearest,
     Bilinear,
 }
+/// Crop-edge policy: `transparent` (taps outside the crop are transparent) or `clamp` (samples must map inside the crop; taps clamp to its edge pixels).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Edge {
     Transparent,
     Clamp,
 }
+/// Aspect fitting: `contain` (smaller ratio, uniform), `cover` (larger ratio, uniform) or `stretch` (independent x/y ratios).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FitMode {
@@ -32,45 +35,66 @@ pub enum FitMode {
     Cover,
     Stretch,
 }
+/// Scales the source so its reference size fits a target size, before spatial scale and rotation; does not center or crop.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Fit {
+    /// Target `[width, height]` in logical scene pixels, each 1..=32768.
     pub size: [u32; 2],
+    /// How the two axis ratios combine.
     pub mode: FitMode,
-    /// Optional fitting reference size; source-tap clipping remains the legacy crop.
+    /// Optional fitting reference `[width, height]`, each 1..=32768; defaults to the source crop size. Source taps stay limited to the crop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[u32; 2]>,
 }
+/// Keyframe curves on the layer-local clock that override static spatial values; at least one curve is required.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Animation {
+    /// Horizontal translation curve in millipixels, -32768000..=32768000; omit to keep the static value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translate_x_milli: Option<Curve>,
+    /// Vertical translation curve in millipixels, -32768000..=32768000; omit to keep the static value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translate_y_milli: Option<Curve>,
+    /// Horizontal scale curve in thousandths (1000 = 1.0), 1..=16000; omit to keep the static value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale_x_milli: Option<Curve>,
+    /// Vertical scale curve in thousandths (1000 = 1.0), 1..=16000; omit to keep the static value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale_y_milli: Option<Curve>,
+    /// Clockwise rotation curve in millidegrees, -3600000..=3600000; interpolates signed values, not the shortest arc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation_mdeg: Option<Curve>,
 }
+/// Optional layer `transform.spatial`: subpixel translation, scale, rotation, mirroring, pixel aspect and fitting with filtered sampling.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
+    /// Offset added to the sampled layer position, `[x, y]` in millipixels, each -32768000..=32768000.
     pub translate_milli: [i32; 2],
+    /// Source axis scale `[x, y]` in thousandths (1000 = 1.0), each 1..=16000.
     pub scale_milli: [i32; 2],
+    /// Clockwise rotation in millidegrees added to `quarter_turns`, -3600000..=3600000.
     pub rotation_mdeg: i32,
+    /// Mirror the source horizontally/vertically, as `[x, y]`, before rotation.
     pub flip: [bool; 2],
+    /// Declared source pixel width/height `{num, den}`, 1/16..=16, reduced denominator at most 1000000.
     pub pixel_aspect: Time,
+    /// Sampling filter.
     pub sampling: Sampling,
+    /// Behavior at the source crop edge.
     pub edge: Edge,
+    /// Optional aspect fitting applied before `scale_milli`; omit for none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
+    /// Optional destination clip `[x, y, width, height]` in logical scene pixels; x/y -32768..=32768, sizes 1..=32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<[i32; 4]>,
+    /// Optional curves animating translation, scale and rotation; all other fields are static.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<Animation>,
+    /// Optional camera-stabilization correction returned by `stabilization.inspect`, composed before this mapping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compensation: Option<crate::stabilize::Compensation>,
 }
@@ -301,8 +325,41 @@ pub(crate) fn draw(
 ) {
     let [a, b, c, d, e, f] = mapping.scene_to_source;
     let [cx, cy, cw, ch] = crop.map(i64::from);
-    for y in 0..dimensions[1] {
-        for x in 0..dimensions[0] {
+    // Visit only destination pixels whose centers can map near the crop: forward-map the crop
+    // grown by one source pixel (bilinear taps reach half a pixel outside) and add a two-pixel
+    // margin for rounding. Unvisited pixels would receive no taps and stay exactly unchanged.
+    let [fa, fb, fc, fd, fe, ff] = mapping.source_to_scene;
+    let corners = [
+        ((cx - 1) as f64, (cy - 1) as f64),
+        ((cx + cw + 1) as f64, (cy - 1) as f64),
+        ((cx - 1) as f64, (cy + ch + 1) as f64),
+        ((cx + cw + 1) as f64, (cy + ch + 1) as f64),
+    ]
+    .map(|(sx, sy)| (fa * sx + fb * sy + fc, fd * sx + fe * sy + ff));
+    let finite = corners.iter().all(|(x, y)| x.is_finite() && y.is_finite());
+    let bound = |values: [f64; 4], size: u32| {
+        let lo = values.iter().cloned().fold(f64::INFINITY, f64::min).floor() - 2.0;
+        let hi = values
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max)
+            .ceil()
+            + 2.0;
+        (
+            lo.clamp(0.0, size as f64) as u32,
+            hi.clamp(0.0, size as f64) as u32,
+        )
+    };
+    let ((x0, x1), (y0, y1)) = if finite {
+        (
+            bound(corners.map(|p| p.0), dimensions[0]),
+            bound(corners.map(|p| p.1), dimensions[1]),
+        )
+    } else {
+        ((0, dimensions[0]), (0, dimensions[1]))
+    };
+    for y in y0..y1 {
+        for x in x0..x1 {
             if let Some([vx, vy, vw, vh]) = spec.viewport
                 && ((x as i64) < vx as i64
                     || (y as i64) < vy as i64

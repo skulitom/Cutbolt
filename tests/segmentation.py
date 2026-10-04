@@ -180,7 +180,7 @@ def run(root, python):
 
     client=Client(exe)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         schema=next(t for t in catalog if t['name']=='cutbolt_scene_inspect')['inputSchema']
         Draft202012Validator(schema).validate({'scene':scene,'input_root':str(root)})
         assert client.call('scene.inspect',scene=scene,input_root=str(root))['frame_matte']['matted_pairs']==count

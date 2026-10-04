@@ -1,5 +1,33 @@
 # Progress history
 
+## 4 October 2026: native-resolution scenes, overlay tracks, large imports and agent ergonomics
+
+These changes fix findings from two external capability demonstrations, a pixel-art reel and a narrated 1080p video. No acceptance criteria, weights, exclusions or denominators changed, and no points were awarded. The core and combined trackers remain 100/100 and 108/108; the new checks are additional regression evidence.
+
+- **Scenes** render natively up to 4096 pixels per axis (eight million output pixels). Output scale 1 skips scaling, text reaches 512 px, and `tilemap` layers assemble canvases from up to 256 independently timed tiles in 4,096 cells. Frames are composited in parallel batches limited to each layer's footprint and streamed to the encoder, and `capabilities.scenes.limits` reports the bounds. Glyph rows were drawn one pixel low when rasterizer bounds fell just below a whole pixel; placement now follows the rasterizer's own offset.
+- **Tracks:** `"composite": "alpha_over"` video tracks composite straight-alpha FFV1 sources over the opaque base with exact integer rounding. Previews, scopes, range exports and queued renders include them.
+- **Media conversion** accepts 16 GiB, 108,000-frame, one-hour sources and 45,000-frame (30-minute) outputs. CPU forward and freeze mappings stream only the needed frames. Reverse, non-monotonic and hardware-decoded mappings use a bounded 4 GiB window, and audio decodes only its mapped window.
+- **Audio-only exports** no longer decode, composite or encode pictures; source video timing comes from FFV1 packets.
+- **Agent interface:**
+  - `session.receipt` returns a committed request's stored receipt; MCP now has 64 tools, and the stale count of 61 in the docs is corrected.
+  - Unaligned-time and scene errors name the field path and value, and SRT rejections name the cue.
+  - Scopes on native tracks were already supported; the documentation now says so.
+- **Verification** now schedules fixtures in a memory-aware parallel pool beside the real-time recording capture. Budget-gated fixtures run one at a time, with the long-form 4K render in its own lane, and every failure is reported. The 4K check hashes its 45,000 frames in eight parallel segments, with each frame's absolute index still asserted. Stage times are recorded under `verification_timing`.
+
+New fixtures: `native_scenes` (12 checks, including exact native 1080p spatial rotation and tilemaps), `overlays` (7), `large_imports` (8) and `agent_ergonomics` (6). A full parallel verification of the combined tree, including the separately recorded schema change, took 45.5 minutes against 6,164 s for the previous serial run. 60 of 61 stages passed. The 15-minute sustained capture was rejected once for a 10 ms capture discontinuity and passed in an earlier run of the same capture code; it is a timing-sensitive real-time fixture, not a regression. Evidence and progress trackers were therefore not regenerated, and the recorded source fingerprints stay stale until the next thorough run. The speech fixtures needed PowerShell 7.6.5, which had to be reinstalled. Documentation records PixelForge 0.7.0 as a later observation and the Qwen CustomVoice checkpoint, now fetched and verified by `tools/download_qwen.py --repository`.
+
+## 4 October 2026: right-sized agent schemas
+
+Each MCP tool's `inputSchema` used to embed all 214 request type definitions. As a result, `tools/list` returned 5,417,140 bytes of compact JSON (roughly 1.4 million tokens) for 64 tools. Listings now carry only the definitions each tool uses, and five large shared types become short stubs: project, operation, scene, template and audio routing. A stub names the new read-only `schema` command, which returns the complete schema of any command or type, including CLI-only commands. The `operation` stub keeps every valid `op` tag.
+
+Every request field, shared type and tagged variant now has a description taken from its Rust doc comment. Previously only 6 of 524 type properties had one. The 65-tool `tools/list` result is now 222,225 bytes, and the largest listing is 11,800 bytes. Unit tests fail when:
+- a schema node lacks a description;
+- a listing has an unresolved or deferred reference;
+- a listing exceeds 16 KiB;
+- the catalog exceeds 240 KiB.
+
+The MCP fixtures' tool-count assertions move from 64 to 65. No baseline, criteria, evidence, weights, exclusions or denominators changed. The recorded source fingerprints are stale until the next full verification.
+
 ## 4 October 2026: verified 108/108 implementation completion
 
 The complete verifier passes **466 unique checks**, reaching **100/100 core, 8/8 supplemental and 108/108 total (100.0%)**. Both original checkpoints now pass for X01 3D planes/cameras/lighting, X02 exact shutter sampling, X03 typed property expressions/links and X04 optional local annotated segmentation. The supplemental fixtures add 28 acceptance checks and one exact-arithmetic Rust test to the 437-check core milestone. No criterion, weight, exclusion, performance gate or denominator was relaxed. Agent foundations remain separate at 10/10.

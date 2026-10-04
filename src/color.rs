@@ -3,6 +3,7 @@ use crate::{Result, error};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// SDR transfer function of encoded RGB or YUV values: `srgb` (sRGB piecewise curve) or `bt709` (BT.709 OETF).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Transfer {
@@ -53,30 +54,38 @@ impl Transfer {
         }
     }
 }
+/// Sample matrix: `rgb` for FFV1/bgr0 RGB, `bt709` for BT.709 YUV (FFV1 yuv444p MKV or H.264 yuv420p MP4/MOV).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Matrix {
     Rgb,
     Bt709,
 }
+/// Code range: `full` (0-255 at 8 bits) or `limited` (luma 16-235, chroma 16-240 at 8 bits, scaled for higher depths).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Range {
     Full,
     Limited,
 }
+/// Absent or unknown color tags: `reject` fails; `use_declared` assumes the declared values and reports them. Conflicting tags always fail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MissingTags {
     Reject,
     UseDeclared,
 }
+/// Declared SDR interpretation of a conform source (`source.sdr`); BT.709 primaries and D65 are implied.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Input {
+    /// Sample matrix; must match the stored pixel format.
     pub matrix: Matrix,
+    /// Code range of the stored samples; yuvj420p requires `full`.
     pub range: Range,
+    /// Transfer function of the source values.
     pub transfer: Transfer,
+    /// Policy for absent or unknown stream and frame color tags.
     pub missing_tags: MissingTags,
 }
 #[derive(Clone, Copy)]

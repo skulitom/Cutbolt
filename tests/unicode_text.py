@@ -181,7 +181,7 @@ def run(root):
 
     client=Client(EXE)
     try:
-        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==63
+        client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==65
         for tool_name,args in [('cutbolt_scene_inspect',{'scene':moving,'input_root':str(sources)}),('cutbolt_captions_scene',{k:v for k,v in request.items() if k!='command'})]:
             tool=next(t for t in catalog if t['name']==tool_name);assert tool['annotations']['readOnlyHint'];Draft202012Validator(tool['inputSchema']).validate(args)
         assert client.call('scene.inspect',scene=moving,input_root=str(sources))==moving_info
@@ -250,9 +250,11 @@ def run(root):
         font=TTFont(sources/'second.ttf');table=DefaultTable(tag);table.data=bytes(20);font[tag]=table
         path=sources/f'unsupported-{tag}.ttf';font.save(path);hashes[path]=sha(path)
         bad({'fonts':[fonts[0],identity(path,sources)]},'UNSUPPORTED_FONT')
-    for name,overrides in [('advance',{'u0041':(60000,[(0,0,100,100)])}),('dimensions',{'u0041':(600,[(0,0,5000,5000)])})]:
+    # Glyph metrics are bounded to 1024 pixels: 60000 units is far beyond it at size 128, and a
+    # 5000-unit glyph exceeds it at size 256 (1280 pixels).
+    for name,overrides,size in [('advance',{'u0041':(60000,[(0,0,100,100)])},128),('dimensions',{'u0041':(600,[(0,0,5000,5000)])},256)]:
         path=sources/f'{name}.ttf';make_font(path,overrides=overrides);hashes[path]=sha(path)
-        bad({'fonts':[identity(path,sources)],'size':128,'overflow':'clip'},'UNSUPPORTED_FONT')
+        bad({'fonts':[identity(path,sources)],'size':size,'overflow':'clip'},'UNSUPPORTED_FONT')
     path=sources/'expansion.ttf';make_font(path,extra_features='feature ccmp {sub u0041 by '+' '.join(['u0042']*16)+';} ccmp;');hashes[path]=sha(path)
     bad({'text':'A'*600,'fonts':[identity(path,sources)],'overflow':'clip'},'LIMIT_EXCEEDED')
     path=sources/'raster-work.ttf';make_font(path,overrides={'u0041':(4000,[(0,0,4000,4000)])});hashes[path]=sha(path)
@@ -267,7 +269,8 @@ def run(root):
     try:
         deadline=clock.monotonic()+15
         while process.poll() is None and clock.monotonic()<deadline:
-            if list(out.glob('.cutbolt-scene-*/video.rgb')):
+            # Preparation is complete once frames stream into the scene's scratch encoder output.
+            if list(out.glob('.cutbolt-scene-*/output.mkv')):
                 (sources/'first.ttf').write_bytes(original+b'changed original fixture');changed_font=True;break
             clock.sleep(.002)
         assert changed_font,'Failed to inject the post-preparation font change'

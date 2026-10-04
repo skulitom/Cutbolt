@@ -36,74 +36,116 @@ fn bounded(values: &[i64]) -> Result<()> {
         Ok(())
     }
 }
+/// Routing graph node, tagged by `kind`: a mix track, a bus or the final output.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NodeRef {
-    Track { id: String },
-    Bus { id: String },
+    /// A track of the enclosing mix.
+    Track {
+        /// ID of a track in the enclosing mix.
+        id: String,
+    },
+    /// A bus declared in `routing.buses`.
+    Bus {
+        /// ID of a bus in `routing.buses`.
+        id: String,
+    },
+    /// The final output node; it runs the mix's master `effects`.
     Output,
 }
+/// Channel layout declaration for one mix track.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TrackLayout {
+    /// ID of a track in the enclosing mix; declare each track exactly once.
     pub id: String,
+    /// Layout that every clip on the track must produce through its channel policy.
     pub layout: Layout,
 }
+/// Summing bus: incoming routes add, then gain, ordered effects and mute apply.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Bus {
+    /// Bus ID unique among buses; 1..128 bytes, not blank.
     pub id: String,
+    /// Channel layout of the bus signal.
     pub layout: Layout,
+    /// Linear gain, 1000 = unity, 0..4000; default 1000. `gain_curve` replaces it when set.
     #[serde(default = "unity")]
     pub gain_milli: u32,
+    /// Silence the bus output after its effects; default false.
     #[serde(default)]
     pub mute: bool,
+    /// Optional gain automation in milli-units 0..4000 on the mix clock (sample index / 48000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain_curve: Option<Curve>,
+    /// Ordered effects run after bus gain, at most 8; default empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
 }
+/// Pan law: `linear` weights (1000-p)/2000 and (1000+p)/2000, so center is half amplitude per side; `equal_power` uses cosine/sine weights, about 0.707 per side at center.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PanLaw {
     Linear,
     EqualPower,
 }
+/// How a route maps source channels to destination channels, tagged by `type`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Mapping {
+    /// Copy channels unchanged; source and destination layouts must match exactly.
     Identity,
+    /// Explicit weighted channel matrix, rounded once per destination channel.
     Matrix {
+        /// One row per destination channel, one column per source channel; milli-unit weights -4000..4000 (1000 = unity, negative inverts).
         coefficients_milli: Vec<Vec<i32>>,
     },
+    /// Pan a mono source into a stereo destination.
     Pan {
+        /// Pan law used for the left/right weights.
         law: PanLaw,
+        /// Position from -1000 (left) to 1000 (right); `curve` replaces it when set.
         position_milli: i32,
+        /// Optional position automation, -1000..1000, on the mix clock (sample index / 48000).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curve: Option<Curve>,
     },
+    /// Stereo-to-stereo balance; center keeps both channels at unity, movement attenuates the opposite side.
     Balance {
+        /// Position from -1000 (left) to 1000 (right); `curve` replaces it when set.
         position_milli: i32,
+        /// Optional position automation, -1000..1000, on the mix clock (sample index / 48000).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curve: Option<Curve>,
     },
 }
+/// Directed connection from a track or bus to a bus or the output; parallel routes add.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Route {
+    /// Route ID unique within the routing; 1..128 bytes, not blank.
     pub id: String,
+    /// Track or bus that feeds the route.
     pub source: NodeRef,
+    /// Bus or output that receives the route.
     pub destination: NodeRef,
+    /// Channel mapping applied to the signal.
     pub mapping: Mapping,
 }
+/// Optional mix routing graph with named layouts, buses and channel routes.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Routing {
+    /// Layout of the final rendered WAV.
     pub output: Layout,
+    /// Exactly one layout declaration for every mix track.
     pub tracks: Vec<TrackLayout>,
+    /// Up to 16 buses.
     pub buses: Vec<Bus>,
+    /// Up to 64 routes; every track and bus must reach the output without cycles, through at most 16 buses.
     pub routes: Vec<Route>,
 }
 enum Weights {
