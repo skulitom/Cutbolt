@@ -1,5 +1,16 @@
 # Progress history
 
+## 4 October 2026: gate deadline and background yielding
+
+Shipping while background verification ran showed that duration predictions fail under contention: one gate took six minutes.
+
+- The gate's budget is now a hard deadline (85 s of fixtures by default). Fixtures still running at the deadline are stopped with their process trees and deferred; fixtures not yet started are deferred too.
+- Timing history is kept per kind of run, so gate predictions come from earlier gates.
+- A running gate leaves a marker in the shared state, and background verification starts no new fixtures while a live gate exists.
+- Background runs default to four lanes and the gate to eight. Process creation saturates near eight concurrent fixtures on this machine, so more lanes only slow every fixture.
+
+On a heavily loaded machine (two background runs) a broad gate finished in 125 s, reused 25 unchanged passes, and deferred the rest.
+
 ## 4 October 2026: background verification fixes
 
 The first background runs exposed two harness problems, both now fixed:

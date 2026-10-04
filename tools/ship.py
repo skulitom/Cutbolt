@@ -35,9 +35,10 @@ def git(*args, check=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--budget", type=float, default=100, help="Gate fixture budget in seconds")
-    parser.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
-    parser.add_argument("--background-jobs", type=int, default=8, help="Concurrent fixtures in the background verification")
+    parser.add_argument("--budget", type=float, default=85, help="Gate fixture budget in seconds")
+    # Process creation saturates near eight concurrent fixtures here; more lanes slow every fixture.
+    parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--background-jobs", type=int, default=4, help="Concurrent fixtures in the background verification (it also yields to running gates)")
     parser.add_argument("--no-push", action="store_true", help="Run the gate and background verification without pushing")
     parser.add_argument("--decode-device", type=int, help="CUDA ordinal for the hardware-decode fixtures (otherwise they are skipped)")
     parser.add_argument("--to", help="Push HEAD to this branch of origin (for example main from a session branch); default: the current branch's upstream")

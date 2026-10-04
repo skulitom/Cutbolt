@@ -35,7 +35,7 @@ parser.add_argument("--engine", type=Path, help="Quick: verify this prebuilt eng
 parser.add_argument("--no-rust", action="store_true", help="Quick: skip formatting, lint and Rust tests")
 parser.add_argument("--coverage-dir", type=Path, help="Quick: write each fixture's LLVM coverage profiles under this directory (needs an instrumented --engine)")
 parser.add_argument("--gate", action="store_true", help="Push gate: run only fixtures the changes can affect (tools/impact.py), reuse unchanged passes, fit a time budget and defer the rest")
-parser.add_argument("--budget", type=float, default=100, help="Gate: predicted fixture wall-clock budget in seconds")
+parser.add_argument("--budget", type=float, default=85, help="Gate: fixture wall-clock budget in seconds; fixtures still running then are stopped and deferred")
 parser.add_argument("--report", type=Path, help="Write a JSON summary of this run (used by tools/ship.py)")
 parser.add_argument("--background", action="store_true", help="Deferred verification of a pushed commit (tools/ship.py)")
 parser.add_argument("--commit", help="Commit being verified, for the run record")
@@ -225,7 +225,8 @@ STAGES = [
 ]
 assert len({s["name"] for s in STAGES}) == len(STAGES)
 NAMES = [s["name"] for s in STAGES]
-previous = history.get(MODE, {}).get("stages", {})
+# Durations depend on concurrency, so each kind of run predicts from its own history (quick as fallback).
+previous = {**history.get("quick", {}).get("stages", {}), **history.get(RUN, {}).get("stages", {})}
 if args.only:
     wanted = [n.strip() for n in args.only.split(",") if n.strip()]
     unknown = sorted(set(wanted) - set(NAMES))
@@ -300,6 +301,52 @@ def log(message):
         print(f"[{elapsed // 60:3d}:{elapsed % 60:02d}] {message}", flush=True)
 
 
+deadline_passed = threading.Event()
+gate_deadline = None
+GATES = impact.STATE / "gates"
+
+
+def gate_running():
+    """Whether any live gate is running; background verification starts nothing new meanwhile."""
+    for marker in GATES.glob("*.pid"):
+        try:
+            if psutil.pid_exists(int(marker.stem)):
+                return True
+            marker.unlink(missing_ok=True)
+        except (ValueError, OSError):
+            continue
+    return False
+
+
+if args.gate:
+    GATES.mkdir(parents=True, exist_ok=True)
+    gate_marker = GATES / f"{os.getpid()}.pid"
+    gate_marker.write_text(args.commit or "", encoding="utf-8")
+
+
+def run_command(argv, environment):
+    """Run one fixture command; the gate stops it (and its process tree) at the deadline."""
+    process = subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                               encoding="utf-8", errors="replace", env=environment)
+    while True:
+        try:
+            out, err = process.communicate(timeout=0.5)
+            return process.returncode, out, err
+        except subprocess.TimeoutExpired:
+            if deadline_passed.is_set():
+                try:
+                    tree = psutil.Process(process.pid).children(recursive=True)
+                except psutil.Error:
+                    tree = []
+                for child in [*tree, process]:
+                    try:
+                        child.kill()
+                    except (psutil.Error, OSError):
+                        pass
+                out, err = process.communicate()
+                return None, out, err
+
+
 def execute(stage):
     directory = Path(tempfile.mkdtemp(prefix=f"cutbolt-{stage['name'].replace('_', '-')}-"))
     began = time.monotonic()
@@ -312,11 +359,13 @@ def execute(stage):
             # %8m: processes merge online into eight pool files instead of one large file each.
             environment = {**fixture_environment, "LLVM_PROFILE_FILE": str(profiles / "%8m.profraw")}
         for argv in stage["commands"]:
-            result = subprocess.run([a.replace("{dir}", str(directory)) for a in argv], cwd=ROOT, capture_output=True,
-                                    text=True, encoding="utf-8", errors="replace", env=environment)
-            outcome["budget_misses"] += [line.split(" ", 1)[1] for line in result.stderr.splitlines() if line.startswith("CUTBOLT_BUDGET_MISS ")]
-            if result.returncode:
-                outcome["log"] = f"exit {result.returncode}\n{result.stdout[-4000:]}\n{result.stderr[-8000:]}"
+            code, out, err = run_command([a.replace("{dir}", str(directory)) for a in argv], environment)
+            outcome["budget_misses"] += [line.split(" ", 1)[1] for line in err.splitlines() if line.startswith("CUTBOLT_BUDGET_MISS ")]
+            if code is None:
+                outcome.update(deferred=True, log="stopped at the gate deadline; deferred")
+                return
+            if code:
+                outcome["log"] = f"exit {code}\n{out[-4000:]}\n{err[-8000:]}"
                 return
         values = {key: json.loads((directory / path).read_text(encoding="utf-8")) for key, path in stage["results"].items()}
         problem = stage["check"](values) if stage["check"] else None
@@ -332,8 +381,9 @@ def execute(stage):
         with lock:
             outcomes[stage["name"]] = outcome
         note = f" ({len(outcome['budget_misses'])} budget(s) recorded over)" if outcome["budget_misses"] else ""
-        log(f"{stage['name']} {'passed' if outcome['ok'] else 'FAILED'} in {outcome['seconds']:.0f} s{note}")
-        if not outcome["ok"]:
+        status = "passed" if outcome["ok"] else "deferred at the deadline" if outcome.get("deferred") else "FAILED"
+        log(f"{stage['name']} {status} in {outcome['seconds']:.0f} s{note}")
+        if not outcome["ok"] and not outcome.get("deferred"):
             if args.fail_fast:
                 stop_starting.set()
             with lock:
@@ -345,10 +395,16 @@ def run_phase(lanes):
     queues = [(list(stages), limit, memory_aware) for stages, limit, memory_aware in lanes]
     running = [[] for _ in queues]
     while (any(queue for queue, _, _ in queues) and not stop_starting.is_set()) or any(t.is_alive() for active in running for t in active):
+        if gate_deadline is not None and time.monotonic() > gate_deadline and not deadline_passed.is_set():
+            deadline_passed.set()
+            stop_starting.set()
+            log("gate deadline reached; running fixtures stop and are deferred")
         for (queue, limit, memory_aware), active in zip(queues, running):
             active[:] = [t for t in active if t.is_alive()]
             while queue and len(active) < limit and not stop_starting.is_set():
                 if memory_aware and active and psutil.virtual_memory().available < 6 * 1024**3:
+                    break
+                if args.background and gate_running():
                     break
                 stage = queue.pop(0)
                 log(f"{stage['name']} started")
@@ -364,13 +420,22 @@ def lane(name):
     return sorted(stages, key=lambda s: -previous.get(s["name"], {}).get("seconds", 0)) if name == "pool" else stages
 
 
+if args.gate:
+    gate_deadline = time.monotonic() + args.budget
 run_phase([(lane("pool"), args.jobs, True)])
 run_phase([(lane("long"), 1, False), (lane("gated"), 1, False)])
 run_phase([(lane("quiet"), 1, False)])
 if rust_thread:
     rust_thread.join()
+if args.gate:
+    gate_marker.unlink(missing_ok=True)
 shutil.rmtree(run_directory, ignore_errors=True)
-failures = {name: outcome for name, outcome in outcomes.items() if not outcome["ok"]}
+failures = {name: outcome for name, outcome in outcomes.items() if not outcome["ok"] and not outcome.get("deferred")}
+deferred += [name for name, outcome in outcomes.items() if outcome.get("deferred")]
+not_run = [s["name"] for s in STAGES if s["name"] not in outcomes]
+if deadline_passed.is_set():  # Never started because the gate's time ran out: the background runs them.
+    deferred += not_run
+    not_run = []
 if rust_outcome.get("error"):
     failures["rust"] = {"ok": False, "log": rust_outcome["error"], "seconds": 0, "budget_misses": []}
 commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
@@ -381,7 +446,7 @@ impact.record(RUN, passed_fingerprints,
               commit=commit, failures=sorted(failures), deferred=deferred, reused=reused,
               not_impacted=len(not_impacted), skipped=sorted(skipped))
 if args.report:
-    args.report.write_text(json.dumps({"ok": not failures and not [s for s in STAGES if s["name"] not in outcomes], "run": RUN,
+    args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN,
                                        "ran": sorted(outcomes), "failed": sorted(failures), "deferred": deferred, "reused": reused,
                                        "not_impacted": not_impacted, "skipped": skipped}, indent=1), encoding="utf-8")
 if args.cleanup_worktree:
@@ -389,10 +454,10 @@ if args.cleanup_worktree:
     main_checkout = (ROOT / common).resolve().parent
     os.chdir(tempfile.gettempdir())
     subprocess.run(["git", "-C", str(main_checkout), "worktree", "remove", "--force", str(ROOT)], capture_output=True)
-not_run = [s["name"] for s in STAGES if s["name"] not in outcomes]
 wall = round(time.monotonic() - started_at, 1)
-recorded = {**previous, **{name: {"ok": o["ok"], "seconds": o["seconds"], "budget_misses": o["budget_misses"]} for name, o in outcomes.items()}}
-history[MODE] = {"finished": datetime.now(timezone.utc).isoformat(timespec="seconds"), "wall_seconds": wall, "stages": recorded,
+recorded = {**history.get(RUN, {}).get("stages", {}),
+            **{name: {"ok": o["ok"], "seconds": o["seconds"], "budget_misses": o["budget_misses"]} for name, o in outcomes.items() if not o.get("deferred")}}
+history[RUN] = {"finished": datetime.now(timezone.utc).isoformat(timespec="seconds"), "wall_seconds": wall, "stages": recorded,
                  "last_failed": sorted(failures), "skipped": skipped}
 history_path.parent.mkdir(parents=True, exist_ok=True)
 if not args.coverage_dir:  # Instrumented timings would mislead later scheduling and gate budgets.
