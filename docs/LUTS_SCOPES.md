@@ -30,7 +30,7 @@ Public interface references: [FFmpeg LUT filter descriptions](https://ffmpeg.org
 
 ## Numerical frame scopes
 
-`scopes.inspect` takes `project`, `input_root`, rational `time`, `input_transfer: "srgb" | "bt709"`, `missing_tags: "reject" | "use_declared"`, and `columns`. The timeline must satisfy the existing 25 fps reference profile: 1–64 sequential items or a [native-track](TRACKS.md) arrangement, including alpha overlay tracks and gaps. Time is a frame boundary before the timeline end; each frame is at most 8 million pixels. `columns` is 1 through `min(width, 256)`.
+`scopes.inspect` takes `project`, `input_root`, rational `time`, `input_transfer: "srgb" | "bt709"` (optional when the project declares `transfer`), `missing_tags: "reject" | "use_declared"`, and `columns`. The timeline must satisfy the existing 25 fps reference profile: 1–64 sequential items or a [native-track](TRACKS.md) arrangement, including alpha overlay tracks and gaps. Time is a frame boundary before the timeline end; each frame is at most 8 million pixels. `columns` is 1 through `min(width, 256)`.
 
 The source must have full-range RGB/BT.709 primaries with the declared transfer. Stream metadata conflicts fail; missing tags require explicit interpretation. The scopes measure encoded RGB values, not luminance in nits or a display transform. A gap supplies exact black; its source interpretation report is null. Scopes always use the original asset even if a reduced or offline proxy is selected. They do not change the project, write an image, or save a cache.
 

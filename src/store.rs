@@ -70,6 +70,8 @@ pub struct Changes {
     pub preview: Option<PreviewChange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track_layout: Option<TrackLayoutChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer: Option<TransferChange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,6 +122,13 @@ fn track_layout(project: &Project) -> Option<TrackLayout> {
 pub struct PreviewChange {
     pub scale_before: Option<u32>,
     pub scale_after: Option<u32>,
+}
+
+/// A change to the project's declared transfer, set by project.transfer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferChange {
+    pub before: Option<crate::color::Transfer>,
+    pub after: Option<crate::color::Transfer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -503,6 +512,10 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
         preview: (before.preview_scale != after.preview_scale).then_some(PreviewChange {
             scale_before: before.preview_scale,
             scale_after: after.preview_scale,
+        }),
+        transfer: (before.transfer != after.transfer).then_some(TransferChange {
+            before: before.transfer,
+            after: after.transfer,
         }),
         duration_before: before.duration()?,
         duration_after: after.duration()?,

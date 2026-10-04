@@ -224,6 +224,10 @@ def run(root):
     reject({**base,'input_transfer':'srgb'},'INVALID_EXPORT')
     r=request('missing-transfer','h264_aac');r.pop('input_transfer');reject(r,'INVALID_EXPORT')
     reject({**request('unused-transfer','h264_aac','audio'),'input_transfer':'bt709'},'INVALID_EXPORT')
+    declared=copy.deepcopy(project);declared['transfer']='srgb'
+    r=request('declared-transfer','h264_aac',p=declared);r.pop('input_transfer')
+    assert call({**r,'command':'export.inspect'})['input_transfer']=='srgb'
+    reject({**r,'input_transfer':'bt709'},'INVALID_EXPORT')
     for w,h in [(191,128),(192,127),(1922,128),(192,1082)]:
         p=copy.deepcopy(project);p.update(width=w,height=h);reject(request('bad-geometry','h264_aac',p=p),'INVALID_EXPORT')
     p=copy.deepcopy(project);p['clips']=[];reject(request('empty',p=p),'INVALID_EXPORT')

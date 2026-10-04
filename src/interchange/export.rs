@@ -64,6 +64,14 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
             false,
         );
     }
+    if project.transfer.is_some() {
+        a.loss(
+            "$/transfer",
+            "declared_transfer",
+            "The declared transfer of encoded RGB values is omitted",
+            false,
+        );
+    }
     let mut references = BTreeMap::new();
     for asset in &project.assets {
         let path = checked_asset(asset, &root)?;

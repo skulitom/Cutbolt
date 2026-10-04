@@ -1,5 +1,5 @@
 //! Explicit range/stream export with verified reference and bounded delivery profiles.
-use crate::{Result, error, media, model::Project, render, time::Time};
+use crate::{Result, color::Transfer, error, media, model::Project, render, time::Time};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -38,13 +38,6 @@ impl Streams {
     fn audio(self) -> bool {
         self != Self::Video
     }
-}
-/// Declared transfer of encoded RGB values, `srgb` or `bt709`. For H.264, `srgb` converts to BT.709 transfer first and `bt709` passes values unchanged; lossless outputs keep values and tag the choice.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Transfer {
-    Srgb,
-    Bt709,
 }
 impl Transfer {
     fn filter(self) -> String {
@@ -92,7 +85,7 @@ pub struct Export {
     /// Timeline interval to export; omit or null for the whole timeline.
     #[serde(default)]
     pub range: Option<Range>,
-    /// Required for H.264 and PNG outputs with video; omit for reference and audio-only exports.
+    /// Transfer of the timeline's encoded RGB values for H.264 and PNG video: for H.264, `srgb` converts to BT.709 transfer first and `bt709` passes values unchanged; PNG keeps values and tags the choice. Omit to use the project's declared `transfer`; reference and audio-only exports take none.
     #[serde(default)]
     pub input_transfer: Option<Transfer>,
     /// H.264 encoder settings, only for `h264_aac` with video; omit for High profile CRF 18.
@@ -128,6 +121,17 @@ fn nonce() -> Result<String> {
     ))
 }
 impl Export {
+    /// H.264 and PNG video convert or tag encoded values, so they need a transfer.
+    fn color_needed(&self) -> bool {
+        self.profile != Profile::Reference && self.streams.video()
+    }
+    /// Transfer applied to video: `input_transfer`, else the project's declaration; none for
+    /// reference and audio-only exports. Validated by `selected`.
+    fn transfer(&self) -> Option<Transfer> {
+        self.input_transfer
+            .or(self.project.transfer)
+            .filter(|_| self.color_needed())
+    }
     fn extension(&self) -> &'static str {
         match (self.profile, self.streams) {
             (Profile::Reference, Streams::Audio) => "wav",
@@ -182,10 +186,17 @@ impl Export {
         } else if self.sequence_first.is_some() {
             return Err(invalid("sequence_first requires png_sequence output"));
         }
-        let color_needed = self.profile != Profile::Reference && self.streams.video();
-        if color_needed != self.input_transfer.is_some() {
+        if !self.color_needed() && self.input_transfer.is_some() {
             return Err(invalid(
-                "H.264 and PNG video require explicit input_transfer (srgb or bt709); reference/audio exports must omit it",
+                "Reference and audio-only exports keep encoded values; omit input_transfer",
+            ));
+        }
+        if self.color_needed()
+            && Transfer::declared("INVALID_EXPORT", self.input_transfer, self.project.transfer)?
+                .is_none()
+        {
+            return Err(invalid(
+                "H.264 and PNG video need the timeline's transfer: declare it once with the project.transfer operation, or pass input_transfer. bt709 keeps encoded values and suits most material; srgb converts from the sRGB curve first, darkening shadows in typical players",
             ));
         }
         if self.h264.is_some() && !(self.profile == Profile::H264Aac && self.streams.video()) {
@@ -247,7 +258,7 @@ impl Export {
 fn report(request: &Export, c: &Checked) -> Value {
     json!({"profile":request.profile,"profile_version":if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
         "timeline_frames":c.reference.frames,"video_frames":if request.streams.video(){c.reference.frames}else{0},"audio_samples":if request.streams.audio(){c.reference.samples}else{0},
-        "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.input_transfer,"sources":c.reference.sources,
+        "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.transfer(),"sources":c.reference.sources,
         "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report()},
         "audio":if !request.streams.audio(){Value::Null}else if request.profile!=Profile::H264Aac{json!({"codec":"pcm_s16le","sample_rate":48000,"channels":2,"decoded_tail_padding":0})}else{json!({"codec":"aac","profile":"LC","bitrate":request.aac_bitrate.unwrap_or(320000),"sample_rate":48000,"channels":2,"presentation_samples":c.reference.samples,"decoder_tail_padding":"reported_separately_0_to_1023_samples"})},
         "encoder_passes":if request.profile==Profile::Reference{0}else if request.streams.video() && request.h264.unwrap_or_default().rate_control.two_pass(){2}else{1},
@@ -369,11 +380,7 @@ fn arguments(
             "-color_primaries".into(),
             "bt709".into(),
             "-color_trc".into(),
-            match request.input_transfer.expect("validated transfer") {
-                Transfer::Srgb => "iec61966-2-1",
-                Transfer::Bt709 => "bt709",
-            }
-            .into(),
+            request.transfer().expect("validated transfer").tag().into(),
             "-movflags".into(),
             "+faststart+write_colr".into(),
             "-movie_timescale".into(),
@@ -387,7 +394,7 @@ fn arguments(
         if request.streams.video() {
             args.extend([
                 "-vf".into(),
-                request.input_transfer.expect("validated transfer").filter(),
+                request.transfer().expect("validated transfer").filter(),
             ]);
             args.extend(
                 [
@@ -627,11 +634,7 @@ fn validate_output(
                 || v["color_range"] != "pc"
                 || v["color_space"] != "gbr"
                 || v["color_primaries"] != "bt709"
-                || v["color_transfer"]
-                    != match request.input_transfer.expect("validated transfer") {
-                        Transfer::Srgb => "iec61966-2-1",
-                        Transfer::Bt709 => "bt709",
-                    }
+                || v["color_transfer"] != request.transfer().expect("validated transfer").tag()
                 || v["start_pts"] != 0
                 || exact_time(v, "duration_ts")?
                     .compare(c.range.duration)?
@@ -856,5 +859,5 @@ pub fn run(request: &Export) -> Result<Value> {
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; h264_and_placed_tracks_25fps","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
+    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; h264_and_placed_tracks_25fps","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
 }

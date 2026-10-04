@@ -15,8 +15,9 @@ pub struct Inspect {
     pub input_root: PathBuf,
     /// Frame time in rational seconds; a frame boundary before the timeline end.
     pub time: Time,
-    /// Declared transfer of the full-range RGB source values.
-    pub input_transfer: color::Transfer,
+    /// Declared transfer of the full-range RGB source values; omit to use the project's declared `transfer`.
+    #[serde(default)]
+    pub input_transfer: Option<color::Transfer>,
     /// Policy for absent source color tags.
     pub missing_tags: color::MissingTags,
     /// Horizontal waveform bins, 1 to min(width, 256).
@@ -79,6 +80,12 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
             "Scope columns must be 1..min(width,256)",
         ));
     }
+    let transfer = color::Transfer::declared(
+        "INVALID_SCOPE",
+        request.input_transfer,
+        request.project.transfer,
+    )?
+    .ok_or_else(|| error("INVALID_SCOPE", "Scopes need the timeline's transfer: declare it once with the project.transfer operation, or pass input_transfer. bt709 keeps encoded values and suits most material; srgb converts from the sRGB curve first, darkening shadows in typical players"))?;
     let mut project = request.project.clone();
     project.preview_scale = None;
     let (pixels, frame) = preview::read_frame(&project, &request.input_root, request.time)?;
@@ -113,7 +120,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
         let (_, report) = color::Input {
             matrix: color::Matrix::Rgb,
             range: color::Range::Full,
-            transfer: request.input_transfer,
+            transfer,
             missing_tags: request.missing_tags,
         }
         .inspect(&video, true, false)?;
@@ -131,7 +138,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
         Value::Null
     };
     Ok(
-        json!({"profile":"encoded-rgb-scopes-v1","frame":frame,"input_transfer":request.input_transfer,"interpretation":interpretation,"source_interpretations":interpretations,"pixels":pixels.len()/3,"rgb_sha256":format!("{:x}",Sha256::digest(&pixels)),"columns":request.columns,"scope_domain":"encoded_full_range_rgb_8bit","luma_coefficients":[2126,7152,722],"luma_divisor":10000,"rounding":"nearest_ties_up","waveform_axes":"column_then_code_value","vectorscope_axes":"cr_then_cb_full_range_128_center","values":values}),
+        json!({"profile":"encoded-rgb-scopes-v1","frame":frame,"input_transfer":transfer,"interpretation":interpretation,"source_interpretations":interpretations,"pixels":pixels.len()/3,"rgb_sha256":format!("{:x}",Sha256::digest(&pixels)),"columns":request.columns,"scope_domain":"encoded_full_range_rgb_8bit","luma_coefficients":[2126,7152,722],"luma_divisor":10000,"rounding":"nearest_ties_up","waveform_axes":"column_then_code_value","vectorscope_axes":"cr_then_cb_full_range_128_center","values":values}),
     )
 }
 pub fn capabilities() -> Value {

@@ -1,5 +1,11 @@
 # Progress history
 
+## 4 October 2026: declared project transfer
+
+Every H.264 or PNG export and every scopes request had to repeat `input_transfer`, and agents in the trials guessed at it. A project can now declare the transfer of its encoded RGB values once, with the `project.transfer` operation. The declaration is a new optional `transfer` field, omitted when unset, so existing snapshots and fingerprints are unchanged.
+
+`export.inspect`, `export.run` and `scopes.inspect` use the declaration when `input_transfer` is omitted. They reject a request value that contradicts it, and report the transfer they used. Session receipts show a declaration change. When neither is given, the error names the operation and explains the choice. Interchange export reports the declaration as a non-critical loss. The delivery and scopes fixtures cover the declared default and the contradiction. No scoring changed.
+
 ## 4 October 2026: listing workspace files
 
 The MCP-only trials had no way to see which media existed, so every one of them fell back to a shell to list the folder. The new read-only `files.list` command (`cutbolt_files_list`) lists files and folders under `input_root`, which is the workspace in workspace mode. It returns sorted relative paths with sizes, can recurse and filter by extension, caps the entry count while reporting the total, and skips engine state. No scoring changed.

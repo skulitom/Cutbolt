@@ -1,6 +1,6 @@
 //! Original bounded numbered-footage compilation, with explicit alpha and exact native clocks.
+use crate::color::Transfer;
 use crate::composite::{self, AlphaMode, BlendMode};
-use crate::delivery::Transfer;
 use crate::{
     Result, error, media, render,
     scene::{self, Identity},
@@ -255,10 +255,7 @@ pub fn run(recipe: &Recipe, input_root: &Path, output_root: &Path, output: &Path
     drop(audio);
     let temp = scratch.0.join(format!("output.{extension}"));
     let transparent = recipe.profile != Profile::ReferenceRgb;
-    let transfer = match recipe.input_transfer {
-        Transfer::Srgb => "iec61966-2-1",
-        Transfer::Bt709 => "bt709",
-    };
+    let transfer = recipe.input_transfer.tag();
     let mut args: Vec<String> = [
         "-v",
         "error",

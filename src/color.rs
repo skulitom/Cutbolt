@@ -11,6 +11,32 @@ pub enum Transfer {
     Bt709,
 }
 impl Transfer {
+    /// The name used in requests.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Srgb => "srgb",
+            Self::Bt709 => "bt709",
+        }
+    }
+    /// The transfer a request applies: its own `input_transfer`, else the project's declared
+    /// `transfer`. A request value that contradicts the declaration fails with `code`.
+    pub(crate) fn declared(
+        code: &'static str,
+        request: Option<Self>,
+        project: Option<Self>,
+    ) -> Result<Option<Self>> {
+        match (request, project) {
+            (Some(given), Some(declared)) if given != declared => Err(error(
+                code,
+                format!(
+                    "input_transfer {} contradicts the project's declared transfer {}; omit input_transfer, or change the declaration with project.transfer",
+                    given.name(),
+                    declared.name()
+                ),
+            )),
+            _ => Ok(request.or(project)),
+        }
+    }
     pub(crate) fn tag(self) -> &'static str {
         match self {
             Self::Srgb => "iec61966-2-1",

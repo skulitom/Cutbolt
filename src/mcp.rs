@@ -79,7 +79,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Compute exact per-channel/luma histograms, waveform/parade and a chroma vectorscope for one full-quality timeline frame. Explicit color interpretation and missing-tag policy required; proxy selection is ignored. No files or saved state change."
         }
         "export.inspect" => {
-            "Inspect an exact timeline range and full-quality sources for reference, lossless PNG movie/image-directory or H.264/AAC export. Lossless sequential output supports native clocks; H.264 and placed tracks retain 25 fps. PNG/H.264 video requires explicit source transfer; sequence_first selects image numbering, h264 selects delivery controls and aac_bitrate selects audio rate. Returns timing, source identities and color/publication policy without writing. export.run is blocking CLI/library-only."
+            "Inspect an exact timeline range and full-quality sources for reference, lossless PNG movie/image-directory or H.264/AAC export. Lossless sequential output supports native clocks; H.264 and placed tracks retain 25 fps. PNG/H.264 video needs input_transfer unless the project declares its transfer with the project.transfer operation; sequence_first selects image numbering, h264 selects delivery controls and aac_bitrate selects audio rate. Returns timing, source identities and color/publication policy without writing. Run the export with job.start run export.run."
         }
         "effects.preset" => {
             "Return an independent editable scene effect chain from an original green/blue hard/soft chroma-key preset. Explicit strength and spill controls must be 0..1000. Copy effects into a layer, inspect the scene, then compile it. No files or saved state are changed."
@@ -356,7 +356,7 @@ impl Server {
         let mut text = concat!(
             "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
             "Typical cut: session.create with id, width, height and frame_rate; media.inspect each source (timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio; ",
-            "convert others with job.start run media.conform); session.apply with media.add then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
+            "convert others with job.start run media.conform); session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",

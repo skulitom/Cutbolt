@@ -213,7 +213,7 @@ pub(super) fn run(
     }
     let manifest = json!({"schema_version":1,"profile":"cutbolt-numbered-rgb-v1","first_number":first,"frame_count":c.reference.frames,
         "frame_rate":c.project.frame_rate,"duration":c.range.duration,"source_range":c.range,"project_revision":c.project.revision,
-        "width":c.project.width,"height":c.project.height,"pixel_format":"rgb24","alpha":"opaque","transfer":request.input_transfer,
+        "width":c.project.width,"height":c.project.height,"pixel_format":"rgb24","alpha":"opaque","transfer":request.transfer(),
         "sampling":"one_image_per_native_frame_half_open_range","decoded_rgb_sha256":digest,"frames":files,"audio":audio,"sources":c.reference.sources});
     let path = images.path.join("manifest.json");
     let mut file = File::options().write(true).create_new(true).open(&path)?;

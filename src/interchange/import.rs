@@ -40,6 +40,7 @@ pub(super) fn prepare(request: &Import, document: &Value, a: &mut Analysis) -> R
         tracks: None,
         sequences: vec![],
         preview_scale: None,
+        transfer: None,
     };
     project.validate()?;
     schema(document, &["Timeline.1"], "$")?;

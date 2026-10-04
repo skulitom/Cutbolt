@@ -84,6 +84,9 @@ pub struct Project {
     /// Proxy preview divisor 2, 4 or 8 set by preview.proxy; omitted for full-quality previews.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_scale: Option<u32>,
+    /// Declared transfer of the timeline's encoded RGB values, set by project.transfer; exports and scopes that omit `input_transfer` use it. Omitted when undeclared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer: Option<crate::color::Transfer>,
 }
 
 /// One edit in an atomic timeline.apply or session.apply batch, tagged by `op`; each must leave a valid project. The clip.* operations and timeline.ripple_delete edit the sequential `clips` list and are rejected once native tracks exist.
@@ -181,6 +184,12 @@ pub enum Operation {
     PreviewProxy {
         /// Dimension divisor 2, 4 or 8; null or omitted selects full-quality sources.
         scale: Option<u32>,
+    },
+    /// Declare once how the timeline's encoded RGB values are meant, so H.264 and PNG exports and scopes need no `input_transfer`.
+    #[serde(rename = "project.transfer")]
+    ProjectTransfer {
+        /// `bt709` keeps encoded values for H.264 and suits camera and most screen-designed material; `srgb` converts from the sRGB curve first, darkening shadows in typical players. Null clears the declaration.
+        transfer: Option<crate::color::Transfer>,
     },
     /// Declare an external source; rendering verifies its actual contents.
     #[serde(rename = "media.add")]
@@ -329,6 +338,7 @@ impl Project {
             tracks: None,
             sequences: vec![],
             preview_scale: None,
+            transfer: None,
         };
         project.validate()?;
         Ok(project)
@@ -550,6 +560,7 @@ impl Project {
                         .path = path;
                 }
                 Operation::PreviewProxy { scale } => next.preview_scale = scale,
+                Operation::ProjectTransfer { transfer } => next.transfer = transfer,
                 Operation::AddMedia { asset } => next.assets.push(asset),
                 Operation::Insert { at, clip, right_id } => {
                     let mut left = next.slice(Time::ZERO, at)?;
