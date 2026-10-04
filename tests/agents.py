@@ -280,6 +280,21 @@ def run(executable, fixture):
             return until(lambda: status(ticket, queue_root), lambda s: s["status"] in TERMINAL)
 
         ticket, request = start(normal, "render", root / "async.mkv")
+        # A long job.wait runs on its own worker: a later call answers first, and the wait reports progress.
+        wait = {"name": "cutbolt_job_wait", "arguments": {"job_root": str(job_root), "job_id": ticket["job_id"], "timeout_seconds": 90}, "_meta": {"progressToken": "render"}}
+        normal.write(json.dumps({"jsonrpc": "2.0", "id": "wait", "method": "tools/call", "params": wait}).encode() + b"\n")
+        normal.write(json.dumps({"jsonrpc": "2.0", "id": "quick", "method": "tools/call", "params": {"name": "cutbolt_capabilities", "arguments": {}}}).encode() + b"\n")
+        arrivals, progress = [], []
+        while "wait" not in arrivals:
+            message = normal.receive()
+            if message.get("method") == "notifications/progress":
+                assert message["params"]["progressToken"] == "render", message
+                progress.append(message["params"]["progress"])
+            else:
+                arrivals.append(message["id"])
+                if message["id"] == "wait":
+                    assert message["result"]["structuredContent"]["result"]["status"] == "completed", message
+        check("mcp.concurrent_calls_and_progress", progress == sorted(set(progress)) and (arrivals == ["quick", "wait"] or not progress))
         result = terminal(ticket)
         check("jobs.durable_completion", result["status"] == "completed" and result["progress"]["frames"] == 750
               and result["result"]["samples"] == 1440000)

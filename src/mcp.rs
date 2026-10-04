@@ -1,7 +1,10 @@
 //! Local MCP tools over newline-delimited JSON-RPC, pinned to the 2025-11-25 contract.
 use crate::{Result, commands, workspace::Workspace};
 use serde_json::{Value, json};
-use std::io::{self, BufRead, Write};
+use std::{
+    io::{self, BufRead, Write},
+    sync::{Arc, Condvar, Mutex},
+};
 const MAX_LINE: usize = 4 * 1024 * 1024;
 const VERSION: &str = "2025-11-25";
 /// Longest edge of inline preview images: legible text at a modest image-token cost.
@@ -332,6 +335,116 @@ struct Server {
     ready: bool,
     workspace: Option<Workspace>,
     catalog: Option<Vec<Value>>,
+    /// A validated tool call left by `route` for the caller to run.
+    pending: Option<Call>,
+}
+/// What one incoming message needs: an immediate reply, if any, or a tool call to run.
+enum Step {
+    Reply(Option<Value>),
+    Call(Call),
+}
+/// A validated tool call. `serve` runs calls on worker threads, so a slow tool does not hold up
+/// the others; JSON-RPC IDs pair each response with its request.
+struct Call {
+    id: Value,
+    command: String,
+    arguments: Value,
+    workspace: Option<Workspace>,
+    /// The request's `_meta.progressToken`, if the client asked for progress.
+    progress_token: Option<Value>,
+    /// Sends a notification to the client; set by `serve`.
+    notify: Option<Box<dyn Fn(Value) + Send>>,
+}
+impl Call {
+    fn run(self) -> Value {
+        if self.command == "job.wait"
+            && let (Some(token), Some(notify)) = (&self.progress_token, &self.notify)
+            && let Some(seconds) = self.arguments["timeout_seconds"]
+                .as_u64()
+                .filter(|s| (1..=120).contains(s))
+        {
+            // Wait one second at a time and report each second, so the client sees the phase
+            // and can keep a long wait alive. The final result is the same as one long wait.
+            let mut slice = self.arguments.clone();
+            slice["timeout_seconds"] = json!(1);
+            for elapsed in 1..seconds {
+                let state = Self::outcome("job.wait", slice.clone(), self.workspace.as_ref());
+                let Some(job) = state.ok().filter(|job| job["finished"] != true) else {
+                    break;
+                };
+                let progress = &job["progress"];
+                let mut message = progress["phase"].as_str().unwrap_or("waiting").to_string();
+                if let (Some(done), Some(total)) = (
+                    progress["frames"].as_u64(),
+                    progress["total_frames"].as_u64(),
+                ) && total > 0
+                {
+                    message.push_str(&format!(", {done} of {total} frames"));
+                }
+                notify(json!({"jsonrpc":"2.0","method":"notifications/progress",
+                    "params":{"progressToken":token,"progress":elapsed,"message":message}}));
+            }
+            return Call {
+                arguments: slice,
+                notify: None,
+                ..self
+            }
+            .run();
+        }
+        let Call {
+            id,
+            command,
+            arguments,
+            workspace,
+            ..
+        } = self;
+        let value = match Self::outcome(&command, arguments, workspace.as_ref()) {
+            Ok(result) => json!({"ok":true,"result":result}),
+            Err(error) => json!({"ok":false,"error":error}),
+        };
+        let mut content = vec![json!({"type":"text","text":value.to_string()})];
+        if value["ok"] == true {
+            content.extend(preview_image(
+                workspace.as_ref(),
+                &command,
+                &value["result"],
+            ));
+        }
+        response(
+            id,
+            json!({"isError":value["ok"]!=true,"structuredContent":value,"content":content}),
+        )
+    }
+    fn outcome(
+        command: &str,
+        mut arguments: Value,
+        workspace: Option<&Workspace>,
+    ) -> Result<Value> {
+        let object = arguments
+            .as_object_mut()
+            .ok_or_else(|| crate::error("INVALID_JSON", "Tool arguments must be an object"))?;
+        if object.contains_key("command") {
+            return Err(crate::error(
+                "INVALID_JSON",
+                "Do not send command inside tool arguments",
+            ));
+        }
+        object.insert("command".into(), Value::String(command.to_string()));
+        commands::handle_json(arguments, workspace)
+    }
+}
+/// A preview command's PNG as an image content block, downscaled to PREVIEW_EDGE.
+fn preview_image(workspace: Option<&Workspace>, command: &str, result: &Value) -> Option<Value> {
+    if !matches!(command, "preview.frame" | "preview.sheet") {
+        return None;
+    }
+    let output = std::path::Path::new(result["output"].as_str()?);
+    let path = match workspace {
+        Some(workspace) if output.is_relative() => workspace.root().join(output),
+        _ => output.to_path_buf(),
+    };
+    let png = crate::thumbnail::png(&path, PREVIEW_EDGE).ok()?;
+    Some(json!({"type":"image","data":crate::thumbnail::base64(&png),"mimeType":"image/png"}))
 }
 impl Server {
     fn catalog(&mut self) -> &[Value] {
@@ -340,18 +453,6 @@ impl Server {
     }
     /// Frame and contact-sheet previews also come back as a downscaled inline image, so a
     /// multimodal client sees the edit without opening the file.
-    fn preview_image(&self, command: &str, result: &Value) -> Option<Value> {
-        if !matches!(command, "preview.frame" | "preview.sheet") {
-            return None;
-        }
-        let output = std::path::Path::new(result["output"].as_str()?);
-        let path = match &self.workspace {
-            Some(workspace) if output.is_relative() => workspace.root().join(output),
-            _ => output.to_path_buf(),
-        };
-        let png = crate::thumbnail::png(&path, PREVIEW_EDGE).ok()?;
-        Some(json!({"type":"image","data":crate::thumbnail::base64(&png),"mimeType":"image/png"}))
-    }
     fn instructions(&self) -> String {
         let mut text = concat!(
             "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
@@ -371,7 +472,23 @@ impl Server {
         }
         text
     }
+    /// Handle one message, running a tool call inline.
+    #[cfg(test)]
     fn message(&mut self, message: Value) -> Option<Value> {
+        match self.step(message) {
+            Step::Reply(reply) => reply,
+            Step::Call(call) => Some(call.run()),
+        }
+    }
+    fn step(&mut self, message: Value) -> Step {
+        let reply = self.route(message);
+        match self.pending.take() {
+            Some(call) => Step::Call(call),
+            None => Step::Reply(reply),
+        }
+    }
+    /// Answer a message directly, or leave a validated tool call in `pending`.
+    fn route(&mut self, message: Value) -> Option<Value> {
         if !message.is_object() || message["jsonrpc"] != "2.0" || !message["method"].is_string() {
             return Some(rpc_error(
                 Value::Null,
@@ -453,36 +570,20 @@ impl Server {
                         "Unknown tool; discover names with tools/list",
                     ));
                 }
-                let mut arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
-                let command = name.strip_prefix("cutbolt_").unwrap().replace('_', ".");
-                let outcome = (|| {
-                    let object = arguments.as_object_mut().ok_or_else(|| {
-                        crate::error("INVALID_JSON", "Tool arguments must be an object")
-                    })?;
-                    if object.contains_key("command") {
-                        return Err(crate::error(
-                            "INVALID_JSON",
-                            "Do not send command inside tool arguments",
-                        ));
-                    }
-                    object.insert("command".into(), Value::String(command.clone()));
-                    commands::handle_json(arguments, self.workspace.as_ref())
-                })();
-                let value = match outcome {
-                    Ok(result) => json!({"ok":true,"result":result}),
-                    Err(error) => json!({"ok":false,"error":error}),
-                };
-                let mut content = vec![json!({"type":"text","text":value.to_string()})];
-                if value["ok"] == true {
-                    content.extend(self.preview_image(&command, &value["result"]));
-                }
-                Some(response(
+                self.pending = Some(Call {
                     id,
-                    json!({"isError":value["ok"]!=true,"structuredContent":value,"content":content}),
-                ))
+                    command: name.strip_prefix("cutbolt_").unwrap().replace('_', "."),
+                    arguments: params
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or_else(|| json!({})),
+                    workspace: self.workspace.clone(),
+                    progress_token: Some(&params["_meta"]["progressToken"])
+                        .filter(|t| t.is_string() || t.is_i64())
+                        .cloned(),
+                    notify: None,
+                });
+                None
             }
             _ => Some(rpc_error(id, -32601, "Method not found")),
         }
@@ -512,30 +613,76 @@ fn line(reader: &mut impl BufRead) -> io::Result<Option<(Vec<u8>, bool)>> {
     }
 }
 
+/// Tool calls that may run at once; a further call waits for a free slot before it starts.
+const MAX_CALLS: usize = 8;
+
+/// Write one whole message line; workers share stdout, so lines never interleave.
+fn send(output: &Mutex<io::Stdout>, message: &Value) -> io::Result<()> {
+    let mut output = output.lock().unwrap_or_else(|e| e.into_inner());
+    writeln!(output, "{message}")?;
+    output.flush()
+}
+
 pub fn serve(workspace: Option<Workspace>) -> Result<()> {
     let mut server = Server {
         workspace,
         ..Server::default()
     };
+    let output = Arc::new(Mutex::new(io::stdout()));
+    let slots = Arc::new((Mutex::new(0usize), Condvar::new()));
+    let mut workers = Vec::new();
     let mut input = io::stdin().lock();
-    let mut output = io::stdout().lock();
     while let Some((bytes, oversized)) = line(&mut input)? {
-        let response = if oversized {
-            Some(rpc_error(
+        let step = if oversized {
+            Step::Reply(Some(rpc_error(
                 Value::Null,
                 -32600,
                 "MCP messages are limited to 4 MiB",
-            ))
+            )))
         } else {
             match serde_json::from_slice(&bytes) {
-                Ok(value) => server.message(value),
-                Err(_) => Some(rpc_error(Value::Null, -32700, "Invalid JSON")),
+                Ok(value) => server.step(value),
+                Err(_) => Step::Reply(Some(rpc_error(Value::Null, -32700, "Invalid JSON"))),
             }
         };
-        if let Some(response) = response {
-            writeln!(output, "{response}")?;
-            output.flush()?;
+        match step {
+            Step::Reply(Some(response)) => send(&output, &response)?,
+            Step::Reply(None) => {}
+            Step::Call(mut call) => {
+                if call.progress_token.is_some() {
+                    let output = Arc::clone(&output);
+                    call.notify = Some(Box::new(move |message| {
+                        let _ = send(&output, &message);
+                    }));
+                }
+                let (running, freed) = &*slots;
+                let mut count = running.lock().unwrap_or_else(|e| e.into_inner());
+                while *count >= MAX_CALLS {
+                    count = freed.wait(count).unwrap_or_else(|e| e.into_inner());
+                }
+                *count += 1;
+                drop(count);
+                let (output, slots) = (Arc::clone(&output), Arc::clone(&slots));
+                let worker = std::thread::Builder::new()
+                    .stack_size(8 << 20)
+                    .spawn(move || {
+                        let id = call.id.clone();
+                        let response =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call.run()))
+                                .unwrap_or_else(|_| rpc_error(id, -32603, "Internal error"));
+                        let _ = send(&output, &response);
+                        let (running, freed) = &*slots;
+                        *running.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+                        freed.notify_one();
+                    })?;
+                workers.push(worker);
+            }
         }
+        workers.retain(|w| !w.is_finished());
+    }
+    // Answer every accepted call before exiting.
+    for worker in workers {
+        let _ = worker.join();
     }
     Ok(())
 }

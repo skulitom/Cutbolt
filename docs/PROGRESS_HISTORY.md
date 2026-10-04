@@ -1,5 +1,11 @@
 # Progress history
 
+## 4 October 2026: concurrent MCP tool calls and wait progress
+
+The stdio server answered one request at a time, so a two-minute `job.wait` blocked every other tool call from the same agent. Tool calls now run on worker threads, up to eight at once, and responses are paired with requests by ID. Every accepted call is still answered when input ends. A `job.wait` sent with a progress token reports the job's phase once a second through `notifications/progress`.
+
+A wire-level check in the agents fixture waits on a render job with a token while it sends a second call. The second call is answered first, and the progress values increase. No scoring changed.
+
 ## 4 October 2026: vertical text alignment and caption legibility
 
 Text graphics always placed the first baseline at the box top plus the font size. Agents had to count wrapped lines themselves to center a title, and short caption cues sat at the top of their box instead of the bottom line. Text graphics and caption layouts now accept `valign`: `top` (the default, unchanged), `middle` or `bottom`. Each line takes a `line_height` slot. Bottom alignment leaves `line_height - size` below the last baseline for descenders. Overflow rejection also catches lines pushed above the box.
