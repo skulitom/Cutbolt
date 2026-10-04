@@ -1,5 +1,18 @@
 # Progress history
 
+## 4 October 2026: picture-in-picture overlay transforms
+
+Overlay tracks could only cover the whole frame, so an inset camera or a corner b-roll had to be pre-rendered at its final size. Clips on `alpha_over` tracks now take an optional `transform`: a source `crop`, an integer `divisor` (1-8), an `opacity`, and a canvas `position` that may hang off the edge. The new `clip_transform` track edit sets it. The divisor shrinks each block to the floor of its mean, and opacity rounds to nearest. Shrinking is limited to opaque sources, because an exact alpha-weighted mean is not available in the pinned filters; this is rejected explicitly.
+
+The steps map to FFmpeg's `crop`, `pixelize` average with neighbor decimation, `lutrgb` and `pad` filters. These were checked exact against independent integer arithmetic for divisors 2, 3, 4, 5 and 8 before use. The overlays fixture now builds a picture-in-picture timeline:
+
+- a shrunk, cropped camera inset;
+- a half-transparent inset hanging off the bottom-left edge;
+- a cropped, faded and moved alpha title;
+- a clip moved fully off the canvas.
+
+Its independent numpy oracle matched all 150 rendered frames, three previews and a 20-frame range export exactly. The rejections are covered too. Existing projects serialize unchanged. No scoring changed.
+
 ## 4 October 2026: timeline loudness meters
 
 Clip gain made levels editable, but an agent had no way to measure a timeline's loudness short of exporting it and probing the result. The read-only `timeline.meters` command (`cutbolt_timeline_meters`) renders a range's audio exactly as an audio-only export would. It reports sample peak, RMS and BS.1770 integrated loudness for the mix and for each enabled audio track played alone. A range is limited to 600 seconds.

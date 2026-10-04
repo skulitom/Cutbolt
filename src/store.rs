@@ -33,6 +33,9 @@ pub struct Placement {
     /// Audio-track clip gain and fades, when they differ from unity without fades.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<Levels>,
+    /// Picture-in-picture transform of an alpha_over clip, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<crate::tracks::OverlayTransform>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -450,6 +453,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                             fade_in: clip.fade_in,
                             fade_out: clip.fade_out,
                         }),
+                        transform: clip.transform.clone(),
                     },
                 );
             }
@@ -466,6 +470,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                 timeline_start: start,
                 clip: clip.clone(),
                 levels: None,
+                transform: None,
             },
         );
         start = start.plus(clip.duration)?;
@@ -489,6 +494,7 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
                     || a.timeline_start != b.timeline_start
                     || a.clip != b.clip
                     || a.levels != b.levels
+                    || a.transform != b.transform
             }
             (a, b) => a != b,
         })
@@ -564,6 +570,7 @@ fn summarize_shifts(clips: Vec<ClipChange>) -> Result<(Vec<ClipChange>, Option<S
                 && a.track_id == b.track_id
                 && a.sequence_id == b.sequence_id
                 && a.levels == b.levels
+                && a.transform == b.transform
         }
         _ => false,
     };

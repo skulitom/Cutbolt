@@ -54,6 +54,65 @@ pub struct TrackClip {
     /// length, in 48 kHz samples, so a trimmed clip keeps the original clip's fade envelope.
     #[serde(skip)]
     pub(crate) envelope: Option<(u64, u64)>,
+    /// `alpha_over` track clips only: crop, shrink, fade and place the clip's frame, as for picture-in-picture; omit to cover the whole frame unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<OverlayTransform>,
+}
+/// Picture-in-picture placement of an `alpha_over` clip, applied in order: `crop` the source, shrink it by `divisor`, multiply its alpha by `opacity`, then put its top-left corner at `position`. Parts outside the canvas are clipped.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayTransform {
+    /// Source region `[x, y, width, height]` in source pixels, inside the frame, with sizes that are multiples of `divisor`; omit for the whole frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<[u32; 4]>,
+    /// Integer shrink factor 1-8: each output pixel is the floor of its `divisor` x `divisor` block's mean, per channel. Opaque sources only; default 1.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub divisor: u32,
+    /// Alpha multiplier 0-255 (255 keeps the source alpha): `alpha x opacity / 255`, rounded to nearest. Default 255.
+    #[serde(default = "opaque", skip_serializing_if = "is_opaque")]
+    pub opacity: u8,
+    /// Canvas position `[x, y]` of the result's top-left corner, -32768..=32768; parts outside the canvas are clipped. Default `[0, 0]`.
+    #[serde(default, skip_serializing_if = "is_origin")]
+    pub position: [i32; 2],
+}
+fn one() -> u32 {
+    1
+}
+fn is_one(value: &u32) -> bool {
+    *value == 1
+}
+fn opaque() -> u8 {
+    255
+}
+fn is_opaque(value: &u8) -> bool {
+    *value == 255
+}
+fn is_origin(value: &[i32; 2]) -> bool {
+    *value == [0, 0]
+}
+impl OverlayTransform {
+    fn check(&self, width: u32, height: u32) -> Result<()> {
+        let [x, y, w, h] = self.crop.unwrap_or([0, 0, width, height]);
+        if !(1..=8).contains(&self.divisor) {
+            return Err(invalid("transform divisor must be 1-8"));
+        }
+        if w == 0
+            || h == 0
+            || x as u64 + w as u64 > width as u64
+            || y as u64 + h as u64 > height as u64
+            || w % self.divisor != 0
+            || h % self.divisor != 0
+        {
+            return Err(invalid(format!(
+                "transform crop [{x}, {y}, {w}, {h}] must lie inside the {width}x{height} frame with sizes that are multiples of divisor {}",
+                self.divisor
+            )));
+        }
+        if self.position.iter().any(|p| p.unsigned_abs() > 32768) {
+            return Err(invalid("transform position must be within -32768..=32768"));
+        }
+        Ok(())
+    }
 }
 const UNITY: u32 = 1000;
 /// The 48 kHz audio clock.
@@ -86,6 +145,7 @@ impl Default for TrackClip {
             fade_in: Time::ZERO,
             fade_out: Time::ZERO,
             envelope: None,
+            transform: None,
         }
     }
 }
@@ -478,6 +538,13 @@ pub enum Edit {
         #[serde(default)]
         fade_out: Option<Time>,
     },
+    /// Set or clear the picture-in-picture transform of `alpha_over` track clips.
+    ClipTransform {
+        /// Clips on `alpha_over` tracks, 1-1000 unique IDs.
+        clip_ids: Vec<String>,
+        /// New transform for every listed clip; null restores the full, unchanged frame.
+        transform: Option<OverlayTransform>,
+    },
 }
 fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_TRACKS", message)
@@ -553,6 +620,17 @@ impl Arrangement {
                         clip.end()?,
                         self.duration
                     ));
+                }
+                if let Some(transform) = &clip.transform {
+                    if track.composite.is_opaque() {
+                        return Err(invalid(format!(
+                            "clip {:?} has a transform, which only alpha_over track clips accept",
+                            clip.id
+                        )));
+                    }
+                    transform
+                        .check(project.width, project.height)
+                        .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
                 }
                 clip.check_audio(track.kind)
                     .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
@@ -1197,6 +1275,18 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                 clip.fade_out = fade_out.unwrap_or(clip.fade_out);
             }
         }
+        Edit::ClipTransform {
+            clip_ids,
+            transform,
+        } => {
+            let a = arrangement(project)?;
+            a.selection(&clip_ids, Linked::Include)?;
+            for name in &clip_ids {
+                let (t, c) = a.locate(name)?;
+                unlocked(&a.tracks[t])?;
+                a.tracks[t].clips[c].transform = transform.clone();
+            }
+        }
     }
     Ok(())
 }
@@ -1288,5 +1378,5 @@ pub(crate) fn range(project: &Project, start: Time, duration: Time) -> Result<Pr
 }
 
 pub fn capabilities() -> serde_json::Value {
-    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_frame_rate":25,"audio_clock":48000,"video":"highest_enabled_opaque_track","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
+    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_frame_rate":25,"audio_clock":48000,"video":"highest_enabled_opaque_track","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
 }

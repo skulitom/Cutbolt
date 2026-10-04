@@ -4,7 +4,7 @@ use crate::{
     model::Project,
     render::{self, Plan, Source},
     time::Time,
-    tracks::{Kind, Track, TrackClip, Transition, TransitionKind},
+    tracks::{Kind, OverlayTransform, Track, TrackClip, Transition, TransitionKind},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -197,6 +197,9 @@ impl<'a> Graph<'a> {
         let source = format!(
             "[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr=1/25,setpts=N"
         );
+        if let Some(transform) = &clip.transform {
+            return self.transformed_overlay(clip, transform, &source, label);
+        }
         if self.alpha_assets.contains(&clip.asset_id) {
             // Planar conversion of packed alpha through the scaler is not value-exact, so split the
             // decoded bgra planes and reassemble them as gbrap (G, B, R, A) without any arithmetic.
@@ -208,6 +211,87 @@ impl<'a> Graph<'a> {
             self.filters
                 .push(format!("{source},format=pix_fmts=gbrap[{label}]"));
         }
+        Ok(())
+    }
+    /// A picture-in-picture overlay on a transparent full canvas: crop, shrink by the floor of
+    /// each block's mean (`pixelize`, then exact neighbor decimation of the constant blocks), scale
+    /// alpha by the opacity through a lookup table, then crop to the visible part and pad.
+    fn transformed_overlay(
+        &mut self,
+        clip: &TrackClip,
+        transform: &OverlayTransform,
+        source: &str,
+        label: &str,
+    ) -> Result<()> {
+        let (width, height) = (self.project.width, self.project.height);
+        let alpha = self.alpha_assets.contains(&clip.asset_id);
+        let k = transform.divisor;
+        if alpha && k > 1 {
+            return Err(error(
+                "UNSUPPORTED_MEDIA",
+                format!(
+                    "Clip {:?}: only opaque overlay sources can be shrunk; straight-alpha sources may be cropped, faded and placed",
+                    clip.id
+                ),
+            ));
+        }
+        let planes = format!("{label}m");
+        if alpha {
+            self.filters.push(format!(
+                "{source},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{planes}]"
+            ));
+        } else {
+            self.filters
+                .push(format!("{source},format=pix_fmts=gbrp[{planes}]"));
+        }
+        let [cx, cy, cw, ch] = transform.crop.unwrap_or([0, 0, width, height]);
+        let mut chain = Vec::new();
+        if [cx, cy, cw, ch] != [0, 0, width, height] {
+            chain.push(format!("crop={cw}:{ch}:{cx}:{cy}"));
+        }
+        if k > 1 {
+            chain.push(format!(
+                "pixelize=w={k}:h={k}:m=avg,scale={}:{}:flags=neighbor",
+                cw / k,
+                ch / k
+            ));
+        }
+        if !alpha {
+            chain.push("format=pix_fmts=gbrap".into());
+        }
+        if transform.opacity < 255 {
+            chain.push(format!(
+                "lutrgb=a='floor((val*{}+127)/255)'",
+                transform.opacity
+            ));
+        }
+        // The shrunk image occupies [x, x + w) x [y, y + h) on the canvas; keep what is visible.
+        let (w, h) = (i64::from(cw / k), i64::from(ch / k));
+        let [x, y] = transform.position.map(i64::from);
+        let (left, top) = (x.max(0), y.max(0));
+        let (right, bottom) = ((x + w).min(width.into()), (y + h).min(height.into()));
+        if left >= right || top >= bottom {
+            chain.push("crop=1:1:0:0,lutrgb=a=0".into());
+            chain.push(format!("pad={width}:{height}:0:0:color=black@0"));
+        } else {
+            if (left, top, right, bottom) != (x, y, x + w, y + h) {
+                chain.push(format!(
+                    "crop={}:{}:{}:{}",
+                    right - left,
+                    bottom - top,
+                    left - x,
+                    top - y
+                ));
+            }
+            if (left, top, right, bottom) != (0, 0, width.into(), height.into()) {
+                chain.push(format!("pad={width}:{height}:{left}:{top}:color=black@0"));
+            }
+        }
+        if chain.is_empty() {
+            chain.push("null".into());
+        }
+        self.filters
+            .push(format!("[{planes}]{}[{label}]", chain.join(",")));
         Ok(())
     }
     /// Straight-alpha "over" in encoded RGB with exact integer rounding (ties up):

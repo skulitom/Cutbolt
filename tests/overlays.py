@@ -229,12 +229,92 @@ def run(root):
     assert status["progress"]["phase"] == "completed", status
     assert np.array_equal(decode(output / "queued.mkv", "rgb24", 3), frames)
     passed.append("overlays.queued_render_matches")
+
+    # Picture-in-picture: crop, shrink by the floor of each block's mean, fade and place overlay clips.
+    def transformed(src, tf):
+        if src.shape[2] == 3:
+            src = np.concatenate([src, np.full(src.shape[:2] + (1,), 255, np.uint8)], axis=2)
+        x, y, w, h = tf.get("crop", [0, 0, W, H])
+        k = tf.get("divisor", 1)
+        part = src[y:y + h, x:x + w].astype(np.int64)
+        if k > 1:
+            part = part.reshape(h // k, k, w // k, k, 4).sum(axis=(1, 3)) // (k * k)
+        part[..., 3] = (part[..., 3] * tf.get("opacity", 255) + 127) // 255
+        canvas = np.zeros((H, W, 4), np.int64)
+        px, py = tf.get("position", [0, 0])
+        sh, sw = part.shape[:2]
+        x0, y0, x1, y1 = max(px, 0), max(py, 0), min(px + sw, W), min(py + sh, H)
+        if x0 < x1 and y0 < y1:
+            canvas[y0:y1, x0:x1] = part[y0 - py:y1 - py, x0 - px:x1 - px]
+        return canvas.astype(np.uint8)
+
+    def composed(p, n):
+        layers = p["tracks"]["tracks"]
+        def at(t):
+            for c in t["clips"]:
+                start, dur, src = (F(c[k]["num"], c[k]["den"]) for k in ("start", "duration", "source_in"))
+                if start <= F(n, 25) < start + dur:
+                    return c, int((src + F(n, 25) - start) * 25)
+            return None
+        base_index = max((i for i, t in enumerate(layers) if t["kind"] == "video" and t["enabled"]
+                          and t.get("composite", "opaque") == "opaque" and at(t)), default=None)
+        frame = np.zeros((H, W, 3), np.uint8)
+        if base_index is not None:
+            c, index = at(layers[base_index])
+            frame = decoded[c["asset_id"]][index].copy()
+        for i, t in enumerate(layers):
+            if t.get("composite") == "alpha_over" and t["enabled"] and (base_index is None or i > base_index) and at(t):
+                c, index = at(t)
+                source = decoded[c["asset_id"]][index]
+                if "transform" in c:
+                    source = transformed(source, c["transform"])
+                elif source.shape[2] == 3:
+                    source = transformed(source, {})
+                frame = over(frame, source)
+        return frame
+
+    edit = lambda op, **fields: {"op": "tracks.edit", "edit": {"op": op, **fields}}
+    pip_ops = [edit("remove", clip_ids=["c"], links="reject_partial"), track("V6", "alpha_over"),
+               place("V6", {**clip("p", "cover", (2, 5), (0,), (11, 5)), "transform": {"crop": [8, 4, 288, 160], "divisor": 4, "position": [230, 128]}}),
+               place("V6", clip("q", "cover", (3,), (1, 5), (8, 5))),
+               edit("clip_transform", clip_ids=["q"], transform={"divisor": 2, "opacity": 180, "position": [-20, 150]}),
+               edit("clip_transform", clip_ids=["t1"], transform={"crop": [40, 20, 200, 120], "opacity": 128, "position": [100, -30]}),
+               edit("clip_transform", clip_ids=["g2"], transform={"position": [400, 0]})]
+    pip = call("timeline.apply", project=project, expected_revision=project["revision"], operations=pip_ops)
+    placed = {c["id"]: c for t in pip["tracks"]["tracks"] for c in t["clips"]}
+    assert placed["q"]["transform"] == {"divisor": 2, "opacity": 180, "position": [-20, 150]} and "transform" not in placed["t2"]
+    call("render.run", project=pip, input_root=str(sources), output_root=str(output), output=str(output / "pip.mkv"))
+    pip_frames = decode(output / "pip.mkv", "rgb24", 3)
+    assert pip_frames.shape[0] == 150
+    for n in range(150):
+        assert np.array_equal(pip_frames[n], composed(pip, n)), f"picture-in-picture frame {n} differs"
+    for t in (F(1), F(77, 25), F(133, 25)):
+        name = f"pip-{t.numerator}-{t.denominator}.png"
+        call("preview.frame", project=pip, input_root=str(sources), output_root=str(output), output=str(output / name),
+             time=time(t.numerator, t.denominator))
+        with Image.open(output / name) as image:
+            assert np.array_equal(np.asarray(image.convert("RGB")), composed(pip, int(t * 25)))
+    call("export.run", project=pip, input_root=str(sources), output_root=str(output), output=str(output / "pip-range.mkv"),
+         profile="reference", streams="video", range={"start": time(70, 25), "duration": time(20, 25)})
+    assert all(np.array_equal(f, composed(pip, 70 + i)) for i, f in enumerate(decode(output / "pip-range.mkv", "rgb24", 3)))
+    call("timeline.apply", "INVALID_TRACKS", project=pip, expected_revision=pip["revision"],
+         operations=[edit("clip_transform", clip_ids=["a"], transform={"position": [1, 1]})])
+    call("timeline.apply", "INVALID_TRACKS", project=pip, expected_revision=pip["revision"],
+         operations=[edit("clip_transform", clip_ids=["q"], transform={"divisor": 3})])
+    call("timeline.apply", "INVALID_TRACKS", project=pip, expected_revision=pip["revision"],
+         operations=[edit("clip_transform", clip_ids=["q"], transform={"divisor": 9, "crop": [0, 0, 288, 162]})])
+    shrunk_alpha = call("timeline.apply", project=pip, expected_revision=pip["revision"],
+                        operations=[edit("clip_transform", clip_ids=["t2"], transform={"divisor": 2})])
+    call("render.run", "UNSUPPORTED_MEDIA", project=shrunk_alpha, input_root=str(sources), output_root=str(output),
+         output=str(output / "bad-shrunk-alpha.mkv"))
+    assert not (output / "bad-shrunk-alpha.mkv").exists()
+    passed.append("overlays.picture_in_picture_transforms_exact")
     undo = call("session.undo", store_root=str(store), project_id="overlays", request_id="undo", expected_revision=1)
     head = call("session.get", store_root=str(store), project_id="overlays")
     assert undo["revision"] == 2 and head.get("tracks") is None and head["assets"] == []
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir() if p.name in originals} == originals
     passed.append("overlays.sources_preserved")
-    report = {"passed": passed, "frames_compared": 150 + 6 + 60 + 1 + 150,
+    report = {"passed": passed, "frames_compared": 150 + 6 + 60 + 1 + 150 + 150 + 3 + 20,
               "oracle": "separately decoded sources; exact integer straight-alpha over; top opaque track as base"}
     (root / "verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))

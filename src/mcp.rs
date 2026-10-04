@@ -465,6 +465,7 @@ impl Server {
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, fade_in and fade_out with tracks.edit clip_audio. ",
+            "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
             "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template and audio_routing schemas; ",
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."

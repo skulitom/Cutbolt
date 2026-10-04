@@ -137,6 +137,14 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
         value["enabled"] = json!(track.enabled);
         let mut clips = track.clips.iter().collect::<Vec<_>>();
         clips.sort_by(|x, y| x.start.compare(y.start).expect("validated times"));
+        for clip in clips.iter().filter(|c| c.transform.is_some()) {
+            a.loss(
+                &format!("{path}/clips/{}", clip.id),
+                "overlay_transform",
+                "Picture-in-picture crop, shrink, opacity and position are omitted",
+                true,
+            );
+        }
         for clip in clips.iter().filter(|c| c.adjusts_audio()) {
             a.loss(
                 &format!("{path}/clips/{}", clip.id),

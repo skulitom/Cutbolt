@@ -10,7 +10,7 @@ Each track has a unique `id`, `kind` (`video` or `audio`), explicit `locked` and
 
 Video tracks are ordered bottom to top; the last enabled track with a clip at the requested time supplies the entire opaque frame. An upper gap exposes the lower video. No video produces black.
 
-A video track may declare `"composite": "alpha_over"` (the default, omitted from snapshots, is `"opaque"`). Opaque tracks choose the base frame as above. Enabled `alpha_over` tracks above that base are then composited bottom to top with straight-alpha "over" in encoded RGB: each channel is `floor((2*(s*a + d*(255-a)) + 255) / 510)`, the exact nearest integer with no ties. Overlay sources are 25 fps FFV1 `bgra` (straight alpha, for example from a [transparent scene](SCENES.md#transparent-output) or [`image.sequence.compile`](IMAGE_SEQUENCES.md) with an alpha profile) or opaque `bgr0`, read as alpha 255. Gaps on an overlay track are transparent. An asset cannot be both an overlay and an opaque source in one render, and an alpha source on an opaque track fails with `UNSUPPORTED_MEDIA`. Overlay tracks must be video, without transitions or nested sequences; proxy previews reject them, so use full-quality previews. Frame/range previews, scopes, reference renders, queued renders and exports include overlays. Receipts list `overlay_track_ids` for an overlaid preview frame. Enabled audio tracks sum stereo PCM, after [clip gain and fades](#clip-gain-and-fades), with one final signed-16-bit saturation; gaps produce exact silence. Enabled state affects playback, while locks protect edits. The arrangement's explicit duration includes leading and trailing gaps. Removing clips leaves their space and keeps that duration.
+A video track may declare `"composite": "alpha_over"` (the default, omitted from snapshots, is `"opaque"`). Opaque tracks choose the base frame as above. Enabled `alpha_over` tracks above that base are then composited bottom to top with straight-alpha "over" in encoded RGB: each channel is `floor((2*(s*a + d*(255-a)) + 255) / 510)`, the exact nearest integer with no ties. Overlay sources are 25 fps FFV1 `bgra` (straight alpha, for example from a [transparent scene](SCENES.md#transparent-output) or [`image.sequence.compile`](IMAGE_SEQUENCES.md) with an alpha profile) or opaque `bgr0`, read as alpha 255. Gaps on an overlay track are transparent. An overlay clip covers the whole frame unless it has a [picture-in-picture transform](#picture-in-picture). An asset cannot be both an overlay and an opaque source in one render, and an alpha source on an opaque track fails with `UNSUPPORTED_MEDIA`. Overlay tracks must be video, without transitions or nested sequences; proxy previews reject them, so use full-quality previews. Frame/range previews, scopes, reference renders, queued renders and exports include overlays. Receipts list `overlay_track_ids` for an overlaid preview frame. Enabled audio tracks sum stereo PCM, after [clip gain and fades](#clip-gain-and-fades), with one final signed-16-bit saturation; gaps produce exact silence. Enabled state affects playback, while locks protect edits. The arrangement's explicit duration includes leading and trailing gaps. Removing clips leaves their space and keeps that duration.
 
 The editable model permits up to 32 tracks, 1,000 clips and 500 links. The current renderer and previews support 25 fps reference assets, at most 64 model clips, and at most 8 million pixels. A full render supports 1–180,000 frames. Sources require matching dimensions, FFV1 RGB8 and 48 kHz stereo PCM16; use the existing media conversion path for other inputs. An empty arrangement with positive duration renders black and silence. Zero duration is editable but cannot be rendered. Unsupported rates, sources and resource limits fail explicitly.
 
@@ -36,6 +36,7 @@ Wrap every edit as `{"op":"tracks.edit","edit":{...}}`. Each operation must leav
 | `split`, `slip`, `roll`, `slide` | See [boundary edit fields](TRACK_EDITS.md) | Split linked clips or move content/boundaries while retaining valid source handles and effects |
 | `insert`, `overwrite`, `ripple_delete` | See [interval fields and policies](TRACK_EDITS.md#interval-operations) | Edit intervals across selected/linked tracks with explicit survivor IDs, end policy and transition policy |
 | `clip_audio` | `clip_ids`, optional `gain_milli`, `fade_in`, `fade_out` | Set the [gain and fades](#clip-gain-and-fades) of audio-track clips; omitted fields keep their values |
+| `clip_transform` | `clip_ids`, `transform` | Set the [picture-in-picture transform](#picture-in-picture) of `alpha_over` track clips; null restores the full frame |
 
 `shift` requires `backward` and nonnegative rational `amount`; zero supports retargeting alone. `targets` is an explicit array of `{clip_id,track_id}`. Omitted members keep their existing track; included linked partners may have explicit targets too. All placements are calculated together, so simultaneous swaps are evaluated against the final placement. A video clip cannot be retargeted to an audio track or vice versa.
 
@@ -68,6 +69,19 @@ To leave room and move both members five frames later, extend the end before mov
   {"op":"tracks.edit","edit":{"op":"move","clip_ids":["shot"],"shift":{"backward":false,"amount":{"num":1,"den":5}},"targets":[],"links":"include","collision":"reject"}}
 ]
 ```
+
+## Picture-in-picture
+
+A clip on an `alpha_over` track may carry a `transform`, also accepted in a `place` clip. Its steps apply in this order:
+
+1. `crop` keeps the source region `[x, y, width, height]`. It must lie inside the frame, and its sizes must be multiples of `divisor`. By default it is the whole frame.
+2. `divisor` (1-8, default 1) shrinks the region. Each output pixel is the floor of the mean of its `divisor x divisor` block, per channel. Only opaque `bgr0` sources can be shrunk, because a straight-alpha source needs alpha-weighted averaging. A shrunk alpha source fails at render with `UNSUPPORTED_MEDIA`; scenes can render titles at the size they need instead.
+3. `opacity` (0-255, default 255) sets alpha to `floor((alpha x opacity + 127) / 255)`.
+4. `position` (default `[0, 0]`) places the result's top-left corner on the canvas. It may be negative or past the edge, and the parts outside the canvas are clipped.
+
+Everywhere else the canvas is transparent. The overlay is then composited with the same exact straight-alpha over as a full-frame overlay. For example, a 1920x1080 camera on an `alpha_over` track with `{"divisor": 4, "position": [1424, 48]}` becomes a 480x270 inset in the top-right corner.
+
+Transforms are rejected on other tracks. Session diffs list a clip's `transform`, and interchange export reports it as a critical loss. The steps map to the pinned FFmpeg build's `crop`, block-average `pixelize` with neighbor decimation, `lutrgb` and transparent `pad` filters. The overlays fixture compares every rendered frame, previews and a range export against an independent implementation of these equations, with zero tolerance.
 
 ## Clip gain and fades
 
