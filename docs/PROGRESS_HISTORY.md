@@ -1,5 +1,9 @@
 # Progress history
 
+## 4 October 2026: listing workspace files
+
+The MCP-only trials had no way to see which media existed, so every one of them fell back to a shell to list the folder. The new read-only `files.list` command (`cutbolt_files_list`) lists files and folders under `input_root`, which is the workspace in workspace mode. It returns sorted relative paths with sizes, can recurse and filter by extension, caps the entry count while reporting the total, and skips engine state. No scoring changed.
+
 ## 4 October 2026: transparent scenes for overlays
 
 In the captions trial, burning captions into video meant rebuilding the clip as a scene of 250 PNG frames. That workaround hit the decoded-pixel limit at 640x360 and could not reach HD. A scene can now set `"transparent": true` and compile to a straight-alpha FFV1 `bgra` asset, which an `alpha_over` track composites over any video.

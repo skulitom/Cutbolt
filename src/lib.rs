@@ -15,6 +15,7 @@ pub mod delivery;
 pub mod documents;
 pub mod effects;
 pub mod expressions;
+pub mod files;
 pub mod geometry;
 pub mod graphics;
 pub mod hdr;

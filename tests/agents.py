@@ -190,6 +190,10 @@ def run(executable, fixture):
               and "cutbolt_hdr_inspect" in names and "cutbolt_hdr_conform" not in names
               and "cutbolt_graphics_instantiate" in names
               and {"cutbolt_captions_"+operation for operation in ("import","inspect","apply","encode","export","scene")}.issubset(names))
+        (root / "listed").mkdir()
+        (root / "listed" / "clip.MKV").write_bytes(b"x" * 3)
+        listed = normal.call("files.list", input_root=str(root), recursive=True, extensions=["mkv"])
+        assert listed["entries"] == [{"path": "listed/clip.MKV", "kind": "file", "bytes": 3}], listed
         check("mcp.capabilities", normal.call("capabilities")["local_only"])
         assert normal.rpc("ping")["result"] == {}
         assert normal.rpc("unknown")["error"]["code"] == -32601
