@@ -41,8 +41,111 @@ pub struct TrackClip {
     pub source_in: Time,
     /// Positive length in rational seconds; `source_in + duration` must fit the source.
     pub duration: Time,
+    /// Audio-track clips only: linear gain, 1000 = unity, 0..4000; default 1000.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub gain_milli: u32,
+    /// Audio-track clips only: linear fade-in from the clip start, on the 48 kHz grid, at most 60 s; default zero.
+    #[serde(default = "zero", skip_serializing_if = "is_zero")]
+    pub fade_in: Time,
+    /// Audio-track clips only: linear fade-out ending at the clip end, on the 48 kHz grid, at most 60 s; `fade_in + fade_out` must fit `duration`. Default zero.
+    #[serde(default = "zero", skip_serializing_if = "is_zero")]
+    pub fade_out: Time,
+    /// Set only in range snapshots: this part's offset into the original clip and the original
+    /// length, in 48 kHz samples, so a trimmed clip keeps the original clip's fade envelope.
+    #[serde(skip)]
+    pub(crate) envelope: Option<(u64, u64)>,
+}
+const UNITY: u32 = 1000;
+/// The 48 kHz audio clock.
+const SAMPLES: Time = Time { num: 48000, den: 1 };
+/// Longest fade: 60 s keeps the per-sample gain arithmetic exact in doubles.
+const MAX_FADE_SAMPLES: u64 = 60 * 48000;
+fn unity() -> u32 {
+    UNITY
+}
+fn is_unity(gain: &u32) -> bool {
+    *gain == UNITY
+}
+fn zero() -> Time {
+    Time::ZERO
+}
+fn is_zero(time: &Time) -> bool {
+    time.num == 0
+}
+impl Default for TrackClip {
+    /// An empty placement at zero without audio adjustments; callers set the placement fields.
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            asset_id: String::new(),
+            sequence_id: None,
+            start: Time::ZERO,
+            source_in: Time::ZERO,
+            duration: Time::ZERO,
+            gain_milli: UNITY,
+            fade_in: Time::ZERO,
+            fade_out: Time::ZERO,
+            envelope: None,
+        }
+    }
+}
+/// A clip's level envelope on the 48 kHz clock: gain plus linear fades, all in samples.
+pub(crate) struct Envelope {
+    pub gain_milli: u32,
+    pub fade_in: u64,
+    pub fade_out: u64,
+    /// This clip's offset into the clip the fades belong to.
+    pub offset: u64,
+    /// Length of the clip the fades belong to.
+    pub samples: u64,
 }
 impl TrackClip {
+    /// Whether the clip changes its audio level: a gain other than unity, or a fade.
+    pub(crate) fn adjusts_audio(&self) -> bool {
+        self.gain_milli != UNITY || self.fade_in.num != 0 || self.fade_out.num != 0
+    }
+    pub(crate) fn envelope(&self) -> Result<Envelope> {
+        let (offset, samples) = match self.envelope {
+            Some(part) => part,
+            None => (0, self.duration.units(SAMPLES)?),
+        };
+        Ok(Envelope {
+            gain_milli: self.gain_milli,
+            fade_in: self.fade_in.units(SAMPLES).at(|| "fade_in".into())?,
+            fade_out: self.fade_out.units(SAMPLES).at(|| "fade_out".into())?,
+            offset,
+            samples,
+        })
+    }
+    fn check_audio(&self, kind: Kind) -> Result<()> {
+        if !self.adjusts_audio() {
+            return Ok(());
+        }
+        if kind != Kind::Audio {
+            return Err(invalid(
+                "gain_milli, fade_in and fade_out apply only to audio-track clips",
+            ));
+        }
+        if self.gain_milli > 4000 {
+            return Err(invalid("gain_milli must be 0..4000, with 1000 for unity"));
+        }
+        let e = self.envelope()?;
+        if e.fade_in.max(e.fade_out) > MAX_FADE_SAMPLES {
+            return Err(error("INVALID_RANGE", "Fades last at most 60 s"));
+        }
+        if e.fade_in + e.fade_out > e.samples {
+            return Err(error(
+                "INVALID_RANGE",
+                format!(
+                    "fade_in {} s and fade_out {} s together exceed the clip's {} s",
+                    self.fade_in,
+                    self.fade_out,
+                    Time::new(e.samples, 48000)?
+                ),
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn source_duration(&self, project: &Project) -> Result<Time> {
         match (&self.sequence_id, self.asset_id.is_empty()) {
             (Some(id), true) => Ok(crate::sequences::get(project, id)?.arrangement.duration),
@@ -361,6 +464,20 @@ pub enum Edit {
         /// ID of the link to remove.
         id: String,
     },
+    /// Set the gain and linear fades of audio-track clips; omitted fields keep their values. Fades follow clip edges through trims; splits and interval edits reject cuts inside a fade.
+    ClipAudio {
+        /// Audio-track clips to change, 1-1000 unique IDs.
+        clip_ids: Vec<String>,
+        /// Linear gain, 1000 = unity, 0..4000.
+        #[serde(default)]
+        gain_milli: Option<u32>,
+        /// Fade-in from each clip's start, on the 48 kHz grid, at most 60 s; zero removes it.
+        #[serde(default)]
+        fade_in: Option<Time>,
+        /// Fade-out ending at each clip's end, on the 48 kHz grid, at most 60 s; zero removes it.
+        #[serde(default)]
+        fade_out: Option<Time>,
+    },
 }
 fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_TRACKS", message)
@@ -437,6 +554,8 @@ impl Arrangement {
                         self.duration
                     ));
                 }
+                clip.check_audio(track.kind)
+                    .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
                 if source_end.compare(source_duration)?.is_gt() {
                     let source = match &clip.sequence_id {
                         Some(id) => format!("sequence {id:?}"),
@@ -493,6 +612,15 @@ impl Arrangement {
                     .units(clock)
                     .at(|| format!("transition {:?} after", effect.id))?;
                 let (left, right) = track.endpoints(effect)?;
+                if left.fade_out.num != 0 || right.fade_in.num != 0 {
+                    return Err(error(
+                        "INVALID_TRANSITION",
+                        format!(
+                            "Transition {:?} already shapes the cut; remove the fade_out of {:?} and the fade_in of {:?}",
+                            effect.id, left.id, right.id
+                        ),
+                    ));
+                }
                 if left.end()?.compare(right.start)?.is_ne()
                     || effect.before.plus(effect.after)?.num == 0
                 {
@@ -862,6 +990,7 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                         start,
                         source_in: clip.source_in,
                         duration: clip.duration,
+                        ..Default::default()
                     };
                     let audio = TrackClip {
                         id: audio_id,
@@ -1045,6 +1174,29 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
             )?;
             a.links.remove(index);
         }
+        Edit::ClipAudio {
+            clip_ids,
+            gain_milli,
+            fade_in,
+            fade_out,
+        } => {
+            let a = arrangement(project)?;
+            a.selection(&clip_ids, Linked::Include)?;
+            for name in &clip_ids {
+                let (t, c) = a.locate(name)?;
+                unlocked(&a.tracks[t])?;
+                if a.tracks[t].kind != Kind::Audio {
+                    return Err(invalid(format!(
+                        "clip {name:?} is on video track {:?}; gain and fades apply to audio-track clips",
+                        a.tracks[t].id
+                    )));
+                }
+                let clip = &mut a.tracks[t].clips[c];
+                clip.gain_milli = gain_milli.unwrap_or(clip.gain_milli);
+                clip.fade_in = fade_in.unwrap_or(clip.fade_in);
+                clip.fade_out = fade_out.unwrap_or(clip.fade_out);
+            }
+        }
     }
     Ok(())
 }
@@ -1074,6 +1226,11 @@ pub(crate) fn range(project: &Project, start: Time, duration: Time) -> Result<Pr
                     c.start = x.minus(start)?;
                     c.source_in = c.source_in.plus(x.minus(clip.start)?)?;
                     c.duration = y.minus(x)?;
+                    if track.kind == Kind::Audio && clip.adjusts_audio() {
+                        let e = clip.envelope()?;
+                        c.envelope =
+                            Some((e.offset + x.minus(clip.start)?.units(SAMPLES)?, e.samples));
+                    }
                     clips.push(c);
                 }
             }
@@ -1131,5 +1288,5 @@ pub(crate) fn range(project: &Project, start: Time, duration: Time) -> Result<Pr
 }
 
 pub fn capabilities() -> serde_json::Value {
-    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_frame_rate":25,"audio_clock":48000,"video":"highest_enabled_opaque_track","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
+    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_frame_rate":25,"audio_clock":48000,"video":"highest_enabled_opaque_track","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
 }

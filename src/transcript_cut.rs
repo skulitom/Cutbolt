@@ -490,6 +490,7 @@ mod tests {
                 start: t(2, 1),
                 source_in: t(48000 + 7 * i as u64, 48000),
                 duration: t(3, 1),
+                ..Default::default()
             })
             .collect();
         project.tracks = Some(tracks::Arrangement {

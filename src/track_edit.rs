@@ -252,7 +252,48 @@ fn rebuild_links(
     a.links = links;
     Ok(())
 }
-fn apply_parts(a: &mut Arrangement, parts: &BTreeMap<String, Vec<TrackClip>>) {
+/// A part cut from `old` keeps the fades at the edges it shares with `old`. A cut inside a fade
+/// would change what plays, so it is rejected.
+fn keep_fades(old: &TrackClip, part: &mut TrackClip) -> Result<()> {
+    if old.fade_in.num == 0 && old.fade_out.num == 0 {
+        return Ok(());
+    }
+    let head = part.source_in.minus(old.source_in)?;
+    let tail = old
+        .source_in
+        .plus(old.duration)?
+        .minus(part.source_in.plus(part.duration)?)?;
+    let fade_out_from = old.duration.minus(old.fade_out)?;
+    for (cut, present) in [
+        (head, head.num != 0),
+        (old.duration.minus(tail)?, tail.num != 0),
+    ] {
+        if present && (cut.compare(old.fade_in)?.is_lt() || cut.compare(fade_out_from)?.is_gt()) {
+            return Err(error(
+                "INVALID_RANGE",
+                format!(
+                    "A cut {} s into clip {:?} falls inside its fades (fade_in {} s, fade_out {} s); shorten them with clip_audio first",
+                    cut, old.id, old.fade_in, old.fade_out
+                ),
+            ));
+        }
+    }
+    if head.num != 0 {
+        part.fade_in = Time::ZERO;
+    }
+    if tail.num != 0 {
+        part.fade_out = Time::ZERO;
+    }
+    Ok(())
+}
+fn apply_parts(a: &mut Arrangement, parts: &mut BTreeMap<String, Vec<TrackClip>>) -> Result<()> {
+    for track in &a.tracks {
+        for old in &track.clips {
+            for part in parts.get_mut(&old.id).into_iter().flatten() {
+                keep_fades(old, part)?;
+            }
+        }
+    }
     for track in &mut a.tracks {
         track.clips = track
             .clips
@@ -275,6 +316,7 @@ fn apply_parts(a: &mut Arrangement, parts: &BTreeMap<String, Vec<TrackClip>>) {
             true
         });
     }
+    Ok(())
 }
 pub(crate) fn split(a: &mut Arrangement, e: Split) -> Result<()> {
     let selected = a.selection(&e.clip_ids, e.links)?;
@@ -314,7 +356,7 @@ pub(crate) fn split(a: &mut Arrangement, e: Split) -> Result<()> {
         return Err(error("UNUSED_SPLIT_ID", "Unused right-clip IDs"));
     }
     rebuild_links(a, &parts, link_ids)?;
-    apply_parts(a, &parts);
+    apply_parts(a, &mut parts)?;
     Ok(())
 }
 pub(crate) fn slip(a: &mut Arrangement, e: Slip) -> Result<()> {
@@ -668,7 +710,7 @@ fn span(a: &mut Arrangement, fps: Time, e: Span) -> Result<()> {
         return Err(error("UNUSED_SPLIT_ID", "Unused right-clip IDs"));
     }
     rebuild_links(a, &parts, link_ids)?;
-    apply_parts(a, &parts);
+    apply_parts(a, &mut parts)?;
     for placement in e.clips {
         let t = a.track(&placement.track_id)?;
         a.tracks[t].clips.push(placement.clip);

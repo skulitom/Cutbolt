@@ -369,6 +369,7 @@ pub fn place(request: &Place) -> Result<Value> {
             start,
             source_in: Time::ZERO,
             duration,
+            ..Default::default()
         },
         collision: request.collision,
     };

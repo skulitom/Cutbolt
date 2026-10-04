@@ -237,18 +237,59 @@ impl<'a> Graph<'a> {
         duration: Time,
         label: &str,
     ) -> Result<()> {
+        let raw = if clip.adjusts_audio() {
+            format!("{label}g")
+        } else {
+            label.to_string()
+        };
         if let Some(id) = &clip.sequence_id {
             let a = crate::sequences::get(self.project, id)?.arrangement.clone();
-            return self.compose(
+            self.compose(
                 &a,
                 clip.source_in.plus(at)?.minus(clip.start)?,
                 duration,
                 Kind::Audio,
-                label,
-            );
+                &raw,
+            )?;
+        } else {
+            let (input, first, end) = self.input(clip, at, duration, Kind::Audio)?;
+            self.filters.push(format!("[{input}:a:0]atrim=start_sample={first}:end_sample={end},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{raw}]"));
         }
-        let (input, first, end) = self.input(clip, at, duration, Kind::Audio)?;
-        self.filters.push(format!("[{input}:a:0]atrim=start_sample={first}:end_sample={end},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{label}]"));
+        if clip.adjusts_audio() {
+            self.level(clip, at, &raw, label)?;
+        }
+        Ok(())
+    }
+    /// Clip gain and linear fades, rounded once per sample to the nearest PCM16 value with ties
+    /// away from zero, as in a pcm-mix-v1 voice. Fades never overlap and last at most 60 s, so
+    /// every product stays an exact integer in doubles.
+    fn level(&mut self, clip: &TrackClip, at: Time, input: &str, label: &str) -> Result<()> {
+        let e = clip.envelope()?;
+        // Transition handles read before a clip's start and after its end; validation keeps
+        // fades off those edges, so the handles play at the plain gain.
+        let offset =
+            e.offset as i64 + at.units(SAMPLES)? as i64 - clip.start.units(SAMPLES)? as i64;
+        let (g, fi, fo, samples) = (e.gain_milli, e.fade_in, e.fade_out, e.samples);
+        let (mut weight, mut divisor) = (g.to_string(), "1000".to_string());
+        if fo != 0 {
+            let tail = samples - fo;
+            weight = format!("if(gte(ld(0),{tail}),{g}*({samples}-ld(0)),{weight})");
+            divisor = format!("if(gte(ld(0),{tail}),{},{divisor})", 1000 * fo);
+        }
+        if fi != 0 {
+            weight = format!("if(lt(ld(0),{fi}),{g}*ld(0),{weight})");
+            divisor = format!("if(lt(ld(0),{fi}),{},{divisor})", 1000 * fi);
+        }
+        let channel = |c: usize| {
+            format!(
+                "st(0,n{offset:+});st(1,{weight});st(2,{divisor});st(3,val({c})*32768*ld(1));if(lt(ld(3),0),-floor((-ld(3)+ld(2)/2)/ld(2)),floor((ld(3)+ld(2)/2)/ld(2)))/32768"
+            )
+        };
+        self.filters.push(format!(
+            "[{input}]aeval=exprs='{}|{}':channel_layout=stereo,aformat=sample_fmts=dblp:channel_layouts=stereo[{label}]",
+            channel(0),
+            channel(1)
+        ));
         Ok(())
     }
     fn effect(

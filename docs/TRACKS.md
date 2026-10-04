@@ -10,7 +10,7 @@ Each track has a unique `id`, `kind` (`video` or `audio`), explicit `locked` and
 
 Video tracks are ordered bottom to top; the last enabled track with a clip at the requested time supplies the entire opaque frame. An upper gap exposes the lower video. No video produces black.
 
-A video track may declare `"composite": "alpha_over"` (the default, omitted from snapshots, is `"opaque"`). Opaque tracks choose the base frame as above. Enabled `alpha_over` tracks above that base are then composited bottom to top with straight-alpha "over" in encoded RGB: each channel is `floor((2*(s*a + d*(255-a)) + 255) / 510)`, the exact nearest integer with no ties. Overlay sources are 25 fps FFV1 `bgra` (straight alpha, for example from a [transparent scene](SCENES.md#transparent-output) or [`image.sequence.compile`](IMAGE_SEQUENCES.md) with an alpha profile) or opaque `bgr0`, read as alpha 255. Gaps on an overlay track are transparent. An asset cannot be both an overlay and an opaque source in one render, and an alpha source on an opaque track fails with `UNSUPPORTED_MEDIA`. Overlay tracks must be video, without transitions or nested sequences; proxy previews reject them, so use full-quality previews. Frame/range previews, scopes, reference renders, queued renders and exports include overlays. Receipts list `overlay_track_ids` for an overlaid preview frame. Enabled audio tracks sum stereo PCM with unity gain and one final signed-16-bit saturation; gaps produce exact silence. Enabled state affects playback, while locks protect edits. The arrangement's explicit duration includes leading and trailing gaps. Removing clips leaves their space and keeps that duration.
+A video track may declare `"composite": "alpha_over"` (the default, omitted from snapshots, is `"opaque"`). Opaque tracks choose the base frame as above. Enabled `alpha_over` tracks above that base are then composited bottom to top with straight-alpha "over" in encoded RGB: each channel is `floor((2*(s*a + d*(255-a)) + 255) / 510)`, the exact nearest integer with no ties. Overlay sources are 25 fps FFV1 `bgra` (straight alpha, for example from a [transparent scene](SCENES.md#transparent-output) or [`image.sequence.compile`](IMAGE_SEQUENCES.md) with an alpha profile) or opaque `bgr0`, read as alpha 255. Gaps on an overlay track are transparent. An asset cannot be both an overlay and an opaque source in one render, and an alpha source on an opaque track fails with `UNSUPPORTED_MEDIA`. Overlay tracks must be video, without transitions or nested sequences; proxy previews reject them, so use full-quality previews. Frame/range previews, scopes, reference renders, queued renders and exports include overlays. Receipts list `overlay_track_ids` for an overlaid preview frame. Enabled audio tracks sum stereo PCM, after [clip gain and fades](#clip-gain-and-fades), with one final signed-16-bit saturation; gaps produce exact silence. Enabled state affects playback, while locks protect edits. The arrangement's explicit duration includes leading and trailing gaps. Removing clips leaves their space and keeps that duration.
 
 The editable model permits up to 32 tracks, 1,000 clips and 500 links. The current renderer and previews support 25 fps reference assets, at most 64 model clips, and at most 8 million pixels. A full render supports 1–180,000 frames. Sources require matching dimensions, FFV1 RGB8 and 48 kHz stereo PCM16; use the existing media conversion path for other inputs. An empty arrangement with positive duration renders black and silence. Zero duration is editable but cannot be rendered. Unsupported rates, sources and resource limits fail explicitly.
 
@@ -35,6 +35,7 @@ Wrap every edit as `{"op":"tracks.edit","edit":{...}}`. Each operation must leav
 | `transition_remove` | `track_id`, `id` | Remove a transition; its underlying cut remains |
 | `split`, `slip`, `roll`, `slide` | See [boundary edit fields](TRACK_EDITS.md) | Split linked clips or move content/boundaries while retaining valid source handles and effects |
 | `insert`, `overwrite`, `ripple_delete` | See [interval fields and policies](TRACK_EDITS.md#interval-operations) | Edit intervals across selected/linked tracks with explicit survivor IDs, end policy and transition policy |
+| `clip_audio` | `clip_ids`, optional `gain_milli`, `fade_in`, `fade_out` | Set the [gain and fades](#clip-gain-and-fades) of audio-track clips; omitted fields keep their values |
 
 `shift` requires `backward` and nonnegative rational `amount`; zero supports retargeting alone. `targets` is an explicit array of `{clip_id,track_id}`. Omitted members keep their existing track; included linked partners may have explicit targets too. All placements are calculated together, so simultaneous swaps are evaluated against the final placement. A video clip cannot be retargeted to an audio track or vice versa.
 
@@ -67,6 +68,28 @@ To leave room and move both members five frames later, extend the end before mov
   {"op":"tracks.edit","edit":{"op":"move","clip_ids":["shot"],"shift":{"backward":false,"amount":{"num":1,"den":5}},"targets":[],"links":"include","collision":"reject"}}
 ]
 ```
+
+## Clip gain and fades
+
+Audio-track clips carry three optional fields, also accepted in a `place` clip. They are omitted from snapshots at their defaults:
+
+- `gain_milli`: linear gain from 0 to 4000, where 1000 (the default) is unity.
+- `fade_in`: a linear fade from the clip start.
+- `fade_out`: a linear fade ending at the clip end.
+
+Fades align to the 48 kHz clock and last at most 60 seconds each. Together they must fit the clip, so they never overlap. The semantics match a [mix recipe](AUDIO.md) voice. At clip sample `i` of `n`, the weight is `gain_milli x min(i, fade_in) / fade_in` inside the fade-in, `gain_milli x min(n - i, fade_out) / fade_out` inside the fade-out, and `gain_milli` elsewhere, divided by 1000. Each sample is rounded once to the nearest PCM16 value, ties away from zero. This happens before transitions and track summation, so every product stays an exact integer.
+
+Video clips reject these fields. A clip edge with a [transition](TRANSITIONS.md) rejects a fade there, because the transition already shapes the cut. Transition handles play at the clip's plain gain.
+
+Edits keep the audible result:
+
+- Fades follow clip edges through `roll`, `slide` and `slip`.
+- A `split` or interval edit gives each part the fades at the edges it shares with the original clip.
+- A cut that falls inside a fade fails with `INVALID_RANGE`; shorten the fade with `clip_audio` first.
+- Range previews and exports keep the original clip's envelope, so a window that starts inside a fade plays exactly as the full render does.
+- Interchange export reports clip gain and fades as a critical loss.
+
+Session diffs and previews list a clip's `levels` (`gain_milli`, `fade_in`, `fade_out`) when it has gain or fades, so a `clip_audio` change appears as a clip change.
 
 ## Sessions, previews and export
 

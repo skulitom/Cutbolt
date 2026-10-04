@@ -82,7 +82,7 @@ def run(root):
             video.append(pixels)
         for layer in project['tracks']['tracks']:
             if layer['kind']!='audio' or not layer['enabled']:continue
-            clips={c['id']:(int(c['asset_id']),int(seconds(c['start'])*48000),int((seconds(c['start'])+seconds(c['duration']))*48000),int(seconds(c['source_in'])*48000)) for c in layer['clips']}
+            clips={c['id']:(int(c['asset_id']),int(seconds(c['start'])*48000),int((seconds(c['start'])+seconds(c['duration']))*48000),int(seconds(c['source_in'])*48000),c.get('gain_milli',1000),int(seconds(c.get('fade_in',time(0)))*48000),int(seconds(c.get('fade_out',time(0)))*48000)) for c in layer['clips']}
             effects=[]
             for e in layer.get('transitions',[]):
                 l,r=clips[e['left_id']],clips[e['right_id']];effects.append((r[1]-int(seconds(e['before'])*48000),r[1]+int(seconds(e['after'])*48000),l,r,e['kind']))
@@ -90,7 +90,13 @@ def run(root):
                 e=next((e for e in effects if e[0]<=n<e[1]),None)
                 c=next((c for c in clips.values() if c[1]<=n<c[2]),None)
                 for ch in range(2):
-                    def value(c):return sounds[c[0]][(c[3]+n-c[1])*2+ch]
+                    def value(c):
+                        # Clip gain and linear fades on the clip's own sample clock, one signed rounding.
+                        s=sounds[c[0]][(c[3]+n-c[1])*2+ch];g,fi,fo=c[4:];i=n-c[1];total=c[2]-c[1]
+                        if fi and i<fi:w,d=g*i,1000*fi
+                        elif fo and i>=total-fo:w,d=g*(total-i),1000*fo
+                        else:w,d=g,1000
+                        v=s*w;return (1 if v>=0 else -1)*((abs(v)+d//2)//d)
                     if e:
                         start,end,l,r,kind=e;k=2*(n-start)+1;d=2*(end-start);a,b=weights(kind,k,d);v=value(l)*a+value(r)*b;v=(1 if v>=0 else -1)*((abs(v)+d//2)//d)
                     else:v=value(c) if c else 0
@@ -123,6 +129,22 @@ def run(root):
     locked=apply(p,[edit('state',track_id='v',locked=True,enabled=True)])
     for op in [effects('dip_black')[0],edit('transition_remove',track_id='v',id='vt')]:apply(locked,[op],'TRACK_LOCKED')
     passed.append('transitions.edit_dependencies_locks')
+    # Clip gain and fades apply per clip before transitions and track summation; cuts keep them.
+    levels=apply(p,[edit('clip_audio',clip_ids=['al'],gain_milli=1500,fade_in=time(5003,48000)),edit('clip_audio',clip_ids=['ar'],gain_milli=600,fade_out=time(3*1920+11,48000))])
+    assert [c.get('gain_milli') for c in levels['tracks']['tracks'][1]['clips']]==[1500,600]
+    leveled=render(levels,'clip-gain-fades-with-transition');assert leveled[1]!=expected[1]
+    cut=apply(levels,[edit('split',clip_ids=['al'],at=time(6,25),links='include',right_clip_ids=[{'id':'al','new_id':'al2'},{'id':'vl','new_id':'vl2'}],right_link_ids=[{'id':'left','new_id':'left2'}])])
+    assert render(cut,'split-keeps-clip-fades')==leveled
+    apply(levels,[edit('split',clip_ids=['al'],at=time(3,25),links='include',right_clip_ids=[{'id':'al','new_id':'al2'},{'id':'vl','new_id':'vl2'}],right_link_ids=[{'id':'left','new_id':'left2'}])],'INVALID_RANGE')
+    for first,count in [(3,4),(15,4)]:
+        output=out/f'levels-range-{first}.mkv';call({'command':'preview.range','project':levels,'input_root':str(root),'output_root':str(out),'output':str(output),'start':time(first,25),'duration':time(count,25)})
+        compare(output,leveled[0][first*W*H*3:(first+count)*W*H*3],leveled[1][first*1920*4:(first+count)*1920*4],f'levels-range-{first}-{count}')
+    apply(p,[edit('clip_audio',clip_ids=['vl'],gain_milli=500)],'INVALID_TRACKS')
+    apply(p,[edit('clip_audio',clip_ids=['ar'],fade_in=time(1920,48000))],'INVALID_TRANSITION')
+    apply(p,[edit('clip_audio',clip_ids=['al'],gain_milli=4001)],'INVALID_TRACKS')
+    apply(base,[edit('clip_audio',clip_ids=['al'],fade_in=time(10000,48000),fade_out=time(6000,48000))],'INVALID_RANGE')
+    apply(base,[edit('clip_audio',clip_ids=['al'],fade_in=time(1,96000))],'UNALIGNED_TIME')
+    passed.append('transitions.clip_gain_fades_exact')
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS

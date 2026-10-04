@@ -137,6 +137,14 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
         value["enabled"] = json!(track.enabled);
         let mut clips = track.clips.iter().collect::<Vec<_>>();
         clips.sort_by(|x, y| x.start.compare(y.start).expect("validated times"));
+        for clip in clips.iter().filter(|c| c.adjusts_audio()) {
+            a.loss(
+                &format!("{path}/clips/{}", clip.id),
+                "clip_audio_levels",
+                "Clip gain and fades are omitted, so the exported audio plays at unity",
+                true,
+            );
+        }
         let mut transition_anchors = BTreeSet::new();
         for effect in &track.transitions {
             if !transition_anchors.insert(&effect.right_id) {

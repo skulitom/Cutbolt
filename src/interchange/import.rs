@@ -232,6 +232,7 @@ pub(super) fn prepare(request: &Import, document: &Value, a: &mut Analysis) -> R
                             start: cursor,
                             source_in,
                             duration: length,
+                            ..Default::default()
                         });
                         used.insert(asset.id.clone(), (*asset).clone());
                     } else {

@@ -1,5 +1,19 @@
 # Progress history
 
+## 4 October 2026: clip gain and fades on audio tracks
+
+Timeline audio tracks summed every clip at unity. In the trials, lowering a music bed or fading it out meant rendering a separate mix recipe and importing the result. Audio-track clips now carry optional `gain_milli`, `fade_in` and `fade_out`, set with the new `clip_audio` track edit or given at `place`. They share the mix recipe's linear semantics, with one rounding per sample before transitions and track summation. Fades are limited to 60 seconds and may not overlap, so the per-sample arithmetic stays exact.
+
+Edits preserve the audible result:
+
+- Fades follow edges through trims.
+- Splits and interval edits keep only the fades at shared edges, and reject cuts inside a fade.
+- Range previews and exports carry the original clip's envelope.
+- A transition edge rejects a fade.
+- Session diffs list a clip's levels.
+
+The transitions fixture's independent PCM oracle now covers gain with fades next to a transition, a split that renders identically, ranges starting inside a fade, and the rejections. Defaults are omitted from snapshots, so existing projects and render graphs are unchanged. No scoring changed.
+
 ## 4 October 2026: media.inspect says what to do next
 
 In the trials, `media.inspect` returned raw ffprobe output. Agents had to work out for themselves whether a file could be placed, compute its duration, and write a conform recipe. The result now also carries a `timeline` decision:

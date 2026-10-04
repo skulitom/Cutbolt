@@ -30,6 +30,16 @@ pub struct Placement {
     pub sequence_id: Option<String>,
     pub timeline_start: Time,
     pub clip: Clip,
+    /// Audio-track clip gain and fades, when they differ from unity without fades.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<Levels>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Levels {
+    pub gain_milli: u32,
+    pub fade_in: Time,
+    pub fade_out: Time,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -435,6 +445,11 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                         sequence_id: clip.sequence_id.clone(),
                         timeline_start: clip.start,
                         clip: clip.legacy(),
+                        levels: clip.adjusts_audio().then_some(Levels {
+                            gain_milli: clip.gain_milli,
+                            fade_in: clip.fade_in,
+                            fade_out: clip.fade_out,
+                        }),
                     },
                 );
             }
@@ -450,6 +465,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                 sequence_id: None,
                 timeline_start: start,
                 clip: clip.clone(),
+                levels: None,
             },
         );
         start = start.plus(clip.duration)?;
@@ -472,6 +488,7 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
                     || a.sequence_id != b.sequence_id
                     || a.timeline_start != b.timeline_start
                     || a.clip != b.clip
+                    || a.levels != b.levels
             }
             (a, b) => a != b,
         })
@@ -543,7 +560,10 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
 fn summarize_shifts(clips: Vec<ClipChange>) -> Result<(Vec<ClipChange>, Option<Shifted>)> {
     let moved_only = |c: &ClipChange| match (&c.before, &c.after) {
         (Some(a), Some(b)) => {
-            a.clip == b.clip && a.track_id == b.track_id && a.sequence_id == b.sequence_id
+            a.clip == b.clip
+                && a.track_id == b.track_id
+                && a.sequence_id == b.sequence_id
+                && a.levels == b.levels
         }
         _ => false,
     };

@@ -148,6 +148,7 @@ fn interval(angle: &Angle, at: Time, duration: Time, kind: Kind, id: String) -> 
         }
         .plus(at.minus(angle.start)?)?,
         duration,
+        ..Default::default()
     })
 }
 pub(crate) fn project(group: &Group, project: &Project) -> Result<Arrangement> {
