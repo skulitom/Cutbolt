@@ -17,6 +17,10 @@ Two smaller fixes:
 - A command that can't be queued is refused before its arguments are checked.
 
 A workspace end-to-end run exported H.264 from a saved-project reference and conformed a phone clip from a path-only identity, both over MCP. The catalog has 68 tools, about 230 KB. No baseline, criteria, evidence, weights, exclusions or denominators changed.
+## 4 October 2026: serialized shipping
+
+Concurrent sessions kept racing at the push: each gate passed, but another session's push landed during it, so the push was rejected. `tools/ship.py` now takes a lock in the shared state. Inside the lock it fetches, rebases onto the target branch, builds, gates and pushes, so every push is gated on exactly the commit it publishes. A waiting ship waits for at most one gate. Background verification starts after the lock is released.
+
 ## 4 October 2026: background runs give way to newer commits
 
 Successive ships had left several background runs verifying overlapping fixtures for successive commits. Each background run now registers its commit and fixtures in the shared state. Before starting a fixture, it skips any fixture that a newer background run of a descendant commit will also verify; only the newest result matters. Skipped fixtures are listed as superseded and are neither passes nor failures.

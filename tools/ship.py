@@ -17,6 +17,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_NAME = "cutbolt.exe" if os.name == "nt" else "cutbolt"
@@ -33,6 +34,39 @@ def git(*args, check=True):
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=check)
 
 
+def acquire_ship_lock():
+    """Serialize gate-and-push across every session and worktree of this repository."""
+    import psutil
+    lock = impact.STATE / "ship.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    announced = False
+    while True:
+        try:
+            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(descriptor, str(os.getpid()).encode())
+            os.close(descriptor)
+            return lock
+        except FileExistsError:
+            try:
+                holder = int(lock.read_text(encoding="utf-8") or 0)
+            except (OSError, ValueError):
+                holder = 0
+            if not holder or not psutil.pid_exists(holder):
+                lock.unlink(missing_ok=True)  # left by a ship that ended abnormally
+                continue
+            if not announced:
+                print(f"Waiting for another ship (pid {holder}) to finish its gate and push...", flush=True)
+                announced = True
+            time.sleep(2)
+
+
+def target_branch(args):
+    if args.to:
+        return args.to
+    upstream = git("rev-parse", "--abbrev-ref", "@{u}", check=False).stdout.strip()
+    return upstream.split("/", 1)[1] if upstream.startswith("origin/") else None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--budget", type=float, default=85, help="Gate fixture budget in seconds")
@@ -47,6 +81,27 @@ def main():
     dirty = git("status", "--porcelain", "--", *CODE).stdout.strip()
     if dirty:
         raise SystemExit("Commit (or stash) these code changes first; ship verifies and pushes HEAD:\n" + dirty)
+    lock = None if args.no_push else acquire_ship_lock()
+    try:
+        commit, summary, engine, run_id, device = gate_and_push(args)
+    finally:
+        if lock:
+            lock.unlink(missing_ok=True)
+    start_background(args, commit, summary, engine, run_id, device)
+
+
+def gate_and_push(args):
+    branch = target_branch(args)
+    if branch and not args.no_push:
+        # Inside the lock: build on the latest target so the gated commit is exactly what is pushed.
+        git("fetch", "origin", branch)
+        behind = git("merge-base", "--is-ancestor", f"origin/{branch}", "HEAD", check=False).returncode
+        if behind:
+            rebased = git("rebase", "--autostash", f"origin/{branch}", check=False)
+            if rebased.returncode:
+                git("rebase", "--abort", check=False)
+                raise SystemExit(f"Rebasing onto origin/{branch} conflicts; resolve it, then ship again:\n{rebased.stdout}{rebased.stderr}")
+            print(f"Rebased onto origin/{branch}", flush=True)
     commit = git("rev-parse", "HEAD").stdout.strip()
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
     run_id = f"{commit[:10]}-{stamp}"
@@ -74,7 +129,10 @@ def main():
         if pushed.returncode:
             raise SystemExit("Push failed (fetch and rebase, then ship again):\n" + pushed.stderr)
         print(f"Pushed {commit[:10]}", flush=True)
+    return commit, summary, engine, run_id, device
 
+
+def start_background(args, commit, summary, engine, run_id, device):
     deferred = summary.get("deferred", [])
     if not deferred:
         engine.unlink(missing_ok=True)
