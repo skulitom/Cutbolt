@@ -673,6 +673,20 @@ pub fn handle_json(
     mut request: Value,
     workspace: Option<&crate::workspace::Workspace>,
 ) -> Result<Value> {
+    let save_as = match request.as_object_mut().and_then(|o| o.remove("save_as")) {
+        None => None,
+        Some(Value::String(file)) if workspace.is_some() => Some(file),
+        Some(Value::String(_)) => {
+            return Err(crate::error("INVALID_PATH", "save_as needs a workspace"));
+        }
+        Some(_) => {
+            return Err(crate::error(
+                "INVALID_JSON",
+                "save_as: expected a .json path",
+            ));
+        }
+    };
+    crate::documents::load(&mut request, workspace)?;
     let mut completed = prepare(&mut request, workspace)?;
     // A queued command's arguments get the same preparation now, in the caller's workspace.
     if request["command"] == "job.start"
@@ -719,6 +733,9 @@ pub fn handle_json(
         }
     } else if capabilities {
         result["workspace"] = Value::Null;
+    }
+    if let (Some(file), Some(workspace)) = (save_as, workspace) {
+        result = crate::documents::save(&result, &file, workspace)?;
     }
     Ok(result)
 }

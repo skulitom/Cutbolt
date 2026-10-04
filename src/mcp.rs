@@ -274,6 +274,24 @@ const BLOCKING: [&str; 13] = [
     "preview.range",
 ];
 
+/// Commands whose results are documents an agent passes on; with a workspace they accept save_as.
+const DOCUMENTS: [&str; 14] = [
+    "captions.import",
+    "captions.apply",
+    "captions.scene",
+    "graphics.instantiate",
+    "tracking.inspect",
+    "stabilization.inspect",
+    "reframe.inspect",
+    "scene.inspect",
+    "timeline.apply",
+    "session.get",
+    "interchange.import",
+    "native.import",
+    "project.portable",
+    "transcript.correct",
+];
+
 /// Whether a command is offered as an MCP tool.
 pub(crate) fn exposed(command: &str) -> bool {
     !BLOCKING.contains(&command)
@@ -285,6 +303,9 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
         let mut input = crate::schema::arguments(command, true).expect("command schema");
         if workspace.is_some() {
             crate::schema::relax_roots(&mut input);
+            if DOCUMENTS.contains(&command) {
+                input["properties"]["save_as"] = json!({"type":"string","description":"Write the whole result to this new .json file in the workspace and return a short summary; later arguments can name it as {\"file\": path, \"select\": field}."});
+            }
         }
         let read_only=matches!(command,"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         let text = match workspace {
@@ -342,7 +363,7 @@ impl Server {
         )
         .to_owned();
         if let Some(workspace) = &self.workspace {
-            text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it.", workspace.root().display()));
+            text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any object argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file, and save_as writes a large result to a new .json file instead of returning it.", workspace.root().display()));
         }
         text
     }

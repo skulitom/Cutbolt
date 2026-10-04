@@ -113,6 +113,19 @@ impl Workspace {
         })
     }
 
+    /// A document file inside the workspace: relative to it, or absolute within it.
+    pub fn file(&self, path: &str) -> Result<PathBuf> {
+        let resolved = self.resolve(path)?;
+        self.contain(resolved.parent().unwrap_or(&self.root))?;
+        if resolved.is_absolute() && !resolved.starts_with(&self.root) && !resolved.exists() {
+            return Err(error(
+                "PATH_OUTSIDE_WORKSPACE",
+                format!("{path} is outside the workspace {}", self.root.display()),
+            ));
+        }
+        Ok(resolved)
+    }
+
     /// An absolute path is kept as given; a relative one is joined to the workspace, without `..`.
     fn resolve(&self, path: &str) -> Result<PathBuf> {
         let given = Path::new(path);

@@ -12,6 +12,7 @@ pub mod commands;
 pub mod composite;
 pub mod conform;
 pub mod delivery;
+pub mod documents;
 pub mod effects;
 pub mod expressions;
 pub mod geometry;

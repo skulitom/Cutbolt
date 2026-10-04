@@ -803,6 +803,27 @@ mod tests {
         assert!(patterns.is_empty(), "{patterns:?}");
     }
 
+    /// documents::load reads any object of only file (and select) keys from a workspace file.
+    #[test]
+    fn no_request_object_looks_like_a_document_reference() {
+        let mut nodes = Vec::new();
+        for definition in definitions().values() {
+            nodes.push(definition.clone());
+        }
+        for command in commands() {
+            nodes.push(arguments(command, false).unwrap());
+        }
+        for node in &nodes {
+            walk(node, &mut |object| {
+                if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+                    let looks = properties.contains_key("file")
+                        && properties.keys().all(|k| k == "file" || k == "select");
+                    assert!(!looks, "{properties:?} would be read as a document file");
+                }
+            });
+        }
+    }
+
     /// identity::complete treats any object of only path/sha256/bytes keys as a file identity.
     #[test]
     fn only_file_identities_look_like_file_identities() {

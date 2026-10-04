@@ -1,5 +1,9 @@
 # Progress history
 
+## 4 October 2026: document files in a workspace
+
+In the captions trial, an agent copied about 330 KB of scene and caption JSON from one call's result into the next call's arguments. In a workspace, any object argument can now be `{"file": "name.json", "select": "field"}`, read from a workspace file. `save_as` writes a call's whole result to a new `.json` file and returns a short summary. An inspected title scene went from a 10 KB response to 330 bytes and was compiled through `job.start` directly from its file. Existing files are never overwritten, documents are limited to 16 MiB, and a schema test keeps real request objects from looking like file references. No scoring changed.
+
 ## 4 October 2026: long-running commands as background jobs over MCP
 
 In all three MCP-only trials the agents had to fall back to CLI-only commands. The blockers were H.264 delivery, media conversion and scene compilation.
