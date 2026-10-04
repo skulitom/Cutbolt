@@ -1,5 +1,19 @@
 # Progress history
 
+## 4 October 2026: long-running commands as background jobs over MCP
+
+In all three MCP-only trials the agents had to fall back to CLI-only commands. The blockers were H.264 delivery, media conversion and scene compilation.
+
+`job.start` now queues `export.run`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe` in the existing background queue. That includes request-ID replay, output reservation and status. Arguments are prepared and validated at submission like a direct call. `job.wait` waits up to two minutes for a result instead of polling.
+
+A queued job can be cancelled; a running one finishes, and an interrupted run is reported, not retried. The server instructions now describe the cut, graphics and caption workflows.
+
+Two smaller fixes:
+- Sequential-clip alignment errors name the clip and field.
+- A command that can't be queued is refused before its arguments are checked.
+
+A workspace end-to-end run exported H.264 from a saved-project reference and conformed a phone clip from a path-only identity, both over MCP. The catalog has 68 tools, about 230 KB. No baseline, criteria, evidence, weights, exclusions or denominators changed.
+
 ## 4 October 2026: one retry for the real-time capture outside thorough runs
 
 Background runs share the machine, and the recording fixture's real-time capture is correctly rejected when a packet is delayed by load: a 90 ms gap in one background run. Outside `--thorough`, that one fixture may now retry once, and its record notes the earlier failure. The thorough run still captures once, in its quiet phase.
@@ -21,6 +35,7 @@ The first background runs exposed two harness problems, both now fixed:
 
 - **Console windows.** The background verifier was started without a console, so every console program it launched opened its own window. Three fixtures were ended by console-close events. It now runs with one hidden console shared by all its children, in its own process group.
 - **Missing build artifacts.** Fixtures that compile helpers against the library (`transcription`) or build examples (`recording`) expected `target/debug` in the worktree. Background runs now build into a shared, incremental directory in the common git directory, and `tests/engine.py` exposes it as `BUILD`, following `CARGO_TARGET_DIR`.
+
 ## 4 October 2026: agent usability fixes from MCP-only trials
 
 Three fresh agents worked through an edit, a title card and a music-plus-captions job using only the MCP view. All three finished only by falling back to CLI-only commands, and 60 to 90% of their response bytes went to schema and capability lookups. This batch addresses most of what they hit:

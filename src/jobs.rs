@@ -55,6 +55,33 @@ struct SavedRequest {
     ffprobe_sha256: Option<String>,
 }
 
+/// A queued long-running command other than a reference render. It has no publication
+/// recovery of its own: the command publishes its output atomically, and an interrupted run is
+/// reported rather than retried.
+#[derive(Serialize, Deserialize)]
+struct SavedCommand {
+    command: Value,
+    ffmpeg: String,
+    ffprobe: String,
+    ffmpeg_sha256: String,
+    ffprobe_sha256: String,
+}
+
+/// Commands that job.start can queue: each writes new files and can take minutes.
+pub const QUEUED_COMMANDS: [&str; 11] = [
+    "export.run",
+    "media.conform",
+    "scene.render",
+    "audio.render",
+    "audio.repair.render",
+    "hdr.conform",
+    "image.sequence.compile",
+    "proxy.generate",
+    "preview.range",
+    "cache.run",
+    "transcript.transcribe",
+];
+
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -370,6 +397,141 @@ pub fn start(root: &Path, request_id: &str, request: RenderRequest) -> Result<Va
     Ok(ticket)
 }
 
+/// Queue one long-running command, given as its complete request, in the background. The same
+/// request ID and request always return the original ticket.
+pub fn start_command(root: &Path, request_id: &str, request: Value) -> Result<Value> {
+    supported()?;
+    let command = request["command"].as_str().unwrap_or_default().to_owned();
+    if !QUEUED_COMMANDS.contains(&command.as_str()) {
+        return Err(error(
+            "UNSUPPORTED_JOB",
+            format!(
+                "{command:?} cannot be queued; job.start runs {}. Use render.start for reference renders",
+                QUEUED_COMMANDS.join(", ")
+            ),
+        ));
+    }
+    if request_id.trim().is_empty() || request_id.len() > 128 {
+        return Err(error("INVALID_ID", "Request ID requires 1-128 bytes"));
+    }
+    let payload_hash = digest(&serde_json::to_vec(&request)?);
+    let mut connection = connect(root, true)?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let existing: Option<(String, String, String)> = tx
+        .query_row(
+            "SELECT payload_hash,ticket,status FROM jobs WHERE request_id=?1",
+            [request_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    if let Some((hash, ticket, state)) = existing {
+        if hash != payload_hash {
+            return Err(error(
+                "REQUEST_ID_CONFLICT",
+                "Job request ID was already used with different arguments",
+            ));
+        }
+        tx.commit()?;
+        if state == "queued" {
+            kick(root)?;
+        }
+        return Ok(serde_json::from_str(&ticket)?);
+    }
+    let id = digest(request_id.as_bytes());
+    // Commands without an output file reserve their job instead.
+    let output = request["output"]
+        .as_str()
+        .map_or_else(|| format!("job:{id}"), str::to_owned);
+    let active: i64 = tx.query_row(
+        "SELECT count(*) FROM jobs WHERE status IN ('queued','running')",
+        [],
+        |r| r.get(0),
+    )?;
+    if active >= 32 {
+        return Err(error(
+            "QUEUE_FULL",
+            "At most 32 active jobs per root; wait or cancel a queued job",
+        ));
+    }
+    let reserved: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM jobs WHERE output=?1 AND status IN ('queued','running'))",
+        [&output],
+        |r| r.get(0),
+    )?;
+    if reserved {
+        return Err(error(
+            "OUTPUT_RESERVED",
+            format!("An active job already reserves {output}"),
+        ));
+    }
+    let ticket = json!({"job_id":id,"command":command});
+    let ffmpeg = resolve_tool("ffmpeg")?;
+    let ffprobe = resolve_tool("ffprobe")?;
+    let saved = SavedCommand {
+        command: request,
+        ffmpeg_sha256: media::file_hash(Path::new(&ffmpeg))?,
+        ffprobe_sha256: media::file_hash(Path::new(&ffprobe))?,
+        ffmpeg,
+        ffprobe,
+    };
+    let encoded = serde_json::to_string(&saved)?;
+    tx.execute("INSERT INTO jobs(id,request_id,payload_hash,request,request_hash,ticket,output,status,phase,total_frames,max_attempts)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,'queued','queued',0,1)",params![id,request_id,payload_hash,encoded,digest(encoded.as_bytes()),ticket.to_string(),output])?;
+    tx.commit()?;
+    kick(root)?;
+    Ok(ticket)
+}
+
+/// Run a queued command in the worker and record its result.
+fn run_command(connection: &Connection, id: &str, encoded: &str) -> Result<()> {
+    let saved: SavedCommand = serde_json::from_str(encoded)?;
+    for (path, expected) in [
+        (&saved.ffmpeg, &saved.ffmpeg_sha256),
+        (&saved.ffprobe, &saved.ffprobe_sha256),
+    ] {
+        if media::file_hash(Path::new(path))? != *expected {
+            return Err(error(
+                "TOOL_CHANGED",
+                "A queued media tool changed after submission",
+            ));
+        }
+    }
+    connection.execute("UPDATE jobs SET phase='running' WHERE id=?1", [id])?;
+    let result = crate::commands::handle(serde_json::from_value(saved.command)?)?;
+    let tx = connection.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE jobs SET status='completed',phase='completed',result=?1 WHERE id=?2",
+        params![result.to_string(), id],
+    )?;
+    recovery::complete_attempt(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Wait up to `seconds` for a job to finish, then report its status either way.
+pub fn wait(root: &Path, id: &str, seconds: u32) -> Result<Value> {
+    if !(1..=120).contains(&seconds) {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            "timeout_seconds must be 1 to 120",
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(seconds.into());
+    loop {
+        let state = status(root, id)?;
+        let done = matches!(
+            state["status"].as_str(),
+            Some("completed" | "failed" | "cancelled" | "interrupted")
+        );
+        if done || Instant::now() >= deadline {
+            let mut state = state;
+            state["finished"] = json!(done);
+            return Ok(state);
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
 type JobRow = (
     String,
     String,
@@ -595,6 +757,12 @@ pub fn worker(root: &Path) -> Result<()> {
         let outcome = (|| {
             if digest(encoded.as_bytes()) != hash {
                 return Err(error("STORE_CORRUPT", "Job request checksum mismatch"));
+            }
+            if serde_json::from_str::<Value>(&encoded)?
+                .get("command")
+                .is_some()
+            {
+                return run_command(&connection, &id, &encoded).map(|()| Value::Null);
             }
             let saved: SavedRequest = serde_json::from_str(&encoded)?;
             for (path, expected) in [

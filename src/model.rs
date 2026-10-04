@@ -412,8 +412,12 @@ impl Project {
             if !ids.insert(&clip.id) {
                 return Err(error("DUPLICATE_ID", &clip.id));
             }
-            clip.source_in.units(self.frame_rate)?;
-            clip.duration.units(self.frame_rate)?;
+            clip.source_in
+                .units(self.frame_rate)
+                .at(|| format!("clip {:?} source_in", clip.id))?;
+            clip.duration
+                .units(self.frame_rate)
+                .at(|| format!("clip {:?} duration", clip.id))?;
             if clip.duration.num == 0 {
                 return Err(error(
                     "INVALID_RANGE",

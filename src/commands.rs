@@ -608,6 +608,27 @@ pub enum Request {
         /// Job queue directory used with render.start.
         job_root: PathBuf,
     },
+    #[serde(rename = "job.start")]
+    JobStart {
+        /// Existing absolute local directory holding the job queue (jobs.sqlite3).
+        job_root: PathBuf,
+        /// Caller-chosen ID unique within job_root, 1-128 bytes. An identical resubmission returns the original ticket.
+        request_id: String,
+        /// Command to run in the background: export.run, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
+        run: String,
+        /// That command's arguments exactly as for a direct call, without `command`; cutbolt_schema with its name gives the schema.
+        arguments: serde_json::Map<String, Value>,
+    },
+    #[serde(rename = "job.wait")]
+    JobWait {
+        /// Job queue directory used with render.start or job.start.
+        job_root: PathBuf,
+        /// Job ID from the ticket.
+        job_id: String,
+        /// Longest wait in seconds, 1 to 120; default 30. The status is returned either way, with `finished`.
+        #[serde(default)]
+        timeout_seconds: Option<u32>,
+    },
     #[serde(rename = "media.inspect")]
     Inspect {
         /// Absolute path of the file to probe; it must lie inside input_root.
@@ -652,23 +673,32 @@ pub fn handle_json(
     mut request: Value,
     workspace: Option<&crate::workspace::Workspace>,
 ) -> Result<Value> {
-    if let Some(workspace) = workspace {
-        workspace.prepare(&mut request)?;
+    let mut completed = prepare(&mut request, workspace)?;
+    // A queued command's arguments get the same preparation now, in the caller's workspace.
+    if request["command"] == "job.start"
+        && let Some(run) = request["run"].as_str()
+        && !jobs::QUEUED_COMMANDS.contains(&run)
+    {
+        return Err(crate::error(
+            "UNSUPPORTED_JOB",
+            format!(
+                "{run:?} cannot be queued; job.start runs {}. Use render.start for reference renders",
+                jobs::QUEUED_COMMANDS.join(", ")
+            ),
+        ));
     }
-    let store = workspace.map(crate::workspace::Workspace::store_root);
-    crate::reference::resolve(&mut request, store.as_deref())?;
-    let completed = crate::identity::complete(&mut request)?;
-    let located = crate::schema::locate(&request);
-    let request: Request = serde_json::from_value(request).map_err(|e| {
-        // Tagged requests and operations lose serde's position, so name the field the schema
-        // rejects, such as operations[2].clip.duration.
-        match located {
-            Some(field) if !field.is_empty() => {
-                crate::error("INVALID_JSON", format!("{field}: {e}"))
-            }
-            _ => crate::Error::from(e),
-        }
-    })?;
+    if request["command"] == "job.start"
+        && let Some(Value::Object(arguments)) = request.get_mut("arguments")
+    {
+        let mut queued = Value::Object(std::mem::take(arguments));
+        queued["command"] = request["run"].clone();
+        completed.extend(prepare(&mut queued, workspace)?);
+        parse(queued.clone())
+            .map_err(|e| crate::error(e.code, format!("arguments: {}", e.message)))?;
+        queued.as_object_mut().unwrap().remove("command");
+        request["arguments"] = queued;
+    }
+    let request = parse(request)?;
     let schema = matches!(request, Request::Schema { .. });
     let capabilities = matches!(&request, Request::Capabilities { section } if section.as_deref().is_none_or(|s| s == "all"));
     let mut result = handle(request)?;
@@ -691,6 +721,35 @@ pub fn handle_json(
         result["workspace"] = Value::Null;
     }
     Ok(result)
+}
+
+/// Workspace defaults, saved-project references and path-only identities, resolved in place.
+/// Returns the identities that were completed.
+fn prepare(
+    request: &mut Value,
+    workspace: Option<&crate::workspace::Workspace>,
+) -> Result<Vec<Value>> {
+    if let Some(workspace) = workspace {
+        workspace.prepare(request)?;
+    }
+    let store = workspace.map(crate::workspace::Workspace::store_root);
+    crate::reference::resolve(request, store.as_deref())?;
+    crate::identity::complete(request)
+}
+
+/// Parse a request, naming the first field its schema rejects when it fails.
+fn parse(request: Value) -> Result<Request> {
+    let located = crate::schema::locate(&request);
+    serde_json::from_value(request).map_err(|e| {
+        // Tagged requests and operations lose serde's position, so name the field the schema
+        // rejects, such as operations[2].clip.duration.
+        match located {
+            Some(field) if !field.is_empty() => {
+                crate::error("INVALID_JSON", format!("{field}: {e}"))
+            }
+            _ => crate::Error::from(e),
+        }
+    })
 }
 
 pub fn handle(request: Request) -> Result<Value> {
@@ -1045,6 +1104,23 @@ pub fn handle(request: Request) -> Result<Value> {
         Request::JobStatus { job_root, job_id } => jobs::status(&job_root, &job_id),
         Request::JobCancel { job_root, job_id } => jobs::cancel(&job_root, &job_id),
         Request::JobResume { job_root } => jobs::resume(&job_root),
+        Request::JobStart {
+            job_root,
+            request_id,
+            run,
+            arguments,
+        } => {
+            let mut request = Value::Object(arguments);
+            request["command"] = Value::String(run);
+            // Validate the queued command now, so a bad argument fails before it waits in line.
+            serde_json::from_value::<Request>(request.clone())?;
+            jobs::start_command(&job_root, &request_id, request)
+        }
+        Request::JobWait {
+            job_root,
+            job_id,
+            timeout_seconds,
+        } => jobs::wait(&job_root, &job_id, timeout_seconds.unwrap_or(30)),
         Request::Inspect { path, input_root } => {
             let path = media::allowed_file(&path, &input_root)?;
             let identity = crate::identity::relative(&path, &input_root)?;
@@ -1075,7 +1151,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
@@ -1144,7 +1220,7 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
             renderer["placed_track_frame_rate"]
         ),
         format!(
-            "Renders take 1 to {} clips and up to {} frames. render.start queues reference .mkv renders; export.run delivers H.264/AAC or lossless files.",
+            "Renders take 1 to {} clips and up to {} frames. render.start queues reference .mkv renders; job.start queues export.run (H.264/AAC or lossless delivery), media.conform, scene.render and the other long commands.",
             renderer["maximum_clips"], renderer["maximum_sequential_frames"]
         ),
         format!(

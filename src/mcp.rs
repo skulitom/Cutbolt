@@ -201,6 +201,12 @@ pub(crate) fn description(command: &str) -> &'static str {
         "job.resume" => {
             "Reconcile saved publication and wake a Windows worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
         }
+        "job.start" => {
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
+        }
+        "job.wait" => {
+            "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
+        }
         "schema" => {
             "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template or audio_routing. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
         }
@@ -323,7 +329,18 @@ impl Server {
         Some(json!({"type":"image","data":crate::thumbnail::base64(&png),"mimeType":"image/png"}))
     }
     fn instructions(&self) -> String {
-        let mut text = "Cutbolt runs locally. Use session commands for saved editing, durable request IDs for retries, and render.start/job.status/job.cancel for background work. Unsupported editing semantics fail explicitly. No HTTP service is used. Tool listings abbreviate the large shared project, operation, scene, template and audio_routing schemas; cutbolt_schema returns any of them, or any command's arguments, in full. Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision instead of a full snapshot.".to_owned();
+        let mut text = concat!(
+            "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
+            "Typical cut: session.create with id, width, height and frame_rate; media.inspect each source (timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio; ",
+            "convert others with job.start run media.conform); session.apply with media.add then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
+            "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait. ",
+            "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
+            "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
+            "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
+            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template and audio_routing schemas; ",
+            "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
+        )
+        .to_owned();
         if let Some(workspace) = &self.workspace {
             text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it.", workspace.root().display()));
         }
