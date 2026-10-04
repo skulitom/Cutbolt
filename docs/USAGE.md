@@ -6,11 +6,11 @@ Optional scene [geometry](GEOMETRY.md) provides textured planes with perspective
 
 The [property-expression contract](EXPRESSIONS.md) describes optional scene graphs and `expression.inspect`: read-only exact value sampling with typed links, cycle checks and reproducible seeded inputs. Complete media validation and compilation remain `scene.inspect` and `scene.render`.
 
-The executable accepts one JSON request on stdin, or a request-file path as its only argument. `cutbolt capabilities` is a shorthand. It returns one JSON object on stdout: `{"ok":true,"result":...}` on success or `{"ok":false,"error":{"code":"...","message":"..."}}` with exit code 1 on failure. Unknown fields and operations are rejected. Requests are limited to 4 MiB.
+The executable accepts one JSON request on stdin, or a request-file path as its only argument. `cutbolt capabilities` is a shorthand. It returns a short summary: essentials, commands, operations and the names of the detailed sections. Add `"section"` with one of those names, or `"all"`, for details. It returns one JSON object on stdout: `{"ok":true,"result":...}` on success or `{"ok":false,"error":{"code":"...","message":"..."}}` with exit code 1 on failure. Unknown fields and operations are rejected. Requests are limited to 4 MiB.
 
 Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.validate`, `timeline.apply`, `media.inspect`, `render.plan`, `render.run`, `export.inspect`, and `export.run`. Saved editing sessions add `session.create`, `session.get`, `session.apply`, `session.preview`, `session.undo`, `session.restore`, `session.history`, and `session.receipt`. Background commands are `render.start`, `job.status`, `job.cancel`, and `job.resume`. `cutbolt mcp` provides a local stdio adapter. There is no listening socket, installed service, or network request in the engine's normal execution path. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md) for jobs and MCP setup.
 
-`{"command":"schema","name":"scene.render"}` returns a command's complete argument schema, with a description on every field. It also accepts the shared types `project`, `operation`, `scene`, `template` and `audio_routing`.
+`{"command":"schema","name":"scene.render"}` returns a command's argument schema, with a description on every field. Large schemas come back as an outline; `select` returns one variant or definition, and `full` returns everything. It also accepts the shared types `project`, `operation`, `scene`, `template` and `audio_routing`.
 
 `cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
@@ -63,7 +63,7 @@ For roll, `left_duration` replaces the left clip's duration; the following clip'
 
 `python -X utf8 tests/timeline_edges.py --output C:\DEV\CutboltData\new-timeline-edges` checks gap/edit interactions and mixed-source boundaries, including first/last-frame trims, a non-keyframe start crossing an H.264 keyframe, 24 and 30000/1001 fps sources, audio-only end samples, gap-only/odd-size output, previews, saved edits and queued renders. Native inputs first use the explicit [media-conform contract](CONFORM.md); timeline source-in/out values then refer to the resulting 25 fps editing assets. This does not enable arbitrary direct native-codec timeline playback or subframe timeline audio edits.
 
-Times use nonnegative rational seconds, such as `{"num":1,"den":25}` for one frame at 25 fps. Frame rates are rationals too. Editing rejects times between the sequence's frame boundaries. Sequential rendering supports [eight native frame rates](NATIVE_TIMING.md), including 24000/1001, 30000/1001 and 60000/1001. Audio-bearing cuts/ranges also require whole 48 kHz samples; 30000/1001 and 60000/1001 therefore use multiples of five video frames. Placed tracks retain 25 fps. Ranges are half-open, and source in/out positions never change source files.
+Times use nonnegative exact seconds: `{"num":1,"den":25}` for one frame at 25 fps, or the literals `"1/25"`, `0.04`, `"0.04"` or `3`. Each converts exactly or is rejected; nothing is rounded. JSON numbers are exact up to 15 significant digits, and strings are always exact. Results always use the object form. Frame rates are rationals too. Editing rejects times between the sequence's frame boundaries. Sequential rendering supports [eight native frame rates](NATIVE_TIMING.md), including 24000/1001, 30000/1001 and 60000/1001. Audio-bearing cuts/ranges also require whole 48 kHz samples; 30000/1001 and 60000/1001 therefore use multiples of five video frames. Placed tracks retain 25 fps. Ranges are half-open, and source in/out positions never change source files.
 
 ## Asset registry
 
@@ -111,7 +111,7 @@ Sessions use one `projects.sqlite3` file in an explicit, existing absolute `stor
 
 | Command | Fields besides `command`, `store_root` | Result |
 | --- | --- | --- |
-| `session.create` | `project`, `request_id` | Import a valid snapshot as revision 0 and return its receipt |
+| `session.create` | `project`, or `id`, `width`, `height` and `frame_rate`; `request_id` | Import a valid snapshot, or start an empty project, as revision 0 and return its receipt |
 | `session.get` | `project_id`, optional `revision` | Full saved snapshot; omitted revision selects the current head |
 | `session.apply` | `project_id`, `request_id`, `expected_revision`, `operations` | Commit one batch and return its receipt |
 | `session.preview` | `project_id`, `expected_revision`, `operations` | Semantic before/after diff without saving anything |
@@ -134,7 +134,7 @@ $project = (.\target\debug\cutbolt.exe examples/create-project.json | ConvertFro
 
 Use the same operation objects listed above for `session.apply`; omit the entire `project` field and instead send its ID and the revision read from `session.get`. A receipt contains `project_id`, `request_id`, `action`, `revision`, `parent_revision`, `restored_from` and `changes`. Fetch that exact receipt revision with `session.get` when a renderer needs a stable snapshot. If a response is lost, `session.receipt` with the same `request_id` reports whether the request committed without sending its operations again. Validation errors name the field path and exact value, for example `track "picture" clip "late" source_in` with the unaligned time and clock. Send the retrieved snapshot to the existing `render.plan` / `render.run` commands.
 
-`changes` includes exact old/new sequence duration, changed clip IDs with before/after placements (index, rational timeline start, and full clip), and added/removed/modified asset IDs. Removing or shortening a clip reports shifted subsequent placements too. `session.preview` previews edit semantics, not video pixels. A preview does not reserve a revision: apply with the same `expected_revision` and handle a conflict if another writer commits first.
+`changes` includes exact old/new sequence duration, changed clip IDs with before/after placements (index, rational timeline start, and full clip), and added/removed/modified asset IDs. Removing or shortening a clip reports shifted subsequent placements too. When more than 32 clips only moved in time, with unchanged content, track and sequence, they appear once in `shifted` (count, clip IDs, and `earlier_by` or `later_by` when the offset is uniform) instead of individually. `session.preview` previews edit semantics, not video pixels. A preview does not reserve a revision: apply with the same `expected_revision` and handle a conflict if another writer commits first.
 
 ### Retry and conflict contract
 

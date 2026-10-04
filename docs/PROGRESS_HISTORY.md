@@ -1,5 +1,29 @@
 # Progress history
 
+## 4 October 2026: agent usability fixes from MCP-only trials
+
+Three fresh agents worked through an edit, a title card and a music-plus-captions job using only the MCP view. All three finished only by falling back to CLI-only commands, and 60 to 90% of their response bytes went to schema and capability lookups. This batch addresses most of what they hit:
+
+- **Discovery:**
+  - Large schemas come back as an outline, with `select` for one variant or definition; `scene.render`'s lookup drops from 72 KB to under 1 KB.
+  - `capabilities` is a 3 KB summary with sections, down from 26 KB.
+  - Workspace listings no longer claim that paths must be absolute.
+  - The uninformative per-tool output schema is gone, saving about 18 KB of the catalog.
+- **Inputs:**
+  - Exact time literals: `2.5`, `"5/2"` or `3`.
+  - File identities given as a path alone are hashed on request, and `media.inspect` returns identities.
+  - `session.create` accepts dimensions directly.
+- **Outputs:**
+  - Previews return an inline downscaled image, and contact sheets are available over MCP.
+  - Receipts summarize long ripples: one trim in a 500-clip timeline drops from 165 KB to 3.9 KB.
+  - `scene.render` assets carry their identity.
+- **Errors:**
+  - Type errors name their field.
+  - Missing references list the available IDs, and range errors state exact times.
+  - Content mismatches give the file, its expected and actual values, and a remedy.
+
+The catalog has 66 tools, 225 KB, inside its 240 KiB budget. No baseline, criteria, evidence, weights, exclusions or denominators changed. The recorded fingerprints are stale until the next thorough run.
+
 ## 4 October 2026: one packet listing per source inspection
 
 Phase 1a of the [development-loop plan](DEVELOPMENT_LOOP.md). Reference-source inspection used three `ffprobe` runs per source: stream metadata, every decoded video frame, and every decoded audio frame. It now uses one packet listing, which decodes nothing. That listing returns metadata identical to a plain probe, FFV1 video packet timing, and exact PCM16 sample counts from packet sizes. Only strict inspection adds a second run, which decodes the video frames; validation still happens before any decoding, so unsupported media is rejected as before. Alpha overlays reuse the same metadata instead of probing again.
