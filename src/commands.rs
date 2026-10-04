@@ -469,8 +469,21 @@ pub enum Request {
     SessionCreate {
         /// Existing absolute local directory holding the session database (projects.sqlite3).
         store_root: PathBuf,
-        /// Valid snapshot saved as revision 0 of a new project; its own revision is ignored.
-        project: Project,
+        /// Valid snapshot saved as revision 0 of a new project; its own revision is ignored. Omit it to start an empty project from `id`, `width`, `height` and `frame_rate`.
+        #[serde(default)]
+        project: Option<Project>,
+        /// New empty project ID, 1-128 bytes; use with width, height and frame_rate instead of `project`.
+        #[serde(default)]
+        id: Option<String>,
+        /// New empty project frame width in pixels, 1-8192.
+        #[serde(default)]
+        width: Option<u32>,
+        /// New empty project frame height in pixels, 1-8192.
+        #[serde(default)]
+        height: Option<u32>,
+        /// New empty project frame rate, for example 25 or "30000/1001".
+        #[serde(default)]
+        frame_rate: Option<Time>,
         /// Caller-chosen ID for this change, 1-128 bytes, unique within the project. Resend identical arguments with it to retry safely.
         request_id: String,
     },
@@ -641,6 +654,9 @@ pub fn handle_json(
     if let Some(workspace) = workspace {
         if schema {
             crate::schema::relax_roots(&mut result["schema"]);
+            if let Some(text) = result["description"].as_str() {
+                result["description"] = Value::String(crate::schema::workspace_wording(text));
+            }
         }
         workspace.present(&mut result);
         if capabilities {
@@ -918,12 +934,30 @@ pub fn handle(request: Request) -> Result<Value> {
         Request::SessionCreate {
             store_root,
             project,
+            id,
+            width,
+            height,
+            frame_rate,
             request_id,
-        } => Ok(serde_json::to_value(store::create(
-            &store_root,
-            project,
-            &request_id,
-        )?)?),
+        } => {
+            let project = match (project, id, width, height, frame_rate) {
+                (Some(project), None, None, None, None) => project,
+                (None, Some(id), Some(width), Some(height), Some(frame_rate)) => {
+                    Project::new(id, width, height, frame_rate)?
+                }
+                _ => {
+                    return Err(crate::error(
+                        "INVALID_ARGUMENT",
+                        "Give either project, or all of id, width, height and frame_rate",
+                    ));
+                }
+            };
+            Ok(serde_json::to_value(store::create(
+                &store_root,
+                project,
+                &request_id,
+            )?)?)
+        }
         Request::SessionGet {
             store_root,
             project_id,

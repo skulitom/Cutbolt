@@ -330,6 +330,18 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(copy.code, "INVALID_JSON");
+        // A new session can start from dimensions alone, and a retry replays the same receipt.
+        let direct = json!({"command":"session.create","request_id":"n","id":"n","width":32,"height":24,"frame_rate":{"num":25,"den":1}});
+        let created = handle_json(direct.clone(), ws).unwrap();
+        assert_eq!(created["revision"], 0);
+        assert_eq!(created["project_id"], "n");
+        assert_eq!(handle_json(direct, ws).unwrap(), created);
+        let mixed = handle_json(
+            json!({"command":"session.create","request_id":"m","project":project("m"),"width":32}),
+            ws,
+        )
+        .unwrap_err();
+        assert_eq!(mixed.code, "INVALID_ARGUMENT");
     }
 
     #[test]

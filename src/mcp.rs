@@ -158,7 +158,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Transform a caller-owned snapshot with one atomic batch; returns a new snapshot. tracks.edit supports placed video/audio tracks, links, locks and explicit collisions. For saved edits and safe retries use session.apply instead."
         }
         "session.create" => {
-            "Save a project snapshot as revision 0. store_root must be an existing absolute local directory. Retry with the same request_id and arguments to retrieve the original receipt."
+            "Start a saved project at revision 0, from id/width/height/frame_rate or from a full snapshot. store_root must be an existing absolute local directory. Retry with the same request_id and arguments to retrieve the original receipt."
         }
         "session.get" => {
             "Read the saved head or a chosen immutable revision. Returns the full project. Get the head before editing; use a receipt revision for rendering."
@@ -280,7 +280,11 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
             crate::schema::relax_roots(&mut input);
         }
         let read_only=matches!(command,"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
-        json!({"name":format!("cutbolt_{}",command.replace('.',"_")),"description":description(command),"inputSchema":input,
+        let text = match workspace {
+            Some(_) => crate::schema::workspace_wording(description(command)),
+            None => description(command).to_owned(),
+        };
+        json!({"name":format!("cutbolt_{}",command.replace('.',"_")),"description":text,"inputSchema":input,
             "outputSchema":{"type":"object","properties":{"ok":{"type":"boolean"},"result":{},"error":{"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]}},"required":["ok"],"additionalProperties":false},
             "annotations":{"readOnlyHint":read_only,"destructiveHint":matches!(command,"job.cancel"|"cache.prune"),"idempotentHint":!matches!(command,"preview.frame"|"captions.export"|"interchange.export"|"session.backup"|"session.recover"),"openWorldHint":false}})
     }).collect()
@@ -581,6 +585,25 @@ mod tests {
             start["inputSchema"]["required"],
             json!(["request_id", "render"])
         );
+        // Workspace listings never claim that paths must be absolute.
+        let text = listed["result"]["tools"].to_string().to_lowercase();
+        for phrase in [
+            "absolute path",
+            "absolute dir",
+            "absolute local",
+            "absolute input",
+            "absolute output",
+            "absolute `",
+            "absolute candidate",
+            "absolute media",
+            "unused absolute",
+            "new absolute",
+        ] {
+            assert!(
+                !text.contains(phrase),
+                "workspace listing still says {phrase:?}"
+            );
+        }
         let _ = std::fs::remove_dir_all(&temp);
     }
 

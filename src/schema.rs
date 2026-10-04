@@ -236,6 +236,9 @@ pub(crate) fn context_properties(command: &str, context: &str, object: &Value) -
 pub fn relax_roots(schema: &mut Value) {
     match schema {
         Value::Object(object) => {
+            if let Some(Value::String(text)) = object.get_mut("description") {
+                *text = workspace_wording(text);
+            }
             for (field, relative) in crate::workspace::DEFAULTS {
                 let Some(property) = object.get_mut("properties").and_then(|p| p.get_mut(field))
                 else {
@@ -257,6 +260,38 @@ pub fn relax_roots(schema: &mut Value) {
         Value::Array(items) => items.iter_mut().for_each(relax_roots),
         _ => {}
     }
+}
+
+/// Phrases that require absolute paths without a workspace; with one, relative paths also work.
+const ABSOLUTE_PHRASES: [(&str, &str); 13] = [
+    ("Existing absolute media root", "Existing media root"),
+    (
+        "Existing absolute local directory",
+        "Existing local directory",
+    ),
+    (
+        "existing absolute local directory",
+        "existing local directory",
+    ),
+    ("Existing absolute directory", "Existing directory"),
+    ("Absolute local cache directory", "Local cache directory"),
+    ("Absolute directory", "Directory"),
+    ("Absolute path of", "Path of"),
+    ("Unused absolute ", "Unused "),
+    ("New absolute ", "New "),
+    ("explicit absolute input_root", "explicit input_root"),
+    ("absolute input/output roots", "input/output roots"),
+    ("absolute path,", "path,"),
+    ("Absolute candidate", "Candidate"),
+];
+
+/// Reword a description for a workspace server, where paths may be relative to the workspace.
+pub fn workspace_wording(text: &str) -> String {
+    ABSOLUTE_PHRASES
+        .iter()
+        .fold(text.to_owned(), |text, (absolute, either)| {
+            text.replace(absolute, either)
+        })
 }
 
 #[cfg(test)]
