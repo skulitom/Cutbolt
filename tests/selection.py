@@ -207,7 +207,7 @@ def run(root):
         s=case[0];scale=s['output_scale'];start=(y*scale*s['width']*scale+x*scale)*3
         return tuple(case[-1][start:start+3])
 
-    assert 'selective_grade' in request({'command':'capabilities'})['effects']['types']
+    assert 'selective_grade' in request({'command':'capabilities','section':'all'})['effects']['types']
     baseline=check(base([]),'bypass')
     red=check(base([selective(hue(0,10000,25000))]),'red-soft')
     assert point(red,11,8)==(118,118,118) and point(red,13,8)==palette[5] and point(red,10,8)==palette[2]

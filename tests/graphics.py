@@ -199,7 +199,7 @@ def run(root):
         cases.append({"name":name,"frames":receipt["frames"],"maximum_rgb_delta":delta,"allowed_delta":tolerance})
         return info,receipt,reference
 
-    caps=request({"command":"capabilities"})
+    caps=request({"command":"capabilities","section":"all"})
     assert caps["graphics"]["complex_shaping"] is True and caps["graphics"]["layout"] == "ltr_scalar_v1"
     static=scene([layer(text())])
     info,_,_=check_case(static,"fonts-fallback")

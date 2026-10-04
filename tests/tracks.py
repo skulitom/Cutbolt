@@ -137,7 +137,7 @@ def run(root):
         bad=[edit('add',track=track('must-not-commit','video')),edit('state',track_id='dialogue',locked=True,enabled=True),edit('remove',clip_ids=['low'],links='include')]
         client.call('session.apply','TRACK_LOCKED',**common,expected_revision=3,request_id='failed-batch',operations=bad)
         assert client.call('session.get',**common)==before and client.call('session.history',**common)==history
-        assert client.call('capabilities')['tracks']['profile']=='native-tracks-v1'
+        assert client.call('capabilities',section='all')['tracks']['profile']=='native-tracks-v1'
         passed.append('tracks.atomic_sessions_history_mcp')
 
         for n in [0,2,3,7,8,9,10,13,14,17,18,19]:

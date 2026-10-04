@@ -327,7 +327,7 @@ def run(root):
     passed, measurements = [], {}
     originals = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
 
-    caps = call({"command": "capabilities"})["scenes"]["limits"]
+    caps = call({"command": "capabilities", "section": "all"})["scenes"]["limits"]
     assert caps["canvas_per_axis"] == [1, 4096] and caps["maximum_output_pixels"] == 8_000_000 and caps["text_size"] == [1, 512]
     assert caps["tilemap"]["maximum_tiles"] == 256 and caps["tilemap"]["maximum_cells"] == 4096
     passed.append("native.capability_limits")

@@ -19,6 +19,7 @@ pub mod graphics;
 pub mod hdr;
 pub mod hdr_color;
 mod hdr_metadata;
+pub mod identity;
 pub mod image_sequence;
 pub mod interchange;
 pub mod jobs;

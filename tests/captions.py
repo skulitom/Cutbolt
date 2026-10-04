@@ -64,7 +64,7 @@ def run(root):
     def export(doc,fmt,name,policy='reject',error=None):
         return request({'command':'captions.export','document':doc,'format':fmt,'loss_policy':policy,'output_root':str(output),'output':str(output/name)},error)
     def apply(doc,ops,error=None):return request({'command':'captions.apply','document':doc,'expected_revision':doc['revision'],'operations':ops},error)
-    cap=request({'command':'capabilities'})
+    cap=request({'command':'capabilities','section':'all'})
     assert cap['captions']['export_time']=='exact_milliseconds_no_rounding'
     simple=import_file('original.srt','srt')['document']
     expected_intervals=[(0,41,'AB\nC'),(40,160,'ΩA'),(160,240,'中'),(161,162,'B'),(2000,2040,'A')]

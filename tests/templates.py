@@ -70,7 +70,7 @@ def run(root):
         decoded+=receipt["frames"];rendered.append({"name":name,"frames":receipt["frames"],"maximum_rgb_delta":0})
         return receipt,ref
 
-    cap=request({"command":"capabilities"})
+    cap=request({"command":"capabilities","section":"all"})
     assert "graphics.instantiate" in cap["commands"] and cap["templates"]["maximum_parameters"]==64
     fade={"keys":[{"time":time(0),"value":0,"interpolation":"linear"},{"time":time(3,25),"value":255,"interpolation":"hold"},{"time":time(7,25),"value":128,"interpolation":"ease_out"},{"time":time(11,25),"value":0,"interpolation":"hold"}]}
     base_values={"fonts":value("fonts",fonts),"label":value("text","A Ω中"),"duration":value("time",time(12,25)),"fade":value("curve",fade)}

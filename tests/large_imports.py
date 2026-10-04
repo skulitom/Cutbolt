@@ -92,7 +92,7 @@ def run(root):
     assert sizes["long.mkv"] > 64 * MIB and sizes["long.wav"] > 128 * MIB, sizes
     passed, cases = [], []
 
-    capabilities = call({"command": "capabilities"})["conform"]
+    capabilities = call({"command": "capabilities", "section": "all"})["conform"]
     assert capabilities["maximum_output_frames"] >= 45000 and capabilities["source_maximum_bytes"] >= 16 * 1024 * MIB
     assert capabilities["source_maximum_audio_seconds"] >= 3600
     assert capabilities["decoding"]["forward"] == "streamed_needed_frames"

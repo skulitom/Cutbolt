@@ -432,7 +432,11 @@ pub enum Request {
         duration: Time,
     },
     #[serde(rename = "capabilities")]
-    Capabilities {},
+    Capabilities {
+        /// One area to describe in full, such as `renderer`, `scenes` or `export`, or `all` for everything. Omit for a short summary that lists the areas.
+        #[serde(default)]
+        section: Option<String>,
+    },
     #[serde(rename = "schema")]
     Schema {
         /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template` or `audio_routing`.
@@ -653,10 +657,14 @@ pub fn handle_json(
     }
     let store = workspace.map(crate::workspace::Workspace::store_root);
     crate::reference::resolve(&mut request, store.as_deref())?;
+    let completed = crate::identity::complete(&mut request)?;
     let request: Request = serde_json::from_value(request)?;
     let schema = matches!(request, Request::Schema { .. });
-    let capabilities = matches!(request, Request::Capabilities {});
+    let capabilities = matches!(&request, Request::Capabilities { section } if section.as_deref().is_none_or(|s| s == "all"));
     let mut result = handle(request)?;
+    if !completed.is_empty() && result.is_object() {
+        result["resolved_identities"] = Value::Array(completed);
+    }
     if let Some(workspace) = workspace {
         if schema {
             crate::schema::relax_roots(&mut result["schema"]);
@@ -891,33 +899,7 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             duration,
         ),
-        Request::Capabilities {} => {
-            let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
-            "interchange":crate::interchange::capabilities(),
-            "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-            "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume"],
-            "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
-            "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
-            "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
-            "transcripts":crate::transcript::capabilities(),
-            "audio_repair":crate::audio_repair::capabilities(),
-            "audio_recording":{"platform":"windows","sample_rate":48000,"channels":2,"sample_format":"s16le","maximum_seconds":7200,"input_selection":"explicit_endpoint_or_process","recording":"blocking_cli_library","placement":"existing_native_audio_tracks","latency_compensation":"explicit_exact_shift","source_preservation":true},
-            "stabilization":crate::stabilize::capabilities(),
-            "native_projects":crate::native_project::capabilities(),"image_sequences":crate::image_sequence::capabilities(),"scenes":{"spatial":crate::spatial::capabilities(),"profile":"pixel-scene-v1","maximum_seconds":10,"limits":crate::scene::limits(),"color":"srgb_straight_encoded","render_mode":"blocking CLI/library","alpha_modes":["straight","premultiplied"],"blend_modes":["normal","multiply","screen"],"mask":{"shape":"rectangle","space":"source_canvas_before_transform","inversion":true,"animated_properties":["x","y","width","height"],"maximum_per_layer":1,"feather":{"radius":[1,4096],"edges":["inner","centered","outer"],"coverage_grid":65536},"tracking":crate::tracking::capabilities()},"animation":{"properties":["position_x","position_y","opacity"],"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"easing_profile":"quadratic","clock":"layer_local","retime":{"scope":"per_property_or_mask_curve","start":"layer_local_playback_anchor","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"changes_media_time":false},"rounding":"nearest_ties_away_from_zero","maximum_keys_per_curve":128,"maximum_reduced_time_denominator":1000000,"precision":"checked_exact_integer_overflow_rejected"}},"renderer":{"profile":"reference-ffv1-pcm-v1","frame_rate":25,"sequential_frame_rates":[{"num":24,"den":1},{"num":25,"den":1},{"num":30,"den":1},{"num":50,"den":1},{"num":60,"den":1},{"num":24000,"den":1001},{"num":30000,"den":1001},{"num":60000,"den":1001}],"sequential_cut_policy":"whole_video_frames_and_48000_hz_samples","placed_track_frame_rate":25,"maximum_sequential_frames":180000,"large_raster":{"minimum_pixels":8000000,"minimum_dimension":4,"sequential_encoder_threads":16,"sequential_slices":16,"sequential_input_decoder_threads":4,"video_inspection_threads":16,"video_inspection_timeout_seconds":900,"sequential_encode_timeout_seconds":1800},"audio_rate":48000,"channels":2,"maximum_clips":64,"gaps":{"explicit":true,"video":"black","audio":"silence","maximum_frames":180000}},
-            "graphics":crate::graphics::capabilities(),
-            "tracks":crate::tracks::capabilities(),"sequences":crate::sequences::capabilities(),"multicam":crate::multicam::capabilities(),"synchronization":crate::sync::capabilities(),
-            "templates":crate::templates::capabilities(),
-            "captions":crate::captions::capabilities(),
-            "effects":crate::effects::capabilities(),
-            "export":crate::delivery::capabilities(),
-            "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
-            "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
-            result["expressions"] = crate::expressions::capabilities();
-            result["temporal"] = crate::temporal::capabilities();
-            result["geometry"] = crate::geometry::capabilities();
-            result["frame_matte"] = json!({"profile":"binary-source-matte-v1","field":"scene.layers[].frames[].matte","identity":"relative path, SHA-256 and bytes","pixels":"opaque black/white RGB or RGBA PNG matching source dimensions","processing":"held with source, before effects and transforms","limits":"included in existing source byte and decoded/derived pixel budgets","optional_producer":"tools/segmentation.py; annotated frames; external pinned CPU runtime; no automatic tracking"});
-            Ok(result)
-        }
+        Request::Capabilities { section } => capabilities(section.as_deref()),
         Request::Schema { name, select, full } => {
             crate::schema::lookup(&name, select.as_deref(), full)
         }
@@ -1055,7 +1037,8 @@ pub fn handle(request: Request) -> Result<Value> {
         Request::JobResume { job_root } => jobs::resume(&job_root),
         Request::Inspect { path, input_root } => {
             let path = media::allowed_file(&path, &input_root)?;
-            Ok(json!({"path":path,"metadata":media::probe(&path)?}))
+            let identity = crate::identity::relative(&path, &input_root)?;
+            Ok(json!({"path":path,"identity":identity,"metadata":media::probe(&path)?}))
         }
         Request::Plan {
             project,
@@ -1074,5 +1057,137 @@ pub fn handle(request: Request) -> Result<Value> {
             output_root,
             output,
         } => render::run(&project, &input_root, &output_root, &output),
+    }
+}
+
+/// Everything the engine can do and every limit, by area.
+fn all_capabilities() -> Value {
+    let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
+    "interchange":crate::interchange::capabilities(),
+    "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume"],
+    "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
+    "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
+    "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
+    "transcripts":crate::transcript::capabilities(),
+    "audio_repair":crate::audio_repair::capabilities(),
+    "audio_recording":{"platform":"windows","sample_rate":48000,"channels":2,"sample_format":"s16le","maximum_seconds":7200,"input_selection":"explicit_endpoint_or_process","recording":"blocking_cli_library","placement":"existing_native_audio_tracks","latency_compensation":"explicit_exact_shift","source_preservation":true},
+    "stabilization":crate::stabilize::capabilities(),
+    "native_projects":crate::native_project::capabilities(),"image_sequences":crate::image_sequence::capabilities(),"scenes":{"spatial":crate::spatial::capabilities(),"profile":"pixel-scene-v1","maximum_seconds":10,"limits":crate::scene::limits(),"color":"srgb_straight_encoded","render_mode":"blocking CLI/library","alpha_modes":["straight","premultiplied"],"blend_modes":["normal","multiply","screen"],"mask":{"shape":"rectangle","space":"source_canvas_before_transform","inversion":true,"animated_properties":["x","y","width","height"],"maximum_per_layer":1,"feather":{"radius":[1,4096],"edges":["inner","centered","outer"],"coverage_grid":65536},"tracking":crate::tracking::capabilities()},"animation":{"properties":["position_x","position_y","opacity"],"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"easing_profile":"quadratic","clock":"layer_local","retime":{"scope":"per_property_or_mask_curve","start":"layer_local_playback_anchor","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"changes_media_time":false},"rounding":"nearest_ties_away_from_zero","maximum_keys_per_curve":128,"maximum_reduced_time_denominator":1000000,"precision":"checked_exact_integer_overflow_rejected"}},"renderer":{"profile":"reference-ffv1-pcm-v1","frame_rate":25,"sequential_frame_rates":[{"num":24,"den":1},{"num":25,"den":1},{"num":30,"den":1},{"num":50,"den":1},{"num":60,"den":1},{"num":24000,"den":1001},{"num":30000,"den":1001},{"num":60000,"den":1001}],"sequential_cut_policy":"whole_video_frames_and_48000_hz_samples","placed_track_frame_rate":25,"maximum_sequential_frames":180000,"large_raster":{"minimum_pixels":8000000,"minimum_dimension":4,"sequential_encoder_threads":16,"sequential_slices":16,"sequential_input_decoder_threads":4,"video_inspection_threads":16,"video_inspection_timeout_seconds":900,"sequential_encode_timeout_seconds":1800},"audio_rate":48000,"channels":2,"maximum_clips":64,"gaps":{"explicit":true,"video":"black","audio":"silence","maximum_frames":180000}},
+    "graphics":crate::graphics::capabilities(),
+    "tracks":crate::tracks::capabilities(),"sequences":crate::sequences::capabilities(),"multicam":crate::multicam::capabilities(),"synchronization":crate::sync::capabilities(),
+    "templates":crate::templates::capabilities(),
+    "captions":crate::captions::capabilities(),
+    "effects":crate::effects::capabilities(),
+    "export":crate::delivery::capabilities(),
+    "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
+    "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
+    result["expressions"] = crate::expressions::capabilities();
+    result["temporal"] = crate::temporal::capabilities();
+    result["geometry"] = crate::geometry::capabilities();
+    result["frame_matte"] = json!({"profile":"binary-source-matte-v1","field":"scene.layers[].frames[].matte","identity":"relative path, SHA-256 and bytes","pixels":"opaque black/white RGB or RGBA PNG matching source dimensions","processing":"held with source, before effects and transforms","limits":"included in existing source byte and decoded/derived pixel budgets","optional_producer":"tools/segmentation.py; annotated frames; external pinned CPU runtime; no automatic tracking"});
+    result
+}
+
+fn rate(time: &Value) -> String {
+    match (time["num"].as_u64(), time["den"].as_u64()) {
+        (Some(num), Some(1)) => num.to_string(),
+        (Some(num), Some(den)) => format!("{num}/{den}"),
+        _ => time.to_string(),
+    }
+}
+
+/// A short summary by default, one area by name, or everything with `all`.
+fn capabilities(section: Option<&str>) -> Result<Value> {
+    let all = all_capabilities();
+    match section {
+        Some("all") => return Ok(all),
+        Some(name) => {
+            return match all.get(name) {
+                Some(value) if !matches!(name, "version" | "license" | "local_only") => {
+                    Ok(json!({ name: value }))
+                }
+                _ => Err(crate::error(
+                    "UNKNOWN_SECTION",
+                    format!(
+                        "No capabilities section {name:?}; choose all or one of: {}",
+                        sections(&all).join(", ")
+                    ),
+                )),
+            };
+        }
+        None => {}
+    }
+    let renderer = &all["renderer"];
+    let scenes = &all["scenes"]["limits"];
+    let rates: Vec<String> = renderer["sequential_frame_rates"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(rate)
+        .collect();
+    let essentials = [
+        "Timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio at the project size (the reference profile); convert other media with media.conform into editing assets.".to_owned(),
+        format!(
+            "Sequential timelines run at {} fps; placed tracks, scenes, proxies and H.264 delivery use {} fps.",
+            rates.join(", "),
+            renderer["placed_track_frame_rate"]
+        ),
+        format!(
+            "Renders take 1 to {} clips and up to {} frames. render.start queues reference .mkv renders; export.run delivers H.264/AAC or lossless files.",
+            renderer["maximum_clips"], renderer["maximum_sequential_frames"]
+        ),
+        format!(
+            "Scenes (titles, graphics, captions) last up to {} frames at {} fps, with up to {} layers and {} px per axis; scene.render compiles one into an editing asset.",
+            scenes["frames"][1],
+            rate(&scenes["frame_rate"]),
+            scenes["layers"][1],
+            scenes["canvas_per_axis"][1]
+        ),
+        "Times are exact: 2.5, \"5/2\" or {num, den} seconds, on frame boundaries, and on whole 48 kHz samples for audio cuts.".to_owned(),
+    ];
+    Ok(
+        json!({"version":all["version"],"license":all["license"],"local_only":all["local_only"],
+        "essentials":essentials,"commands":all["commands"],"operations":all["operations"],
+        "sections":sections(&all),
+        "note":"Pass section with one of these names for its details, or all for everything."}),
+    )
+}
+
+fn sections(all: &Value) -> Vec<String> {
+    let summary = ["version", "license", "local_only", "commands", "operations"];
+    all.as_object()
+        .into_iter()
+        .flat_map(|o| o.keys())
+        .filter(|k| !summary.contains(&k.as_str()))
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capabilities_summarize_by_default_and_detail_by_section() {
+        let summary = capabilities(None).unwrap();
+        assert!(summary.to_string().len() < 6 * 1024);
+        assert_eq!(summary["local_only"], true);
+        assert!(
+            summary["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c == "render.run")
+        );
+        let sections = summary["sections"].as_array().unwrap();
+        assert!(sections.iter().any(|s| s == "scenes"));
+        let scenes = capabilities(Some("scenes")).unwrap();
+        assert!(scenes["scenes"]["limits"].is_object());
+        assert_eq!(capabilities(Some("all")).unwrap(), all_capabilities());
+        assert_eq!(
+            capabilities(Some("nope")).unwrap_err().code,
+            "UNKNOWN_SECTION"
+        );
     }
 }

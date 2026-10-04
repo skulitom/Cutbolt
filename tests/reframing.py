@@ -154,7 +154,7 @@ def run(root):
         print(json.dumps(cases[-1]),flush=True)
         return req,result,receipt,expected,pcm
 
-    cap=call({'command':'capabilities'})
+    cap=call({'command':'capabilities','section':'all'})
     assert 'reframe.inspect' in cap['commands'] and cap['reframing']['maximum_frames']==128
     boxes=[[16+2*n,23+[0,2,0,-2][n%4],6,5] for n in range(16)]
     first=None

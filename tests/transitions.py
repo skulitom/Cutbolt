@@ -136,7 +136,7 @@ def run(root):
         assert client.call('session.get',**common)==saved and client.call('session.history',**common)==history
         client.call('session.undo',**common,expected_revision=1,request_id='undo');assert client.call('session.get',**common)['tracks']==before['tracks']
         client.call('session.restore',**common,expected_revision=2,request_id='restore',target_revision=1);assert client.call('session.get',**common)['tracks']==p['tracks'];render(client.call('session.get',**common),'saved-restored')
-        assert client.call('capabilities')['tracks']['transitions']['video']==['dissolve','dip_black','wipe_left','wipe_right'];passed.append('transitions.saved_diffs_history_schema')
+        assert client.call('capabilities',section='all')['tracks']['transitions']['video']==['dissolve','dip_black','wipe_left','wipe_right'];passed.append('transitions.saved_diffs_history_schema')
         for kind in ('dissolve','dip_black','wipe_left','wipe_right'):
             q=apply(base,effects(kind));rgb,_=oracle(q)
             for n in [7,8,9,10,11,12,13]:

@@ -190,7 +190,7 @@ def run(root):
         s=case[0];scale=s['output_scale'];start=(y*scale*s['width']*scale+x*scale)*3
         return tuple(case[-1][start:start+3])
 
-    assert 'chroma_key' in request({'command':'capabilities'})['effects']['types']
+    assert 'chroma_key' in request({'command':'capabilities','section':'all'})['effects']['types']
     baseline=check(base([]),'bypass')
     soft=check(base([key()]),'green-soft')
     assert point(soft,8,8)==(23,57,101) and point(soft,9,8)==palette[1] and point(soft,11,8)==palette[3]

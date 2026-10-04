@@ -618,6 +618,25 @@ mod tests {
         }
     }
 
+    /// identity::complete treats any object of only path/sha256/bytes keys as a file identity.
+    #[test]
+    fn only_file_identities_look_like_file_identities() {
+        let shape = ["path", "sha256", "bytes"];
+        for (name, definition) in definitions() {
+            walk(definition, &mut |node| {
+                let Some(properties) = node.get("properties").and_then(Value::as_object) else {
+                    return;
+                };
+                let looks = properties.contains_key("path")
+                    && properties.keys().all(|k| shape.contains(&k.as_str()));
+                assert!(
+                    !looks || properties.len() == 3 && name == "Identity",
+                    "{name} has an identity-like shape and would be hashed"
+                );
+            });
+        }
+    }
+
     #[test]
     fn workspace_schemas_make_supplied_roots_optional() {
         let mut render = arguments("render.start", true).unwrap();

@@ -50,9 +50,11 @@ pub(crate) fn limits() -> Value {
 pub struct Identity {
     /// Relative path of normal components inside `input_root`; no `..`, drive or absolute parts.
     pub path: PathBuf,
-    /// Lowercase hex SHA-256 of the file contents (64 characters).
+    /// Lowercase hex SHA-256 of the file contents (64 characters). Omit it, with or without `bytes`, to have the file hashed when the request runs.
+    #[serde(default)]
     pub sha256: String,
-    /// Exact nonzero file size in bytes; checked against the file before use.
+    /// Exact nonzero file size in bytes; checked against the file before use. Omitted values are read from the file.
+    #[serde(default)]
     pub bytes: u64,
 }
 /// One held source image in a layer or tile animation.
@@ -1628,7 +1630,8 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     report["ffmpeg"] = json!(ffmpeg);
     report["ffprobe"] = json!(ffprobe);
     report["scene_sha256"] = json!(format!("{:x}", Sha256::digest(serde_json::to_vec(scene)?)));
-    report["asset"] = json!({"id":scene.id,"path":output,"duration":scene.duration});
+    report["asset"] = json!({"id":scene.id,"path":output,"duration":scene.duration,
+        "identity":{"sha256":verified.sha256,"bytes":fs::metadata(&temp)?.len()}});
     media::publish(&temp, &output)?;
     Ok(report)
 }

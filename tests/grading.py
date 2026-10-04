@@ -157,7 +157,7 @@ def run(root):
         raw=verify_bytes(output/(name+'.mkv'),scene,expected,count);cases.append(name)
         return scene,info,receipt,expected,raw
 
-    assert request({'command':'capabilities'})['effects']['working_space']=='linear_srgb_f64'
+    assert request({'command':'capabilities','section':'all'})['effects']['working_space']=='linear_srgb_f64'
     bypass=check(base(),'bypass');identity_case=check(base([grade()]),'neutral')
     assert bypass[-1]==identity_case[-1]
     identity_curve={'points':[[0,0],[100,100],[32768,32768],[65535,65535]]}

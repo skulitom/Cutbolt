@@ -184,7 +184,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Read newest-first revision summaries. limit defaults to 50 (1-200). Pass next_before_revision as before_revision for the next page; null means finished."
         }
         "media.inspect" => {
-            "Probe a local source inside an explicit absolute input_root. Returns stream metadata; inspection does not imply this format can be rendered."
+            "Probe a local source inside an explicit absolute input_root. Returns its content identity (path relative to input_root, SHA-256, bytes) and stream metadata; inspection does not imply this format can be rendered."
         }
         "render.plan" => {
             "Validate the narrow reference media profile and inspect an export plan. Requires absolute input/output roots and an unused .mkv output. May take time to decode source metadata."
