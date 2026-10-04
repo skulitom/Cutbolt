@@ -80,6 +80,46 @@ pub fn error(code: &'static str, message: impl Into<String>) -> Error {
     }
 }
 
+/// Most IDs a missing-reference message lists before counting the rest.
+pub(crate) const LISTED_IDS: usize = 20;
+
+/// Error for a reference to an absent `kind` ID, listing the IDs that do exist so the caller can correct it.
+pub(crate) fn missing<'a>(
+    code: &'static str,
+    kind: &str,
+    id: &str,
+    available: impl IntoIterator<Item = &'a str>,
+) -> Error {
+    let mut ids: Vec<&str> = available.into_iter().collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let total = ids.len();
+    ids.truncate(LISTED_IDS);
+    missing_listed(code, kind, id, &ids, total)
+}
+
+/// `missing` for callers that load only the first `LISTED_IDS` sorted IDs and the total count.
+pub(crate) fn missing_listed(
+    code: &'static str,
+    kind: &str,
+    id: &str,
+    first: &[impl AsRef<str>],
+    total: usize,
+) -> Error {
+    let mut listed: Vec<String> = first.iter().map(|v| format!("{:?}", v.as_ref())).collect();
+    if listed.is_empty() {
+        listed.push("none".into());
+    }
+    let mut message = format!(
+        "Unknown {kind} {id:?}; available {kind} IDs: {}",
+        listed.join(", ")
+    );
+    if total > first.len() {
+        message += &format!(" … and {} more", total - first.len());
+    }
+    error(code, message)
+}
+
 /// Prefix an error with the JSON path of the request field that caused it, keeping its code.
 pub(crate) trait At<T> {
     fn at(self, path: impl FnOnce() -> String) -> Result<T>;
@@ -118,5 +158,40 @@ impl From<rusqlite::Error> for Error {
             _ => "STORE_ERROR",
         };
         error(code, value.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn missing_references_list_sorted_bounded_candidates() {
+        let none = missing("MISSING_TRACK", "track", "v9", []);
+        assert_eq!(
+            (none.code, none.message.as_str()),
+            (
+                "MISSING_TRACK",
+                r#"Unknown track "v9"; available track IDs: none"#
+            )
+        );
+        let some = missing("MISSING_CLIP", "clip", "nope", ["c2", "c1", "c2"]);
+        assert_eq!(
+            some.message,
+            r#"Unknown clip "nope"; available clip IDs: "c1", "c2""#
+        );
+        let names: Vec<String> = (0..25).map(|i| format!("a{i:02}")).collect();
+        let many = missing(
+            "MISSING_MEDIA",
+            "asset",
+            "x",
+            names.iter().map(String::as_str),
+        );
+        assert!(
+            many.message.contains(r#""a00", "a01""#)
+                && many.message.contains(r#""a19" … and 5 more"#)
+                && !many.message.contains("a20"),
+            "{}",
+            many.message
+        );
     }
 }

@@ -385,8 +385,21 @@ type JobRow = (
 fn state(connection: &Connection, id: &str) -> Result<Value> {
     let row:Option<JobRow>=connection.query_row(
         "SELECT status,phase,cancel_requested,frames,total_frames,result,failure,ticket,worker_pid FROM jobs WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?))).optional()?;
-    let (status, phase, cancelled, frames, total, result, failure, ticket, worker_pid) =
-        row.ok_or_else(|| error("JOB_NOT_FOUND", id))?;
+    let Some((status, phase, cancelled, frames, total, result, failure, ticket, worker_pid)) = row
+    else {
+        let count: i64 = connection.query_row("SELECT count(*) FROM jobs", [], |r| r.get(0))?;
+        let first = connection
+            .prepare("SELECT id FROM jobs ORDER BY id LIMIT ?1")?
+            .query_map([crate::LISTED_IDS as i64], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        return Err(crate::missing_listed(
+            "JOB_NOT_FOUND",
+            "job",
+            id,
+            &first,
+            count as usize,
+        ));
+    };
     let parse = |s: Option<String>| -> Result<Value> {
         Ok(s.map(|s| serde_json::from_str(&s))
             .transpose()?

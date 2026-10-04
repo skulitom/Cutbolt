@@ -284,6 +284,22 @@ fn saved_number(value: i64) -> Result<u64> {
     Ok(value as u64)
 }
 
+/// PROJECT_NOT_FOUND naming `project_id` and the first project IDs saved in this store.
+fn missing_project(connection: &Connection, project_id: &str) -> Result<crate::Error> {
+    let total: i64 = connection.query_row("SELECT count(*) FROM projects", [], |r| r.get(0))?;
+    let first = connection
+        .prepare("SELECT id FROM projects ORDER BY id LIMIT ?1")?
+        .query_map([crate::LISTED_IDS as i64], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(crate::missing_listed(
+        "PROJECT_NOT_FOUND",
+        "project",
+        project_id,
+        &first,
+        total as usize,
+    ))
+}
+
 fn head(connection: &Connection, project_id: &str) -> Result<u64> {
     check_id(project_id)?;
     let value: Option<i64> = connection
@@ -291,7 +307,10 @@ fn head(connection: &Connection, project_id: &str) -> Result<u64> {
             r.get(0)
         })
         .optional()?;
-    let value = saved_number(value.ok_or_else(|| error("PROJECT_NOT_FOUND", project_id))?)?;
+    let Some(value) = value else {
+        return Err(missing_project(connection, project_id)?);
+    };
+    let value = saved_number(value)?;
     let latest: Option<i64> = connection.query_row(
         "SELECT max(revision) FROM revisions WHERE project_id=?1",
         [project_id],

@@ -25,7 +25,14 @@ pub(crate) fn get<'a>(project: &'a Project, id: &str) -> Result<&'a Sequence> {
         .sequences
         .iter()
         .find(|s| s.id == id)
-        .ok_or_else(|| error("MISSING_SEQUENCE", id))
+        .ok_or_else(|| {
+            crate::missing(
+                "MISSING_SEQUENCE",
+                "sequence",
+                id,
+                project.sequences.iter().map(|s| s.id.as_str()),
+            )
+        })
 }
 fn dependencies(sequence: &Sequence) -> BTreeSet<&str> {
     sequence

@@ -1,6 +1,6 @@
 //! Bounded original editorial mapping against the public OTIO data contract.
 use crate::{
-    Result, error, media,
+    At, Result, error, media,
     model::{Asset, Project},
     render, scene,
     time::Time,
@@ -289,12 +289,13 @@ fn checked_asset(asset: &Asset, root: &Path) -> Result<PathBuf> {
     })?;
     identity.validate()?;
     let path = local_path(&asset.path, root)?;
-    if path.metadata()?.len() != identity.bytes || media::file_hash(&path)? != identity.sha256 {
-        return Err(error(
-            "MEDIA_CHANGED",
-            format!("Bound media changed: {}", asset.id),
-        ));
-    }
+    crate::registry::check_file(
+        &path,
+        &asset.path,
+        identity,
+        crate::registry::UPDATE_IDENTITY,
+    )
+    .at(|| format!("asset {:?}", asset.id))?;
     Ok(path)
 }
 
@@ -364,14 +365,13 @@ pub(crate) fn import_document(request: &Import, document: &Value) -> Result<Valu
                 .into_owned();
             if let Some(proxy) = &mut asset.proxy {
                 let path = local_path(&proxy.path, &request.media_root)?;
-                if path.metadata()?.len() != proxy.identity.bytes
-                    || media::file_hash(&path)? != proxy.identity.sha256
-                {
-                    return Err(error(
-                        "MEDIA_CHANGED",
-                        format!("Bound proxy changed: {}", asset.id),
-                    ));
-                }
+                crate::registry::check_file(
+                    &path,
+                    &proxy.path,
+                    &proxy.identity,
+                    crate::registry::UPDATE_IDENTITY,
+                )
+                .at(|| format!("asset {:?} proxy", asset.id))?;
                 proxy.path = path.to_string_lossy().into_owned();
             }
         }

@@ -62,11 +62,7 @@ impl Binding {
     }
 }
 fn asset<'a>(project: &'a Project, id: &str) -> Result<&'a Asset> {
-    project
-        .assets
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| error("MISSING_MEDIA", id))
+    project.asset(id)
 }
 /// proxy.generate request: write a reduced-size FFV1/PCM proxy of one asset and propose a media.proxy.attach operation. The project is not saved.
 #[derive(Deserialize, schemars::JsonSchema)]

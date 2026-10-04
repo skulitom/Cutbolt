@@ -1,5 +1,10 @@
 //! Local, explicitly selected audio capture and inspectable native-track placement.
-use crate::{Result, error, media, pcm_stream, render, scene, time::Time};
+use crate::{
+    At, Result, error, media, pcm_stream,
+    registry::{UPDATE_IDENTITY, changed_digest, changed_size},
+    render, scene,
+    time::Time,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -298,10 +303,21 @@ pub fn place(request: &Place) -> Result<Value> {
     }
     let path = media::allowed_file(&request.source.path, &request.input_root)?;
     let actual = pcm_stream::inspect(&path, &media::Uncontrolled)?;
-    if actual.bytes != request.source.bytes || actual.sha256 != request.source.sha256 {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Recorded source differs from its supplied identity",
+    let source = request.source.path.to_string_lossy();
+    if actual.bytes != request.source.bytes {
+        return Err(changed_size(
+            &source,
+            request.source.bytes,
+            actual.bytes,
+            UPDATE_IDENTITY,
+        ));
+    }
+    if actual.sha256 != request.source.sha256 {
+        return Err(changed_digest(
+            &source,
+            &request.source.sha256,
+            &actual.sha256,
+            UPDATE_IDENTITY,
         ));
     }
     request.start.units(RATE)?;
@@ -336,7 +352,8 @@ pub fn place(request: &Place) -> Result<Value> {
         .tracks
         .iter()
         .find(|t| t.id == request.track_id)
-        .ok_or_else(|| error("MISSING_TRACK", "Recording target track is missing"))?;
+        .ok_or_else(|| arrangement.missing_track(&request.track_id))
+        .at(|| "track_id".into())?;
     if track.kind != crate::tracks::Kind::Audio {
         return Err(error(
             "INVALID_CAPTURE_PLACEMENT",

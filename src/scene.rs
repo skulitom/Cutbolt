@@ -4,7 +4,9 @@ use crate::{
     At, Result,
     animation::Curve,
     composite::{self, AlphaMode, BlendMode, RectMask},
-    error, media, render,
+    error, media,
+    registry::{UPDATE_IDENTITY, changed_digest, changed_size},
+    render,
     time::Time,
 };
 use serde::{Deserialize, Serialize};
@@ -521,11 +523,10 @@ pub(crate) fn identity_bytes(identity: &Identity, root: &Path) -> Result<(PathBu
         ));
     }
     let path = media::allowed_file(&root.join(&identity.path), root)?;
-    if fs::metadata(&path)?.len() != identity.bytes {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Source byte count differs from its identity",
-        ));
+    let label = identity.path.to_string_lossy();
+    let size = fs::metadata(&path)?.len();
+    if size != identity.bytes {
+        return Err(changed_size(&label, identity.bytes, size, UPDATE_IDENTITY));
     }
     // Read at most the declared bounded length, even if a concurrent writer grows the file.
     use std::io::Read;
@@ -533,12 +534,13 @@ pub(crate) fn identity_bytes(identity: &Identity, root: &Path) -> Result<(PathBu
     File::open(&path)?
         .take(identity.bytes + 1)
         .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != identity.bytes
-        || format!("{:x}", Sha256::digest(&bytes)) != identity.sha256
-    {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Source digest differs from its identity",
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    if bytes.len() as u64 != identity.bytes || digest != identity.sha256 {
+        return Err(changed_digest(
+            &label,
+            &identity.sha256,
+            &digest,
+            UPDATE_IDENTITY,
         ));
     }
     Ok((path, bytes))
@@ -575,17 +577,23 @@ pub(crate) fn identity_file(identity: &Identity, root: &Path, max_bytes: u64) ->
         ));
     }
     let path = media::allowed_file(&root.join(&identity.path), root)?;
-    if fs::metadata(&path)?.len() != identity.bytes {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Source byte count differs from its identity",
+    let label = identity.path.to_string_lossy();
+    let size = fs::metadata(&path)?.len();
+    if size != identity.bytes {
+        return Err(changed_size(&label, identity.bytes, size, UPDATE_IDENTITY));
+    }
+    let digest = media::file_hash(&path)?;
+    if digest != identity.sha256 {
+        return Err(changed_digest(
+            &label,
+            &identity.sha256,
+            &digest,
+            UPDATE_IDENTITY,
         ));
     }
-    if media::file_hash(&path)? != identity.sha256 || fs::metadata(&path)?.len() != identity.bytes {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Source digest differs from its identity",
-        ));
+    let size = fs::metadata(&path)?.len();
+    if size != identity.bytes {
+        return Err(changed_size(&label, identity.bytes, size, UPDATE_IDENTITY));
     }
     Ok(path)
 }

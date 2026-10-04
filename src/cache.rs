@@ -5,7 +5,7 @@ use crate::{
     Result, error, media,
     model::{Operation, Project},
     preview, proxy,
-    registry::Identity,
+    registry::{self, Identity},
     render,
     time::Time,
 };
@@ -113,17 +113,29 @@ struct Source {
     path: PathBuf,
     identity: Identity,
 }
-fn source(id: String, path: &Path, root: &Path, expected: Option<&Identity>) -> Result<Source> {
-    let path = media::allowed_file(path, root)?;
+fn source(
+    id: String,
+    requested: &Path,
+    root: &Path,
+    expected: Option<&Identity>,
+) -> Result<Source> {
+    let path = media::allowed_file(requested, root)?;
     let identity = Identity {
         bytes: fs::metadata(&path)?.len(),
         sha256: media::file_hash(&path)?,
     };
-    if expected.is_some_and(|e| *e != identity) {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Cache source differs from its declared identity",
-        ));
+    if let Some(e) = expected.filter(|e| **e != identity) {
+        let label = requested.to_string_lossy();
+        return Err(if e.bytes != identity.bytes {
+            registry::changed_size(&label, e.bytes, identity.bytes, registry::UPDATE_IDENTITY)
+        } else {
+            registry::changed_digest(
+                &label,
+                &e.sha256,
+                &identity.sha256,
+                registry::UPDATE_IDENTITY,
+            )
+        });
     }
     Ok(Source { id, path, identity })
 }
@@ -274,11 +286,7 @@ pub fn run(request: &Request) -> Result<Value> {
             if project.revision != *expected_revision {
                 return Err(error("REVISION_CONFLICT", "Expected revision differs"));
             }
-            let asset = project
-                .assets
-                .iter()
-                .find(|a| a.id == *asset_id)
-                .ok_or_else(|| error("MISSING_MEDIA", asset_id))?;
+            let asset = project.asset(asset_id)?;
             if asset.identity.is_none() {
                 return Err(error(
                     "IDENTITY_REQUIRED",

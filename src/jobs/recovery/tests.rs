@@ -120,6 +120,20 @@ fn crash_at(root: &Path, stage: &str, fractional: bool) {
 }
 
 #[test]
+fn unknown_job_lists_existing_ids() {
+    let fixture = Fixture::new();
+    let (connection, _) = seed(&fixture.0, 1);
+    let missing = state(&connection, "absent").unwrap_err();
+    assert_eq!(
+        (missing.code, missing.message.as_str()),
+        (
+            "JOB_NOT_FOUND",
+            r#"Unknown job "absent"; available job IDs: "one""#
+        )
+    );
+}
+
+#[test]
 fn fractional_publication_crash_recovers_exact_frame_and_audio_clocks() {
     let fixture = Fixture::new();
     crash_at(&fixture.0, "published", true);

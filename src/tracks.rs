@@ -46,12 +46,7 @@ impl TrackClip {
     pub(crate) fn source_duration(&self, project: &Project) -> Result<Time> {
         match (&self.sequence_id, self.asset_id.is_empty()) {
             (Some(id), true) => Ok(crate::sequences::get(project, id)?.arrangement.duration),
-            (None, false) => project
-                .assets
-                .iter()
-                .find(|a| a.id == self.asset_id)
-                .map(|a| a.duration)
-                .ok_or_else(|| error("MISSING_MEDIA", &self.asset_id)),
+            (None, false) => project.asset(&self.asset_id).map(|a| a.duration),
             _ => Err(error(
                 "INVALID_CLIP_SOURCE",
                 "A track clip requires exactly one nonempty asset_id or sequence_id",
@@ -426,18 +421,30 @@ impl Arrangement {
                     t.units(track.kind.clock(project.frame_rate))
                         .at(|| format!("track {:?} clip {:?} {field}", track.id, clip.id))?;
                 }
-                let source_duration = clip.source_duration(project)?;
-                if clip.duration.num == 0
-                    || clip.end()?.compare(self.duration)?.is_gt()
-                    || clip
-                        .source_in
-                        .plus(clip.duration)?
-                        .compare(source_duration)?
-                        .is_gt()
-                {
-                    return Err(error(
-                        "INVALID_RANGE",
-                        format!("Clip {} exceeds its source or timeline", clip.id),
+                let source_duration = clip
+                    .source_duration(project)
+                    .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
+                let source_end = clip.source_in.plus(clip.duration)?;
+                let range = |message: String| Err(error("INVALID_RANGE", message));
+                if clip.duration.num == 0 {
+                    return range(format!("clip {:?} duration must be positive", clip.id));
+                }
+                if clip.end()?.compare(self.duration)?.is_gt() {
+                    return range(format!(
+                        "clip {:?} ends at {} s, after the timeline end {} s",
+                        clip.id,
+                        clip.end()?,
+                        self.duration
+                    ));
+                }
+                if source_end.compare(source_duration)?.is_gt() {
+                    let source = match &clip.sequence_id {
+                        Some(id) => format!("sequence {id:?}"),
+                        None => format!("asset {:?}", clip.asset_id),
+                    };
+                    return range(format!(
+                        "clip {:?} needs source {} s to {source_end} s but {source} lasts {source_duration} s",
+                        clip.id, clip.source_in
                     ));
                 }
             }
@@ -558,7 +565,15 @@ impl Arrangement {
             for anchor in &link.members {
                 let (track, clip) = clips
                     .get(&anchor.clip_id)
-                    .ok_or_else(|| error("MISSING_CLIP", &anchor.clip_id))?;
+                    .ok_or_else(|| {
+                        crate::missing(
+                            "MISSING_CLIP",
+                            "clip",
+                            &anchor.clip_id,
+                            clips.keys().map(|id| id.as_str()),
+                        )
+                    })
+                    .at(|| format!("link {:?}", link.id))?;
                 if !linked.insert(&anchor.clip_id) {
                     return Err(invalid("A clip can belong to only one link"));
                 }
@@ -586,7 +601,16 @@ impl Arrangement {
         self.tracks
             .iter()
             .position(|t| t.id == name)
-            .ok_or_else(|| error("MISSING_TRACK", name))
+            .ok_or_else(|| self.missing_track(name))
+    }
+    /// MISSING_TRACK naming `name` and the arrangement's track IDs.
+    pub(crate) fn missing_track(&self, name: &str) -> crate::Error {
+        crate::missing(
+            "MISSING_TRACK",
+            "track",
+            name,
+            self.tracks.iter().map(|t| t.id.as_str()),
+        )
     }
     pub(crate) fn locate(&self, name: &str) -> Result<(usize, usize)> {
         self.tracks
@@ -599,7 +623,17 @@ impl Arrangement {
                     .position(|c| c.id == name)
                     .map(|c| (t, c))
             })
-            .ok_or_else(|| error("MISSING_CLIP", name))
+            .ok_or_else(|| {
+                crate::missing(
+                    "MISSING_CLIP",
+                    "clip",
+                    name,
+                    self.tracks
+                        .iter()
+                        .flat_map(|t| &t.clips)
+                        .map(|c| c.id.as_str()),
+                )
+            })
     }
     pub(crate) fn selection(&self, names: &[String], policy: Linked) -> Result<BTreeSet<String>> {
         if names.is_empty() || names.len() > 1000 {
@@ -757,7 +791,15 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
             let old = effects
                 .iter()
                 .position(|e| e.id == id)
-                .ok_or_else(|| error("MISSING_TRANSITION", &id))?;
+                .ok_or_else(|| {
+                    crate::missing(
+                        "MISSING_TRANSITION",
+                        "transition",
+                        &id,
+                        effects.iter().map(|e| e.id.as_str()),
+                    )
+                })
+                .at(|| format!("track {track_id:?}"))?;
             effects.remove(old);
         }
         Edit::Create { duration } => {
@@ -986,11 +1028,14 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
         }
         Edit::Unlink { id } => {
             let a = arrangement(project)?;
-            let index = a
-                .links
-                .iter()
-                .position(|l| l.id == id)
-                .ok_or_else(|| error("MISSING_LINK", id))?;
+            let index = a.links.iter().position(|l| l.id == id).ok_or_else(|| {
+                crate::missing(
+                    "MISSING_LINK",
+                    "link",
+                    &id,
+                    a.links.iter().map(|l| l.id.as_str()),
+                )
+            })?;
             a.check_locks(
                 &a.links[index]
                     .members

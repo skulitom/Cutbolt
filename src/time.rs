@@ -258,6 +258,25 @@ impl schemars::JsonSchema for Time {
     }
 }
 
+/// Reduced exact value for messages: `18` or `49/25`; callers add the unit.
+impl std::fmt::Display for Time {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (mut a, mut b) = (self.num, self.den);
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        let (num, den) = match a {
+            0 => (self.num, self.den),
+            _ => (self.num / a, self.den / a),
+        };
+        if den == 1 {
+            write!(f, "{num}")
+        } else {
+            write!(f, "{num}/{den}")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +323,9 @@ mod tests {
             .is_err()
         );
         assert_eq!(Time::new(2, 4).unwrap(), Time::new(1, 2).unwrap());
+        assert_eq!(Time { num: 36, den: 2 }.to_string(), "18");
+        assert_eq!(Time { num: 98, den: 50 }.to_string(), "49/25");
+        assert_eq!(Time { num: 0, den: 7 }.to_string(), "0");
         let max = Time::new(MAX as u64, 1).unwrap();
         assert!(max.times(Time::new(2, 1).unwrap()).is_err());
         assert_eq!(

@@ -161,11 +161,7 @@ fn build(project: &Project, document: &Document, spec: &Spec) -> Result<Built> {
             "Bind a concrete media clip, not a nested sequence",
         ));
     }
-    let asset = project
-        .assets
-        .iter()
-        .find(|a| a.id == clip.asset_id)
-        .ok_or_else(|| error("MISSING_MEDIA", &clip.asset_id))?;
+    let asset = project.asset(&clip.asset_id)?;
     if asset.identity.as_ref() != Some(&document.source.identity)
         || asset.duration.compare(document.source.duration)?.is_ne()
     {
@@ -378,11 +374,7 @@ fn verify_binding(project: &Project, spec: &Spec, input_root: &Path) -> Result<(
         .ok_or_else(|| error("UNSUPPORTED_TIMELINE", "Text cuts require native tracks"))?;
     let (track, clip) = arrangement.locate(&spec.clip_id)?;
     let asset_id = &arrangement.tracks[track].clips[clip].asset_id;
-    let asset = project
-        .assets
-        .iter()
-        .find(|a| &a.id == asset_id)
-        .ok_or_else(|| error("MISSING_MEDIA", asset_id))?;
+    let asset = project.asset(asset_id)?;
     let identity = asset.identity.as_ref().ok_or_else(|| {
         error(
             "TRANSCRIPT_SOURCE_MISMATCH",
@@ -390,14 +382,7 @@ fn verify_binding(project: &Project, spec: &Spec, input_root: &Path) -> Result<(
         )
     })?;
     let path = crate::media::project_file(std::path::Path::new(&asset.path), input_root)?;
-    if std::fs::metadata(&path)?.len() != identity.bytes
-        || crate::media::file_hash(&path)? != identity.sha256
-    {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Bound clip's local source no longer matches its identity",
-        ));
-    }
+    crate::registry::check_file(&path, &asset.path, identity, crate::registry::RELINK_ASSET)?;
     Ok(())
 }
 pub fn plan(

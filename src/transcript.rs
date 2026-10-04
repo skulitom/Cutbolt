@@ -305,14 +305,12 @@ impl Document {
     pub(crate) fn verify_source(&self, input_root: &Path) -> Result<PathBuf> {
         self.validate()?;
         let path = media::allowed_file(&input_root.join(&self.source.path), input_root)?;
-        if std::fs::metadata(&path)?.len() != self.source.identity.bytes
-            || media::file_hash(&path)? != self.source.identity.sha256
-        {
-            return Err(error(
-                "MEDIA_CHANGED",
-                "Transcript source identity no longer matches the local media",
-            ));
-        }
+        crate::registry::check_file(
+            &path,
+            &self.source.path.to_string_lossy(),
+            &self.source.identity,
+            "restore the original file or transcribe the current one (transcript.transcribe)",
+        )?;
         Ok(path)
     }
 }

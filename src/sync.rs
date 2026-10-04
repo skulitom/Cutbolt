@@ -125,12 +125,7 @@ fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_SYNC", message)
 }
 fn source(request: &Inspect, id: &str) -> Result<render::Source> {
-    let asset = request
-        .project
-        .assets
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| error("MISSING_MEDIA", id))?;
+    let asset = request.project.asset(id)?;
     if asset.identity.is_none() {
         return Err(error(
             "IDENTITY_REQUIRED",

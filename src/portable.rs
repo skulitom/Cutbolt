@@ -1,20 +1,18 @@
 //! Original relative-media proposal; applying it uses existing revision/history rules.
 use crate::{
-    Result, error, media,
+    At, Result, error, media,
     model::{Operation, Project},
-    registry::Identity,
+    registry::{Identity, RELINK_ASSET},
 };
 use serde_json::{Value, json};
 use std::path::Path;
 
-fn relative(path: &str, identity: &Identity, root: &Path) -> Result<String> {
-    let path = media::project_file(Path::new(path), root)?;
-    if path.metadata()?.len() != identity.bytes || media::file_hash(&path)? != identity.sha256 {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Portable media differs from its bound identity",
-        ));
-    }
+const RELINK_PROXY: &str =
+    "restore the proxy, relink a matching copy (proxy.relink) or detach it (media.proxy.detach)";
+
+fn relative(label: &str, identity: &Identity, root: &Path, remedy: &str) -> Result<String> {
+    let path = media::project_file(Path::new(label), root)?;
+    crate::registry::check_file(&path, label, identity, remedy)?;
     path.strip_prefix(root)
         .ok()
         .and_then(Path::to_str)
@@ -44,12 +42,14 @@ pub fn inspect(project: &Project, expected_revision: u64, input_root: &Path) -> 
                 "Bind all media before making portable paths",
             )
         })?;
-        let path = relative(&asset.path, identity, &root)?;
+        let path = relative(&asset.path, identity, &root, RELINK_ASSET)
+            .at(|| format!("asset {:?}", asset.id))?;
         let proxy_path = asset
             .proxy
             .as_ref()
-            .map(|p| relative(&p.path, &p.identity, &root))
-            .transpose()?;
+            .map(|p| relative(&p.path, &p.identity, &root, RELINK_PROXY))
+            .transpose()
+            .at(|| format!("asset {:?} proxy", asset.id))?;
         if path != asset.path
             || proxy_path.as_deref() != asset.proxy.as_ref().map(|p| p.path.as_str())
         {

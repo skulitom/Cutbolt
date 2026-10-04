@@ -1,6 +1,12 @@
 //! Original local speech orchestration: exact parent media, owned derivatives and
 //! a fixed optional worker with OS-level network/descendant lifetime boundaries.
-use crate::{Result, error, media, pcm_stream, registry::Identity, render, time::Time, transcript};
+use crate::{
+    Result, error, media, pcm_stream,
+    registry::{self, Identity},
+    render,
+    time::Time,
+    transcript,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -152,12 +158,26 @@ fn source_file(request: &Transcribe, control: &dyn media::Control) -> Result<Pat
         &request.input_root.join(&request.source.path),
         &request.input_root,
     )?;
-    if fs::metadata(&path)?.len() != request.source.identity.bytes
-        || media::file_hash_controlled(&path, control)? != request.source.identity.sha256
-    {
-        return Err(error(
-            "MEDIA_CHANGED",
-            "Transcription parent source identity differs",
+    let (label, expected) = (
+        request.source.path.to_string_lossy(),
+        &request.source.identity,
+    );
+    let size = fs::metadata(&path)?.len();
+    if size != expected.bytes {
+        return Err(registry::changed_size(
+            &label,
+            expected.bytes,
+            size,
+            registry::UPDATE_IDENTITY,
+        ));
+    }
+    let digest = media::file_hash_controlled(&path, control)?;
+    if digest != expected.sha256 {
+        return Err(registry::changed_digest(
+            &label,
+            &expected.sha256,
+            &digest,
+            registry::UPDATE_IDENTITY,
         ));
     }
     Ok(path)

@@ -112,10 +112,14 @@ fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_MULTICAM", message)
 }
 fn find<'a>(g: &'a Group, id: &str) -> Result<&'a Angle> {
-    g.angles
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| error("MISSING_ANGLE", id))
+    g.angles.iter().find(|a| a.id == id).ok_or_else(|| {
+        crate::missing(
+            "MISSING_ANGLE",
+            "angle",
+            id,
+            g.angles.iter().map(|a| a.id.as_str()),
+        )
+    })
 }
 fn interval(angle: &Angle, at: Time, duration: Time, kind: Kind, id: String) -> Result<TrackClip> {
     if at.compare(angle.start)?.is_lt()
@@ -173,21 +177,25 @@ pub(crate) fn project(group: &Group, project: &Project) -> Result<Arrangement> {
         }
         a.audio_in.units(AUDIO)?;
         let source = sequences::get(project, &a.sequence_id)?;
-        if a.duration.num == 0
-            || a.start.compare(group.duration)?.is_ge()
-            || a.source_in
-                .plus(a.duration)?
-                .compare(source.arrangement.duration)?
-                .is_gt()
-            || a.audio_in
-                .plus(a.duration)?
-                .compare(source.arrangement.duration)?
-                .is_gt()
-        {
-            return Err(error(
-                "INVALID_RANGE",
-                format!("Angle {} has an invalid source or coverage interval", a.id),
+        let range = |message: String| Err(error("INVALID_RANGE", message));
+        if a.duration.num == 0 {
+            return range(format!("angle {:?} duration must be positive", a.id));
+        }
+        if a.start.compare(group.duration)?.is_ge() {
+            return range(format!(
+                "angle {:?} starts at {} s, not before the group end {} s",
+                a.id, a.start, group.duration
             ));
+        }
+        let length = source.arrangement.duration;
+        for (field, from) in [("source_in", a.source_in), ("audio_in", a.audio_in)] {
+            let end = from.plus(a.duration)?;
+            if end.compare(length)?.is_gt() {
+                return range(format!(
+                    "angle {:?} needs {field} {from} s to {end} s but sequence {:?} lasts {length} s",
+                    a.id, a.sequence_id
+                ));
+            }
         }
     }
     ids.clear();
@@ -309,11 +317,14 @@ pub(crate) fn edit(project_: &mut Project, id: &str, edit: Edit) -> Result<()> {
             }
         }
         Edit::CutRemove { id } => {
-            let index = group
-                .cuts
-                .iter()
-                .position(|c| c.id == id)
-                .ok_or_else(|| error("MISSING_CUT", id))?;
+            let index = group.cuts.iter().position(|c| c.id == id).ok_or_else(|| {
+                crate::missing(
+                    "MISSING_CUT",
+                    "cut",
+                    &id,
+                    group.cuts.iter().map(|c| c.id.as_str()),
+                )
+            })?;
             group.cuts.remove(index);
         }
         Edit::AngleSet { angle } => {

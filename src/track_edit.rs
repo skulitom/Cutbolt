@@ -287,7 +287,12 @@ pub(crate) fn split(a: &mut Arrangement, e: Split) -> Result<()> {
         if !e.at.compare(old.start)?.is_gt() || !e.at.compare(old.end()?)?.is_lt() {
             return Err(error(
                 "INVALID_RANGE",
-                "Split time must be strictly inside every selected clip",
+                format!(
+                    "Split time {} s must be strictly inside every selected clip; clip {id:?} spans {} s to {} s",
+                    e.at,
+                    old.start,
+                    old.end()?
+                ),
             ));
         }
         let left_duration = e.at.minus(old.start)?;
@@ -536,7 +541,10 @@ fn span(a: &mut Arrangement, fps: Time, e: Span) -> Result<()> {
     {
         return Err(error(
             "INVALID_RANGE",
-            "Interval must be nonempty and start inside the timeline; ripple must also end inside",
+            format!(
+                "Interval {} s to {end} s must be nonempty and start inside the timeline, 0 s to {} s; ripple must also end inside",
+                e.start, a.duration
+            ),
         ));
     }
     let selected = selected_tracks(a, &e, end)?;

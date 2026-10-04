@@ -1,6 +1,6 @@
 //! Project-owned metadata and explicit, content-checked local relinking proposals.
 use crate::{
-    Result, error, media,
+    At, Result, error, media,
     model::{Asset, Operation, Project},
     render,
 };
@@ -96,6 +96,57 @@ impl Identity {
         }
         Ok(())
     }
+}
+
+/// Remedy for an identity supplied with a request, such as a scene image, font or conform source.
+pub(crate) const UPDATE_IDENTITY: &str = "restore the original file, or give the identity as {\"path\": ...} alone to use the current file";
+/// Remedy for a project asset, whose bound identity media.bind cannot replace.
+pub(crate) const RELINK_ASSET: &str = "restore the original file or relink a copy with the bound identity (registry.relink); changed content needs a new asset (media.add, then registry.bind)";
+
+/// MEDIA_CHANGED naming a file and the byte count its identity expects and has.
+pub(crate) fn changed_size(path: &str, expected: u64, actual: u64, remedy: &str) -> crate::Error {
+    error(
+        "MEDIA_CHANGED",
+        format!(
+            "Source \"{path}\" no longer matches its identity: expected byte count {expected}, actual {actual}; {remedy}"
+        ),
+    )
+}
+
+/// MEDIA_CHANGED naming a file and the first 12 hex characters of its expected and actual SHA-256.
+pub(crate) fn changed_digest(
+    path: &str,
+    expected: &str,
+    actual: &str,
+    remedy: &str,
+) -> crate::Error {
+    let short = |hash: &str| hash.get(..12).unwrap_or(hash).to_owned();
+    error(
+        "MEDIA_CHANGED",
+        format!(
+            "Source \"{path}\" no longer matches its identity: expected SHA-256 starting {}, actual starting {}; {remedy}",
+            short(expected),
+            short(actual)
+        ),
+    )
+}
+
+/// Check a file's size, then its streamed SHA-256, against `identity`; `label` names it in errors.
+pub(crate) fn check_file(
+    path: &Path,
+    label: &str,
+    identity: &Identity,
+    remedy: &str,
+) -> Result<()> {
+    let bytes = path.metadata()?.len();
+    if bytes != identity.bytes {
+        return Err(changed_size(label, identity.bytes, bytes, remedy));
+    }
+    let sha256 = media::file_hash(path)?;
+    if sha256 != identity.sha256 {
+        return Err(changed_digest(label, &identity.sha256, &sha256, remedy));
+    }
+    Ok(())
 }
 
 /// Asset filter for registry.search; every supplied filter must match, and results sort by asset ID.
@@ -216,11 +267,7 @@ pub fn bind(project: &Project, revision: u64, input_root: &Path, ids: &[String])
     let mut hashes = HashMap::new();
     let mut operations = Vec::new();
     for id in ids {
-        let asset = project
-            .assets
-            .iter()
-            .find(|a| &a.id == id)
-            .ok_or_else(|| error("MISSING_MEDIA", id))?;
+        let asset = project.asset(id)?;
         let path = media::project_file(Path::new(&asset.path), input_root)?;
         if !hashes.contains_key(&path) {
             hashes.insert(path.clone(), fingerprint(&path)?);
@@ -264,11 +311,7 @@ pub fn relink(
 ) -> Result<Value> {
     project.validate()?;
     root(input_root)?;
-    let asset = project
-        .assets
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| error("MISSING_MEDIA", id))?;
+    let asset = project.asset(id)?;
     let expected = asset.identity.as_ref().ok_or_else(|| {
         error(
             "IDENTITY_REQUIRED",
@@ -320,13 +363,58 @@ pub(crate) fn match_identity(
 }
 
 pub(crate) fn verify_source(asset: &Asset, source: &render::Source) -> Result<()> {
-    if let Some(identity) = &asset.identity
-        && (identity.sha256 != source.sha256 || identity.bytes != source.path.metadata()?.len())
-    {
-        return Err(error(
-            "IDENTITY_MISMATCH",
-            format!("Asset {} differs from its bound source", asset.id),
-        ));
+    if let Some(identity) = &asset.identity {
+        let bytes = source.path.metadata()?.len();
+        let mut differs = if identity.bytes != bytes {
+            changed_size(&asset.path, identity.bytes, bytes, RELINK_ASSET)
+        } else if identity.sha256 != source.sha256 {
+            changed_digest(&asset.path, &identity.sha256, &source.sha256, RELINK_ASSET)
+        } else {
+            return Ok(());
+        };
+        differs.code = "IDENTITY_MISMATCH";
+        return Err(differs).at(|| format!("asset {:?}", asset.id));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn identity_mismatches_name_the_file_values_and_remedy() {
+        let path =
+            std::env::temp_dir().join(format!("cutbolt-identity-{}.bin", std::process::id()));
+        std::fs::write(&path, b"original identity fixture").unwrap();
+        let actual = fingerprint(&path).unwrap();
+        let check =
+            |identity: Identity| check_file(&path, "media/a.bin", &identity, UPDATE_IDENTITY);
+        let size = check(Identity {
+            bytes: 1,
+            ..actual.clone()
+        });
+        let digest = check(Identity {
+            sha256: "0".repeat(64),
+            ..actual.clone()
+        });
+        let same = check(actual.clone());
+        std::fs::remove_file(&path).unwrap();
+        let size = size.unwrap_err();
+        assert_eq!(size.code, "MEDIA_CHANGED");
+        assert_eq!(
+            size.message,
+            format!(
+                "Source \"media/a.bin\" no longer matches its identity: expected byte count 1, actual {}; {UPDATE_IDENTITY}",
+                actual.bytes
+            )
+        );
+        assert_eq!(
+            digest.unwrap_err().message,
+            format!(
+                "Source \"media/a.bin\" no longer matches its identity: expected SHA-256 starting 000000000000, actual starting {}; {UPDATE_IDENTITY}",
+                &actual.sha256[..12]
+            )
+        );
+        same.unwrap();
+    }
 }

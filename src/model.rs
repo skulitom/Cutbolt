@@ -1,4 +1,4 @@
-use crate::{Result, error, time::Time};
+use crate::{At, Result, error, time::Time};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -415,7 +415,10 @@ impl Project {
             clip.source_in.units(self.frame_rate)?;
             clip.duration.units(self.frame_rate)?;
             if clip.duration.num == 0 {
-                return Err(error("INVALID_RANGE", "Clip duration must be positive"));
+                return Err(error(
+                    "INVALID_RANGE",
+                    format!("clip {:?} duration must be positive", clip.id),
+                ));
             }
             if clip.gap {
                 if clip.asset_id.is_some() || clip.source_in.num != 0 {
@@ -432,16 +435,18 @@ impl Project {
                     "Media clips require asset_id; gaps require gap=true",
                 )
             })?;
-            let asset = assets.get(id).ok_or_else(|| error("MISSING_MEDIA", id))?;
-            if clip
-                .source_in
-                .plus(clip.duration)?
-                .compare(asset.duration)?
-                == Ordering::Greater
-            {
+            let asset = assets
+                .get(id)
+                .ok_or_else(|| self.missing_asset(id))
+                .at(|| format!("clip {:?}", clip.id))?;
+            let end = clip.source_in.plus(clip.duration)?;
+            if end.compare(asset.duration)? == Ordering::Greater {
                 return Err(error(
                     "INVALID_RANGE",
-                    format!("Clip {} exceeds source or is empty", clip.id),
+                    format!(
+                        "clip {:?} needs source {} s to {end} s but asset {:?} lasts {} s",
+                        clip.id, clip.source_in, asset.id, asset.duration
+                    ),
                 ));
             }
         }
@@ -657,7 +662,10 @@ impl Project {
                     if offset.num == 0 || offset.compare(clip.duration)? != Ordering::Less {
                         return Err(error(
                             "INVALID_RANGE",
-                            "Split offset must be strictly inside the clip",
+                            format!(
+                                "Split offset {offset} s must be strictly inside clip {:?}, which lasts {} s",
+                                clip.id, clip.duration
+                            ),
                         ));
                     }
                     let mut right = clip.clone();
@@ -699,27 +707,49 @@ impl Project {
         Ok(next)
     }
     fn index(&self, id: &str) -> Result<usize> {
-        self.clips
+        self.clips.iter().position(|c| c.id == id).ok_or_else(|| {
+            crate::missing(
+                "MISSING_CLIP",
+                "clip",
+                id,
+                self.clips.iter().map(|c| &*c.id),
+            )
+        })
+    }
+    /// MISSING_MEDIA naming `id` and the project's asset IDs.
+    pub(crate) fn missing_asset(&self, id: &str) -> crate::Error {
+        crate::missing(
+            "MISSING_MEDIA",
+            "asset",
+            id,
+            self.assets.iter().map(|a| &*a.id),
+        )
+    }
+    pub(crate) fn asset(&self, id: &str) -> Result<&Asset> {
+        self.assets
             .iter()
-            .position(|c| c.id == id)
-            .ok_or_else(|| error("MISSING_CLIP", id))
+            .find(|a| a.id == id)
+            .ok_or_else(|| self.missing_asset(id))
     }
     fn asset_mut(&mut self, id: &str) -> Result<&mut Asset> {
-        self.assets
-            .iter_mut()
-            .find(|a| a.id == id)
-            .ok_or_else(|| error("MISSING_MEDIA", id))
+        let i = self
+            .assets
+            .iter()
+            .position(|a| a.id == id)
+            .ok_or_else(|| self.missing_asset(id))?;
+        Ok(&mut self.assets[i])
     }
     /// Half-open timeline slice; source intervals are clipped, never rounded or merged.
     fn slice(&self, start: Time, end: Time) -> Result<Vec<Clip>> {
         start.units(self.frame_rate)?;
         end.units(self.frame_rate)?;
-        if start.compare(end)? == Ordering::Greater
-            || end.compare(self.duration()?)? == Ordering::Greater
-        {
+        let total = self.duration()?;
+        if start.compare(end)? == Ordering::Greater || end.compare(total)? == Ordering::Greater {
             return Err(error(
                 "INVALID_RANGE",
-                "Edit range must lie inside the timeline",
+                format!(
+                    "Edit range {start} s to {end} s must lie inside the timeline, 0 s to {total} s"
+                ),
             ));
         }
         let mut position = Time::ZERO;
@@ -852,6 +882,42 @@ mod tests {
             .is_err()
         );
         assert_eq!(before, serde_json::to_string(&p).unwrap());
+    }
+    #[test]
+    fn errors_name_missing_ids_and_exact_ranges() {
+        let p = sample();
+        let missing = p
+            .apply(
+                0,
+                vec![Operation::Remove {
+                    clip_id: "nope".into(),
+                }],
+            )
+            .unwrap_err();
+        assert_eq!(
+            (missing.code, missing.message.as_str()),
+            (
+                "MISSING_CLIP",
+                r#"Unknown clip "nope"; available clip IDs: "c""#
+            )
+        );
+        let range = p
+            .apply(
+                0,
+                vec![Operation::Trim {
+                    clip_id: "c".into(),
+                    source_in: t(8),
+                    duration: t(5),
+                }],
+            )
+            .unwrap_err();
+        assert_eq!(
+            (range.code, range.message.as_str()),
+            (
+                "INVALID_RANGE",
+                r#"clip "c" needs source 8 s to 13 s but asset "a" lasts 12 s"#
+            )
+        );
     }
     #[test]
     fn rejects_conflicts_unknown_fields_and_duplicate_ids() {

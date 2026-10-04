@@ -35,6 +35,17 @@ pub(crate) fn validate(project: &Project) -> Result<u64> {
     }
     project.duration()?.units(project.frame_rate)
 }
+/// Message suffix naming the start of the last previewable frame of a `total`-frame timeline.
+fn last_frame(project: &Project, total: u64) -> Result<String> {
+    if total == 0 {
+        return Ok("; the timeline is empty".into());
+    }
+    let frame = Time::new(project.frame_rate.den, project.frame_rate.num)?;
+    Ok(format!(
+        "; the last frame starts at {} s",
+        Time::new(total - 1, 1)?.times(frame)?
+    ))
+}
 pub(crate) fn read_frame(
     project: &Project,
     input_root: &Path,
@@ -49,7 +60,11 @@ pub(crate) fn read_frame(
     if selected >= total {
         return Err(error(
             "INVALID_RANGE",
-            "Preview time must be before the timeline end",
+            format!(
+                "Preview time {time} s must be before the timeline end {} s{}",
+                project.duration()?,
+                last_frame(project, total)?
+            ),
         ));
     }
     if project.width as u64 * project.height as u64 > 8_000_000 {
@@ -174,15 +189,19 @@ pub(crate) fn read_frame(
         &media::Uncontrolled,
     )?;
     crate::registry::verify_source(asset, &source)?;
-    if clip
-        .source_in
-        .plus(clip.duration)?
-        .units(project.frame_rate)?
-        > source.frames
-    {
+    let source_end = clip.source_in.plus(clip.duration)?;
+    if source_end.units(project.frame_rate)? > source.frames {
         return Err(error(
             "INVALID_RANGE",
-            "Selected clip exceeds decoded media",
+            format!(
+                "clip {:?} needs source {} s to {source_end} s but asset {:?} decodes to {} s ({} frames)",
+                clip.id,
+                clip.source_in,
+                asset.id,
+                Time::new(source.frames, 1)?
+                    .times(Time::new(project.frame_rate.den, project.frame_rate.num)?)?,
+                source.frames
+            ),
         ));
     }
     let source_frame = clip.source_in.units(project.frame_rate)? + selected - offset;
@@ -280,7 +299,11 @@ pub fn range(
     if count == 0 || begin as u128 + count as u128 > total as u128 {
         return Err(error(
             "INVALID_RANGE",
-            "Preview range must be nonempty and inside the timeline",
+            format!(
+                "Preview range {start} s to {} s must be nonempty and inside the timeline, 0 s to {} s",
+                start.plus(duration)?,
+                project.duration()?
+            ),
         ));
     }
     let mut receipt = render::run_range(project, input_root, output_root, output, start, duration)?;
@@ -329,11 +352,15 @@ impl Sheet {
                 "Contact sheets require 1..64 times, 1..8 columns, tiles up to 1920x1080 and a gap of at most 32 pixels",
             ));
         }
-        for t in &self.times {
+        for (i, t) in self.times.iter().enumerate() {
             if t.units(project.frame_rate)? >= total {
                 return Err(error(
                     "INVALID_RANGE",
-                    "Every contact-sheet time must be before the timeline end",
+                    format!(
+                        "times[{i}]: Contact-sheet time {t} s must be before the timeline end {} s{}",
+                        project.duration()?,
+                        last_frame(project, total)?
+                    ),
                 ));
             }
         }
