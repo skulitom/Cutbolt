@@ -1,5 +1,13 @@
 # Progress history
 
+## 4 October 2026: vertical text alignment and caption legibility
+
+Text graphics always placed the first baseline at the box top plus the font size. Agents had to count wrapped lines themselves to center a title, and short caption cues sat at the top of their box instead of the bottom line. Text graphics and caption layouts now accept `valign`: `top` (the default, unchanged), `middle` or `bottom`. Each line takes a `line_height` slot. Bottom alignment leaves `line_height - size` below the last baseline for descenders. Overflow rejection also catches lines pushed above the box.
+
+The captions trial also had no way to keep text readable over busy video. Text graphics and caption layouts now take an optional `background` (padded per-line boxes, drawn once where they overlap) and `outline` (the text's alpha dilated by a disc of radius 1-8). Both are composited under the unchanged fill.
+
+The graphics fixture's independent oracle covers middle and bottom alignment, the new overflow rejection, and a decorated wrapped text with an empty line. That text matches with zero tolerance. All new fields are omitted at their defaults, so existing scenes keep their fingerprints. No scoring changed.
+
 ## 4 October 2026: clip gain and fades on audio tracks
 
 Timeline audio tracks summed every clip at unity. In the trials, lowering a music bed or fading it out meant rendering a separate mix recipe and importing the result. Audio-track clips now carry optional `gain_milli`, `fade_in` and `fade_out`, set with the new `clip_audio` track edit or given at `place`. They share the mix recipe's linear semantics, with one rounding per sample before transitions and track summation. Fades are limited to 60 seconds and may not overlap, so the per-sample arithmetic stays exact.

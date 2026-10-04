@@ -1,5 +1,5 @@
 //! Original bounded layout orchestration around external Unicode/font algorithms.
-use super::{Align, Cache, Graphic, Overflow, Wrap, put};
+use super::{Align, Cache, Graphic, Overflow, Wrap, decorate, put};
 use crate::{Result, error};
 use fontdue::{Font, FontSettings};
 use harfrust::{
@@ -315,6 +315,9 @@ pub(super) fn rasterize(
         line_height,
         letter_spacing,
         align,
+        valign,
+        background: _,
+        outline: _,
         wrap,
         overflow,
         layout:
@@ -474,6 +477,7 @@ pub(super) fn rasterize(
     let mut clipped = 0usize;
     let mut glyph_report = Vec::new();
     let mut line_report = Vec::new();
+    let mut spans = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let delta = rect[2] as i64 * 64 - line.width_64;
         let offset_128 = match align {
@@ -481,10 +485,18 @@ pub(super) fn rasterize(
             Align::Center => delta,
             Align::Right => delta * 2,
         };
-        let baseline = rect[1] + *size as i32 + index as i32 * *line_height as i32;
-        if matches!(overflow, Overflow::Reject) && (delta < 0 || baseline > rect[1] + rect[3]) {
+        let baseline = valign.first_baseline(*rect, *size, *line_height, lines.len())
+            + index as i32 * *line_height as i32;
+        if matches!(overflow, Overflow::Reject)
+            && (delta < 0 || baseline > rect[1] + rect[3] || baseline - (*size as i32) < rect[1])
+        {
             return Err(error("TEXT_OVERFLOW", "Text line exceeds its declared box"));
         }
+        spans.push([
+            rect[0] + pixel(offset_128),
+            rect[0] + pixel(offset_128 + 2 * line.width_64),
+            baseline,
+        ]);
         line_report.push(json!({"utf8_bytes":[line.bytes.start,line.bytes.end],"width_64":line.width_64,"baseline":baseline,"base_direction":if line.rtl{"rtl"}else{"ltr"}}));
         for glyph in &line.glyphs {
             let key = (glyph.font, glyph.id);
@@ -558,6 +570,7 @@ pub(super) fn rasterize(
         }
     }
     let widths: Vec<_> = lines.iter().map(|l| l.width_64 as f64 / 64.0).collect();
+    let rgba = decorate(rgba, canvas, graphic, &spans);
     Ok((
         rgba,
         json!({"kind":"text","layout":"unicode_v1","shaper":"harfrust-0.13.3","rasterizer":"fontdue-0.9.4-scalar-indexed","direction":direction,"language":tag,"glyphs":glyph_report,"lines":line_report,"line_widths":widths,"clipped_coverage_pixels":clipped,"box":rect,"shaped_input_scalars":work,"cached_coverage_pixels":cached_pixels,"raster_work_pixels":drawn_pixels}),

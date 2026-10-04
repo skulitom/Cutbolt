@@ -103,10 +103,12 @@ def text_pixels(graphic, canvas, font_data):
             lines.append([]); widths.append(F(0)); spacing=0
         pen=widths[-1]+spacing
         lines[-1].append((c,font_index,pen,rectangles,advance)); widths[-1]=pen+advance
-    glyphs=[]
+    glyphs=[];spans=[]
     for line, entries in enumerate(lines):
         shift={"left":F(0),"center":(w-widths[line])/2,"right":w-widths[line]}[graphic["align"]]
-        baseline=y+size+line*graphic["line_height"]
+        block=len(lines)*graphic["line_height"]
+        baseline=y+{"top":0,"middle":(h-block)//2,"bottom":h-block}[graphic.get("valign","top")]+size+line*graphic["line_height"]
+        spans.append((x+nearest(shift),x+nearest(shift+widths[line]),baseline))
         for c,fi,pen,rectangles,advance in entries:
             origin=x+nearest(pen+shift)
             glyphs.append({"scalar":c,"font_index":fi,"line":line,"baseline":baseline,"advance":float(advance)})
@@ -122,6 +124,27 @@ def text_pixels(graphic, canvas, font_data):
             for (px,py),area in coverage.items():
                 if x <= px < x+w and y <= py < y+h:
                     paint(image,px,py,graphic["color"],nearest(area*255))
+    if graphic.get("background") or graphic.get("outline"):
+        # Independent decoration: padded line boxes once, a disc-dilated alpha outline, then the fill over both.
+        decorated=Image.new("RGBA", tuple(canvas)); cw,ch=canvas
+        if graphic.get("background"):
+            b=graphic["background"]; pad=b["padding"]; covered=set()
+            for x0,x1,baseline in spans:
+                if x1 <= x0:continue
+                for py in range(max(0,baseline-size-pad),min(ch,baseline-size+graphic["line_height"]+pad)):
+                    for px in range(max(0,x0-pad),min(cw,x1+pad)):covered.add((px,py))
+            for px,py in covered:paint(decorated,px,py,b["color"])
+        if graphic.get("outline"):
+            o=graphic["outline"]; r=o["width"]
+            alpha={(px,py):image.getpixel((px,py))[3] for py in range(ch) for px in range(cw) if image.getpixel((px,py))[3]}
+            near={(px+dx,py+dy) for px,py in alpha for dy in range(-r,r+1) for dx in range(-r,r+1) if dx*dx+dy*dy<=r*r and 0<=px+dx<cw and 0<=py+dy<ch}
+            for px,py in near:
+                paint(decorated,px,py,o["color"],max(alpha.get((px+dx,py+dy),0) for dy in range(-r,r+1) for dx in range(-r,r+1) if dx*dx+dy*dy<=r*r))
+        for py in range(ch):
+            for px in range(cw):
+                pixel=image.getpixel((px,py))
+                if pixel[3]:paint(decorated,px,py,pixel)
+        image=decorated
     return image, glyphs, list(map(float,widths))
 
 
@@ -208,6 +231,15 @@ def run(root):
     check_case(reverse,"fallback-order")
     for align in ("left","center","right"):
         check_case(scene([layer(text(text="AB CΩ\n中A",rect=[2,1,38,62],align=align,wrap="character",line_height=20))]),"wrap-"+align)
+    for valign in ("middle","bottom"):
+        info,_,_=check_case(scene([layer(text(text="AB CΩ\n中A",rect=[2,0,38,64],align="center",valign=valign,wrap="character",line_height=20))]),"valign-"+valign)
+        assert info["timing"][0]["graphics"]["glyphs"][0]["baseline"]>20
+    request({"command":"scene.inspect","scene":scene([layer(text(text="A\nB\nC",rect=[2,1,92,40],valign="bottom"))]),"input_root":str(sources)},"TEXT_OVERFLOW")
+    decor=text(text="AB CΩ\n\n中A",rect=[4,2,88,60],align="center",valign="middle",wrap="character",line_height=18,
+               background={"color":[10,20,30,150],"padding":3},outline={"color":[240,200,40,220],"width":2})
+    check_case(scene([layer(decor)]),"background-outline")
+    for bad in [{"background":{"color":[0,0,0,0],"padding":257}},{"outline":{"color":[0,0,0,0],"width":0}},{"outline":{"color":[0,0,0,0],"width":9}}]:
+        request({"command":"scene.inspect","scene":scene([layer(text(**bad))]),"input_root":str(sources)},"INVALID_GRAPHIC")
     clipped=scene([layer(text(text="ABCC\n中Ω",rect=[2,1,20,23],overflow="clip",align="right"))])
     clip_info,_,_=check_case(clipped,"explicit-clip")
     assert clip_info["timing"][0]["graphics"]["clipped_coverage_pixels"]>0

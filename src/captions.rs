@@ -857,6 +857,15 @@ pub struct Layout {
     /// Optional Unicode text profile for shaping and mixed directions; omit for the scalar layout.
     #[serde(default)]
     pub text_layout: Option<crate::graphics::TextLayout>,
+    /// Vertical alignment of each cue's lines in `rect`; `bottom` keeps one- and two-line cues on the same bottom line. Default `top`.
+    #[serde(default, skip_serializing_if = "crate::graphics::VAlign::is_top")]
+    pub valign: crate::graphics::VAlign,
+    /// Optional box behind each cue line for legibility over video; omit for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<crate::graphics::TextBackground>,
+    /// Optional outline around the glyphs; omit for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<crate::graphics::TextOutline>,
 }
 /// Caption sampling policy; only `sample_start`: output frame n shows caption time `offset + n/25`.
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -955,6 +964,9 @@ pub fn to_scene(request: &SceneRequest) -> Result<Value> {
                 line_height: layout.line_height,
                 letter_spacing: layout.letter_spacing,
                 align: cue.align.clone(),
+                valign: layout.valign,
+                background: layout.background.clone(),
+                outline: layout.outline.clone(),
                 wrap: layout.wrap.clone(),
                 overflow: layout.overflow.clone(),
                 layout: layout.text_layout.clone(),

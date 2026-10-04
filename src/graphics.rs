@@ -21,6 +21,56 @@ pub enum Align {
     Center,
     Right,
 }
+/// Vertical placement of the lines inside the text box, each line taking `line_height`: `top` puts the first baseline at the box top plus `size`; `middle` centers the lines (rounding up); `bottom` puts the last line's slot at the box bottom, leaving `line_height - size` below its baseline.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VAlign {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+impl VAlign {
+    pub(crate) fn is_top(&self) -> bool {
+        *self == Self::Top
+    }
+    /// First baseline for `lines` lines in `rect`.
+    pub(crate) fn first_baseline(
+        self,
+        rect: [i32; 4],
+        size: u16,
+        line_height: u16,
+        lines: usize,
+    ) -> i32 {
+        let block = lines as i32 * line_height as i32;
+        let offset = match self {
+            Self::Top => 0,
+            Self::Middle => (rect[3] - block).div_euclid(2),
+            Self::Bottom => rect[3] - block,
+        };
+        rect[1] + offset + size as i32
+    }
+}
+/// Box behind each nonempty text line: the line's advance width by its `line_height` slot (from `baseline - size`), grown by `padding` on every side. Overlapping boxes are drawn once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TextBackground {
+    /// Straight-alpha RGBA box color as `[r, g, b, a]` bytes.
+    pub color: [u8; 4],
+    /// Pixels added on every side of each line box, 0..=256.
+    pub padding: u16,
+}
+/// Outline around glyphs, drawn under the fill: the text's alpha dilated by a disc of radius `width`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TextOutline {
+    /// Straight-alpha RGBA outline color as `[r, g, b, a]` bytes.
+    pub color: [u8; 4],
+    /// Outline radius in pixels, 1..=8.
+    pub width: u8,
+}
 /// Line breaking: `none` (LF only), `character` (before a scalar or grapheme that would overflow the box) or `word` (Unicode line-break opportunities; requires `layout`).
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +124,15 @@ pub enum Graphic {
         letter_spacing: u16,
         /// Line alignment inside the box.
         align: Align,
+        /// Vertical alignment of the lines inside the box; default `top`.
+        #[serde(default, skip_serializing_if = "VAlign::is_top")]
+        valign: VAlign,
+        /// Optional box behind each line, as for captions over video; drawn under the outline and fill.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        background: Option<TextBackground>,
+        /// Optional outline around the glyphs, drawn under the fill.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outline: Option<TextOutline>,
         /// Line breaking mode.
         wrap: Wrap,
         /// Out-of-box policy.
@@ -221,6 +280,90 @@ fn put(rgba: &mut [u8], width: u32, x: i32, y: i32, color: [u8; 4], coverage: u8
     }
     p[3] = ((a + 127) / 255) as u8;
 }
+/// Composite a text graphic's background and outline under its already rendered fill. `text` is
+/// the fill alone on a transparent canvas, and `spans` holds each line's `[x0, x1, baseline]`.
+fn decorate(text: Vec<u8>, canvas: [u32; 2], graphic: &Graphic, spans: &[[i32; 3]]) -> Vec<u8> {
+    let Graphic::Text {
+        size,
+        line_height,
+        background,
+        outline,
+        ..
+    } = graphic
+    else {
+        return text;
+    };
+    if background.is_none() && outline.is_none() {
+        return text;
+    }
+    let (width, height) = (canvas[0] as i32, canvas[1] as i32);
+    let at = |x: i32, y: i32| (y as usize * width as usize + x as usize) * 4;
+    let mut out = vec![0; text.len()];
+    if let Some(b) = background {
+        let pad = b.padding as i32;
+        let mut covered = vec![false; (width * height) as usize];
+        for &[x0, x1, baseline] in spans.iter().filter(|s| s[1] > s[0]) {
+            let top = baseline - *size as i32 - pad;
+            let bottom = baseline - *size as i32 + *line_height as i32 + pad;
+            for y in top.max(0)..bottom.min(height) {
+                for x in (x0 - pad).max(0)..(x1 + pad).min(width) {
+                    covered[(y * width + x) as usize] = true;
+                }
+            }
+        }
+        for (i, _) in covered.iter().enumerate().filter(|(_, c)| **c) {
+            put(
+                &mut out,
+                canvas[0],
+                i as i32 % width,
+                i as i32 / width,
+                b.color,
+                255,
+            );
+        }
+    }
+    if let Some(o) = outline {
+        let r = o.width as i32;
+        let disc: Vec<(i32, i32)> = (-r..=r)
+            .flat_map(|dy| (-r..=r).map(move |dx| (dx, dy)))
+            .filter(|(dx, dy)| dx * dx + dy * dy <= r * r)
+            .collect();
+        let alpha = |x: i32, y: i32| text[at(x, y) + 3];
+        let (mut left, mut top, mut right, mut bottom) = (width, height, -1, -1);
+        for y in 0..height {
+            for x in 0..width {
+                if alpha(x, y) != 0 {
+                    (left, top) = (left.min(x), top.min(y));
+                    (right, bottom) = (right.max(x), bottom.max(y));
+                }
+            }
+        }
+        for y in (top - r).max(0)..=(bottom + r).min(height - 1) {
+            for x in (left - r).max(0)..=(right + r).min(width - 1) {
+                let coverage = disc
+                    .iter()
+                    .map(|(dx, dy)| (x + dx, y + dy))
+                    .filter(|&(sx, sy)| sx >= 0 && sy >= 0 && sx < width && sy < height)
+                    .map(|(sx, sy)| alpha(sx, sy))
+                    .max()
+                    .unwrap_or(0);
+                if coverage != 0 {
+                    put(&mut out, canvas[0], x, y, o.color, coverage);
+                }
+            }
+        }
+    }
+    for y in 0..height {
+        for x in 0..width {
+            let p = at(x, y);
+            if text[p + 3] != 0 {
+                let color = [text[p], text[p + 1], text[p + 2], text[p + 3]];
+                put(&mut out, canvas[0], x, y, color, 255);
+            }
+        }
+    }
+    out
+}
 struct Glyph {
     c: char,
     font: usize,
@@ -281,10 +424,23 @@ pub(crate) fn rasterize(
             line_height,
             letter_spacing,
             align,
+            valign,
+            background,
+            outline,
             wrap,
             overflow,
             layout,
         } => {
+            if background.as_ref().is_some_and(|b| b.padding > 256)
+                || outline
+                    .as_ref()
+                    .is_some_and(|o| !(1..=8).contains(&o.width))
+            {
+                return Err(error(
+                    "INVALID_GRAPHIC",
+                    "Text background padding must be 0..=256 and outline width 1..=8",
+                ));
+            }
             if text.is_empty()
                 || text.len() > 4096
                 || text.chars().count() > 1024
@@ -382,6 +538,7 @@ pub(crate) fn rasterize(
                 });
             }
             let mut report = vec![];
+            let mut spans = Vec::new();
             let mut clipped = 0usize;
             let mut cache_glyphs = HashMap::new();
             let mut glyph_pixels = 0usize;
@@ -391,12 +548,20 @@ pub(crate) fn rasterize(
                     Align::Center => (rect[2] as f32 - widths[n]) / 2.0,
                     Align::Right => rect[2] as f32 - widths[n],
                 };
-                let baseline = rect[1] + *size as i32 + n as i32 * *line_height as i32;
+                let baseline = valign.first_baseline(*rect, *size, *line_height, lines.len())
+                    + n as i32 * *line_height as i32;
                 if matches!(overflow, Overflow::Reject)
-                    && (widths[n] > rect[2] as f32 || baseline > rect[1] + rect[3])
+                    && (widths[n] > rect[2] as f32
+                        || baseline > rect[1] + rect[3]
+                        || baseline - (*size as i32) < rect[1])
                 {
                     return Err(error("TEXT_OVERFLOW", "Text line exceeds its declared box"));
                 }
+                spans.push([
+                    rect[0] + offset.round() as i32,
+                    rect[0] + (offset + widths[n]).round() as i32,
+                    baseline,
+                ]);
                 for glyph in line {
                     let m = &glyph.metrics;
                     let x = rect[0] + (glyph.x + offset).round() as i32 + m.xmin;
@@ -446,6 +611,7 @@ pub(crate) fn rasterize(
                     report.push(json!({"scalar":glyph.c.to_string(),"font_index":glyph.font,"line":n,"bitmap_rect":[x,y,m.width as i32,m.height as i32],"baseline":baseline,"advance":m.advance_width}));
                 }
             }
+            let rgba = decorate(rgba, canvas, graphic, &spans);
             Ok((
                 rgba,
                 json!({"kind":"text","layout":"ltr_scalar_v1","rasterizer":"fontdue-0.9.4-scalar","glyphs":report,"line_widths":widths,"clipped_coverage_pixels":clipped,"box":rect}),
@@ -454,5 +620,21 @@ pub(crate) fn rasterize(
     }
 }
 pub fn capabilities() -> Value {
-    json!({"primitives":["text","rectangle","ellipse"],"fonts":"identity_bound_user_supplied_truetype","layout":"ltr_scalar_v1","layouts":["ltr_scalar_v1","unicode_v1"],"font_fallback":"ordered_explicit_files_missing_glyph_errors","complex_shaping":true,"unicode":unicode::capabilities(),"animation":"scene_position_opacity_and_masks","alpha":"straight","maximum_fonts":8,"maximum_font_bytes":8388608,"maximum_total_font_bytes":33554432})
+    json!({"primitives":["text","rectangle","ellipse"],"fonts":"identity_bound_user_supplied_truetype","layout":"ltr_scalar_v1","layouts":["ltr_scalar_v1","unicode_v1"],"font_fallback":"ordered_explicit_files_missing_glyph_errors","complex_shaping":true,"unicode":unicode::capabilities(),"vertical_alignment":["top","middle","bottom"],"text_background":"padded_line_boxes_drawn_once","text_outline":{"shape":"disc_dilated_alpha","width":[1,8]},"animation":"scene_position_opacity_and_masks","alpha":"straight","maximum_fonts":8,"maximum_font_bytes":8388608,"maximum_total_font_bytes":33554432})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VAlign;
+
+    #[test]
+    fn vertical_alignment_places_line_slots() {
+        // Two 40-pixel line slots of 32-pixel text in a box 100 pixels high starting at y=10.
+        let rect = [0, 10, 200, 100];
+        assert_eq!(VAlign::Top.first_baseline(rect, 32, 40, 2), 42);
+        assert_eq!(VAlign::Middle.first_baseline(rect, 32, 40, 2), 52);
+        // The last baseline sits line_height - size above the box bottom.
+        assert_eq!(VAlign::Bottom.first_baseline(rect, 32, 40, 2) + 40, 110 - 8);
+        assert_eq!(VAlign::Middle.first_baseline([0, 0, 10, 41], 32, 40, 1), 32);
+    }
 }
