@@ -17,7 +17,7 @@ Set the snapshot's existing rational `frame_rate` field, for example `{"num":300
 
 For 30000/1001, five frames last exactly 1001/6000 seconds and contain exactly 8,008 stereo sample frames. The same exact arithmetic is used after splits, trims, moves, selected ranges and undo. A single video-frame preview can inspect any native frame; a rendered range containing audio must meet the shared cut rule above.
 
-The sequential bound is 1–64 clips and 1–180,000 total output frames. Every inspected source has the same 180,000-frame bound. Frame/contact-sheet previews retain their existing pixel limits. Proxies, placed tracks, nested sequences, scene compilation and H.264 delivery retain their documented 25 fps restrictions. [Lossless sequential exports](EXPORT_FORMATS.md) now use these native clocks. This extension does not silently change their clocks or claim fractional-rate support for those paths.
+Sequential timelines hold up to 1,000 items and 1–180,000 total output frames; more than 64 items render as exactly joined chunks ([long timelines](USAGE.md#long-timelines)). Every inspected source has the same 180,000-frame bound. Frame/contact-sheet previews retain their existing pixel limits. Proxies, placed tracks, nested sequences, scene compilation and H.264 delivery retain their documented 25 fps restrictions. [Lossless sequential exports](EXPORT_FORMATS.md) now use these native clocks. This extension does not silently change their clocks or claim fractional-rate support for those paths.
 
 ## Container timestamps
 

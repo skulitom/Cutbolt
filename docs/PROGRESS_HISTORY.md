@@ -1,5 +1,13 @@
 # Progress history
 
+## 4 October 2026: long timelines render in exact chunks
+
+One FFmpeg graph held at most 64 clips. A real-length edit with jump cuts and b-roll therefore failed to render at all, and track previews of any window failed once the whole arrangement passed 64 clips. Renders, range renders, previews, exports and meters now count only the clips a window reads. A window with more clips is planned as consecutive chunks of at most 64 clips. Each chunk renders through the ordinary path and they are joined by stream copy.
+
+Chunk lengths are whole frames, samples and milliseconds, and the join is told each chunk's exact length. Without that, a container that rounds its duration up by a millisecond shifted every later frame. The joined output passes the same full decode verification as before.
+
+The tracks fixture now renders a 1,000-clip timeline as 16 chunks, and it matches the independent oracle exactly. Before this change, the fixture asserted that this timeline was rejected. The native timing fixture renders 150-item sequential timelines with gaps at 30000/1001 and 24000/1001 as chunks. Frames, samples and every container timestamp match the exact clock, and the audio-only export matches too. No scoring changed.
+
 ## 4 October 2026: picture-in-picture overlay transforms
 
 Overlay tracks could only cover the whole frame, so an inset camera or a corner b-roll had to be pre-rendered at its final size. Clips on `alpha_over` tracks now take an optional `transform`: a source `crop`, an integer `divisor` (1-8), an `opacity`, and a canvas `position` that may hang off the edge. The new `clip_transform` track edit sets it. The divisor shrinks each block to the floor of its mean, and opacity rounds to nearest. Shrinking is limited to opaque sources, because an exact alpha-weighted mean is not available in the pinned filters; this is rejected explicitly.

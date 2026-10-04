@@ -687,6 +687,30 @@ fn boundaries(track: &Track, begin: Time, end: Time, clock: Time) -> Result<BTre
     }
     Ok(result)
 }
+/// Clips a render of `[start, end)` reads: those intersecting it, plus both endpoints of every
+/// transition whose interval intersects it (a handle reads beyond its clip).
+pub(crate) fn window_clips(
+    a: &crate::tracks::Arrangement,
+    start: Time,
+    end: Time,
+) -> Result<usize> {
+    let mut ids = std::collections::BTreeSet::new();
+    for track in &a.tracks {
+        for clip in &track.clips {
+            if clip.start.compare(end)?.is_lt() && clip.end()?.compare(start)?.is_gt() {
+                ids.insert(&clip.id);
+            }
+        }
+        for effect in &track.transitions {
+            let (begin, finish) = track.interval(effect)?;
+            if begin.compare(end)?.is_lt() && finish.compare(start)?.is_gt() {
+                ids.insert(&effect.left_id);
+                ids.insert(&effect.right_id);
+            }
+        }
+    }
+    Ok(ids.len())
+}
 fn compile<'a>(
     project: &'a Project,
     root: &'a Path,
@@ -704,12 +728,12 @@ fn compile<'a>(
     if project.frame_rate.compare(FPS)?.is_ne()
         || !(1..=180000).contains(&frames)
         || end.compare(a.duration)?.is_gt()
-        || a.tracks.iter().map(|t| t.clips.len()).sum::<usize>() > 64
+        || window_clips(a, start, end)? > render::MAX_GRAPH_CLIPS
         || project.width as u64 * project.height as u64 > 8_000_000
     {
         return Err(error(
             "UNSUPPORTED_TIMELINE",
-            "Track rendering requires an in-bounds 25 fps range of 1..180000 frames, at most 64 clips and 8M pixels",
+            "Track rendering requires an in-bounds 25 fps range of 1..180000 frames, at most 64 clips per graph and 8M pixels",
         ));
     }
     let mut graph = Graph::new(project, root, control);
@@ -786,6 +810,7 @@ pub(crate) fn plan_audio_window(
         output,
         sources,
         arguments: args,
+        chunks: Vec::new(),
     })
 }
 #[allow(clippy::too_many_arguments)]
@@ -847,6 +872,7 @@ pub(crate) fn plan_window(
         output,
         sources,
         arguments: args,
+        chunks: Vec::new(),
     })
 }
 pub(crate) fn read_frame(

@@ -142,6 +142,19 @@ def run(root,long_form):
             if rate.numerator in [30000,60000]:
                 bad=copy.deepcopy(p);bad['clips'][0]['duration']=t(F(1,1)/rate)
                 call('render.plan',error='UNALIGNED_TIME',**{**fields,'project':bad,'output':str(output/(label+'-unaligned.mkv'))})
+    # Long sequential timelines render as chunks of whole frames, samples and milliseconds, joined by
+    # stream copy; frames, samples and container timestamps must match a single exact clock.
+    for rate in [F(30000,1001),F(24000,1001)]:
+        label='long-'+str(rate).replace('/','-');p=create(rate,60,label)
+        segments=[(None,5) if i%17==16 else (((i*7)%11)*5,5) for i in range(150)];p=append(p,rate,segments);path=output/(label+'.mkv')
+        fields={'project':p,'input_root':str(sources),'output_root':str(output),'output':str(path)}
+        plan=call('render.plan',**fields);assert plan['frames']==750 and len(plan['chunks'])>1,plan.get('chunks')
+        call('render.run',**fields);case=compare(path,rate,segments);case['frame_rate']=t(rate);case['chunks']=len(plan['chunks']);cases.append(case)
+        wav=output/(label+'.wav')
+        call('export.run',project=p,input_root=str(sources),output_root=str(output),output=str(wav),profile='reference',streams='audio')
+        expected=b''.join(bytes(int(F(n,1)/rate*48000)*4) if first is None else pcm(int(F(first,1)/rate*48000),int(F(n,1)/rate*48000)) for first,n in segments)
+        assert ff(['-i',str(wav),'-f','s16le','-'])==expected
+    passed.append('native_timing.long_timelines_render_in_exact_chunks')
     for rate,code in [(F(23),'UNSUPPORTED_TIMELINE'),(F(30),'UNSUPPORTED_MEDIA')]:
         bad=copy.deepcopy(p);bad['clips']=[];bad['frame_rate']=t(rate);bad=append(bad,rate,[(0,10)])
         target=output/('mismatched-'+str(rate)+'.mkv')

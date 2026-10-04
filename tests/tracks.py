@@ -195,7 +195,11 @@ def run(root):
     model_limit=copy.deepcopy(empty);model_limit['tracks']['duration']=time(1000,25)
     model_limit['tracks']['tracks'][0]['clips']=[placement(f'clip-{n}',0,n,1) for n in range(1000)]
     call({'command':'project.validate','project':model_limit})
-    call({'command':'render.plan','project':model_limit,'input_root':str(root),'output_root':str(out),'output':str(out/'too-many-clips.mkv')},'UNSUPPORTED_TIMELINE')
+    # More clips than one graph holds: the render is planned as chunks of at most 64 clips and joined exactly.
+    model_limit['tracks']['tracks'][0]['clips']=[placement(f'clip-{n}',n%3,n,1,n%20) for n in range(1000)]
+    plan=call({'command':'render.plan','project':model_limit,'input_root':str(root),'output_root':str(out),'output':str(out/'thousand-clips-plan.mkv')})
+    assert plan['frames']==1000 and len(plan['chunks'])==16 and [c['frames'] for c in plan['chunks']]==[64]*15+[40],plan['chunks']
+    render(model_limit,'thousand-clips-chunked')
     model_limit['tracks']['duration']=time(1001,25);model_limit['tracks']['tracks'][0]['clips'].append(placement('overflow',0,1000,1))
     call({'command':'project.validate','project':model_limit},'LIMIT_EXCEEDED')
     malformed=copy.deepcopy(base);malformed['tracks']['links'][0]['members'][0]['start']={'num':0,'den':0}

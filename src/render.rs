@@ -33,6 +33,247 @@ pub struct Plan {
     pub output: PathBuf,
     pub sources: Vec<Source>,
     pub arguments: Vec<String>,
+    /// Consecutive windows rendered separately and joined by stream copy, when one graph would
+    /// hold more than MAX_GRAPH_CLIPS clips; empty for a single graph.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "chunk_summary"
+    )]
+    pub chunks: Vec<Plan>,
+}
+
+/// Chunks are reported by size only; their graphs are internal.
+fn chunk_summary<S: serde::Serializer>(
+    chunks: &[Plan],
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = serializer.serialize_seq(Some(chunks.len()))?;
+    for chunk in chunks {
+        seq.serialize_element(&json!({"frames":chunk.frames,"samples":chunk.samples}))?;
+    }
+    seq.end()
+}
+
+/// Clips one FFmpeg graph may hold. Longer timelines render as chunks of at most this many clips,
+/// joined losslessly into one output.
+pub(crate) const MAX_GRAPH_CLIPS: usize = 64;
+
+/// Clips a render of `[start, end)` reads: placed clips and transition endpoints intersecting it,
+/// or sequential items (gaps included) overlapping it.
+fn clips_in(project: &Project, start: Time, end: Time) -> Result<usize> {
+    if let Some(a) = &project.tracks {
+        return crate::track_render::window_clips(a, start, end);
+    }
+    let mut offset = Time::ZERO;
+    let mut count = 0;
+    for clip in &project.clips {
+        let last = offset.plus(clip.duration)?;
+        if offset.compare(end)?.is_lt() && last.compare(start)?.is_gt() {
+            count += 1;
+        }
+        offset = last;
+    }
+    Ok(count)
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// Split `[start, start + duration)` into windows of at most MAX_GRAPH_CLIPS clips, or return
+/// None when one graph holds it. Every window but the last lasts a whole number of frames that is
+/// also a whole number of milliseconds (so of 48 kHz samples): stream-copied chunks then keep the
+/// exact container clock, as a single render would.
+fn windows(project: &Project, start: Time, duration: Time) -> Result<Option<Vec<(Time, Time)>>> {
+    let end = start.plus(duration)?;
+    if clips_in(project, start, end)? <= MAX_GRAPH_CLIPS {
+        return Ok(None);
+    }
+    let rate = project.frame_rate;
+    let step_frames = rate.num / gcd(rate.num, rate.den * 1000);
+    let step = Time::new(step_frames * rate.den, rate.num)?;
+    let mut windows = Vec::new();
+    let mut cursor = start;
+    while cursor.compare(end)?.is_lt() {
+        let rest = end.minus(cursor)?;
+        if clips_in(project, cursor, end)? <= MAX_GRAPH_CLIPS {
+            windows.push((cursor, rest));
+            break;
+        }
+        // The longest whole number of steps that still fits, by bisection over a monotone count.
+        let (mut low, mut high) = (0, rest.units(rate)? / step_frames);
+        while low < high {
+            let middle = (low + high).div_ceil(2);
+            let window_end = cursor.plus(step.times(Time::new(middle, 1)?)?)?;
+            if clips_in(project, cursor, window_end)? <= MAX_GRAPH_CLIPS {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        if low == 0 {
+            return Err(error(
+                "LIMIT_EXCEEDED",
+                format!(
+                    "More than {MAX_GRAPH_CLIPS} clips overlap within {step_frames} frames at {cursor} s"
+                ),
+            ));
+        }
+        let length = step.times(Time::new(low, 1)?)?;
+        windows.push((cursor, length));
+        cursor = cursor.plus(length)?;
+    }
+    Ok(Some(windows))
+}
+
+/// A plan that renders each window with `single` to a hidden chunk and joins the chunks by stream
+/// copy into `output`, or None when one graph holds the whole range.
+fn chunked(
+    project: &Project,
+    output_root: &Path,
+    output: &Path,
+    extension: &str,
+    start: Time,
+    duration: Time,
+    single: impl Fn(Time, Time, &Path) -> Result<Plan>,
+) -> Result<Option<Plan>> {
+    let Some(windows) = windows(project, start, duration)? else {
+        return Ok(None);
+    };
+    let output = destination_extension(output, output_root, extension)?;
+    let mut chunks = Vec::new();
+    for (index, (start, duration)) in windows.into_iter().enumerate() {
+        let placeholder = output.with_file_name(format!(".cutbolt-chunk-{index}.{extension}"));
+        chunks.push(single(start, duration, &placeholder)?);
+    }
+    let mut sources: Vec<Source> = Vec::new();
+    for source in chunks.iter().flat_map(|c| &c.sources) {
+        if !sources.iter().any(|s| s.path == source.path) {
+            sources.push(source.clone());
+        }
+    }
+    sources.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(Some(Plan {
+        profile: chunks[0].profile,
+        source_quality: chunks[0].source_quality,
+        project_revision: project.revision,
+        frames: chunks.iter().map(|c| c.frames).sum(),
+        samples: chunks.iter().map(|c| c.samples).sum(),
+        arguments: join_arguments(Path::new("{chunk list}"), &output, extension),
+        output,
+        sources,
+        chunks,
+    }))
+}
+
+/// FFmpeg arguments that join a concat list of chunk files by stream copy.
+fn join_arguments(list: &Path, output: &Path, extension: &str) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-hide_banner",
+        "-v",
+        "error",
+        "-nostdin",
+        "-n",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    args.push(list.to_string_lossy().into_owned());
+    args.extend(
+        [
+            "-map",
+            "0",
+            "-c",
+            "copy",
+            "-f",
+            if extension == "wav" {
+                "wav"
+            } else {
+                "matroska"
+            },
+        ]
+        .map(str::to_owned),
+    );
+    args.push(output.to_string_lossy().into_owned());
+    args
+}
+
+/// Run a plan's FFmpeg work into `temp`: one graph, or each chunk into a hidden file beside `temp`
+/// followed by a stream-copy join. Callers verify the result.
+pub(crate) fn run_plan(
+    plan: &Plan,
+    temp: &Path,
+    timeout: Duration,
+    progress: bool,
+    control: &dyn media::Control,
+) -> Result<()> {
+    let tool = control.tool("ffmpeg");
+    let output = |arguments: &[String], target: &Path| {
+        let mut arguments = arguments.to_vec();
+        *arguments.last_mut().expect("output argument") = target.to_string_lossy().into_owned();
+        if progress {
+            arguments.splice(
+                0..0,
+                ["-progress".into(), "pipe:1".into(), "-nostats".into()],
+            );
+        }
+        arguments
+    };
+    if plan.chunks.is_empty() {
+        media::capture_controlled(&tool, &output(&plan.arguments, temp), timeout, control)?;
+        return Ok(());
+    }
+    let extension = temp
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mkv")
+        .to_owned();
+    let mut parts = Vec::new();
+    let mut done = 0;
+    for (index, chunk) in plan.chunks.iter().enumerate() {
+        let part = TempFile(temp.with_extension(format!("chunk{index}.{extension}")));
+        if part.0.try_exists()? {
+            return Err(error("OUTPUT_EXISTS", "Temporary chunk collision"));
+        }
+        media::capture_controlled(&tool, &output(&chunk.arguments, &part.0), timeout, control)?;
+        done += chunk.frames;
+        control.frames(done)?;
+        parts.push(part);
+    }
+    let list = TempFile(temp.with_extension("chunks.txt"));
+    let mut text = String::new();
+    for (index, (part, chunk)) in parts.iter().zip(&plan.chunks).enumerate() {
+        let path = part
+            .0
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace('\'', "'\\''");
+        text.push_str(&format!("file '{path}'\n"));
+        // State each chunk's exact length: the join offsets the next chunk by it, and a container's
+        // own duration may round a final packet up by a millisecond.
+        if index + 1 < parts.len() {
+            let micros = u128::from(chunk.samples) * 1_000_000 / 48_000;
+            text.push_str(&format!(
+                "duration {}.{:06}\n",
+                micros / 1_000_000,
+                micros % 1_000_000
+            ));
+        }
+    }
+    fs::write(&list.0, text)?;
+    let extension = if extension == "wav" { "wav" } else { "mkv" };
+    media::capture_controlled(
+        &tool,
+        &join_arguments(&list.0, temp, extension),
+        timeout,
+        control,
+    )?;
+    Ok(())
 }
 
 pub(crate) fn micros(value: &Value) -> Result<i64> {
@@ -335,6 +576,19 @@ fn plan_controlled(
     control.phase("inspecting")?;
     project.validate()?;
     media::input_root(input_root)?;
+    if let Some(plan) = chunked(
+        project,
+        output_root,
+        output,
+        "mkv",
+        Time::ZERO,
+        project.duration()?,
+        |start, duration, chunk| {
+            plan_range(project, input_root, output_root, chunk, start, duration)
+        },
+    )? {
+        return Ok(plan);
+    }
     if project.tracks.is_some() {
         return crate::track_render::plan(project, input_root, output_root, output, control);
     }
@@ -502,6 +756,7 @@ fn plan_controlled(
         output,
         sources,
         arguments: args,
+        chunks: Vec::new(),
     })
 }
 
@@ -573,6 +828,19 @@ pub(crate) fn plan_range(
             "Render range must be nonempty and inside the timeline",
         ));
     }
+    if let Some(plan) = chunked(
+        project,
+        output_root,
+        output,
+        "mkv",
+        start,
+        duration,
+        |start, duration, chunk| {
+            plan_range(project, input_root, output_root, chunk, start, duration)
+        },
+    )? {
+        return Ok(plan);
+    }
     if project.tracks.is_some() {
         crate::track_render::plan_window(
             project,
@@ -607,6 +875,19 @@ pub(crate) fn plan_audio_range(
             "INVALID_RANGE",
             "Render range must be nonempty and inside the timeline",
         ));
+    }
+    if let Some(plan) = chunked(
+        project,
+        output_root,
+        output,
+        "wav",
+        start,
+        duration,
+        |start, duration, chunk| {
+            plan_audio_range(project, input_root, output_root, chunk, start, duration)
+        },
+    )? {
+        return Ok(plan);
     }
     if project.tracks.is_some() {
         return crate::track_render::plan_audio_window(
@@ -734,6 +1015,7 @@ pub(crate) fn plan_audio_range(
         output,
         sources,
         arguments: args,
+        chunks: Vec::new(),
     })
 }
 
@@ -746,7 +1028,7 @@ pub(crate) fn run_audio_range(
     start: Time,
     duration: Time,
 ) -> Result<Value> {
-    let mut plan = plan_audio_range(project, input_root, output_root, output, start, duration)?;
+    let plan = plan_audio_range(project, input_root, output_root, output, start, duration)?;
     let ffmpeg_version = media::version("ffmpeg")?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -756,11 +1038,12 @@ pub(crate) fn run_audio_range(
         ".cutbolt-{}-{nonce}.partial.wav",
         std::process::id()
     )));
-    *plan.arguments.last_mut().expect("output argument") = temp.0.to_string_lossy().into_owned();
-    media::capture(
-        &media::tool("ffmpeg"),
-        &plan.arguments,
+    run_plan(
+        &plan,
+        &temp.0,
         Duration::from_secs(600),
+        false,
+        &media::Uncontrolled,
     )?;
     let rendered = crate::pcm_stream::inspect(&temp.0, &media::Uncontrolled)?;
     if rendered.frames != plan.samples {
@@ -795,7 +1078,7 @@ pub(crate) fn run_range(
 }
 fn execute(
     project: &Project,
-    mut plan: Plan,
+    plan: Plan,
     temp_path: Option<&Path>,
     control: &dyn media::Control,
 ) -> Result<Value> {
@@ -815,15 +1098,10 @@ fn execute(
         return Err(error("OUTPUT_EXISTS", "Temporary output collision"));
     }
     let temp = TempFile(temp);
-    *plan.arguments.last_mut().expect("output argument") = temp.0.to_string_lossy().into_owned();
     control.phase("rendering")?;
-    plan.arguments.splice(
-        0..0,
-        ["-progress".into(), "pipe:1".into(), "-nostats".into()],
-    );
-    media::capture_controlled(
-        &control.tool("ffmpeg"),
-        &plan.arguments,
+    run_plan(
+        &plan,
+        &temp.0,
         Duration::from_secs(
             if project.tracks.is_none() && large_raster(project.width, project.height) {
                 1800
@@ -831,6 +1109,7 @@ fn execute(
                 600
             },
         ),
+        true,
         control,
     )?;
     control.frames(plan.frames)?;

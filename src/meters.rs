@@ -85,10 +85,12 @@ fn measure(project: &Project, input_root: &Path, start: Time, duration: Time) ->
         start,
         duration,
     )?;
-    media::capture(
-        &media::tool("ffmpeg"),
-        &plan.arguments,
+    render::run_plan(
+        &plan,
+        &plan.output,
         Duration::from_secs(600),
+        false,
+        &media::Uncontrolled,
     )?;
     let decoded = crate::pcm_wave::decode(&fs::read(&plan.output)?)?;
     if decoded.data.len() as u64 != plan.samples * 2 {

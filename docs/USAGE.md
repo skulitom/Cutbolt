@@ -179,7 +179,13 @@ Use `multicam.create` and `multicam.edit` inside `timeline.apply` or saved `sess
 
 The reference profile requires:
 
-- One sequence of 1–64 media or explicit gap items at a supported [native frame rate](NATIVE_TIMING.md), or 25 fps [placed tracks](TRACKS.md) with at most 64 clips. Both render paths require 1–180,000 total frames; the reference source bound is also 180,000 frames.
+- One sequence of up to 1,000 media or explicit gap items at a supported [native frame rate](NATIVE_TIMING.md), or 25 fps [placed tracks](TRACKS.md) with up to 1,000 clips. Ranges with more than 64 clips render as chunks; see [long timelines](#long-timelines). Both render paths require 1–180,000 total frames; the reference source bound is also 180,000 frames.
+
+### Long timelines
+
+One FFmpeg graph holds at most 64 clips. A full render, range render, preview range, export or meter of a range with more clips is planned as consecutive chunks of at most 64 clips each. The clips counted are those intersecting the window, plus both endpoints of any transition crossing it. Each chunk renders through the ordinary single-graph path into a hidden file beside the output. The chunks are then joined by stream copy, with each chunk's exact length stated to the join.
+
+Every chunk but the last lasts a whole number of frames that is also a whole number of milliseconds, and so of 48 kHz samples: 1 frame at 25 fps, 30 frames at 30000/1001. The joined container clock therefore matches a single render's exactly. The joined output then passes the same full decode verification as any render. `render.plan` reports `chunks` as their frame and sample counts. Progress advances chunk by chunk. A window where more than 64 clips overlap within one alignment step fails with `LIMIT_EXCEEDED`.
 - Exactly one FFV1/bgr0 video stream and one stereo PCM s16 audio stream in each source.
 - Source dimensions matching the sequence, square pixels, zero-origin continuous video timestamps, and no rotation side data.
 - 48 kHz audio with matching total duration and continuous timestamps (up to 1 ms Matroska timestamp quantization).
