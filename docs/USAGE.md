@@ -169,7 +169,11 @@ Use `multicam.create` and `multicam.edit` inside `timeline.apply` or saved `sess
 
 `files.list` lists files and folders under an absolute `input_root`, sorted by path relative to it, with file sizes. `dir` picks a relative subfolder, `recursive: true` walks every subfolder, `extensions` keeps only matching files (case-insensitive, folders omitted) and `limit` caps entries at 1-1000 (default 200), with `total` and `truncated` reporting the rest. Engine state folders (`.cutbolt`) are skipped and `..` is rejected.
 
-`media.inspect` takes absolute `path` and `input_root` paths. It resolves the file under that root and returns ffprobe metadata. General probing is broader than rendering support.
+`media.inspect` takes absolute `path` and `input_root` paths. It resolves the file under that root and returns its identity and ffprobe metadata. General probing is broader than rendering support, so the result also carries a `timeline` decision.
+
+- **Ready.** The file already meets the source profile: FFV1 `bgr0` video, or `bgra` for alpha overlay tracks, plus 48 kHz stereo PCM16 audio, at a supported frame rate. `timeline` then holds `ready: true`, the size, `frame_rate`, exact `frames` and rational `duration`, checked with the renderer's own packet-timed source inspection, and an `asset` ready for `media.add`. The project's size and frame rate must match it.
+- **Not ready.** `reasons` lists each mismatch. For video, `conform` proposes a whole-source [`media.conform`](CONFORM.md) recipe at 25 fps with an `output` name. The recipe's color interpretation comes from the stream's tags, using `use_declared` when tags are missing. Check it with `media.conform.inspect` and run it with `job.start`.
+- **No proposal.** Still images, HDR sources and sources tagged with non-BT.709 color get no recipe. Their reason names the right command instead.
 
 `render.plan` and `render.run` accept `project`, `input_root`, `output_root`, and `output` as absolute paths. The output root/parent must already exist. The file must be new and end in `.mkv`. Existing files, including source media, are never overwritten. Inputs outside the declared root are rejected after resolving filesystem links.
 

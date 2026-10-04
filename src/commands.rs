@@ -1165,7 +1165,10 @@ pub fn handle(request: Request) -> Result<Value> {
         Request::Inspect { path, input_root } => {
             let path = media::allowed_file(&path, &input_root)?;
             let identity = crate::identity::relative(&path, &input_root)?;
-            Ok(json!({"path":path,"identity":identity,"metadata":media::probe(&path)?}))
+            let metadata = media::probe(&path)?;
+            let relative = identity["path"].as_str().expect("identity path");
+            let timeline = crate::readiness::timeline(&path, relative, &metadata);
+            Ok(json!({"path":path,"identity":identity,"timeline":timeline,"metadata":metadata}))
         }
         Request::Plan {
             project,

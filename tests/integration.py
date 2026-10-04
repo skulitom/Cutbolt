@@ -48,7 +48,9 @@ def run(executable, root):
     request({"command": "capabilities", "unrecognized": True}, "INVALID_JSON")
     check("agent.strict_requests", True)
     inspected = request({"command": "media.inspect", "path": str(sources[0]), "input_root": str(media)})
-    check("media.inspect", len(inspected["metadata"]["streams"]) == 2)
+    ready = inspected["timeline"]
+    check("media.inspect", len(inspected["metadata"]["streams"]) == 2 and ready["ready"] and ready["frames"] == FPS * 12
+          and ready["asset"] == {"id": sources[0].stem, "path": sources[0].name, "duration": time(12)})
     before_hashes = [hashlib.sha256(path.read_bytes()).hexdigest() for path in sources]
     project = request({"command": "project.create", "id": "first-demo", "width": WIDTH, "height": HEIGHT, "frame_rate": time(FPS)})
     operations = []

@@ -1,5 +1,15 @@
 # Progress history
 
+## 4 October 2026: media.inspect says what to do next
+
+In the trials, `media.inspect` returned raw ffprobe output. Agents had to work out for themselves whether a file could be placed, compute its duration, and write a conform recipe. The result now also carries a `timeline` decision:
+
+- A source that meets the renderer's profile is checked with the renderer's own packet-timed source inspection. The result reports the exact frame rate, frames and rational duration, plus an asset ready for `media.add`.
+- Any other video gets its reasons and a whole-source `media.conform` recipe derived from its stream tags. For the trial's phone clip, that recipe passed `media.conform.inspect` unchanged.
+- Stills, HDR sources and sources tagged with non-BT.709 color get a reason that points to the right command, and no recipe.
+
+No scoring changed.
+
 ## 4 October 2026: declared project transfer
 
 Every H.264 or PNG export and every scopes request had to repeat `input_transfer`, and agents in the trials guessed at it. A project can now declare the transfer of its encoded RGB values once, with the `project.transfer` operation. The declaration is a new optional `transfer` field, omitted when unset, so existing snapshots and fingerprints are unchanged.

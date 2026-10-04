@@ -1,0 +1,270 @@
+//! Whether a probed file can go on a timeline as it is, and if not, the media.conform recipe that
+//! makes it usable, so media.inspect answers the agent's next step instead of only listing streams.
+use crate::{media, render, time::Time};
+use serde_json::{Value, json};
+use std::path::Path;
+
+/// Sequential timeline rates; placed tracks use 25 fps.
+const RATES: [(u64, u64); 8] = [
+    (24, 1),
+    (25, 1),
+    (30, 1),
+    (50, 1),
+    (60, 1),
+    (24000, 1001),
+    (30000, 1001),
+    (60000, 1001),
+];
+/// media.conform output limits: at most 4096x2160, 8M pixels and 45000 frames at 25 fps.
+const CONFORM_FRAMES: u64 = 45_000;
+
+/// Timeline readiness of `path`, whose metadata was already probed; `relative` is its path under
+/// `input_root`. Ready sources are checked by the renderer's own packet-timed source inspection.
+pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
+    let streams = metadata["streams"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    let video = streams.iter().find(|s| s["codec_type"] == "video");
+    let audio = streams.iter().find(|s| s["codec_type"] == "audio");
+    let text = |v: &Value| match v {
+        Value::String(s) => s.clone(),
+        Value::Null => "unknown".into(),
+        other => other.to_string(),
+    };
+    if metadata["format"]["format_name"]
+        .as_str()
+        .is_some_and(|f| f == "image2" || f.ends_with("_pipe"))
+    {
+        return json!({"ready":false,"reasons":["still image: show it with a scene image layer and scene.render, or use it in captions or graphics"]});
+    }
+    let mut reasons = Vec::new();
+    match video {
+        None => reasons.push("no video stream; timeline sources need FFV1 video".to_string()),
+        Some(v) => {
+            if v["codec_name"] != "ffv1" || !(v["pix_fmt"] == "bgr0" || v["pix_fmt"] == "bgra") {
+                reasons.push(format!(
+                    "video is {} {}; timeline video must be FFV1 bgr0 (bgra for alpha_over overlay tracks)",
+                    text(&v["codec_name"]),
+                    text(&v["pix_fmt"])
+                ));
+            }
+            if v.get("side_data_list").is_some() {
+                reasons.push("video carries side data such as rotation or HDR metadata".into());
+            }
+            if let Some(sar) = v["sample_aspect_ratio"].as_str()
+                && sar != "1:1"
+                && sar != "N/A"
+            {
+                reasons.push(format!("pixels are not square (aspect {sar})"));
+            }
+        }
+    }
+    match audio {
+        None => reasons.push(
+            "no audio stream; timeline sources need 48000 Hz stereo PCM s16 audio".to_string(),
+        ),
+        Some(a) => {
+            if a["codec_name"] != "pcm_s16le" || a["sample_rate"] != "48000" || a["channels"] != 2 {
+                reasons.push(format!(
+                    "audio is {} at {} Hz with {} channels; timeline audio must be PCM s16 at 48000 Hz, 2 channels",
+                    text(&a["codec_name"]),
+                    text(&a["sample_rate"]),
+                    text(&a["channels"])
+                ));
+            }
+        }
+    }
+    if streams.len() > 2 {
+        reasons.push(format!(
+            "{} streams; timeline sources have exactly one video and one audio stream",
+            streams.len()
+        ));
+    }
+    let rate = video.and_then(|v| native_rate(v, metadata));
+    if let Some(v) = video
+        && rate.is_none()
+    {
+        reasons.push(format!(
+            "frame rate {} is not a timeline rate (24, 25, 30, 50 or 60 fps, or the 1000/1001 rates)",
+            text(&v["r_frame_rate"])
+        ));
+    }
+    if reasons.is_empty()
+        && let (Some(v), Some(rate)) = (video, rate)
+    {
+        let (width, height) = (dimension(&v["width"]), dimension(&v["height"]));
+        match render::inspect_timeline_source(path, width, height, rate, &media::Uncontrolled)
+            .and_then(|source| {
+                Ok((
+                    source.frames,
+                    Time::new(source.frames * rate.den, rate.num)?,
+                ))
+            }) {
+            Ok((frames, duration)) => {
+                let alpha = v["pix_fmt"] == "bgra";
+                return json!({"ready":true,"width":width,"height":height,"frame_rate":rate,"frames":frames,
+                    "duration":duration,"alpha":alpha,"use":if alpha {"alpha_over overlay tracks"} else {"any timeline with this size and frame rate"},
+                    "asset":{"id":asset_id(relative),"path":relative,"duration":duration}});
+            }
+            Err(e) => reasons.push(e.message),
+        }
+    }
+    let mut result = json!({"ready":false,"reasons":reasons});
+    match video.map(|v| conform(relative, v, audio)) {
+        Some(Ok(recipe)) => {
+            result["conform"] = json!({"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),
+                "next":"check the recipe with media.conform.inspect, run it with job.start run media.conform, then media.add the returned asset"})
+        }
+        Some(Err(why)) => result["reasons"]
+            .as_array_mut()
+            .expect("reasons")
+            .push(why.into()),
+        None => {}
+    }
+    result
+}
+
+fn dimension(value: &Value) -> u32 {
+    value
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(0)
+}
+
+/// The timeline rate this video stream declares, using the renderer's own rate test.
+fn native_rate(video: &Value, metadata: &Value) -> Option<Time> {
+    RATES
+        .iter()
+        .map(|&(num, den)| Time { num, den })
+        .find(|&rate| render::clock::rate_hint(video, metadata, rate))
+}
+
+/// A valid asset ID from the file name: its stem, at most 128 bytes.
+fn asset_id(relative: &str) -> String {
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    let mut id = if stem.trim().is_empty() {
+        "media"
+    } else {
+        stem
+    }
+    .to_string();
+    while id.len() > 128 {
+        id.pop();
+    }
+    id
+}
+
+/// Exact stream length from `duration_ts` and `time_base`, as whole 25 fps frames.
+fn frames_at_25(stream: &Value) -> Option<u64> {
+    let ticks = stream["duration_ts"].as_u64()?;
+    let (num, den) = stream["time_base"].as_str()?.split_once('/')?;
+    let (num, den): (u128, u128) = (num.parse().ok()?, den.parse().ok()?);
+    (den > 0).then(|| (ticks as u128 * num * 25 / den) as u64)
+}
+
+/// A media.conform recipe for the whole source at 25 fps, from its tags, or why there is none.
+fn conform(relative: &str, video: &Value, audio: Option<&Value>) -> Result<Value, &'static str> {
+    let tag = |key: &str| {
+        video[key]
+            .as_str()
+            .filter(|v| !v.is_empty() && *v != "unknown")
+    };
+    if matches!(tag("color_transfer"), Some("smpte2084" | "arib-std-b67")) {
+        return Err("HDR source: convert it with hdr.conform instead of media.conform");
+    }
+    let pix_fmt = video["pix_fmt"].as_str().unwrap_or("");
+    let rgb = matches!(pix_fmt, "bgr0" | "rgb24" | "bgra" | "rgba" | "gbrp");
+    let tagged_601 = matches!(tag("color_space"), Some("smpte170m" | "bt470bg"))
+        || matches!(tag("color_primaries"), Some(p) if p != "bt709");
+    if !rgb && tagged_601 {
+        return Err(
+            "the source is tagged with non-BT.709 color, which media.conform does not convert",
+        );
+    }
+    let frames = [Some(video), audio]
+        .into_iter()
+        .flatten()
+        .map(frames_at_25)
+        .collect::<Option<Vec<_>>>()
+        .and_then(|f| f.into_iter().min())
+        .ok_or("the stream durations are not exact, so no conform duration can be proposed")?
+        .min(CONFORM_FRAMES);
+    if frames == 0 {
+        return Err("the source is shorter than one 25 fps frame");
+    }
+    let (mut width, mut height) = (dimension(&video["width"]), dimension(&video["height"]));
+    if width > 4096 || height > 2160 || u64::from(width) * u64::from(height) > 8_294_400 {
+        // Fit 3840x2160, keeping the aspect ratio with even dimensions.
+        let scale = (3840.0 / f64::from(width)).min(2160.0 / f64::from(height));
+        width = ((f64::from(width) * scale / 2.0).floor() as u32 * 2).max(2);
+        height = ((f64::from(height) * scale / 2.0).floor() as u32 * 2).max(2);
+    }
+    let mut recipe = json!({"schema_version":1,"id":asset_id(relative),"source":{"file":{"path":relative}},
+        "source_in":0,"duration":Time{num:frames,den:25},"rate":1,"reverse":false,"freeze":false,
+        "width":width,"height":height,"audio":if audio.is_some() {"resample"} else {"mute"}});
+    if video["codec_name"] == "ffv1" && pix_fmt == "bgr0" {
+        recipe["source"]["color"] = json!("encoded_rgb");
+    } else {
+        let full = tag("color_range") == Some("pc") || pix_fmt.starts_with("yuvj") || rgb;
+        let untagged = [
+            "color_range",
+            "color_space",
+            "color_transfer",
+            "color_primaries",
+        ]
+        .iter()
+        .any(|key| tag(key).is_none());
+        recipe["source"]["sdr"] = json!({"matrix":if rgb {"rgb"} else {"bt709"},"range":if full {"full"} else {"limited"},
+            "transfer":if tag("color_transfer") == Some("iec61966-2-1") {"srgb"} else {"bt709"},
+            "missing_tags":if untagged {"use_declared"} else {"reject"}});
+        recipe["working_transfer"] = json!("bt709");
+    }
+    Ok(recipe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proposes_a_tagged_conform_recipe() {
+        let video = json!({"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":640,"height":360,
+            "r_frame_rate":"30/1","time_base":"1/15360","duration_ts":122880,"color_range":"tv","color_space":"bt709",
+            "color_transfer":"bt709","color_primaries":"bt709","sample_aspect_ratio":"1:1"});
+        let audio = json!({"codec_type":"audio","codec_name":"aac","sample_rate":"44100","channels":2,
+            "time_base":"1/44100","duration_ts":352800});
+        let metadata = json!({"streams":[video,audio],"format":{"format_name":"mov,mp4"}});
+        let result = timeline(Path::new("unused.mp4"), "clips/phone.mp4", &metadata);
+        assert_eq!(result["ready"], false);
+        assert_eq!(result["reasons"].as_array().unwrap().len(), 2, "{result}");
+        let recipe = &result["conform"]["recipe"];
+        assert_eq!(recipe["id"], "phone");
+        assert_eq!(recipe["duration"], json!({"num":200,"den":25}));
+        assert_eq!(recipe["source"]["sdr"]["range"], "limited");
+        assert_eq!(recipe["source"]["sdr"]["missing_tags"], "reject");
+        assert_eq!(result["conform"]["output"], "phone-conformed.mkv");
+    }
+
+    #[test]
+    fn declines_hdr_and_bt601_sources() {
+        let mut video = json!({"codec_type":"video","codec_name":"hevc","pix_fmt":"yuv420p10le","width":3840,
+            "height":2160,"r_frame_rate":"25/1","time_base":"1/25","duration_ts":50,"color_transfer":"smpte2084"});
+        let metadata = json!({"streams":[video.clone()],"format":{}});
+        let result = timeline(Path::new("unused"), "hdr.mov", &metadata);
+        assert!(result.get("conform").is_none());
+        assert!(result["reasons"].to_string().contains("hdr.conform"));
+        video["color_transfer"] = json!("bt709");
+        video["color_space"] = json!("smpte170m");
+        let result = timeline(
+            Path::new("unused"),
+            "sd.mov",
+            &json!({"streams":[video],"format":{}}),
+        );
+        assert!(result.get("conform").is_none(), "{result}");
+        let still = json!({"streams":[{"codec_type":"video","codec_name":"png"}],"format":{"format_name":"png_pipe"}});
+        let result = timeline(Path::new("unused"), "logo.png", &still);
+        assert_eq!(result["reasons"].as_array().unwrap().len(), 1);
+        assert!(result.get("conform").is_none());
+    }
+}

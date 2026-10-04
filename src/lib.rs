@@ -37,6 +37,7 @@ pub mod pcm_wave;
 pub mod portable;
 pub mod preview;
 pub mod proxy;
+pub mod readiness;
 pub mod recording;
 pub mod reference;
 pub mod reframe;

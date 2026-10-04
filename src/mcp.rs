@@ -184,7 +184,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Read newest-first revision summaries. limit defaults to 50 (1-200). Pass next_before_revision as before_revision for the next page; null means finished."
         }
         "media.inspect" => {
-            "Probe a local source inside an explicit absolute input_root. Returns its content identity (path relative to input_root, SHA-256, bytes) and stream metadata; inspection does not imply this format can be rendered."
+            "Probe a local source inside an explicit absolute input_root. Returns its content identity (path relative to input_root, SHA-256, bytes), stream metadata and `timeline`: whether the file can go on a timeline as it is, with its exact frame rate, frames, rational duration and a media.add-ready asset, or the reasons it cannot and, for video, a media.conform recipe and output to run with job.start."
         }
         "render.plan" => {
             "Validate the narrow reference media profile and inspect an export plan. Requires absolute input/output roots and an unused .mkv output. May take time to decode source metadata."
@@ -355,8 +355,8 @@ impl Server {
     fn instructions(&self) -> String {
         let mut text = concat!(
             "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
-            "Typical cut: session.create with id, width, height and frame_rate; media.inspect each source (timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio; ",
-            "convert others with job.start run media.conform); session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
+            "Typical cut: session.create with id, width, height and frame_rate; media.inspect each source (its timeline field gives a ready asset for media.add, ",
+            "or a media.conform recipe to run with job.start); session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",

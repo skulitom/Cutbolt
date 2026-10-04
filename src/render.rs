@@ -94,6 +94,17 @@ pub(crate) fn inspect_reference_audio(
 ) -> Result<Source> {
     inspect_source_at(path, width, height, rate, control, false, Timing::Packets)
 }
+/// A timeline source at its own size and rate, for media.inspect: the reference profile, or a
+/// bgra alpha_over source. Like `inspect_reference_audio`, video timing comes from packets.
+pub(crate) fn inspect_timeline_source(
+    path: &Path,
+    width: u32,
+    height: u32,
+    rate: Time,
+    control: &dyn media::Control,
+) -> Result<Source> {
+    inspect_source_at(path, width, height, rate, control, true, Timing::Packets)
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Timing {
     Decoded,
