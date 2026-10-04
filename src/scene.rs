@@ -330,6 +330,9 @@ pub struct Scene {
     /// Optional 3D plane geometry with cameras, depth and lighting; tilemap layers are rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<crate::geometry::Geometry>,
+    /// Render over a transparent backdrop instead of `background`, as a straight-alpha FFV1 bgra asset for alpha_over tracks (captions and titles over video). Normal-blend layers only, without geometry; default false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub transparent: bool,
 }
 
 pub(crate) struct Pixels {
@@ -490,6 +493,27 @@ impl Scene {
                 "UNSUPPORTED_SCENE",
                 "Tilemap layers are not supported in 3D geometry scenes",
             ));
+        }
+        if self.transparent {
+            if self.geometry.is_some() {
+                return Err(error(
+                    "UNSUPPORTED_SCENE",
+                    "transparent scenes do not support 3D geometry",
+                ));
+            }
+            if let Some(layer) = self
+                .layers
+                .iter()
+                .find(|l| !matches!(l.blend_mode, composite::BlendMode::Normal))
+            {
+                return Err(error(
+                    "UNSUPPORTED_SCENE",
+                    format!(
+                        "transparent scenes composite normal-blend layers only; layer {:?} uses another blend mode",
+                        layer.id
+                    ),
+                ));
+            }
         }
         Ok(frames)
     }
@@ -1183,7 +1207,20 @@ fn select_cycle(frames: &[Frame], end: &End, mut time: Time) -> Result<Option<us
     Err(invalid("Animation sampling exceeded duration"))
 }
 
-fn compose_sample(scene: &Scene, prepared: &Prepared, sample: usize) -> Result<Vec<u8>> {
+/// Compose one sample. A transparent scene composes over black; with `matte`, every source pixel
+/// becomes white with its own alpha, so the result accumulates 255 x alpha with the same weights
+/// and rounding as the color pass.
+fn compose_sample(
+    scene: &Scene,
+    prepared: &Prepared,
+    sample: usize,
+    matte: bool,
+) -> Result<Vec<u8>> {
+    let backdrop = if scene.transparent {
+        [0, 0, 0]
+    } else {
+        scene.background
+    };
     if let Some(geometry) = &prepared.geometry {
         return Ok(if let Some(state) = &geometry.states[sample] {
             compose_geometry(scene, prepared, state, sample)
@@ -1193,9 +1230,7 @@ fn compose_sample(scene: &Scene, prepared: &Prepared, sample: usize) -> Result<V
                 .repeat((scene.width * scene.height) as usize)
         });
     }
-    let mut rgb = scene
-        .background
-        .repeat((scene.width * scene.height) as usize);
+    let mut rgb = backdrop.repeat((scene.width * scene.height) as usize);
     for (layer_index, layer) in scene.layers.iter().enumerate() {
         let Some(index) = prepared.selected[layer_index][sample] else {
             continue;
@@ -1247,10 +1282,14 @@ fn compose_sample(scene: &Scene, prepared: &Prepared, sample: usize) -> Result<V
                     let processed = processor
                         .as_ref()
                         .and_then(|processor| processor.pixel(&p, layer.alpha_mode, [sx, sy]));
-                    Some(if let Some(p) = processed {
-                        (p, AlphaMode::Straight, coverage)
-                    } else {
-                        (p, layer.alpha_mode, coverage)
+                    Some(match processed {
+                        _ if matte => (
+                            [255, 255, 255, processed.unwrap_or(p)[3]],
+                            AlphaMode::Straight,
+                            coverage,
+                        ),
+                        Some(p) => (p, AlphaMode::Straight, coverage),
+                        None => (p, layer.alpha_mode, coverage),
                     })
                 },
             );
@@ -1320,10 +1359,17 @@ fn compose_sample(scene: &Scene, prepared: &Prepared, sample: usize) -> Result<V
                         [sx + offset[0] as i64, sy + offset[1] as i64],
                     )
                 });
+                let white;
                 let (p, alpha_mode) = if let Some(processed) = &processed {
                     (processed.as_slice(), AlphaMode::Straight)
                 } else {
                     (p, layer.alpha_mode)
+                };
+                let (p, alpha_mode) = if matte {
+                    white = [255, 255, 255, p[3]];
+                    (white.as_slice(), AlphaMode::Straight)
+                } else {
+                    (p, alpha_mode)
                 };
                 let dest = ((dy * scene.width + dx) * 3) as usize;
                 for c in 0..3 {
@@ -1465,15 +1511,47 @@ fn compose_geometry(
     })
 }
 
+/// One output frame: RGB, or straight RGBA for a transparent scene.
 fn compose(scene: &Scene, prepared: &Prepared, frame: u64) -> Result<Vec<u8>> {
+    if !scene.transparent {
+        return compose_plane(scene, prepared, frame, false);
+    }
+    // Over black the color pass holds premultiplied color; the matte pass holds 255 x alpha.
+    let color = compose_plane(scene, prepared, frame, false)?;
+    let matte = compose_plane(scene, prepared, frame, true)?;
+    Ok(straighten(&color, &matte))
+}
+
+/// Straight RGBA from premultiplied color over black and a 255 x alpha matte, rounding to nearest.
+fn straighten(color: &[u8], matte: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(color.len() / 3 * 4);
+    for (c, m) in color
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(matte.as_chunks::<3>().0)
+    {
+        let alpha = m[0];
+        for &channel in c {
+            rgba.push(match alpha {
+                0 => 0,
+                a => ((u32::from(channel) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8,
+            });
+        }
+        rgba.push(alpha);
+    }
+    rgba
+}
+
+fn compose_plane(scene: &Scene, prepared: &Prepared, frame: u64, matte: bool) -> Result<Vec<u8>> {
     let samples = prepared.samples_per_frame;
     let first = frame as usize * samples;
     if samples == 1 {
-        return compose_sample(scene, prepared, first);
+        return compose_sample(scene, prepared, first, matte);
     }
     let mut sums = vec![0u32; (scene.width * scene.height * 3) as usize];
     for sample in first..first + samples {
-        let rgb = compose_sample(scene, prepared, sample)?;
+        let rgb = compose_sample(scene, prepared, sample, matte)?;
         for (sum, value) in sums.iter_mut().zip(rgb) {
             *sum += value as u32;
         }
@@ -1550,7 +1628,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         "-f".into(),
         "rawvideo".into(),
         "-pixel_format".into(),
-        "rgb24".into(),
+        if scene.transparent { "rgba" } else { "rgb24" }.into(),
         "-video_size".into(),
         format!("{}x{}", scene.width, scene.height),
         "-framerate".into(),
@@ -1574,7 +1652,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         "-slices".into(),
         ffv1_slices.into(),
         "-pix_fmt".into(),
-        "bgr0".into(),
+        if scene.transparent { "bgra" } else { "bgr0" }.into(),
         "-threads".into(),
         ffv1_slices.into(),
         "-c:a".into(),
@@ -1617,12 +1695,22 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         }
         Ok(())
     })?;
-    let verified = render::inspect_reference(
-        &temp,
+    let (out_w, out_h) = (
         scene.width * scene.output_scale,
         scene.height * scene.output_scale,
-        &media::Uncontrolled,
-    )?;
+    );
+    let verified = if scene.transparent {
+        let (verified, alpha) = render::inspect_overlay(&temp, out_w, out_h, &media::Uncontrolled)?;
+        if !alpha {
+            return Err(error(
+                "RENDER_VALIDATION_FAILED",
+                "Transparent scene output lacks its alpha plane",
+            ));
+        }
+        verified
+    } else {
+        render::inspect_reference(&temp, out_w, out_h, &media::Uncontrolled)?
+    };
     if verified.frames != frames || verified.samples != frames * 1920 {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
@@ -1659,4 +1747,44 @@ pub(crate) fn write_png(path: &Path, width: u32, height: u32, bytes: &[u8]) -> R
         .finish()
         .map_err(|e| error("ENCODE_FAILED", e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transparent_frames_straighten_premultiplied_color() {
+        // Opaque, half-covered white, half-covered dark red, and untouched pixels.
+        let color = [10, 200, 30, 128, 128, 128, 50, 0, 0, 0, 0, 0];
+        let matte = [255, 255, 255, 128, 128, 128, 128, 128, 128, 0, 0, 0];
+        assert_eq!(
+            straighten(&color, &matte),
+            [
+                10, 200, 30, 255, 255, 255, 255, 128, 100, 0, 0, 128, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn transparent_scenes_reject_what_over_cannot_express() {
+        let template: Value =
+            serde_json::from_str(include_str!("../examples/title-card-template.json")).unwrap();
+        let mut scene: Scene = serde_json::from_value(template["scene"].clone()).unwrap();
+        scene.validate().unwrap();
+        // Opaque scenes keep their serialization, so existing scene fingerprints are unchanged.
+        assert!(
+            serde_json::to_value(&scene)
+                .unwrap()
+                .get("transparent")
+                .is_none()
+        );
+        scene.transparent = true;
+        scene.validate().unwrap();
+        assert_eq!(serde_json::to_value(&scene).unwrap()["transparent"], true);
+        scene.layers[0].blend_mode = composite::BlendMode::Multiply;
+        let error = scene.validate().unwrap_err();
+        assert_eq!(error.code, "UNSUPPORTED_SCENE");
+        assert!(error.message.contains("normal-blend"));
+    }
 }

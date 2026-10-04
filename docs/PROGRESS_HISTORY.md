@@ -1,5 +1,13 @@
 # Progress history
 
+## 4 October 2026: transparent scenes for overlays
+
+In the captions trial, burning captions into video meant rebuilding the clip as a scene of 250 PNG frames. That workaround hit the decoded-pixel limit at 640x360 and could not reach HD. A scene can now set `"transparent": true` and compile to a straight-alpha FFV1 `bgra` asset, which an `alpha_over` track composites over any video.
+
+The compositor runs twice per frame: a color pass over black and a white matte pass, with the same weights. Straight color is derived from those two passes, and opaque or fully transparent pixels are exact.
+
+An end-to-end check compiled the trial's title card as a transparent overlay through `job.start` and placed it over a clip. In the previewed frame, every pixel outside the title's text and logo area matched the underlying video exactly. Multiply and screen blending and 3D geometry are rejected for transparent output. Existing scenes serialize unchanged. No scoring changed.
+
 ## 4 October 2026: document files in a workspace
 
 In the captions trial, an agent copied about 330 KB of scene and caption JSON from one call's result into the next call's arguments. In a workspace, any object argument can now be `{"file": "name.json", "select": "field"}`, read from a workspace file. `save_as` writes a call's whole result to a new `.json` file and returns a short summary. An inspected title scene went from a 10 KB response to 330 bytes and was compiled through `job.start` directly from its file. Existing files are never overwritten, documents are limited to 16 MiB, and a schema test keeps real request objects from looking like file references. No scoring changed.

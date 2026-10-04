@@ -60,6 +60,18 @@ Ordinary PNG uses straight alpha and needs no `alpha_mode` field. `"premultiplie
 
 For normalized source color `s` and backdrop `d`, normal uses `s`, multiply uses `s*d`, and screen uses `1-(1-s)*(1-d)`. These are the public [W3C compositing blend definitions](https://www.w3.org/TR/compositing-1/). The effective coverage is the source alpha after any key effects, times layer opacity and mask coverage; the result is `coverage*blend + (1-coverage)*d`. For pixels bypassed by the effect chain, original integer arithmetic preserves the stored premultiplied values through this calculation and rounds once at the final 8-bit channel, avoiding an intermediate unpremultiply rounding step. Changed effect results follow their documented straight-RGB/alpha quantization before this blend. Zero coverage preserves the backdrop exactly. Compositing follows layer order with rounding after each layer; other blend modes and undeclared effect types remain unsupported.
 
+### Transparent output
+
+`"transparent": true` renders over a transparent backdrop instead of `background`. The result is a straight-alpha FFV1 `bgra` asset that an `alpha_over` [track](TRACKS.md) composites over video, which is how a caption scene or a title becomes an overlay.
+
+Each frame is composed twice with the same layer weights and per-layer rounding:
+- a color pass over black, which holds premultiplied color;
+- a matte pass in which every source pixel is white with its own alpha once the layer's effects have run, which holds 255 x alpha.
+
+Straight color is then `round(color x 255 / alpha)`, and fully transparent pixels are stored as zero. Opaque pixels and fully transparent pixels are exact. Partly covered pixels follow the usual 8-bit straight-alpha quantization.
+
+Only normal-blend layers are accepted, because multiply and screen depend on a backdrop that does not exist yet. 3D geometry is also rejected. Both fail with `UNSUPPORTED_SCENE`. Shutter sampling averages both passes.
+
 ### Rectangular masks
 
 One optional `mask` per layer has `rect: [x,y,width,height]`, `inverted` (default false), optional `feather` and optional `animation` curves for `x`, `y`, `width` and `height`. It masks the layer's opacity before compositing. Coordinates refer to the full source canvas, including a trimmed image's offset, before crop/rotation/scale/placement. Without feathering, the rectangle includes its left/top edge and excludes right/bottom edges. [Feathering](TRACKING.md) declares a source-pixel radius and an inner, centered or outer ramp; coverage preserves associated color/alpha through interpolation and compositing. Inversion keeps pixels outside the rectangle; it never creates pixels outside the source image. Zero width or height gives an empty mask, or reveals the entire source when inverted. Rectangles may extend outside the canvas. Coordinates are bounded to -32768..32768, and dimensions to 0..32768.
