@@ -1,6 +1,6 @@
 # Explicit delivery quality and bitrate controls
 
-This extension has passing focused matrix evidence and awaits full verification. E02 extended remains unscored. It keeps the reference timeline and publication rules in [EXPORT.md](EXPORT.md): 25 fps, explicit source transfer, original-quality media, exact requested range, verified stream clocks and no overwritten output.
+This extension passes full verification and earns E02 extended. It keeps the reference timeline and publication rules in [EXPORT.md](EXPORT.md): 25 fps, explicit source transfer, original-quality media, exact requested range, verified stream clocks and no overwritten output.
 
 `export.inspect` and `export.run` accept optional `h264` settings for H.264 video and optional `aac_bitrate` for AAC output. Omit both to retain the original version-1 High-profile CRF-18 preset with 320 kb/s audio. Explicit settings produce a version-2 profile receipt. Inspection includes the complete selected controls and `encoder_passes`; it writes no files. Arbitrary encoder arguments remain unsupported.
 

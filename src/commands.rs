@@ -630,7 +630,7 @@ pub fn handle(request: Request) -> Result<Value> {
             "effects":crate::effects::capabilities(),
             "export":crate::delivery::capabilities(),
             "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
-            "not_implemented":["audio_buses_pan_surround","general_video_effects","delivery_device_matrix"]});
+            "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
             result["expressions"] = crate::expressions::capabilities();
             result["temporal"] = crate::temporal::capabilities();
             result["geometry"] = crate::geometry::capabilities();

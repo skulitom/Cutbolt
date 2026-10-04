@@ -1,6 +1,6 @@
 # Optional hardware video decoding
 
-The focused acceptance fixture passes in a separate original-code checkout. P02 evidence assignments are prepared, but **no P02 points have been awarded**. Full verification against unchanged merged sources is required before promotion.
+The acceptance fixture passes full verification against the merged sources, and both P02 checkpoints are awarded; see the generated [progress tracker](PROGRESS.md).
 
 `media.conform` and `media.conform.inspect` accept an optional `decode` field inside the recipe. Omission retains software decoding. Selection is explicit:
 

@@ -35,7 +35,7 @@ Replace `project` with a complete snapshot, such as one returned by `session.get
 | `png_mov` | `audio_video` or `video` | `.mov` | Lossless RGB PNG video and optional PCM16 |
 | `png_sequence` | `audio_video` or `video` | New `.frames` directory | Numbered RGB PNGs, complete timing/identity manifest and optional PCM WAV |
 
-The new PNG profiles require explicit source transfer interpretation, preserve encoded RGB values and accept up to DCI 4K. See [native-rate export formats](EXPORT_FORMATS.md) for dimensions, numbering and complete-directory publication. Their broader acceptance remains unscored until full verification.
+The new PNG profiles require explicit source transfer interpretation, preserve encoded RGB values and accept up to DCI 4K. See [native-rate export formats](EXPORT_FORMATS.md) for dimensions, numbering and complete-directory publication. Their broader acceptance passes full verification and earns E05 extended.
 
 Omit `range` or use null to export the whole timeline. Otherwise `start` and `duration` are exact nonnegative rational seconds on the supported native project frame boundaries; duration must be positive and the half-open interval must fit wholly inside the sequence. Ranges can cross cuts and gaps, start/end on any frame, or contain one frame. Output time starts at zero. Audio selection follows the same rational range at 48 kHz. Whole samples are required, so 30000/1001 and 60000/1001 cuts use multiples of five video frames; 25 fps retains exactly 1,920 sample frames per video frame. There is no implicit rounding, end padding or clamping of the requested range.
 
