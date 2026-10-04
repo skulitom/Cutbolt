@@ -31,13 +31,45 @@ parser.add_argument("--only", help="Quick: comma-separated fixture names to run 
 parser.add_argument("--last-failed", action="store_true", help="Quick: rerun the fixtures that failed in the previous quick run")
 parser.add_argument("--fail-fast", action="store_true", help="Start no further fixtures after the first failure")
 parser.add_argument("--strict", action="store_true", help="Quick: fail instead of skipping fixtures whose external runtime is not configured")
+parser.add_argument("--engine", type=Path, help="Quick: verify this prebuilt engine executable instead of building target/debug")
+parser.add_argument("--no-rust", action="store_true", help="Quick: skip formatting, lint and Rust tests")
+parser.add_argument("--coverage-dir", type=Path, help="Quick: write each fixture's LLVM coverage profiles under this directory (needs an instrumented --engine)")
+parser.add_argument("--gate", action="store_true", help="Push gate: run only fixtures the changes can affect (tools/impact.py), reuse unchanged passes, fit a time budget and defer the rest")
+parser.add_argument("--budget", type=float, default=100, help="Gate: predicted fixture wall-clock budget in seconds")
+parser.add_argument("--report", type=Path, help="Write a JSON summary of this run (used by tools/ship.py)")
+parser.add_argument("--background", action="store_true", help="Deferred verification of a pushed commit (tools/ship.py)")
+parser.add_argument("--commit", help="Commit being verified, for the run record")
+parser.add_argument("--results-dir", type=Path, help="Directory of run records (default verification/results)")
+parser.add_argument("--impact-map", type=Path, help="Impact map to use (default verification/impact-map.json)")
+parser.add_argument("--cleanup-worktree", action="store_true", help="Background: remove this git worktree when finished")
+parser.add_argument("--status", action="store_true", help="Show the impact map, recent runs and unresolved failures, then exit")
 args = parser.parse_args()
+import impact  # noqa: E402  (tools/ is on sys.path as the script directory)
+
+if args.impact_map:
+    impact.MAP = args.impact_map.resolve()
+if args.results_dir:
+    impact.RESULTS = args.results_dir.resolve()
+if args.status:
+    document = impact.load_map()
+    summary = "none (python tools/impact.py build)" if not document else f"{document['commit'][:10]}, built {document['built']}, {len(document['covered_files'])} fixtures"
+    print(f"Impact map: {summary}")
+    for name, data in impact.recent(12):
+        problems = data.get("failures") or []
+        print(f"  {name[:15]} {data.get('run'):10} {str(data.get('commit') or '')[:10]:10} passed {len(data.get('passes', {}))}"
+              + (f", FAILED {', '.join(problems)}" if problems else "") + (f", deferred {len(data.get('deferred', []))}" if data.get("deferred") else ""))
+    for stage, where in impact.unresolved_failures().items():
+        print(f"  unresolved failure: {stage} ({where})")
+    raise SystemExit(0)
 datetime.strptime(args.date, "%Y-%m-%d")
 MODE = "thorough" if args.thorough else "quick"
-if args.thorough and (args.only or args.last_failed):
-    raise SystemExit("--thorough always runs every fixture; --only and --last-failed are quick-mode options")
+if args.thorough and (args.only or args.last_failed or args.engine or args.no_rust or args.coverage_dir or args.gate or args.background):
+    raise SystemExit("--thorough always builds the engine and runs every check; the other selection options are quick-mode only")
+if args.gate and (args.only or args.last_failed or args.background):
+    raise SystemExit("--gate selects fixtures itself")
+RUN = "thorough" if args.thorough else "gate" if args.gate else "background" if args.background else "quick"
 started_at = time.monotonic()
-history_path = ROOT / "verification" / "last-run.json"
+history_path = impact.STATE / "last-run.json"  # shared by every worktree of this repository
 try:
     history = json.loads(history_path.read_text(encoding="utf-8"))
 except (OSError, ValueError):
@@ -84,21 +116,44 @@ def command(args):
 
 
 starting_hashes = source_hashes()
-targeted = bool(args.only or args.last_failed)
-if not targeted:
+
+
+def rust_checks():
     command([sys.executable, "tests/repository.py"])
     command(["cargo", "fmt", "--check"])
     command(["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"])
     rust = command(["cargo", "test", "--locked"])
-    tests = ["rust:" + match for match in re.findall(r"^test (\S+) \.\.\. ok$", rust, re.MULTILINE)]
-    tests = [name for name in tests if name not in {"rust:store::tests::crash_worker", "rust:store::integrity::tests::crash_worker", "rust:cache_store::tests::crash_child", "rust:jobs::recovery::tests::crash_child"}]
-    if not tests:
+    found = ["rust:" + match for match in re.findall(r"^test (\S+) \.\.\. ok$", rust, re.MULTILINE)]
+    found = [name for name in found if name not in {"rust:store::tests::crash_worker", "rust:store::integrity::tests::crash_worker", "rust:cache_store::tests::crash_child", "rust:jobs::recovery::tests::crash_child"}]
+    if not found:
         raise SystemExit("No Rust test evidence was collected")
-command(["cargo", "build", "--locked"])
+    return found
+
+
+run_rust = not (args.only or args.last_failed or args.no_rust or args.background)
+rust_outcome = {}
+if run_rust and not args.gate:
+    tests = rust_checks()
+ENGINE_NAME = "cutbolt.exe" if os.name == "nt" else "cutbolt"
+if args.engine:
+    source_engine = args.engine.resolve()
+else:
+    command(["cargo", "build", "--locked"])
+    source_engine = ROOT / "target" / "debug" / ENGINE_NAME
 # Fixtures run a private copy of the engine, so target/debug stays free to rebuild during verification.
 run_directory = Path(tempfile.mkdtemp(prefix="cutbolt-verify-run-"))
-engine_copy = run_directory / ("cutbolt.exe" if os.name == "nt" else "cutbolt")
-shutil.copy2(ROOT / "target" / "debug" / engine_copy.name, engine_copy)
+engine_copy = run_directory / ENGINE_NAME
+shutil.copy2(source_engine, engine_copy)
+rust_thread = None
+if run_rust and args.gate:
+    def gate_rust():
+        try:
+            rust_outcome["tests"] = rust_checks()
+        except SystemExit as error:
+            rust_outcome["error"] = f"Rust checks failed ({error})"
+    # Lint and Rust tests use target/debug; fixtures use the copied engine, so both run at once.
+    rust_thread = threading.Thread(target=gate_rust, daemon=True)
+    rust_thread.start()
 print(f"{MODE} verification of {engine_copy.name} copied to {run_directory}", flush=True)
 
 # Fixture scheduling. Correctness fixtures share the machine in a memory-aware pool. In the thorough run,
@@ -186,6 +241,46 @@ for stage in list(STAGES):
             raise SystemExit(f"{stage['name']} {reason} (--strict)")
         skipped[stage["name"]] = reason
         STAGES.remove(stage)
+reused, deferred, not_impacted, selection = [], [], [], {}
+if args.gate:
+    for stage_name, where in impact.unresolved_failures().items():
+        print(f"WARNING: {stage_name} failed in {where} and has not passed since; fix forward", flush=True)
+    selection, map_commit = impact.impacted([s["name"] for s in STAGES])
+    passes = impact.cached_passes()
+    candidates = []
+    for stage in STAGES:
+        if stage["name"] not in selection:
+            not_impacted.append(stage["name"])
+        elif (fp := impact.fingerprint(stage["name"], stage["commands"])) and fp in passes.get(stage["name"], ()):
+            reused.append(stage["name"])
+        else:
+            candidates.append(stage)
+
+    def predicted(stage):
+        return previous.get(stage["name"], {}).get("seconds") or 60
+    pooled = [s for s in candidates if s["lane"] == "pool"]
+    loads, fitted = [0.0] * max(1, min(args.jobs, len(pooled))), []
+    for stage in sorted(pooled, key=predicted):
+        lane_index = loads.index(min(loads))
+        if loads[lane_index] + predicted(stage) > args.budget:
+            deferred.append(stage["name"])
+            continue
+        loads[lane_index] += predicted(stage)
+        fitted.append(stage)
+    # Quiet-phase fixtures run one at a time after the pool, so they only fit in what remains.
+    sequential = max(loads)
+    for stage in sorted((s for s in candidates if s["lane"] != "pool"), key=predicted):
+        if sequential + predicted(stage) > args.budget:
+            deferred.append(stage["name"])
+            continue
+        sequential += predicted(stage)
+        fitted.append(stage)
+    STAGES = fitted
+    print(f"Gate (map {map_commit[:10] if map_commit else 'missing'}): {len(fitted)} to run, {len(reused)} reused, {len(deferred)} deferred, "
+          f"{len(not_impacted)} not affected", flush=True)
+    for stage in fitted:
+        print(f"  run {stage['name']}: {'; '.join(selection[stage['name']][:2])}", flush=True)
+fingerprints = {s["name"]: impact.fingerprint(s["name"], s["commands"]) for s in STAGES}
 lock = threading.Lock()
 outcomes = {}
 stop_starting = threading.Event()
@@ -205,9 +300,14 @@ def execute(stage):
     began = time.monotonic()
     outcome = {"ok": False, "budget_misses": []}
     try:
+        environment = fixture_environment
+        if args.coverage_dir:
+            profiles = args.coverage_dir / stage["name"]
+            profiles.mkdir(parents=True, exist_ok=True)
+            environment = {**fixture_environment, "LLVM_PROFILE_FILE": str(profiles / "%p-%m.profraw")}
         for argv in stage["commands"]:
             result = subprocess.run([a.replace("{dir}", str(directory)) for a in argv], cwd=ROOT, capture_output=True,
-                                    text=True, encoding="utf-8", errors="replace", env=fixture_environment)
+                                    text=True, encoding="utf-8", errors="replace", env=environment)
             outcome["budget_misses"] += [line.split(" ", 1)[1] for line in result.stderr.splitlines() if line.startswith("CUTBOLT_BUDGET_MISS ")]
             if result.returncode:
                 outcome["log"] = f"exit {result.returncode}\n{result.stdout[-4000:]}\n{result.stderr[-8000:]}"
@@ -261,19 +361,42 @@ def lane(name):
 run_phase([(lane("pool"), args.jobs, True)])
 run_phase([(lane("long"), 1, False), (lane("gated"), 1, False)])
 run_phase([(lane("quiet"), 1, False)])
+if rust_thread:
+    rust_thread.join()
 shutil.rmtree(run_directory, ignore_errors=True)
 failures = {name: outcome for name, outcome in outcomes.items() if not outcome["ok"]}
+if rust_outcome.get("error"):
+    failures["rust"] = {"ok": False, "log": rust_outcome["error"], "seconds": 0, "budget_misses": []}
+commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+passed_fingerprints = {name: fingerprints[name] for name, o in outcomes.items() if o["ok"] and fingerprints.get(name)}
+if run_rust and "rust" not in failures:
+    passed_fingerprints["rust"] = "passed"
+impact.record(RUN, passed_fingerprints,
+              commit=commit, failures=sorted(failures), deferred=deferred, reused=reused,
+              not_impacted=len(not_impacted), skipped=sorted(skipped))
+if args.report:
+    args.report.write_text(json.dumps({"ok": not failures and not [s for s in STAGES if s["name"] not in outcomes], "run": RUN,
+                                       "ran": sorted(outcomes), "failed": sorted(failures), "deferred": deferred, "reused": reused,
+                                       "not_impacted": not_impacted, "skipped": skipped}, indent=1), encoding="utf-8")
+if args.cleanup_worktree:
+    common = Path(subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
+    main_checkout = (ROOT / common).resolve().parent
+    os.chdir(tempfile.gettempdir())
+    subprocess.run(["git", "-C", str(main_checkout), "worktree", "remove", "--force", str(ROOT)], capture_output=True)
 not_run = [s["name"] for s in STAGES if s["name"] not in outcomes]
 wall = round(time.monotonic() - started_at, 1)
 recorded = {**previous, **{name: {"ok": o["ok"], "seconds": o["seconds"], "budget_misses": o["budget_misses"]} for name, o in outcomes.items()}}
 history[MODE] = {"finished": datetime.now(timezone.utc).isoformat(timespec="seconds"), "wall_seconds": wall, "stages": recorded,
                  "last_failed": sorted(failures), "skipped": skipped}
-(ROOT / "verification").mkdir(exist_ok=True)
-history_path.write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
+history_path.parent.mkdir(parents=True, exist_ok=True)
+if not args.coverage_dir:  # Instrumented timings would mislead later scheduling and gate budgets.
+    history_path.write_text(json.dumps(history, indent=2) + "\n", encoding="utf-8")
 misses = {name: o["budget_misses"] for name, o in outcomes.items() if o["budget_misses"]}
 if not args.thorough:
-    print(f"\nQuick verification: {len(outcomes) - len(failures)} passed, {len(failures)} failed, {len(skipped)} skipped, "
+    print(f"\n{RUN.capitalize()} verification: {len([o for o in outcomes.values() if o['ok']])} passed, {len(failures)} failed, {len(skipped)} skipped, "
           f"{len(not_run)} not started, {wall:.0f} s. No evidence was written; run --thorough for progress evidence.")
+    if args.gate:
+        print(f"  reused {len(reused)} unchanged passes; {len(not_impacted)} fixtures not affected; deferred to background: {', '.join(deferred) or 'none'}")
     for name, reason in skipped.items():
         print(f"  skipped {name}: {reason}")
     for name, lines in misses.items():

@@ -31,3 +31,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Syste
 # implementation so verifying large external tools does not dominate previews.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# tools/impact.py builds coverage-instrumented engines with --cfg cutbolt_coverage.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(cutbolt_coverage)"] }

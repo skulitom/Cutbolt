@@ -1,5 +1,21 @@
 # Progress history
 
+## 4 October 2026: two-minute push gate and background verification
+
+A change can now be shipped in about two minutes while the full set of affected fixtures is still verified.
+
+- **Impact map.** `tools/impact.py build` runs every fixture against a coverage-instrumented engine (in its own `target/coverage` directory) and records which Rust functions each fixture executes. Instrumented builds use `--cfg cutbolt_coverage`, which makes the engine flush coverage before `process::exit`; on Windows that call otherwise skips the profiler's exit hook, so most invocations recorded nothing. Normal builds are unchanged.
+- **Gate.** `tools/verify.py --gate` maps the diff since the map's commit to fixtures:
+  - changed lines inside recorded functions select the fixtures that executed them;
+  - other changes in a Rust file select every fixture that executed code in that file;
+  - test helpers select the fixtures that import them, and build files select everything.
+
+  Passes with unchanged inputs are reused. The rest run shortest first within a 100-second budget, beside formatting, lint and Rust tests, and whatever does not fit is deferred.
+- **Ship.** `tools/ship.py` gates the committed HEAD and pushes it, `--to main` included. It then verifies the deferred fixtures in a detached background worktree of the pushed commit, with its own engine copy at below-normal priority, so it never locks a checkout or blocks another session.
+- **Shared state.** Run records, timing history and the map are kept in the repository's common git directory and shared by all worktrees. `tools/verify.py --status` lists recent runs, and the next gate warns about any fixture that failed and has not passed since.
+
+No acceptance criteria or evidence changed; the recorded source fingerprints stay stale until the next thorough run.
+
 ## 4 October 2026: quick verification by default
 
 An audit of the edit/test/verify loop is recorded in [DEVELOPMENT_LOOP.md](DEVELOPMENT_LOOP.md), with measurements and a phased plan. Its first phase is implemented here.

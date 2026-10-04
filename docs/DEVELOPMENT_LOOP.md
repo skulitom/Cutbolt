@@ -4,6 +4,19 @@ Audit of the edit → build → test → verify loop, 4 October 2026. Every numb
 
 **Goal:** turn a typical change from "edit, then wait one to two hours" into "edit, check in under a minute, commit after a five-minute check". The thorough evidence run stays intact for milestones.
 
+## Status
+
+- **Phase 0 is done.**
+  - `tools/verify.py` defaults to the quick check (61/61 fixtures in 16.4 minutes); `--thorough` is the evidence run.
+  - `--only`, `--last-failed`, `--fail-fast` and `--strict` are available, with a preflight of tools and runtimes.
+  - Fixtures run a copied engine, and budgets go through `tests/budgets.py`.
+- **The push gate and background verification (section 4, phase 0 item 2, extended) are done.**
+  - `tools/impact.py` builds a function-level coverage map of all fixtures.
+  - `tools/verify.py --gate` runs only the fixtures the diff can affect, within about two minutes, beside lint and Rust tests, and reuses passes whose inputs are unchanged.
+  - `tools/ship.py` gates, pushes, and verifies the deferred remainder in an isolated background worktree that blocks no one.
+  - Map, run records and timings are shared by all worktrees.
+- **Next: phase 1** (one `ffprobe` per source, cached tool identity, validated-probe cache).
+
 ## 1. Summary
 
 The loop is slow for five measured reasons. In order of impact:

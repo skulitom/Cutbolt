@@ -48,21 +48,35 @@ fn execute(args: &[OsString], workspace: Option<&Workspace>) -> Result<Value> {
     handle_json(serde_json::from_slice(&bytes)?, workspace)
 }
 
+/// Ends the process. Coverage builds made by tools/impact.py (`--cfg cutbolt_coverage`) first flush
+/// their counters, because `process::exit` skips the profiler runtime's exit hook.
+fn exit(code: i32) -> ! {
+    #[cfg(cutbolt_coverage)]
+    {
+        unsafe extern "C" {
+            fn __llvm_profile_write_file() -> i32;
+        }
+        // SAFETY: provided by the profiler runtime linked into instrumented builds; called once, at exit.
+        unsafe { __llvm_profile_write_file() };
+    }
+    std::process::exit(code)
+}
+
 fn main() {
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() >= 2 && args[0] == "job-tool" {
         match cutbolt::jobs::tool_worker(&args[1], &args[2..]) {
-            Ok(code) => std::process::exit(code),
+            Ok(code) => exit(code),
             Err(e) => {
                 eprintln!("{}: {}", e.code, e.message);
-                std::process::exit(1);
+                exit(1);
             }
         }
     }
     if args.len() == 2 && args[0] == "job-worker" {
         if let Err(e) = cutbolt::jobs::worker(std::path::Path::new(&args[1])) {
             eprintln!("{}: {}", e.code, e.message);
-            std::process::exit(1);
+            exit(1);
         }
         return;
     }
@@ -77,10 +91,10 @@ fn main() {
         Ok(Some(result)) => (json!({"ok":true,"result":result}), 0),
         Err(error) if args.first().is_some_and(|a| a == "mcp") => {
             eprintln!("{}: {}", error.code, error.message);
-            std::process::exit(1);
+            exit(1);
         }
         Err(error) => (json!({"ok":false,"error":error}), 1),
     };
     println!("{response}");
-    std::process::exit(code);
+    exit(code);
 }

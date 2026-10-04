@@ -111,3 +111,6 @@ audit-private/
 worker.lock
 # Per-machine verifier history (stage times, last failures); not evidence.
 /verification/last-run.json
+# LLVM coverage profiles from tools/impact.py
+*.profraw
+*.profdata
