@@ -179,7 +179,7 @@ Use `multicam.create` and `multicam.edit` inside `timeline.apply` or saved `sess
 
 The reference profile requires:
 
-- One sequence of up to 1,000 media or explicit gap items at a supported [native frame rate](NATIVE_TIMING.md), or 25 fps [placed tracks](TRACKS.md) with up to 1,000 clips. Ranges with more than 64 clips render as chunks; see [long timelines](#long-timelines). Both render paths require 1–180,000 total frames; the reference source bound is also 180,000 frames.
+- One sequence of up to 1,000 media or explicit gap items at a supported [native frame rate](NATIVE_TIMING.md), or [placed tracks](TRACKS.md) at the same rates with up to 1,000 clips. Ranges with more than 64 clips render as chunks; see [long timelines](#long-timelines). Both render paths require 1–180,000 total frames; the reference source bound is also 180,000 frames.
 
 ### Long timelines
 
@@ -211,7 +211,7 @@ Over MCP, the sheets come back as inline images.
 
 ## Range, stream and delivery exports
 
-`export.inspect` and `export.run` accept a reference `project`, explicit input/output roots, unused output path, `profile` and `streams`. Optional `range` selects exact rational start/duration; lossless sequential output uses the supported native clock, while H.264 and placed tracks retain 25 fps. Omitting it selects the whole timeline. `streams` chooses `audio_video`, `video` or `audio`. The `reference` profile produces FFV1/PCM MKV, FFV1-only MKV or PCM WAV. The `h264_aac` profile produces MP4 or audio-only M4A, with `input_transfer: "srgb" | "bt709"` required for video unless the project declares its `transfer` once with the `project.transfer` operation. Optional `h264` and `aac_bitrate` fields select [bounded quality, two-pass bitrate and compatibility settings](DELIVERY_CONTROLS.md); omission preserves the original fixed preset.
+`export.inspect` and `export.run` accept a reference `project`, explicit input/output roots, unused output path, `profile` and `streams`. Optional `range` selects exact rational start/duration; every profile uses the timeline's native clock, for sequential timelines and placed tracks. Omitting it selects the whole timeline. `streams` chooses `audio_video`, `video` or `audio`. The `reference` profile produces FFV1/PCM MKV, FFV1-only MKV or PCM WAV. The `h264_aac` profile produces MP4 or audio-only M4A, with `input_transfer: "srgb" | "bt709"` required for video unless the project declares its `transfer` once with the `project.transfer` operation. Optional `h264` and `aac_bitrate` fields select [bounded quality, two-pass bitrate and compatibility settings](DELIVERY_CONTROLS.md); omission preserves the original fixed preset.
 
 Export inspection is read-only and available through MCP. Execution is blocking CLI/library work; the existing background queue continues to render reference projects only. Output validation checks stream structure, exact timestamps and decoded counts; AAC priming and trailing decoder padding are reported separately from exact presentation duration. Source files, existing output files and saved snapshots remain unchanged. See [EXPORT.md](EXPORT.md) for the preset, color equations, format/range limits, quality evidence and runnable example.
 

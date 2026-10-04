@@ -155,6 +155,51 @@ def run(root,long_form):
         expected=b''.join(bytes(int(F(n,1)/rate*48000)*4) if first is None else pcm(int(F(first,1)/rate*48000),int(F(n,1)/rate*48000)) for first,n in segments)
         assert ff(['-i',str(wav),'-f','s16le','-'])==expected
     passed.append('native_timing.long_timelines_render_in_exact_chunks')
+    # Placed tracks at native rates: promotion keeps playback, an upper track covers a gap, a
+    # dissolve follows its integer equation on the native clock, and H.264 delivers at that rate.
+    def video_frames(path,expected):
+        nonlocal frames
+        raw=ff(['-i',str(path),'-map','0:v:0','-an','-fps_mode','passthrough','-pix_fmt','rgb24','-f','rawvideo','-'])
+        assert len(raw)==len(expected)*w*h*3,(path,len(raw)//(w*h*3),len(expected))
+        for n,want in enumerate(expected):assert raw[n*w*h*3:(n+1)*w*h*3]==want,(path,n)
+        frames+=len(expected)
+    def dissolve(a,b,k,d,count):
+        return bytes((x*(d-k)+y*k+count)//d for x,y in zip(a,b))
+    tb=lambda rate:t(F(1)/rate)
+    promote={'op':'tracks.edit','edit':{'op':'promote','video_track_id':'v','audio_track_id':'a'}}
+    for rate in [F(30000,1001),F(60)]:
+        label='tracks-'+str(rate).replace('/','-');p=create(rate,60,label)
+        segments=[(5,10),(None,5),(20,15)];p=append(p,rate,segments)
+        tracked=call('timeline.apply',project=p,expected_revision=p['revision'],operations=[promote])
+        assert tracked['tracks'] and not tracked['clips']
+        path=output/(label+'.mkv');plan=call('render.plan',project=tracked,input_root=str(sources),output_root=str(output),output=str(path))
+        assert plan['profile']=='reference-tracks-ffv1-pcm-rational-v2' and plan['frames']==30
+        call('render.run',project=tracked,input_root=str(sources),output_root=str(output),output=str(path))
+        case=compare(path,rate,segments);case['frame_rate']=t(rate);case['placed_tracks']=True;cases.append(case)
+        cover={'id':'cover','asset_id':'source','start':t(F(10)/rate),'source_in':t(F(40)/rate),'duration':t(F(5)/rate)}
+        covered=call('timeline.apply',project=tracked,expected_revision=tracked['revision'],operations=[
+            {'op':'tracks.edit','edit':{'op':'add','track':{'id':'top','kind':'video','locked':False,'enabled':True,'clips':[]}}},
+            {'op':'tracks.edit','edit':{'op':'place','track_id':'top','clip':cover,'collision':'reject'}}])
+        path=output/(label+'-covered.mkv');call('render.run',project=covered,input_root=str(sources),output_root=str(output),output=str(path))
+        video_frames(path,[rgb(n) for n in range(5,15)]+[rgb(n) for n in range(40,45)]+[rgb(n) for n in range(20,35)])
+        adjacent=append(create(rate,60,label+'-x'),rate,[(0,10),(30,10)])
+        adjacent=call('timeline.apply',project=adjacent,expected_revision=adjacent['revision'],operations=[promote,
+            {'op':'tracks.edit','edit':{'op':'transition_set','track_id':'v','transition':{'id':'x','left_id':'clip-0','right_id':'clip-1','before':t(F(2)/rate),'after':t(F(3)/rate),'kind':'dissolve'}}}])
+        expected=[]
+        for n in range(20):
+            if 8<=n<13:expected.append(dissolve(rgb(n),rgb(30+n-10),2*(n-8)+1,10,5))
+            else:expected.append(rgb(n) if n<10 else rgb(30+n-10))
+        path=output/(label+'-dissolve.mkv');call('render.run',project=adjacent,input_root=str(sources),output_root=str(output),output=str(path))
+        video_frames(path,expected)
+        target=output/(label+'-dissolve-9.png')
+        call('preview.frame',project=adjacent,input_root=str(sources),output_root=str(output),output=str(target),time=t(F(9)/rate))
+        with Image.open(target) as image:assert image.convert('RGB').tobytes()==expected[9]
+        delivery=output/(label+'.mp4')
+        receipt=call('export.run',project=tracked,input_root=str(sources),output_root=str(output),output=str(delivery),profile='h264_aac',streams='audio_video',input_transfer='bt709')
+        assert receipt['video']['gop_frames']==2*round(rate) and receipt['video']['level']=='4.0',receipt['video']
+        probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0','-count_frames','-show_entries','stream=r_frame_rate,nb_read_frames,codec_name','-of','json',str(delivery)]))['streams'][0]
+        assert F(probe['r_frame_rate'])==rate and int(probe['nb_read_frames'])==30 and probe['codec_name']=='h264',probe
+    passed.append('native_timing.placed_tracks_and_h264_at_native_rates')
     for rate,code in [(F(23),'UNSUPPORTED_TIMELINE'),(F(30),'UNSUPPORTED_MEDIA')]:
         bad=copy.deepcopy(p);bad['clips']=[];bad['frame_rate']=t(rate);bad=append(bad,rate,[(0,10)])
         target=output/('mismatched-'+str(rate)+'.mkv')

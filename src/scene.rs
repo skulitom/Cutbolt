@@ -1715,7 +1715,13 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         scene.height * scene.output_scale,
     );
     let verified = if scene.transparent {
-        let (verified, alpha) = render::inspect_overlay(&temp, out_w, out_h, &media::Uncontrolled)?;
+        let (verified, alpha) = render::inspect_overlay(
+            &temp,
+            out_w,
+            out_h,
+            Time { num: 25, den: 1 },
+            &media::Uncontrolled,
+        )?;
         if !alpha {
             return Err(error(
                 "RENDER_VALIDATION_FAILED",

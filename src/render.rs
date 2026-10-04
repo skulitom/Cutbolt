@@ -357,17 +357,11 @@ pub(crate) fn inspect_overlay(
     path: &Path,
     width: u32,
     height: u32,
+    rate: Time,
     control: &dyn media::Control,
 ) -> Result<(Source, bool)> {
-    let (source, metadata) = inspect_source_with(
-        path,
-        width,
-        height,
-        Time::new(25, 1)?,
-        control,
-        true,
-        Timing::Decoded,
-    )?;
+    let (source, metadata) =
+        inspect_source_with(path, width, height, rate, control, true, Timing::Decoded)?;
     let alpha = metadata["streams"]
         .as_array()
         .and_then(|s| s.iter().find(|s| s["codec_type"] == "video"))

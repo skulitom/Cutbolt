@@ -2,7 +2,7 @@
 
 `export.inspect` validates a selected timeline range, full-quality sources and a declared export profile without writing files. `export.run` writes and verifies a new result through the blocking CLI/library. Inspection is also available through MCP; export execution is not yet queued. Existing `render.run` and queued reference renders keep their original behavior.
 
-Exports preserve source media, ignore proxy preview selection and refuse existing output files. The input remains an FFV1/bgr0 timeline with matching dimensions and 48 kHz stereo PCM. Lossless sequential exports support the [eight exact native rates](NATIVE_TIMING.md); H.264 delivery and [native tracks](TRACKS.md) retain 25 fps, including gaps and [editable transitions](TRANSITIONS.md). Native compressed inputs first use [media conversion](CONFORM.md); scene effects are compiled before export. The operation does not alter the supplied snapshot or save a session revision.
+Exports preserve source media, ignore proxy preview selection and refuse existing output files. The input remains an FFV1/bgr0 timeline with matching dimensions and 48 kHz stereo PCM. Lossless exports, H.264 delivery and [native tracks](TRACKS.md), including gaps and [editable transitions](TRANSITIONS.md), support the [eight exact native rates](NATIVE_TIMING.md). Native compressed inputs first use [media conversion](CONFORM.md); scene effects are compiled before export. The operation does not alter the supplied snapshot or save a session revision.
 
 ## Request and formats
 
@@ -47,11 +47,11 @@ The version-1 `h264_aac` profile selects the existing external FFmpeg build's `l
 
 | Setting | Value |
 | --- | --- |
-| Video rate | 25 fps, unchanged dimensions and square pixels |
+| Video rate | The timeline's native rate, unchanged dimensions and square pixels; the MP4 timescale holds a whole number of ticks per frame (12,800 at 25 fps) |
 | Size | Even width 2..1920 and even height 2..1080; no automatic resize |
-| H.264 | High profile, level 4.0, `medium`, CRF 18 |
+| H.264 | High profile, level 4.0 (4.2 when 1080p runs above about 30 fps), `medium`, CRF 18 |
 | Video buffering | Maximum rate 12,000,000 bits/s, buffer 24,000,000 bits |
-| GOP | 50 frames, minimum key interval 25, scene-cut insertion disabled, two B-frames, three reference frames |
+| GOP | Two seconds of frames at the rounded rate (50 at 25 fps, 60 at 29.97), minimum key interval one second, scene-cut insertion disabled, two B-frames, three reference frames |
 | Output pixels | 8-bit YUV 4:2:0, limited range, BT.709 matrix/primaries/transfer, left chroma location |
 | AAC | LC, 48 kHz stereo, target 320,000 bits/s, native two-loop coder with perceptual noise substitution enabled |
 | MP4 | Faststart index, edit lists, 48,000-unit movie clock and 12,800-unit video clock |

@@ -14,7 +14,7 @@ const FPS: Time = Time { num: 25, den: 1 };
 mod sequence;
 mod settings;
 pub use settings::{Compatibility, H264, RateControl};
-/// Export profile: `reference` (FFV1/bgr0 and PCM16 `.mkv`, audio-only `.wav`), `h264_aac` (25 fps `.mp4`, audio-only `.m4a`), `png_mov` (PNG RGB and optional PCM16 `.mov`), `png_sequence` (new `.frames` directory of numbered PNGs, manifest and optional WAV; Windows only).
+/// Export profile: `reference` (FFV1/bgr0 and PCM16 `.mkv`, audio-only `.wav`), `h264_aac` (`.mp4` at the timeline's native rate, audio-only `.m4a`), `png_mov` (PNG RGB and optional PCM16 `.mov`), `png_sequence` (new `.frames` directory of numbered PNGs, manifest and optional WAV; Windows only).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Profile {
@@ -104,6 +104,15 @@ struct Checked {
     output: PathBuf,
     reference: render::Plan,
 }
+/// MP4 video timescale with a whole number of ticks per frame: 512 per frame at integer rates
+/// (12800 at 25 fps), and the rate's numerator at 1000/1001 rates.
+fn timescale(rate: Time) -> u64 {
+    if rate.den == 1 {
+        rate.num * 512
+    } else {
+        rate.num
+    }
+}
 fn invalid(message: &str) -> crate::Error {
     error("INVALID_EXPORT", message)
 }
@@ -144,11 +153,6 @@ impl Export {
     }
     fn selected(&self) -> Result<(Project, Range)> {
         self.project.validate()?;
-        if self.profile == Profile::H264Aac && self.project.frame_rate.compare(FPS)?.is_ne() {
-            return Err(invalid(
-                "H.264 delivery requires a 25 fps reference timeline",
-            ));
-        }
         let rate = render::clock::rate(self.project.frame_rate)?;
         let total = self.project.duration()?.units(rate)?;
         let range = self.range.unwrap_or(Range {
@@ -203,9 +207,11 @@ impl Export {
             return Err(invalid("h264 settings require H.264 video output"));
         }
         if self.profile == Profile::H264Aac && self.streams.video() {
-            self.h264
-                .unwrap_or_default()
-                .validate(self.project.width, self.project.height)?;
+            self.h264.unwrap_or_default().validate(
+                self.project.width,
+                self.project.height,
+                self.project.frame_rate,
+            )?;
         }
         if let Some(bitrate) = self.aac_bitrate
             && (self.profile != Profile::H264Aac
@@ -259,7 +265,7 @@ fn report(request: &Export, c: &Checked) -> Value {
     json!({"profile":request.profile,"profile_version":if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
         "timeline_frames":c.reference.frames,"video_frames":if request.streams.video(){c.reference.frames}else{0},"audio_samples":if request.streams.audio(){c.reference.samples}else{0},
         "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.transfer(),"sources":c.reference.sources,
-        "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report()},
+        "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report(c.project.width,c.project.height,c.project.frame_rate)},
         "audio":if !request.streams.audio(){Value::Null}else if request.profile!=Profile::H264Aac{json!({"codec":"pcm_s16le","sample_rate":48000,"channels":2,"decoded_tail_padding":0})}else{json!({"codec":"aac","profile":"LC","bitrate":request.aac_bitrate.unwrap_or(320000),"sample_rate":48000,"channels":2,"presentation_samples":c.reference.samples,"decoder_tail_padding":"reported_separately_0_to_1023_samples"})},
         "encoder_passes":if request.profile==Profile::Reference{0}else if request.streams.video() && request.h264.unwrap_or_default().rate_control.two_pass(){2}else{1},
         "container":match request.profile { Profile::H264Aac=>"mp4",Profile::PngMov=>"mov",Profile::PngSequence=>"numbered_png_and_manifest",Profile::Reference=>if request.streams==Streams::Audio{"wav"}else{"matroska"}},"sequence_first":if request.profile==Profile::PngSequence{Some(request.sequence_first.unwrap_or(0))}else{None}})
@@ -403,9 +409,9 @@ fn arguments(
                     "-preset",
                     "medium",
                     "-g",
-                    "50",
+                    &settings::gop(request.project.frame_rate).to_string(),
                     "-keyint_min",
-                    "25",
+                    &(settings::gop(request.project.frame_rate) / 2).to_string(),
                     "-sc_threshold",
                     "0",
                     "-pix_fmt",
@@ -425,10 +431,16 @@ fn arguments(
                 ]
                 .map(str::to_owned),
             );
-            request
-                .h264
-                .unwrap_or_default()
-                .arguments(&mut args, pass, scratch);
+            let h264 = request.h264.unwrap_or_default();
+            let level = h264
+                .compatibility
+                .level(
+                    request.project.width,
+                    request.project.height,
+                    request.project.frame_rate,
+                )
+                .expect("validated level");
+            h264.arguments(&mut args, pass, scratch, level.0);
         }
         if request.streams.audio() && pass != Some(1) {
             args.extend(
@@ -465,7 +477,7 @@ fn arguments(
                     "-movie_timescale",
                     "48000",
                     "-video_track_timescale",
-                    "12800",
+                    &timescale(request.project.frame_rate).to_string(),
                     "-f",
                     "mp4",
                 ]
@@ -651,7 +663,13 @@ fn validate_output(
                     .unwrap_or_default()
                     .compatibility
                     .decoded_profile()
-            || v["level"] != request.h264.unwrap_or_default().compatibility.level().1
+            || v["level"]
+                != request
+                    .h264
+                    .unwrap_or_default()
+                    .compatibility
+                    .level(c.project.width, c.project.height, c.project.frame_rate)?
+                    .1
             || v["pix_fmt"] != "yuv420p"
             || v["color_range"] != "tv"
             || v["color_space"] != "bt709"
@@ -859,5 +877,5 @@ pub fn run(request: &Export) -> Result<Value> {
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; h264_and_placed_tracks_25fps","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
+    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
 }

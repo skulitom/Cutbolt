@@ -231,7 +231,8 @@ def run(root):
     for w,h in [(191,128),(192,127),(1922,128),(192,1082)]:
         p=copy.deepcopy(project);p.update(width=w,height=h);reject(request('bad-geometry','h264_aac',p=p),'INVALID_EXPORT')
     p=copy.deepcopy(project);p['clips']=[];reject(request('empty',p=p),'INVALID_EXPORT')
-    p=copy.deepcopy(project);p['clips']=[{'id':'gap','gap':True,'source_in':time(0),'duration':time(1)}];p['frame_rate']=time(24);reject(request('rate','h264_aac',p=p),'INVALID_EXPORT')
+    p=copy.deepcopy(project);p['clips']=[{'id':'gap','gap':True,'source_in':time(0),'duration':time(1)}];p['frame_rate']=time(24)
+    native=call(request('native-rate','h264_aac',p=p));assert native['frame_rate']==time(24) and native['video']['gop_frames']==48 and native['video_frames']==24
     p=copy.deepcopy(p);p['frame_rate']=time(23);reject(request('unsupported-native-rate',p=p),'UNSUPPORTED_TIMELINE')
     reject({**base,'profile':'h265'},'INVALID_JSON');reject({**base,'streams':'none'},'INVALID_JSON');reject({**base,'bitrate':1},'INVALID_JSON')
     reject({**request('bad-transfer','h264_aac'),'input_transfer':'hdr'},'INVALID_JSON')

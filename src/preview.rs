@@ -3,18 +3,12 @@ use crate::{At, Result, error, media, model::Project, render, scene, time::Time}
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
-const FPS: Time = Time { num: 25, den: 1 };
 pub(crate) fn validate(project: &Project) -> Result<u64> {
     project.validate()?;
     if let Some(a) = &project.tracks {
         // Previews read only the window they show; long ranges render as chunks.
-        if project.frame_rate.compare(FPS)?.is_ne() {
-            return Err(error(
-                "UNSUPPORTED_TIMELINE",
-                "Track previews require 25 fps",
-            ));
-        }
-        return a.duration.units(FPS);
+        let rate = crate::render::clock::rate(project.frame_rate)?;
+        return a.duration.units(rate);
     }
     crate::render::clock::rate(project.frame_rate)?;
     if project.clips.is_empty() {

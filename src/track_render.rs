@@ -12,6 +12,10 @@ use std::{
     time::Duration,
 };
 const FPS: Time = Time { num: 25, den: 1 };
+/// The filter time base of a native frame rate: one tick per frame.
+fn timebase(rate: Time) -> String {
+    format!("{}/{}", rate.den, rate.num)
+}
 const SAMPLES: Time = Time { num: 48000, den: 1 };
 
 struct Graph<'a> {
@@ -102,6 +106,7 @@ impl<'a> Graph<'a> {
                     &path,
                     self.project.width,
                     self.project.height,
+                    self.project.frame_rate,
                     self.control,
                 )?;
                 self.overlay_assets.insert(clip.asset_id.clone());
@@ -114,14 +119,15 @@ impl<'a> Graph<'a> {
                     &path,
                     self.project.width,
                     self.project.height,
-                    FPS,
+                    self.project.frame_rate,
                     self.control,
                 )?
             } else {
-                render::inspect_reference(
+                render::inspect_reference_at(
                     &path,
                     self.project.width,
                     self.project.height,
+                    self.project.frame_rate,
                     self.control,
                 )?
             };
@@ -146,8 +152,8 @@ impl<'a> Graph<'a> {
             .source_in
             .plus(at)?
             .minus(clip.start)?
-            .units(kind.clock(FPS))?;
-        let count = duration.units(kind.clock(FPS))?;
+            .units(kind.clock(self.project.frame_rate))?;
+        let count = duration.units(kind.clock(self.project.frame_rate))?;
         let limit = if kind == Kind::Video {
             source.frames
         } else {
@@ -182,7 +188,8 @@ impl<'a> Graph<'a> {
             );
         }
         let (input, first, end) = self.input(clip, at, duration, Kind::Video)?;
-        self.filters.push(format!("[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr=1/25,setpts=N,format=pix_fmts=gbrp[{label}]"));
+        let tb = timebase(self.project.frame_rate);
+        self.filters.push(format!("[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr={tb},setpts=N,format=pix_fmts=gbrp[{label}]"));
         Ok(())
     }
     /// A clip on an alpha_over track, keeping its straight alpha plane (opaque sources read as 255).
@@ -194,8 +201,9 @@ impl<'a> Graph<'a> {
         label: &str,
     ) -> Result<()> {
         let (input, first, end) = self.input_with(clip, at, duration, Kind::Video, true)?;
+        let tb = timebase(self.project.frame_rate);
         let source = format!(
-            "[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr=1/25,setpts=N"
+            "[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr={tb},setpts=N"
         );
         if let Some(transform) = &clip.transform {
             return self.transformed_overlay(clip, transform, &source, label);
@@ -386,7 +394,7 @@ impl<'a> Graph<'a> {
     ) -> Result<()> {
         let (left, right) = track.endpoints(effect)?;
         let (start, end) = track.interval(effect)?;
-        let units = track.kind.clock(FPS);
+        let units = track.kind.clock(self.project.frame_rate);
         let count = end.minus(start)?.units(units)?;
         let offset = at.minus(start)?.units(units)?;
         let d = count.checked_mul(2).ok_or_else(|| {
@@ -402,7 +410,8 @@ impl<'a> Graph<'a> {
             self.video_source(right, at, duration, &r)?;
             // Sample the transition at each frame center. Timestamp rounding recovers
             // the exact local frame index from the filter's rational clock.
-            let k = format!("(2*(round(T*25)+{offset})+1)");
+            let rate = self.project.frame_rate;
+            let k = format!("(2*(round(T*{}/{})+{offset})+1)", rate.num, rate.den);
             let expr = match effect.kind {
                 TransitionKind::Dissolve => format!("floor((A*({d}-{k})+B*{k}+{count})/{d})"),
                 TransitionKind::DipBlack => {
@@ -495,7 +504,7 @@ impl<'a> Graph<'a> {
                 let (x, y) = t.interval(fx)?;
                 if x.compare(end)?.is_lt() && y.compare(start)?.is_gt() {
                     y.minus(x)?
-                        .units(kind.clock(FPS))?
+                        .units(kind.clock(self.project.frame_rate))?
                         .checked_mul(2)
                         .ok_or_else(|| {
                             error(
@@ -521,7 +530,8 @@ impl<'a> Graph<'a> {
     ) -> Result<()> {
         self.control.check()?;
         let end = start.plus(duration)?;
-        let clock = kind.clock(FPS);
+        let rate = self.project.frame_rate;
+        let clock = kind.clock(rate);
         start.units(clock)?;
         let count = duration.units(clock)?;
         if count == 0 || end.compare(a.duration)?.is_gt() {
@@ -531,20 +541,20 @@ impl<'a> Graph<'a> {
             ));
         }
         if kind == Kind::Video {
-            let mut edges = BTreeSet::from([start.units(FPS)?, end.units(FPS)?]);
+            let mut edges = BTreeSet::from([start.units(rate)?, end.units(rate)?]);
             for t in a
                 .tracks
                 .iter()
                 .filter(|t| t.enabled && t.kind == Kind::Video)
             {
-                edges.extend(boundaries(t, start, end, FPS)?);
+                edges.extend(boundaries(t, start, end, rate)?);
             }
             let edges: Vec<_> = edges.into_iter().collect();
             let mut labels = String::new();
             for part in edges.windows(2) {
                 let n = part[1] - part[0];
-                let at = Time::new(part[0], 25)?;
-                let length = Time::new(n, 25)?;
+                let at = Time::new(part[0] * rate.den, rate.num)?;
+                let length = Time::new(n * rate.den, rate.num)?;
                 let label = self.label()?;
                 labels.push_str(&format!("[{label}]"));
                 let visible = a.visible(at)?;
@@ -583,7 +593,7 @@ impl<'a> Graph<'a> {
                         self.video_source(clip, at, length, &base)?;
                     }
                 } else {
-                    self.filters.push(format!("color=c=black:s={}x{}:r=25,format=pix_fmts=gbrp,trim=end_frame={n},settb=expr=1/25,setpts=N[{base}]", self.project.width, self.project.height));
+                    self.filters.push(format!("color=c=black:s={}x{}:r={}/{},format=pix_fmts=gbrp,trim=end_frame={n},settb=expr={},setpts=N[{base}]", self.project.width, self.project.height, rate.num, rate.den, timebase(rate)));
                 }
                 let mut below = base;
                 for (i, clip) in overlays.iter().enumerate() {
@@ -599,8 +609,9 @@ impl<'a> Graph<'a> {
                 }
             }
             self.filters.push(format!(
-                "{labels}concat=n={}:v=1:a=0,settb=expr=1/25,setpts=N[{output}]",
-                edges.len() - 1
+                "{labels}concat=n={}:v=1:a=0,settb=expr={},setpts=N[{output}]",
+                edges.len() - 1,
+                timebase(rate)
             ));
         } else {
             let begin = start.units(SAMPLES)?;
@@ -722,18 +733,18 @@ fn compile<'a>(
     project.validate()?;
     media::input_root(root)?;
     let a = project.tracks.as_ref().expect("track project");
-    let frames = duration.units(FPS)?;
+    let rate = render::clock::rate(project.frame_rate)?;
+    let frames = duration.units(rate)?;
     let end = start.plus(duration)?;
-    start.units(FPS)?;
-    if project.frame_rate.compare(FPS)?.is_ne()
-        || !(1..=180000).contains(&frames)
+    start.units(rate)?;
+    if !(1..=180000).contains(&frames)
         || end.compare(a.duration)?.is_gt()
         || window_clips(a, start, end)? > render::MAX_GRAPH_CLIPS
         || project.width as u64 * project.height as u64 > 8_000_000
     {
         return Err(error(
             "UNSUPPORTED_TIMELINE",
-            "Track rendering requires an in-bounds 25 fps range of 1..180000 frames, at most 64 clips per graph and 8M pixels",
+            "Track rendering requires an in-bounds range of 1..180000 frames, at most 64 clips per graph and 8M pixels",
         ));
     }
     let mut graph = Graph::new(project, root, control);
@@ -805,7 +816,7 @@ pub(crate) fn plan_audio_window(
         profile: "reference-tracks-pcm-audio-v1",
         source_quality: "original",
         project_revision: project.revision,
-        frames: duration.units(FPS)?,
+        frames: duration.units(project.frame_rate)?,
         samples: duration.units(SAMPLES)?,
         output,
         sources,
@@ -841,8 +852,6 @@ pub(crate) fn plan_window(
             slices,
             "-pix_fmt",
             "bgr0",
-            "-r",
-            "25",
             "-threads",
             "1",
             "-c:a",
@@ -856,6 +865,19 @@ pub(crate) fn plan_window(
         ]
         .map(str::to_owned),
     );
+    let rate = project.frame_rate;
+    if rate == FPS {
+        args.extend(["-r".into(), "25".into()]);
+    } else {
+        args.extend([
+            "-r".into(),
+            format!("{}/{}", rate.num, rate.den),
+            "-fps_mode".into(),
+            "cfr".into(),
+            "-enc_time_base:v".into(),
+            timebase(rate),
+        ]);
+    }
     args.push(output.to_string_lossy().into_owned());
     if args.iter().map(|s| s.len() + 3).sum::<usize>() > 24000 {
         return Err(error(
@@ -864,10 +886,14 @@ pub(crate) fn plan_window(
         ));
     }
     Ok(Plan {
-        profile: "reference-tracks-ffv1-pcm-v1",
+        profile: if rate == FPS {
+            "reference-tracks-ffv1-pcm-v1"
+        } else {
+            "reference-tracks-ffv1-pcm-rational-v2"
+        },
         source_quality: "original",
         project_revision: project.revision,
-        frames: duration.units(FPS)?,
+        frames: duration.units(project.frame_rate)?,
         samples: duration.units(SAMPLES)?,
         output,
         sources,
@@ -884,7 +910,7 @@ pub(crate) fn read_frame(
         project,
         root,
         time,
-        Time::new(1, 25)?,
+        Time::new(project.frame_rate.den, project.frame_rate.num)?,
         (true, false),
         &media::Uncontrolled,
     )?

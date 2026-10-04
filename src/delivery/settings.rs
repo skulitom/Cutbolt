@@ -1,7 +1,12 @@
 //! Bounded, explicit delivery settings; no arbitrary encoder arguments.
 use super::*;
 
-/// H.264 stream profile: `baseline720p` (Constrained Baseline 3.1, up to 1280x720), `main_hd` (Main 4.0, up to 1920x1080), `high_hd` (High 4.0, up to 1920x1080). Dimensions must be even; no resizing.
+/// Frames per two-second GOP at a native rate, rounding the rate to whole frames per second.
+pub(super) fn gop(rate: Time) -> u64 {
+    2 * ((rate.num + rate.den / 2) / rate.den)
+}
+
+/// H.264 stream profile: `baseline720p` (Constrained Baseline 3.1, or 3.2 above 30 fps at 720p, up to 1280x720), `main_hd` (Main 4.0, or 4.2 above 30 fps at 1080p, up to 1920x1080), `high_hd` (High, levels as Main). Dimensions must be even; no resizing.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Compatibility {
@@ -24,12 +29,25 @@ impl Compatibility {
             Self::HighHd => "High",
         }
     }
-    pub(super) fn level(self) -> (&'static str, u32) {
-        if self == Self::Baseline720p {
-            ("3.1", 31)
+    /// The lowest level that carries this frame size and rate: 3.1 or 3.2 for Constrained
+    /// Baseline, 4.0 or 4.2 otherwise, by macroblocks per frame and per second.
+    pub(super) fn level(self, width: u32, height: u32, rate: Time) -> Result<(&'static str, u32)> {
+        let blocks = u64::from(width.div_ceil(16)) * u64::from(height.div_ceil(16));
+        let per_second = (blocks * rate.num).div_ceil(rate.den);
+        let levels: &[(&str, u32, u64, u64)] = if self == Self::Baseline720p {
+            &[("3.1", 31, 3600, 108_000), ("3.2", 32, 5120, 216_000)]
         } else {
-            ("4.0", 40)
-        }
+            &[("4.0", 40, 8192, 245_760), ("4.2", 42, 8704, 522_240)]
+        };
+        levels
+            .iter()
+            .find(|l| blocks <= l.2 && per_second <= l.3)
+            .map(|l| (l.0, l.1))
+            .ok_or_else(|| {
+                invalid(
+                    "Frame size and rate exceed the chosen compatibility profile's highest level",
+                )
+            })
     }
     pub(super) fn b_frames(self) -> u32 {
         if self == Self::Baseline720p { 0 } else { 2 }
@@ -105,7 +123,8 @@ impl Default for H264 {
     }
 }
 impl H264 {
-    pub(super) fn validate(self, width: u32, height: u32) -> Result<()> {
+    pub(super) fn validate(self, width: u32, height: u32, rate: Time) -> Result<()> {
+        self.compatibility.level(width, height, rate)?;
         let baseline = self.compatibility == Compatibility::Baseline720p;
         let (w, h) = if baseline { (1280, 720) } else { (1920, 1080) };
         if width < 2
@@ -141,22 +160,33 @@ impl H264 {
             _ => Ok(()),
         }
     }
-    pub(super) fn video_report(self) -> Value {
-        let mut report = json!({"codec":"h264","encoder":"libx264","profile":self.compatibility.decoded_profile(),"level":self.compatibility.level().0,"preset":"medium",
+    pub(super) fn video_report(self, width: u32, height: u32, rate: Time) -> Value {
+        let level = self
+            .compatibility
+            .level(width, height, rate)
+            .map(|l| l.0)
+            .unwrap_or("unsupported");
+        let mut report = json!({"codec":"h264","encoder":"libx264","profile":self.compatibility.decoded_profile(),"level":level,"preset":"medium",
             "compatibility":self.compatibility,"rate_control":self.rate_control,"maximum_bitrate":self.rate_control.maximum(),"buffer_size":self.rate_control.buffer(),
             "pixel_format":"yuv420p","matrix":"bt709","primaries":"bt709","transfer":"bt709","range":"limited","chroma_location":"left","chroma_filter":"bilinear",
-            "gop_frames":50,"b_frames":self.compatibility.b_frames(),"reference_frames":self.compatibility.references()});
+            "gop_frames":gop(rate),"b_frames":self.compatibility.b_frames(),"reference_frames":self.compatibility.references()});
         if let RateControl::Quality { crf, .. } = self.rate_control {
             report["crf"] = json!(crf);
         }
         report
     }
-    pub(super) fn arguments(self, args: &mut Vec<String>, pass: Option<u8>, scratch: &Path) {
+    pub(super) fn arguments(
+        self,
+        args: &mut Vec<String>,
+        pass: Option<u8>,
+        scratch: &Path,
+        level: &str,
+    ) {
         args.extend([
             "-profile:v".into(),
             self.compatibility.profile().into(),
             "-level:v".into(),
-            self.compatibility.level().0.into(),
+            level.into(),
             "-maxrate".into(),
             self.rate_control.maximum().to_string(),
             "-bufsize".into(),

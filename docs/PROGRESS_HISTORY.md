@@ -1,5 +1,18 @@
 # Progress history
 
+## 4 October 2026: placed tracks and H.264 at native frame rates
+
+Placed tracks rendered at 25 fps only, and H.264 delivery required a 25 fps timeline. A 30 or 60 fps YouTube edit therefore had to be resampled, which made it judder. Track timelines, their previews, overlays, transitions and chunked renders now run on any of the eight native clocks. 25 fps renders keep their exact previous arguments.
+
+H.264 delivery follows the timeline rate:
+- a two-second GOP at the rounded rate;
+- an MP4 timescale with a whole number of ticks per frame;
+- the lowest H.264 level that carries the frame size and rate, 4.0 or 4.2, and 3.1 or 3.2 for baseline. Existing 25 fps outputs keep their level.
+
+The native timing fixture now promotes 29.97 and 60 fps sequential timelines to tracks. Frames, samples and container timestamps match exactly. It also checks an upper track covering a gap, a native-rate dissolve against its integer equation, a preview frame inside it, and an H.264 export at the native rate.
+
+Camera groups and proxies still require 25 fps and reject other rates explicitly. Scenes, captions and media conversion still produce 25 fps assets. The next steps are to let conversion keep a source's own rate and to render scenes at the timeline rate. No scoring changed.
+
 ## 4 October 2026: reviewing cuts, footage and loudness over time
 
 An agent can only see stills and numbers, so it had no practical way to check an edit or log footage. This adds four read-only views:
