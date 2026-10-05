@@ -233,11 +233,17 @@ The result lists the speech runs with exact times, a summary per clip, and `clip
 `audio.beats` is read-only and analyses a music file for cutting to it. The file can be any format FFmpeg decodes, up to an hour (`start` and `duration` select a range). It reports the onsets, the tempo and a beat grid as exact file times. With `frame_rate`, it also gives each listed beat's nearest frame start.
 
 The analysis works on 10 ms hops of the first audio stream, mixed to mono and resampled to 48 kHz:
-- **Onsets.** An onset is a rise in level of at least 6 dB from the previous hop that is also the largest rise within 50 ms on either side.
-- **Tempo.** It comes from the autocorrelation of onset strength over the tempo range (`min_bpm` 60 to `max_bpm` 200 by default). Strength is the rise weighted by the hop's amplitude, so loud hits count more than quiet ones such as hi-hats. Each hop pairs with the strongest of the three hops around the lag, so a period between whole hops still scores as one lag.
-- **Grid.** The phase is the offset whose grid collects the most strength, and each grid beat moves to an onset within 30 ms when there is one. A least-squares line through the beats that landed on onsets then refines the period and places the grid again.
+- **Onsets.** An onset is a rise in level of at least 6 dB from the previous hop that is also the largest rise within 50 ms on either side. A rise counts at most 3 dB more than the rise from two hops back. So a level recovering from a one-hop dip is not an onset; such dips come from a low note, such as a kick's tail, beating against the 10 ms window.
+- **Period.** The autocorrelation of onset strength over the tempo range (`min_bpm` 60 to `max_bpm` 200 by default) gives a first period. Strength is the rise weighted by the hop's amplitude, so loud hits count more than quiet ones such as hi-hats. Each hop pairs with the strongest of the three hops around the lag, so a period between whole hops still scores as one lag.
+- **Phase.** Beats at that period are tracked through the whole range by dynamic programming: the chain of hops that collects the most onset strength while its intervals stay near the period. Where tracking moves to another position in the bar, it starts a new run. The tracked beats on onsets fit one exact period by least squares, with a phase per run, and the run with the most strength sets the phase. A small period error therefore cannot drift the grid across a long file.
+- **Tempo.** Music repeats at several metrical levels at once: bars, half notes, beats and eighths. The analysis lists the levels within the tempo range that the onsets support:
+  - A faster level divides each period in two or three, where onsets fall at least half as often as on the period itself.
+  - A slower level groups two or three periods when one position is accented, with 1.5 times the others' mean strength.
 
-Beats on onsets are accurate to one hop. Fewer than four onsets give no tempo. As with any tempo detector, a pattern can be read at half or double speed; narrow `min_bpm` and `max_bpm` when the expected tempo is known.
+  `tempo_bpm` is the level nearest 120 BPM. `tempo_alternatives` lists the others, each with its tempo `ratio` to the beat. A slower level also gives `first_beat`, the index of the beat on its accented position, such as a backbeat's kick.
+- **Grid.** Each grid beat moves to an onset within 30 ms when there is one, and `on_onsets` counts those beats. A least-squares line through them then refines the period and places the grid again.
+
+Beats on onsets are accurate to one hop. Fewer than four onsets give no tempo. Choosing between levels is a convention, not a measurement: the reported tempo is between 85 and 170 BPM whenever the music has a level there. A ballad felt at 70 BPM with steady eighths therefore reads as 140, and fast music near 175 BPM reads at half. The other reading is in `tempo_alternatives`. To choose a level, narrow `min_bpm` and `max_bpm` to it, and the beats follow.
 
 ## Tightening pauses (jump cuts)
 

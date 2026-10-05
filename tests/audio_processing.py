@@ -1,6 +1,8 @@
 """Original signals, external EQ/loudness references and closed-form compressor checks."""
 from engine import ENGINE
+from array import array
 import argparse
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -220,15 +222,69 @@ def run(root):
         beats = [seconds_of(t) for t in found["beats"]["times"]]
         assert abs(found["tempo_bpm"]-bpm) <= .1 and found["beats"]["count"] == len(truth) == len(beats), (name, found["tempo_bpm"], len(beats), len(truth))
         assert all(min(abs(b-t) for b in beats) < .01 for t in truth) and all(min(abs(b-t) for t in truth) < .01 for b in beats), name
-        from fractions import Fraction
         assert found["beat_frames"]["frames"] == [math.floor(Fraction(t["num"], t["den"])*25+Fraction(1, 2)) for t in found["beats"]["times"]]
+    # Arranged music at exact tempos, generated here: a triangle bass on eighths and a quiet pulse
+    # arpeggio on sixteenths throughout, with drums only in the middle bars. In the backbeat (kick
+    # on 1 and 3, snare on 2 and 4, hats on eighths) the kicks make the half-note level correlate
+    # best; the first version read it at half tempo with a drifting grid. The kick's low sweep also
+    # ripples the 10 ms level, which must not add onsets.
+    def arranged(name, bpm, bars, drums, lead_in=0.0, four_floor=False):
+        beat = Fraction(60, bpm); total = round((lead_in+bars*4*beat)*RATE); out = array("d", bytes(8*total)); seed = [12345]
+        def noise():
+            seed[0] = (seed[0]*1103515245+12345) % 2**31; return seed[0]/2**30-1
+        def add(at, length, gain, voice):
+            first = round(at*RATE)
+            for i in range(min(round(length*RATE), total-first)):out[first+i] += gain*voice(i/RATE)
+        def tone(note, decay, shape):
+            return lambda t: shape(t*440*2**((note-69)/12) % 1)*math.exp(-t/decay)
+        triangle, pulse = (lambda p: 4*abs(p-.5)-1), (lambda p: 1.0 if p < .125 else -1.0)
+        kick = lambda t: math.sin(math.tau*(140*t-95*t*t/.36))*math.exp(-t/.06)
+        snare = lambda t: (noise()+.4*math.sin(math.tau*190*t))*math.exp(-t/.045)
+        hat = lambda decay: lambda t: noise()*math.exp(-t/decay)
+        for bar in range(bars):
+            t0 = lead_in+bar*4*beat; root = [48, 43, 45, 41][bar % 4]
+            for e in range(8):add(t0+e*beat/2, beat/2, .3, tone(root-12+12*(e % 2), .12, triangle))
+            for q in range(16):add(t0+q*beat/4, beat/4, .045, tone(root+12+[0, 4, 7][q % 3], .05, pulse))
+            for b in range(4) if bar in drums else ():
+                if four_floor or b % 2 == 0:add(t0+b*beat, .18, .55, kick)
+                if b % 2:add(t0+b*beat, .16, .22, snare)
+                if four_floor:add(t0+b*beat+beat/2, .12, .09, hat(.05))
+                else:add(t0+b*beat, .04, .1, hat(.012)); add(t0+b*beat+beat/2, .04, .07, hat(.012))
+        peak = max(map(abs, out))
+        with wave.open(str(music/name), "wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(RATE); w.writeframes(array("h", (round(x/peak*23000) for x in out for _ in (0, 1))).tobytes())
+    exact = lambda times: [Fraction(t["num"], t["den"]) for t in times]
+    arranged("backbeat125.wav", 125, 10, range(2, 8))
+    found = request({"command":"audio.beats","path":str(music/"backbeat125.wav"),"input_root":str(music),"frame_rate":time(25)})
+    # The beat level is preferred over the half-note level; both are reported. Every beat lies on
+    # the true grid, all but the first (the file's first hop has no rise) on an onset, and the
+    # onsets are exactly the eighths.
+    assert found["tempo_bpm"] == 125 and found["period"] == {"num":12, "den":25}, found["tempo_bpm"]
+    assert found["tempo_alternatives"] == [{"bpm":62.5, "ratio":{"num":1, "den":2}, "first_beat":0}], found["tempo_alternatives"]
+    assert exact(found["beats"]["times"]) == [Fraction(12*n, 25) for n in range(40)] and found["beats"]["on_onsets"] == 39
+    assert found["beat_frames"]["frames"] == [12*n for n in range(40)]
+    assert exact(found["onsets"]["times"]) == [Fraction(6*k, 25) for k in range(1, 80)]
+    # A range keeps the grid; the half-note level then starts on the second beat, a kick.
+    part = request({"command":"audio.beats","path":str(music/"backbeat125.wav"),"input_root":str(music),"start":time(7),"duration":time(10)})
+    assert exact(part["beats"]["times"]) == [Fraction(12*n, 25) for n in range(15, 36)] and part["tempo_alternatives"][0]["first_beat"] == 1
+    # A narrowed range chooses the half-note level, on the kicks.
+    slow = request({"command":"audio.beats","path":str(music/"backbeat125.wav"),"input_root":str(music),"min_bpm":40,"max_bpm":70})
+    assert slow["tempo_bpm"] == 62.5 and slow["tempo_alternatives"] == [] and exact(slow["beats"]["times"]) == [Fraction(24*n, 25) for n in range(20)]
+    # Four on the floor after a 0.35 s lead-in: a kick on every beat, claps on 2 and 4, open hats
+    # off the beat. The offbeat eighths make the double level, which is listed.
+    arranged("floor100.wav", 100, 8, range(1, 7), lead_in=Fraction(7, 20), four_floor=True)
+    found = request({"command":"audio.beats","path":str(music/"floor100.wav"),"input_root":str(music)})
+    assert found["tempo_bpm"] == 100 and found["period"] == {"num":3, "den":5} and found["tempo_alternatives"] == [{"bpm":200.0, "ratio":{"num":2, "den":1}}], found
+    assert exact(found["beats"]["times"]) == [Fraction(7, 20)+Fraction(3, 5)*n for n in range(32)] and found["beats"]["on_onsets"] == 32
+    onsets = exact(found["onsets"]["times"])
+    assert {Fraction(7, 20)+Fraction(3, 10)*k for k in range(64)} <= set(onsets) and all((t-Fraction(7, 20))/Fraction(3, 20) % 1 == 0 for t in onsets)
     # A range reports file times inside it; silence has no tempo.
     part = request({"command":"audio.beats","path":str(music/"kick120.wav"),"input_root":str(music),"start":time(5),"duration":time(10)})
     times = [seconds_of(t) for t in part["beats"]["times"]]
     assert part["tempo_bpm"] == 120 and all(5 <= t < 15 for t in times) and min(abs(t-5.25) for t in times) < .01 and len(times) == 20
     write("silent-music", [(0, 0)]*(RATE*3))
     quiet = request({"command":"audio.beats","path":str(sources/"silent-music.wav"),"input_root":str(sources)})
-    assert quiet["tempo_bpm"] is None and quiet["beats"]["count"] == 0 and quiet["onsets"]["count"] == 0
+    assert quiet["tempo_bpm"] is None and quiet["beats"]["count"] == 0 and quiet["onsets"]["count"] == 0 and quiet["tempo_alternatives"] == []
     for fields, code in (({"min_bpm":20}, "INVALID_ARGUMENT"), ({"min_bpm":100, "max_bpm":140}, "INVALID_ARGUMENT"), ({"frame_rate":time(23)}, "UNSUPPORTED_TIMELINE")):
         request({"command":"audio.beats","path":str(music/"kick120.wav"),"input_root":str(music),**fields}, code)
     client = Client(executable)

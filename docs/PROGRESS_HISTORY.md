@@ -1,5 +1,28 @@
 # Progress history
 
+## 5 October 2026: beats on arranged music
+
+The demo's own music bed is exactly 125 BPM: a kick on beats 1 and 3, a snare on 2 and 4, hats on eighths, a sixteenth-note arpeggio, and two bars without drums before them. `audio.beats` read it as 62.82 BPM, half tempo with a 0.5 % period error. Its grid started 0.14 s early and drifted up to 0.24 s off, so beats missed the onsets they should have snapped to. There were three causes:
+- The tempo came straight from the autocorrelation, which favours the slowest level that repeats: here, the kicks' half notes.
+- The phase came from a whole-hop search at that inexact period, so the grid drifted across the file.
+- 60 of the 388 onsets were not attacks: a kick's low tail beating against the 10 ms window made one-hop dips and recoveries.
+
+The fixes:
+- A rise now counts at most 3 dB more than the rise from two hops back.
+- Beats are tracked by dynamic programming at the autocorrelation's period. The tracked beats on onsets fit the exact period, with a phase per run of steady tracking.
+- The result lists the metrical levels in the tempo range that the onsets support. The one nearest 120 BPM is `tempo_bpm`, and the others are in `tempo_alternatives`; a slower level names the beat its accent falls on.
+- `beats.on_onsets` counts the beats that landed on onsets.
+
+The half/double caveat in the documentation now states the rule. The tempo is between 85 and 170 BPM whenever the music has a level there, so a 70 BPM ballad with steady eighths reads as 140, and fast music near 175 BPM reads at half.
+
+On the demo file the result is now:
+- 125 BPM, with a period of exactly 12/25 s;
+- 168 beats, all on the true grid and 164 of them on onsets;
+- the 62.5 BPM half-note level listed, starting on the kick;
+- 328 onsets, all on eighths.
+
+The audio-processing fixture now generates arranged music: that backbeat arrangement at 125 BPM, with intro and outro bars without drums, and four on the floor at 100 BPM after a 0.35 s lead-in. It checks exact beat times, frames, onsets and levels, a range, and a narrowed tempo range. The previous engine fails it at 62.5 BPM. Outside the fixture, a sweep of both arrangements from 72 to 174 BPM kept every beat within a hop of the reported level's true grid, and an hour of looped music took about 6 s in a debug build. No scoring changed.
+
 ## 5 October 2026: colour matching between cameras
 
 Shots from two cameras rarely match, and grading applied only to scene layers, so an agent had no direct way to bring one camera's colour to another's. `color.match` samples frames of a reference and a target shot. It builds a per-channel 8-bit mapping, matching mean and spread or whole distributions, and writes it as a 256-entry `.cube`. It returns the `media.conform` recipe that bakes the table into a new target asset, with an identity normalization for encoded RGB assets.

@@ -262,7 +262,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Match one camera's colour to another's: sample frames of a reference and a target shot, build a per-channel 1D LUT (levels: mean and spread; histogram: whole distributions), write it as a new .cube and return the media.conform recipe that bakes it into a new target asset, with channel statistics before and after."
         }
         "audio.beats" => {
-            "Find the beat of a music file for cutting to it: onsets (sudden rises in 10 ms loudness), the tempo in BPM from their autocorrelation, and a beat grid aligned to the onsets, as exact file times and, with frame_rate, the nearest frame of each beat. Read-only."
+            "Find the beat of a music file for cutting to it: onsets (sudden rises in 10 ms loudness), the tempo in BPM (the metrical level nearest 120 BPM; other levels, such as half time, in tempo_alternatives), and a beat grid on the onsets, as exact file times and, with frame_rate, the nearest frame of each beat. Read-only."
         }
         "audio.normalize" => {
             "Bring the whole mix to a loudness target such as -14 LKFS: measure the timeline's integrated loudness and sample peak, then propose clip_audio operations that scale every audio clip's level (and gain curve) by one factor, stopping at a peak ceiling (default -1 dBFS) or the clip gain range. The proposed levels are measured before they are returned (two to four renders of the mix), so result is what applying them gives. Read-only; apply the operations with session.apply."
