@@ -108,7 +108,7 @@ fn prepared_outputs(command: &Value) -> Vec<PathBuf> {
             let paths: Vec<PathBuf> = paths.iter().filter_map(path).collect();
             crate::readiness::batch_names(&paths, &input_root, assets.collect())
                 .into_iter()
-                .map(|(_, id)| output_root.join(format!("{id}-prepared.mkv")))
+                .map(|(path, id)| output_root.join(crate::readiness::prepared_name(&id, &path)))
                 .collect()
         }
         _ => Vec::new(),
@@ -402,19 +402,24 @@ mod tests {
         // A prepare without output claims the files it would convert to, named as it names them.
         let batch = command(
             json!({"command":"media.prepare","input_root":"C:/w","output_root":"C:/w/out",
-            "paths":["phone/clip.mp4","cam/clip.mov","talk.mp4"],"project":{"assets":[{"id":"talk"}]}}),
+            "paths":["phone/clip.mp4","cam/clip.mov","talk.mp4","voice/take.wav"],"project":{"assets":[{"id":"talk"}]}}),
         );
         assert_eq!(
             batch.claims,
             [
                 "C:/w/out/clip-prepared.mkv",
                 "C:/w/out/clip-2-prepared.mkv",
-                "C:/w/out/talk-2-prepared.mkv"
+                "C:/w/out/talk-2-prepared.mkv",
+                "C:/w/out/take-prepared.wav"
             ]
             .map(normalize)
         );
         let single = command(json!({"command":"media.prepare","input_root":"C:/w",
             "output_root":"C:/w/out","path":"phone/clip.mp4"}));
         assert_eq!(single.claims, [normalize("C:/w/out/clip-prepared.mkv")]);
+        // An audio-only WAV converts to a WAV.
+        let voice = command(json!({"command":"media.prepare","input_root":"C:/w",
+            "output_root":"C:/w/out","path":"s1.wav"}));
+        assert_eq!(voice.claims, [normalize("C:/w/out/s1-prepared.wav")]);
     }
 }

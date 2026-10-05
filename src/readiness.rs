@@ -17,6 +17,8 @@ const RATES: [(u64, u64); 8] = [
 ];
 /// media.conform output limits: at most 4096x2160, 8M pixels and 45000 frames at 25 fps.
 const CONFORM_FRAMES: u64 = 45_000;
+/// Audio-only media.conform output: at most one hour at 48 kHz.
+const AUDIO_ONLY_SAMPLES: u64 = 48_000 * 3600;
 
 /// Timeline readiness of `path`, whose metadata was already probed; `relative` is its path under
 /// `input_root`. Ready sources are checked by the renderer's own packet-timed source inspection.
@@ -36,6 +38,9 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
         .is_some_and(|f| f == "image2" || f.ends_with("_pipe"))
     {
         return json!({"ready":false,"reasons":["still image: show it with a scene image layer and scene.render, or use it in captions or graphics"]});
+    }
+    if let (None, Some(a)) = (video, audio) {
+        return audio_only(path, relative, a, metadata);
     }
     let mut reasons = Vec::new();
     match video {
@@ -110,25 +115,10 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
         }
     }
     let mut result = json!({"ready":false,"reasons":reasons});
-    let proposal = match (video, audio) {
-        (Some(v), _) => Some(conform(relative, v, audio, rate, None)),
-        (None, Some(a)) => Some(conform_audio(
-            relative,
-            a,
-            metadata,
-            Time { num: 25, den: 1 },
-            (1920, 1080),
-        )),
-        (None, None) => None,
-    };
-    match proposal {
+    match video.map(|v| conform(relative, v, audio, rate, None)) {
         Some(Ok(recipe)) => {
-            let next = if video.is_some() {
-                "check the recipe with media.conform.inspect, run it with job.start run media.conform, then media.add the returned asset"
-            } else {
-                "audio-only: the asset gets a silent black picture, so set width, height and frame_rate to the project's (media.prepare with the project does all of this in one step), then place it on an audio track"
-            };
-            result["conform"] = json!({"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),"next":next})
+            result["conform"] = json!({"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),
+                "next":"check the recipe with media.conform.inspect, run it with job.start run media.conform, then media.add the returned asset"})
         }
         Some(Err(why)) => result["reasons"]
             .as_array_mut()
@@ -139,10 +129,57 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
     result
 }
 
+/// Readiness of a file with sound and no picture. A 48 kHz stereo PCM16 WAV that the renderer's
+/// own WAV reader accepts is an audio-only asset as it is, for audio tracks; another PCM16 WAV gets
+/// the media.conform recipe that resamples it into one.
+fn audio_only(path: &Path, relative: &str, audio: &Value, metadata: &Value) -> Value {
+    let mut reasons = Vec::new();
+    let stereo = audio["codec_name"] == "pcm_s16le"
+        && audio["sample_rate"] == "48000"
+        && audio["channels"] == 2;
+    if stereo && crate::model::audio_only_path(Path::new(relative)) {
+        match crate::pcm_stream::inspect(path, &media::Uncontrolled)
+            .and_then(|wave| Ok((Time::new(wave.frames, 48_000)?, wave)))
+        {
+            Ok((duration, wave)) => {
+                return json!({"ready":true,"audio_only":true,"samples":wave.frames,"duration":duration,
+                    "use":"audio tracks","asset":{"id":asset_id(relative),"path":relative,"duration":duration,
+                    "identity":{"sha256":wave.sha256,"bytes":wave.bytes}}});
+            }
+            Err(e) => reasons.push(e.message),
+        }
+    } else {
+        let text = |v: &Value| match v {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        reasons.push(format!(
+            "audio is {} at {} Hz with {} channels; audio tracks play 48000 Hz stereo PCM s16 WAV",
+            text(&audio["codec_name"]),
+            text(&audio["sample_rate"]),
+            text(&audio["channels"])
+        ));
+    }
+    match conform_audio_only(relative, audio, metadata) {
+        Ok(recipe) => {
+            json!({"ready":false,"audio_only":true,"reasons":reasons,"conform":{"recipe":recipe,
+            "output":format!("{}-conformed.wav",asset_id(relative)),
+            "next":"media.prepare converts it in one step; or check the recipe with media.conform.inspect and run it with job.start run media.conform. Then media.add the returned asset and place it on an audio track"}})
+        }
+        Err(why) => {
+            reasons.push(why.into());
+            json!({"ready":false,"audio_only":true,"reasons":reasons})
+        }
+    }
+}
+
 /// One step from any decodable video file to a timeline asset. A ready file that fits the target
 /// is returned as it is. Anything else is converted with the readiness recipe: at the project's
 /// frame rate and size when a project is given, otherwise at the source's own rate when that is a
-/// timeline rate (25 fps otherwise) and its own size.
+/// timeline rate (25 fps otherwise) and its own size. A PCM16 WAV becomes an audio-only asset: a
+/// 48 kHz stereo WAV, as it is or resampled, with no picture and so no project needed. An
+/// explicit `.mkv` output keeps the older kind, its sound under a silent picture of the project's
+/// size and rate.
 pub fn prepare(
     path: &Path,
     input_root: &Path,
@@ -181,7 +218,8 @@ pub fn prepare(
                     .is_ok_and(|rate| rate == p.frame_rate)
         }
     };
-    if readiness["ready"] == true && fits(&readiness) {
+    // Audio-only files are decided below, where an .mkv output asks for the older kind.
+    if readiness["ready"] == true && readiness["audio_only"] != true && fits(&readiness) {
         return Ok(
             json!({"converted":false,"asset":readiness["asset"],"readiness":readiness,"transcripts":transcripts}),
         );
@@ -194,14 +232,38 @@ pub fn prepare(
     let still = metadata["format"]["format_name"]
         .as_str()
         .is_some_and(|f| f == "image2" || f.ends_with("_pipe"));
+    let pictured =
+        output.is_some_and(|o| o.extension().is_some_and(|e| e.eq_ignore_ascii_case("mkv")));
+    if let (None, Some(audio), false, false) = (video, audio, still, pictured) {
+        // Voice-overs and music: audio tracks play a 48 kHz stereo PCM16 WAV directly.
+        if readiness["ready"] == true {
+            return Ok(
+                json!({"converted":false,"asset":readiness["asset"],"readiness":readiness,"transcripts":transcripts}),
+            );
+        }
+        let mut recipe = conform_audio_only(&relative, audio, &metadata)
+            .map_err(|why| error("UNSUPPORTED_MEDIA", format!("{relative}: {why}")))?;
+        recipe["source"]["file"] = identity.clone();
+        let recipe: crate::conform::Recipe = serde_json::from_value(recipe)?;
+        let output = match output {
+            Some(output) => output.to_path_buf(),
+            None => prepared_output(&path, output_root),
+        };
+        let receipt = crate::conform::run(&recipe, input_root, output_root, &output)?;
+        return Ok(
+            json!({"converted":true,"asset":receipt["asset"],"recipe":recipe,"output":receipt["output"],
+            "samples":receipt["samples"],"reasons":readiness["reasons"],"transcripts":moved(&recipe, &receipt)?,
+            "note":"audio-only asset: place it on an audio track"}),
+        );
+    }
     if let (None, Some(audio), false) = (video, audio, still) {
-        // Voice-overs and music: a PCM WAV becomes an asset with a silent black picture of the
-        // project's size, for an audio track.
+        // The older kind, asked for by an .mkv output: the sound under a silent black picture of
+        // the project's size and rate.
         let Some(p) = project else {
             return Err(error(
                 "UNSUPPORTED_MEDIA",
                 format!(
-                    "{relative} is audio-only: give the project so its silent picture matches the timeline's size and frame rate"
+                    "{relative} is audio-only: give the project so its silent picture matches the timeline's size and frame rate, or omit output for an audio-only WAV asset"
                 ),
             ));
         };
@@ -279,7 +341,7 @@ pub fn prepare_many(
     let mut operations = Vec::new();
     let (mut converted, mut ready) = (0, 0);
     for (path, id) in batch_names(paths, input_root, used) {
-        let output = output_root.join(format!("{id}-prepared.mkv"));
+        let output = output_root.join(prepared_name(&id, &path));
         match prepare(
             &path,
             input_root,
@@ -338,7 +400,7 @@ pub(crate) fn native_rate(video: &Value, metadata: &Value) -> Option<Time> {
 /// A valid asset ID from the file name: its stem, at most 128 bytes.
 /// Each batch file resolved against `input_root`, with its asset ID: the file name's stem, kept
 /// unique against `used` (the project's assets) and earlier files. A conversion is written to
-/// `<id>-prepared.mkv`; the job queue claims those names before anything is probed.
+/// [`prepared_name`]; the job queue claims those names before anything is probed.
 pub(crate) fn batch_names(
     paths: &[std::path::PathBuf],
     input_root: &Path,
@@ -371,10 +433,21 @@ pub(crate) fn batch_names(
 /// Where one file prepared without `output` is converted to.
 pub(crate) fn prepared_output(path: &Path, output_root: &Path) -> std::path::PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-    output_root.join(format!(
-        "{}-prepared.mkv",
-        asset_id(name.as_deref().unwrap_or_default())
+    output_root.join(prepared_name(
+        &asset_id(name.as_deref().unwrap_or_default()),
+        path,
     ))
+}
+
+/// The file name a conversion of `path` with asset ID `id` gets: `<id>-prepared.wav` for an
+/// audio-only WAV, `<id>-prepared.mkv` otherwise.
+pub(crate) fn prepared_name(id: &str, path: &Path) -> String {
+    let extension = if crate::model::audio_only_path(path) {
+        "wav"
+    } else {
+        "mkv"
+    };
+    format!("{id}-prepared.{extension}")
 }
 
 fn asset_id(relative: &str) -> String {
@@ -526,16 +599,8 @@ fn moved_onto(
         .collect()
 }
 
-/// A media.conform recipe that turns a whole PCM16 WAV into an asset with a silent black picture
-/// of `size` at `rate`, or why there is none. Its length is the audio's whole frames (and whole
-/// 48 kHz samples); a tail shorter than one frame is left out.
-pub(crate) fn conform_audio(
-    relative: &str,
-    audio: &Value,
-    metadata: &Value,
-    rate: Time,
-    size: (u32, u32),
-) -> Result<Value, &'static str> {
+/// Why a stream cannot be a media.conform audio-only source, if it cannot.
+fn pcm16_wav(relative: &str, audio: &Value, metadata: &Value) -> Result<(), &'static str> {
     let format = metadata["format"]["format_name"].as_str().unwrap_or("");
     let wav = format == "wav" && relative.to_ascii_lowercase().ends_with(".wav");
     if !wav || audio["codec_name"] != "pcm_s16le" {
@@ -549,6 +614,42 @@ pub(crate) fn conform_audio(
     {
         return Err("audio-only WAV must be mono or stereo at 24000, 44100 or 48000 Hz");
     }
+    Ok(())
+}
+
+/// A media.conform recipe that resamples a whole PCM16 WAV into an audio-only 48 kHz stereo WAV,
+/// or why there is none. Its length is every whole 48 kHz sample the source covers, at most an
+/// hour.
+pub(crate) fn conform_audio_only(
+    relative: &str,
+    audio: &Value,
+    metadata: &Value,
+) -> Result<Value, &'static str> {
+    pcm16_wav(relative, audio, metadata)?;
+    let d = stream_duration(audio)
+        .ok_or("the audio duration is not exact, so no conform duration can be proposed")?;
+    let samples = ((u128::from(d.num) * 48_000 / u128::from(d.den)) as u64).min(AUDIO_ONLY_SAMPLES);
+    if samples == 0 {
+        return Err("the audio is shorter than one 48 kHz sample");
+    }
+    Ok(
+        json!({"schema_version":1,"id":asset_id(relative),"source":{"file":{"path":relative},"color":null},
+        "source_in":0,"duration":Time::new(samples, 48_000).map_err(|_| "the proposed duration overflows")?,
+        "rate":1,"reverse":false,"freeze":false,"audio":"resample"}),
+    )
+}
+
+/// A media.conform recipe that turns a whole PCM16 WAV into an asset with a silent black picture
+/// of `size` at `rate` (the older audio asset kind), or why there is none. Its length is the
+/// audio's whole frames (and whole 48 kHz samples); a tail shorter than one frame is left out.
+pub(crate) fn conform_audio(
+    relative: &str,
+    audio: &Value,
+    metadata: &Value,
+    rate: Time,
+    size: (u32, u32),
+) -> Result<Value, &'static str> {
+    pcm16_wav(relative, audio, metadata)?;
     let step = sample_step(rate);
     let frames = frames_at(audio, rate)
         .ok_or("the audio duration is not exact, so no conform duration can be proposed")?
@@ -674,34 +775,56 @@ mod tests {
     }
 
     #[test]
-    fn proposes_a_silent_picture_for_audio_only_wav() {
-        // 10.64 s of 24 kHz mono narration: 266 frames at 25 fps.
+    fn proposes_an_audio_only_wav_for_pcm16_wav() {
+        // 10.64 s of 24 kHz mono narration: every one of its 510,720 samples at 48 kHz.
         let audio = json!({"codec_type":"audio","codec_name":"pcm_s16le","sample_rate":"24000","channels":1,
             "time_base":"1/24000","duration_ts":255360});
         let metadata = json!({"streams":[audio],"format":{"format_name":"wav"}});
         let result = timeline(Path::new("unused.wav"), "voice/s1.wav", &metadata);
-        assert_eq!(result["ready"], false);
+        assert_eq!(
+            (&result["ready"], &result["audio_only"]),
+            (&json!(false), &json!(true))
+        );
         let recipe = &result["conform"]["recipe"];
         assert_eq!(
             recipe["source"],
             json!({"file":{"path":"voice/s1.wav"},"color":null})
         );
         assert_eq!(recipe["duration"], json!({"num":266,"den":25}));
-        assert_eq!(
-            (
-                recipe["width"].clone(),
-                recipe["height"].clone(),
-                recipe["audio"].clone()
-            ),
-            (json!(1920), json!(1080), json!("resample"))
-        );
+        assert!(recipe.get("width").is_none() && recipe.get("frame_rate").is_none());
+        assert_eq!(recipe["audio"], "resample");
+        assert_eq!(result["conform"]["output"], "s1-conformed.wav");
         assert!(
             result["conform"]["next"]
                 .as_str()
                 .unwrap()
                 .contains("media.prepare")
         );
-        serde_json::from_value::<crate::conform::Recipe>(recipe.clone()).expect("a valid recipe");
+        let parsed: crate::conform::Recipe =
+            serde_json::from_value(recipe.clone()).expect("a valid recipe");
+        assert_eq!(parsed.picture().unwrap(), None);
+        // 44.1 kHz keeps the whole 48 kHz samples it covers: 441 source samples are 480.
+        let music = json!({"codec_type":"audio","codec_name":"pcm_s16le","sample_rate":"44100","channels":2,
+            "time_base":"1/44100","duration_ts":441_001});
+        let recipe = conform_audio_only("bed.wav", &music, &metadata).unwrap();
+        assert_eq!(recipe["duration"], json!({"num":480_001,"den":48_000}));
+        // The older black-picture recipe, for an explicit .mkv output.
+        let recipe = conform_audio(
+            "s1.wav",
+            &metadata["streams"][0],
+            &metadata,
+            Time { num: 25, den: 1 },
+            (1920, 1080),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                recipe["width"].clone(),
+                recipe["height"].clone(),
+                recipe["duration"].clone()
+            ),
+            (json!(1920), json!(1080), json!({"num":266,"den":25}))
+        );
         // At 30000/1001 the length is whole multiples of five frames (whole 48 kHz samples).
         let recipe = conform_audio(
             "s1.wav",
@@ -720,6 +843,14 @@ mod tests {
         assert!(
             result.get("conform").is_none() && result["reasons"].to_string().contains("PCM16 WAV"),
             "{result}"
+        );
+        assert_eq!(
+            prepared_name("bed", Path::new("music/bed.WAV")),
+            "bed-prepared.wav"
+        );
+        assert_eq!(
+            prepared_name("talk", Path::new("talk.mp4")),
+            "talk-prepared.mkv"
         );
     }
 

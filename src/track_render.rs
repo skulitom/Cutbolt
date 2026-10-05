@@ -177,11 +177,7 @@ impl<'a> Graph<'a> {
     /// read only for its audio is timed from packets, as in audio-only graphs: its pictures are
     /// never decoded, and its samples come from the same packets either way.
     fn inspection(&self, path: &Path, kind: Kind, overlay: bool) -> Option<render::Check> {
-        if kind == Kind::Audio
-            && path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-        {
+        if kind == Kind::Audio && crate::model::audio_only_path(path) {
             return None;
         }
         Some(render::Check {
@@ -310,9 +306,9 @@ impl<'a> Graph<'a> {
         source: &Source,
     ) -> Result<(u64, u64)> {
         if kind == Kind::Video && source.frames == 0 {
-            return Err(error(
-                "UNSUPPORTED_MEDIA",
-                "Audio-only WAV cannot supply video",
+            return Err(crate::model::no_picture(
+                &clip.asset_id,
+                &format!("video clip {:?}", clip.id),
             ));
         }
         let first = clip

@@ -173,6 +173,12 @@ pub(crate) fn read_frame(
         .iter()
         .find(|a| Some(&a.id) == clip.asset_id.as_ref())
         .expect("validated asset");
+    if asset.audio_only() {
+        return Err(crate::model::no_picture(
+            &asset.id,
+            &format!("sequential clip {:?}", clip.id),
+        ));
+    }
     let path = media::project_file(Path::new(&asset.path), input_root)?;
     let source = render::inspect_reference_at(
         &path,

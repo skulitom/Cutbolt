@@ -226,7 +226,7 @@ pub enum Request {
     },
     #[serde(rename = "media.prepare")]
     MediaPrepare {
-        /// File to prepare: any video FFmpeg decodes, such as a phone or camera MP4, or a PCM16 WAV voice-over or music track (with `project`; it gets a silent black picture for an audio track). Give this or `paths`.
+        /// File to prepare: any video FFmpeg decodes, such as a phone or camera MP4, or a PCM16 WAV voice-over or music track (an audio-only WAV asset, for audio tracks). Give this or `paths`.
         #[serde(default)]
         path: Option<PathBuf>,
         /// Several video files to prepare in one job, 1-200, absolute or relative to input_root. Each is prepared as `path` would be; asset IDs come from the file names, made unique, and the result includes `media.add` operations for the prepared assets.
@@ -236,7 +236,7 @@ pub enum Request {
         input_root: PathBuf,
         /// Existing absolute directory for the converted asset.
         output_root: PathBuf,
-        /// New .mkv path inside output_root for a conversion; default `<name>-prepared.mkv` there.
+        /// New path inside output_root for a conversion; default `<name>-prepared.mkv`, or .wav for a WAV (an .mkv gives a WAV a silent picture).
         #[serde(default)]
         output: Option<PathBuf>,
         /// Target project: the asset takes its frame rate and size. Omit to keep the source's own rate (when it is a timeline rate) and size.
@@ -708,7 +708,7 @@ pub enum Request {
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
-        /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
+        /// Absolute path of a new .mkv (audio-only: .wav) file inside output_root; existing files are never overwritten.
         output: PathBuf,
         /// Transcripts of the source to move onto the output, so it need not be recognized again; forward, unit-speed recipes only.
         #[serde(default)]

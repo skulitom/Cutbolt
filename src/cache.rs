@@ -166,10 +166,7 @@ fn project_sources(p: &Project, root: &Path, proxy_only: Option<&str>) -> Result
         let mut expected = asset.identity.as_ref();
         if proxy_only.is_none()
             && let Some(scale) = p.preview_scale
-            && !(p.tracks.is_some()
-                && path
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("wav")))
+            && !(p.tracks.is_some() && asset.audio_only())
         {
             let binding = asset
                 .proxy

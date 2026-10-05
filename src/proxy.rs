@@ -138,8 +138,8 @@ pub fn generate(request: &Generate) -> Result<Value> {
         rate: Time { num: 1, den: 1 },
         reverse: false,
         freeze: false,
-        width,
-        height,
+        width: Some(width),
+        height: Some(height),
         audio: conform::Audio::Resample,
         remap: None,
         working_transfer: None,
@@ -242,11 +242,7 @@ pub(crate) fn preview_project(project: &Project, root: &Path) -> Result<Project>
     for a in &mut mapped.assets {
         if used.contains(&a.id) {
             // Audio-only WAV remains full quality when video previews select proxies.
-            if project.tracks.is_some()
-                && Path::new(&a.path)
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-            {
+            if project.tracks.is_some() && a.audio_only() {
                 if a.proxy.is_some() {
                     return Err(error(
                         "INVALID_PROXY",

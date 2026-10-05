@@ -643,6 +643,15 @@ impl Arrangement {
                 let source_duration = clip
                     .source_duration(project)
                     .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
+                if track.kind == Kind::Video
+                    && clip.sequence_id.is_none()
+                    && project.asset(&clip.asset_id)?.audio_only()
+                {
+                    return Err(crate::model::no_picture(
+                        &clip.asset_id,
+                        &format!("video track {:?} clip {:?}", track.id, clip.id),
+                    ));
+                }
                 let source_end = clip.source_in.plus(clip.duration)?;
                 let range = |message: String| Err(error("INVALID_RANGE", message));
                 if clip.duration.num == 0 {

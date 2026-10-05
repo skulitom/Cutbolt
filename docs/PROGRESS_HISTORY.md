@@ -1,5 +1,48 @@
 # Progress history
 
+## 5 October 2026: audio-only assets for voice-overs and music
+
+Audio tracks have played 48 kHz stereo PCM16 WAV files directly since recording landed. Every other WAV still became a timeline asset with a full-size black FFV1 picture under its sound (`media.prepare`, `src/readiness.rs` `conform_audio`). The part-two research (`demo-progress2-20261005/research/RESEARCH.md`, E1) measured the cost on the 96 s music bed: 14.1 s and 137 CPU-seconds, 117 of them in FFmpeg encoding and decoding the black picture and 19 in the engine hashing about 15 GB of decoded zeros. That is about 1.4 CPU-seconds per second of audio, and the build's alignment waited for it. It was the morning demo's issue 7 in its real form.
+
+The changes:
+- **An audio-only asset kind.** A 48 kHz stereo PCM16 WAV with no picture, recognized by an asset `path` ending in `.wav` (`Asset::audio_only`). Audio tracks already read such files with the engine's own WAV reader, so mixing, gain, fades, limiters, nesting, previews, renders and exports needed no change.
+- **Pictures refuse it clearly.** A `tracks.edit` that leaves a clip of one on a video track fails with `UNSUPPORTED_MEDIA`, naming the clip and asset and saying to use an audio track. Sequential clips stay accepted as edits, because transcript and outline workflows build sequential projects of WAVs without rendering them. Rendering or previewing one fails with the same message before any source is inspected.
+- **`media.conform` writes it.** A recipe for a WAV source without `width` and `height` resamples into a new `.wav`: whole 48 kHz samples up to an hour, no `frame_rate` or `decode`, `audio: resample`. The resampler is the existing one, now a shared function. The engine writes the WAV and hashes it as it writes; the renderer's WAV reader and FFmpeg's decoder must both read back that digest and sample count before it is published. No picture is encoded, decoded or hashed.
+- **`media.prepare` uses it.** A 48 kHz stereo WAV that the renderer's reader accepts comes back as it is (`converted: false`), bound to its content identity. Other PCM16 WAVs, mono or stereo at 24, 44.1 or 48 kHz, are resampled to `<name>-prepared.wav`, with no project needed. Transcripts of the file are returned or moved onto the new file as before, so they bind by content. `media.inspect` reports the first kind `ready` with `audio_only: true` and proposes the audio-only recipe for the second. Batch and job claims name WAV outputs `.wav`.
+- **Fewer waits on tool launches.** What remains is about eight short FFmpeg/ffprobe launches. For an audio-only source the strict full decode now runs beside the sample listing, and the receipt's tool versions are read while the samples convert.
+- **Compatibility.** An explicit `.mkv` `output` with the `project` still makes the older black-picture asset, and existing projects that use such assets render unchanged. On an audio track the older asset plays exactly the same samples as the audio-only asset of the same sound; the fixture checks this.
+- **The production coordinator** (`tools/cutbolt_production`) prepares voice takes and the music bed as audio-only assets, without a project. Music no longer waits for the narration, and the kit cache keeps only beds that had to be resampled. Stage keys changed (`asset: audio-only` replaces the frame size), so existing productions rebuild those stages once.
+
+Measured with release builds of `83de4ca` (the part-two engine) and of this change, run alternately.
+
+The research probe (`research/prepare_profile.py`, run unchanged except for its engine path) prepares the 96 s, 48 kHz stereo music bed: 15.7 s and 155 CPU-seconds before, 0.15 s and under 0.1 CPU-seconds now. An interleaved driver over the same harness ran five rounds of the bed and of one narration take, alternating the engines, with the machine 7-55 % busy before each run. Medians:
+
+| `media.prepare` | `83de4ca` | Now |
+| --- | ---: | ---: |
+| 96 s music bed, 48 kHz stereo (used as it is) | 14.8 s, 150 CPU-s | 0.15 s, 0.1 CPU-s |
+| 15.3 s narration take, 24 kHz mono (resampled) | 3.0 s, 25 CPU-s | 0.38 s, 0.2 CPU-s |
+
+The narration take's remaining 0.38 s is mostly tool start-up. An earlier round, before the two overlaps above and under heavier load (23-100 % busy), measured 0.61 s.
+
+**The part-two film, rebuilt cold.** The part-two manifest and `production-config.json` were copied to `demo-progress2-20261005/audio-only-rebuild/`, with `engine` set to this release build, and built into new folders. For a fair comparison, the same rebuild also ran with the part-two engine and its own coordinator (`83de4ca`) and a cold kit cache, in two alternating pairs. Other sessions shared the CPU and GPU. In pair 2 another job held the GPU, and the "before" build's narration took 97 s instead of about 45 s. The narration does not depend on this change, so the comparison also counts from the moment the narration finished:
+
+| Cold build | Total | Narration done | Voice assets | Music | Cut ready, after narration | Finished, after narration |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pair 1, `83de4ca` (37 % busy) | 203.1 s | 42.5 s | 18.5 s | 36.7 s | 102.0 s | 160.6 s |
+| Pair 1, now (28 % busy) | **148.8 s** | 50.3 s | 2.0 s | 0.9 s | 51.0 s | 98.5 s |
+| Pair 2, `83de4ca` (62 % busy) | 306.8 s | 97.4 s | 22.5 s | 38.8 s | 113.8 s | 209.4 s |
+| Pair 2, now (34 % busy) | **197.3 s** | 48.6 s | 7.2 s | 2.9 s | 76.4 s | 148.7 s |
+
+- **About 61 s less after the narration in both pairs, and 54 s less overall in pair 1.** That is more than the 30 s the research expected. The roughly 250 CPU-seconds of black-picture work also slowed the alignment, scenes, mix and export running beside it: in pair 1 the alignment took 14.3 s instead of 27.9 s.
+- **The same film.** The delivered audio decodes bit-identically (`ebdd53f3…`) in all four builds and in the original part-two film. The reviews match: −14.0 LKFS, no black, silence or clipping, timing as the project. The coordinator made 64 engine calls instead of 71-72.
+- **Against the original part-two build** (141.7 s on a quiet machine after a restart), pair 1 is not faster overall. Its narration took 11 s longer and its mix 8 s longer under the load. The mix (`audio.normalize`, 49-66 s here) is now the critical path after the narration, and another session is making it faster. The speech check still fails on spoken numerals in every build; that is a separate queued fix.
+
+Tests:
+- unit tests for the resampler's exact rounding (ties away from zero) and end clamp, and for the audio-only recipe rules, readiness proposals and job claims;
+- the conform fixture compares four audio-only conversions sample by sample with an integer resampler computed from the formula that generated the sources. It reads each one back with Python's own WAV reader and with FFmpeg, and checks preparation as it is, resampled, in batches and with transcripts. It then mixes the assets on placed tracks and compares every rendered and exported sample, including the older black-picture asset in their place. It also runs meters, ducking, normalizing, tightening, beats, outline, an H.264 export and its review on them, and checks the picture refusals and recipe rejections.
+
+These fixtures pass in the quick tier: conform, tracks, recording, proxies, cache_previews, synchronization, transcripts, integration, agent_ergonomics, production (offline part), overlays and multicam. No capability points change: this is a new asset kind and a speed-up, not a new editing checkpoint: this is a new asset kind and a speed-up, not a new editing checkpoint. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: the MCP catalog regains 16 % headroom
 
 With a workspace, the full MCP catalog was 261,499 bytes against the 262,144-byte budget of `tool_listings_fit_agent_context` (99.8 %), so the next feature adding schema text would have failed it. The evening research (`C:\DEV\CutboltData\demo-progress2-20261005\research\RESEARCH.md`, C3) measured where the bytes went: 30 tools each carried the saved-project reference as two definitions (820 bytes), five caption tools each carried the whole caption document (about 2.6 KB), and schemars adds a numeric `format` and `"default": null` to most fields.

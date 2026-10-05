@@ -25,6 +25,27 @@ pub struct Asset {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<crate::proxy::Binding>,
 }
+impl Asset {
+    /// An audio-only asset: a 48 kHz stereo PCM16 WAV, which audio tracks play directly and no
+    /// picture can use.
+    pub(crate) fn audio_only(&self) -> bool {
+        audio_only_path(std::path::Path::new(&self.path))
+    }
+}
+/// Whether a media file is an audio-only (WAV) source, from its extension.
+pub(crate) fn audio_only_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+}
+/// The error for an audio-only asset where a picture is needed.
+pub(crate) fn no_picture(asset: &str, place: &str) -> crate::Error {
+    error(
+        "UNSUPPORTED_MEDIA",
+        format!(
+            "{place} uses asset {asset:?}, which is audio-only (a WAV with no picture); place it on an audio track"
+        ),
+    )
+}
 
 /// Item of the sequential timeline: a source interval of an asset, or an explicit gap of black and silence.
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

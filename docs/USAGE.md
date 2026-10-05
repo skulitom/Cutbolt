@@ -227,18 +227,34 @@ Replaying a `request_id` returns the original ticket, and `job.wait` on it retur
 
 ## Preparing camera and phone files
 
-`media.prepare` takes any video file FFmpeg decodes, such as a phone or camera MP4, plus an optional target `project`, and returns a timeline asset in one step. It is queued with `job.start`, like other long-running commands.
+`media.prepare` takes any video file FFmpeg decodes, such as a phone or camera MP4, or a PCM16 WAV [voice-over or music track](#voice-overs-and-music), plus an optional target `project`, and returns a timeline asset in one step. It is queued with `job.start`, like other long-running commands.
 
 - A file that is already a timeline source and fits the project's frame rate and size, or any ready file when no project is given, comes back unchanged as `{"converted": false, "asset": ...}`.
-- Anything else is converted with the [`media.inspect` readiness recipe](#local-media-and-rendering) through [`media.conform`](CONFORM.md). With a project, it uses the project's frame rate and size. Without one, it keeps the source's own size and rate when that is a timeline rate, and uses 25 fps otherwise. The output defaults to `<name>-prepared.mkv` in `output_root`.
+- Anything else is converted with the [`media.inspect` readiness recipe](#local-media-and-rendering) through [`media.conform`](CONFORM.md). With a project, it uses the project's frame rate and size. Without one, it keeps the source's own size and rate when that is a timeline rate, and uses 25 fps otherwise. The output defaults to `<name>-prepared.mkv` in `output_root` (`.wav` for a WAV).
 - The result holds the `asset` for `media.add`, the `recipe` it ran, `frames` and `frame_rate`.
 - **Transcripts.** Optional `transcripts` of the files being prepared come back moved onto their assets, as the next revision of each document, so the prepared asset needs no recognition of its own. With `paths`, each file takes the documents of its own source, and the result lists them all.
 - With `paths` instead of `path`, one job prepares up to 200 files, absolute or relative to `input_root`.
-  - **IDs and outputs.** Asset IDs come from the file names, made unique within the batch and against the project's assets (`clip`, `clip-2`, and so on). A conversion is written to `<id>-prepared.mkv`.
+  - **IDs and outputs.** Asset IDs come from the file names, made unique within the batch and against the project's assets (`clip`, `clip-2`, and so on). A conversion is written to `<id>-prepared.mkv`, or `<id>-prepared.wav` for a WAV.
   - **Failures.** A file that fails is listed with its error code and message, and the others continue.
   - **Result.** It lists each file's outcome and returns the prepared assets as `media.add` `operations` for one `session.apply`.
 
-A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. A PCM16 WAV voice-over or music track, mono or stereo at 24, 44.1 or 48 kHz, needs the `project`: it becomes an asset with a silent black picture of the project's size and rate, ready for an audio track, its length the audio's whole frames. `media.inspect` proposes the same recipe at 1920x1080 and 25 fps. Stills, other audio-only formats, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
+A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. Stills, audio formats other than PCM16 WAV, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
+
+### Voice-overs and music
+
+A PCM16 WAV, mono or stereo at 24, 44.1 or 48 kHz, becomes an **audio-only asset**: a 48 kHz stereo PCM16 WAV with no picture, which [audio tracks](TRACKS.md#model-and-clocks) play directly. It needs no `project`; one that is given is ignored.
+
+- **As it is.** A 48 kHz stereo PCM16 WAV that the renderer's WAV reader accepts comes back unchanged (`converted: false`). Its asset is bound to the file's content identity, so transcripts of the file match it. `media.inspect` reports such a file `ready`, with `audio_only: true`.
+- **Resampled.** Any other is converted to `<name>-prepared.wav` by an [audio-only `media.conform` recipe](CONFORM.md#audio-only-output), with no `width` or `height`. The asset keeps every whole 48 kHz sample the source covers, at most an hour, and the result gives `samples` instead of `frames`. Transcripts of the file move onto it as for video.
+- **Pictures refuse it.** A video-track clip of an audio-only asset fails to apply with `UNSUPPORTED_MEDIA`. A sequential clip of one fails when rendered or previewed, because sequential clips play picture and sound together.
+- **The older kind.** An explicit `.mkv` `output`, with the `project`, still makes the sound into an asset with a silent black picture of the project's size and rate, for a sequential timeline. Projects that already use such assets keep working. On an audio track, they play the same samples as the audio-only asset.
+
+Preparing audio is now cheap: no picture is encoded, decoded or hashed. On a busy machine (7-55 % of its 32 threads in use before each run), medians of five alternating runs were:
+
+| `media.prepare` | Black-picture asset (`83de4ca`) | Audio-only asset |
+| --- | ---: | ---: |
+| 96 s music bed, 48 kHz stereo (used as it is) | 14.8 s, 150 CPU-s | 0.15 s, 0.1 CPU-s |
+| 15.3 s narration take, 24 kHz mono (resampled) | 3.0 s, 25 CPU-s | 0.38 s, 0.2 CPU-s |
 
 ## Ducking music under speech
 

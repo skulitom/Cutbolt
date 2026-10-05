@@ -876,6 +876,7 @@ fn plan_controlled(
         clip.source_in.units(Time::new(48000, 1)?)?;
         clip.duration.units(Time::new(48000, 1)?)?;
     }
+    sequential_pictures(project)?;
     let output = destination(output, output_root)?;
     let (ffv1_level, ffv1_slices) = media::ffv1_encoding(project.width, project.height);
     let large = large_raster(project.width, project.height);
@@ -1051,6 +1052,22 @@ fn plan_controlled(
     })
 }
 
+/// Sequential clips play their asset's picture and sound together, so audio-only assets are
+/// refused before any source is inspected.
+fn sequential_pictures(project: &Project) -> Result<()> {
+    for clip in &project.clips {
+        if let Some(id) = &clip.asset_id
+            && project.asset(id)?.audio_only()
+        {
+            return Err(crate::model::no_picture(
+                id,
+                &format!("sequential clip {:?}", clip.id),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct TempFile(pub(crate) PathBuf);
 impl Drop for TempFile {
     fn drop(&mut self) {
@@ -1207,6 +1224,7 @@ pub(crate) fn plan_audio_range(
         ));
     }
     let samples = project.duration()?.units(samples_clock)?;
+    sequential_pictures(&project)?;
     let output = destination_extension(output, output_root, "wav")?;
     let mut sources = HashMap::new();
     let mut args: Vec<String> = ["-hide_banner", "-v", "error", "-nostdin", "-n"]

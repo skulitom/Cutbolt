@@ -9,8 +9,8 @@ scene but keeps every narration take; a new delivery setting only re-exports.
 Order (independent branches run at the same time):
 
     inputs ─┬─ art (PixelForge, every recipe at once) ──────────────────────────────────────────┐
-            └─ tts (one batched Qwen run) ─┬─ music (after the takes, or the kit cache) ─┐       │
-                                           ├─ timing ──────────────────────────────────┤       │
+            ├─ music (an audio-only WAV: as it is, resampled, or the kit cache) ───────┐        │
+            └─ tts (one batched Qwen run) ─┬─ timing ──────────────────────────────────┤        │
                                            └─ voice prepare (one job per take) ────────┴─ audio timeline
         audio timeline ─┬─ mix (meters, duck, normalize) ───────────────────────────────────────┐
                         └─ align (one job, on the voice assets) ─ captions ─ scenes (lanes) ─────┴─ cut
@@ -172,13 +172,10 @@ class Production:
         scenes = self.m["scenes"]
         with ThreadPoolExecutor(max_workers=6) as pool:
             art_future = pool.submit(self.stage_art)
-            # Preparing music is CPU-heavy and slows the GPU narration's Python loop, so it starts once the takes exist
-            # (or at once when the kit cache already holds it).
-            music_early = self.m["music"] and self.music_cached(inputs)
-            music_future = pool.submit(self.stage_music, inputs) if music_early else None
+            # Music becomes an audio-only asset with no picture to encode, which takes a fraction of a second, so it
+            # no longer waits for the narration.
+            music_future = pool.submit(self.stage_music, inputs) if self.m["music"] else None
             takes = self.stage_tts(inputs)
-            if self.m["music"] and not music_early:
-                music_future = pool.submit(self.stage_music, inputs)
             timing = self.stage_timing(takes)
             # Takes become voice assets first and are aligned as those assets, so their transcripts bind to what the
             # timeline plays, and the mix (which needs only the audio) runs while alignment, captions and scenes do.
@@ -471,19 +468,13 @@ class Production:
 
     def music_request(self, inputs):
         path = inputs[self.m["music"]["input"]]
-        request = {"sha256": self.state.identity(path)["sha256"], "path": path, "size": list(pixel_stage.SIZE), "fps": FPS}
+        request = {"sha256": self.state.identity(path)["sha256"], "path": path, "asset": "audio-only"}
         return path, request, self.key("prepare:music", request, {"engine": self.engine_identity})
 
-    def music_cached(self, inputs):
-        path, request, key = self.music_request(inputs)
-        if self.state.reusable("prepare:music", key):
-            return True
-        cache = self.cfg.get("cache")
-        return bool(cache) and (Path(cache) / "music" / key / "record.json").exists()
-
     def stage_music(self, inputs):
-        """The music bed as a timeline asset. The kit cache (config `cache`) keeps one prepared copy per music file,
-        frame size and engine build, so a second production in the same style copies it instead of converting again."""
+        """The music bed as an audio-only asset: a 48 kHz stereo PCM16 WAV is used as it is, and other PCM16 WAVs are
+        resampled into one. The kit cache (config `cache`) keeps one resampled copy per music file and engine build, so a
+        second production in the same style copies it instead of converting again."""
         timer = Timer()
         path, request, key = self.music_request(inputs)
         cache = Path(self.cfg["cache"]) / "music" / key if self.cfg.get("cache") else None
@@ -502,11 +493,11 @@ class Production:
                     return [identity], {"asset": record["asset"], "kit_cache": str(cache)}
                 self.state.event({"event": "cache_mismatch", "stage": "prepare:music", "path": record["asset"]["path"]})
             folder = self.attempt_dir(f"media/music-{key[:12]}", attempt)
-            result = self.engine.job("media.prepare", {"path": path, "output_root": self.rel(folder), "project": self.empty_project()},
+            result = self.engine.job("media.prepare", {"path": path, "output_root": self.rel(folder)},
                                      request_id=f"music-{key[:20]}-{attempt}", lane="music", label="music")
             asset = result["asset"]
             identity = self.ident(asset["path"])
-            if cache and not cache.exists():
+            if cache and result["converted"] and not cache.exists():
                 temp = cache.with_name(f".{cache.name}.partial-{os.getpid()}")
                 temp.mkdir(parents=True)
                 shutil.copyfile(self.root / asset["path"], temp / Path(asset["path"]).name)
@@ -522,18 +513,19 @@ class Production:
         return receipt["result"]["asset"]
 
     def stage_prepare_voice(self, takes):
-        """Each take as a voice-track asset (48 kHz stereo under a black picture); one job per take, on separate lanes."""
+        """Each take as an audio-only voice asset: a 48 kHz stereo PCM16 WAV, as it is or resampled, with no picture.
+        One job per take, on separate lanes."""
         timer = Timer()
 
         def one(item):
             number, scene_id = item
             take = takes[scene_id]
-            request = {"take": self.state.identity(take["path"])["sha256"], "size": list(pixel_stage.SIZE)}
+            request = {"take": self.state.identity(take["path"])["sha256"], "asset": "audio-only"}
             key = self.key(f"prepare:{scene_id}", request, {"engine": self.engine_identity})
 
             def run(attempt):
                 folder = self.attempt_dir(f"media/voice-{scene_id}-{key[:12]}", attempt)
-                result = self.engine.job("media.prepare", {"path": take["path"], "output_root": self.rel(folder), "project": self.empty_project()},
+                result = self.engine.job("media.prepare", {"path": take["path"], "output_root": self.rel(folder)},
                                          request_id=f"voice-{key[:20]}-{attempt}", lane=f"lane-{number % self.lanes}", label="voice")
                 asset = result["asset"]
                 return [self.ident(asset["path"])], {"asset": asset}

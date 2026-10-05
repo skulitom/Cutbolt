@@ -27,6 +27,8 @@ const SOURCE_FRAMES: usize = 108_000;
 const SOURCE_AUDIO_SECONDS: u64 = 3600;
 /// Thirty minutes of 25 fps output, streamed into the encoder.
 const OUTPUT_FRAMES: u64 = 45_000;
+/// One hour of audio-only output at 48 kHz.
+const AUDIO_ONLY_SAMPLES: u64 = 48_000 * 3600;
 
 /// Tool time grows with media length; bounded so a stuck tool still fails.
 fn tool_timeout(seconds: f64) -> Duration {
@@ -58,7 +60,7 @@ pub struct Source {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdr: Option<color::Input>,
 }
-/// Media conversion recipe for media.conform: samples a source into a new FFV1/PCM16 editing asset at `frame_rate` (default 25 fps).
+/// Media conversion recipe for media.conform: samples a source into a new FFV1/PCM16 editing asset at `frame_rate` (default 25 fps), or a WAV source into an audio-only WAV when `width` and `height` are omitted.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
@@ -73,7 +75,7 @@ pub struct Recipe {
     pub source: Source,
     /// Source position in rational seconds at output time zero; on a source audio sample when resampling without remap.
     pub source_in: Time,
-    /// Output duration in rational seconds; whole frames at `frame_rate` and whole 48 kHz samples, 1 to 45000 frames.
+    /// Output duration in rational seconds; whole frames at `frame_rate` and whole 48 kHz samples, 1 to 45000 frames (audio-only: whole samples, at most an hour).
     pub duration: Time,
     /// Constant speed factor from 1/16 to 16; must be 1 with `freeze` or `remap`.
     pub rate: Time,
@@ -81,10 +83,12 @@ pub struct Recipe {
     pub reverse: bool,
     /// Hold `source_in` for every frame; requires unit `rate`, `reverse: false` and `audio: mute`.
     pub freeze: bool,
-    /// Output width in pixels; at most 4096 and 8M pixels in total.
-    pub width: u32,
+    /// Output width in pixels; at most 4096 and 8M pixels in total. Omit with `height` for an audio-only 48 kHz stereo WAV.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
     /// Output height in pixels; at most 2160 and 8M pixels in total.
-    pub height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
     /// Audio policy; must agree with `remap.audio_pitch` when remapping.
     pub audio: Audio,
     /// Variable speed map replacing constant `rate`; omit for constant speed.
@@ -387,61 +391,87 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
             "Audio-only sources have no video color interpretation",
         ));
     }
-    if let Some(a) = audio.first() {
-        let valid =
-            (mp4 && a["codec_name"] == "aac") || ((mkv || wav) && a["codec_name"] == "pcm_s16le");
-        checked.audio_rate = number(&a["sample_rate"])?;
-        checked.channels = number(&a["channels"])?;
-        if !valid
-            || ![24000, 44100, 48000].contains(&checked.audio_rate)
-            || ![1, 2].contains(&checked.channels)
-            || !match a["channel_layout"].as_str() {
-                None | Some("unknown") => true,
-                Some("mono") => checked.channels == 1,
-                Some("stereo") => checked.channels == 2,
-                _ => false,
-            }
-        {
-            return Err(unsupported(
-                "Audio requires PCM16 or MP4/MOV AAC, mono/stereo, 24/44.1/48 kHz",
-            ));
+    // Probe output alone can conceal recoverable codec errors; require a strict full decode. For an
+    // audio-only source it runs beside the sample listing, which reads the same small file.
+    let path = checked.path.clone();
+    let strict = || -> Result<()> {
+        let mut args = input_args(&path);
+        args.extend(["-map", "0", "-f", "null", "-"].map(str::to_owned));
+        media::capture(&media::tool("ffmpeg"), &args, timeout).map(|_| ())
+    };
+    match audio.first() {
+        Some(a) if video.is_empty() => std::thread::scope(|scope| {
+            let decode = scope.spawn(strict);
+            let listed = audio_stream(&mut checked, a, (mkv, mp4, wav), timeout);
+            let decoded = decode
+                .join()
+                .unwrap_or_else(|_| Err(error("TOOL_FAILED", "Decode thread failed")));
+            listed.and(decoded)
+        })?,
+        Some(a) => {
+            audio_stream(&mut checked, a, (mkv, mp4, wav), timeout)?;
+            strict()?;
         }
-        let tb = ratio(&a["time_base"])?;
-        let decoded = frames(&checked.path, "a:0", timeout)?;
-        for f in decoded {
-            let t = Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?;
-            let expected = Time::new(checked.samples, checked.audio_rate)?;
-            let diff = if t.compare(expected)? == Ordering::Less {
-                expected.minus(t)?
-            } else {
-                t.minus(expected)?
-            };
-            if (checked.samples == 0 && t.num != 0)
-                || diff.compare(Time::new(1, 1000)?)? == Ordering::Greater
-            {
-                return Err(unsupported(
-                    "Audio must be zero-origin and continuous within container precision",
-                ));
-            }
-            let n = number(&f["nb_samples"])?;
-            checked.samples = checked
-                .samples
-                .checked_add(n)
-                .ok_or_else(|| unsupported("Audio count overflow"))?;
-            if n == 0 || checked.samples > checked.audio_rate * SOURCE_AUDIO_SECONDS {
-                return Err(error("LIMIT_EXCEEDED", "Decoded audio exceeds one hour"));
-            }
-        }
-        if checked.samples == 0 {
-            return Err(unsupported("Audio stream has no samples"));
-        }
+        None => strict()?,
     }
-    // Probe output alone can conceal recoverable codec errors; require a strict full decode.
-    let mut args = input_args(&checked.path);
-    args.extend(["-map", "0", "-f", "null", "-"].map(str::to_owned));
-    media::capture(&media::tool("ffmpeg"), &args, timeout)?;
     scene::identity_file(&source.file, root, SOURCE_BYTES)?;
     Ok(checked)
+}
+/// Check a source's audio stream and count its decoded samples into `checked`.
+fn audio_stream(
+    checked: &mut Checked,
+    a: &Value,
+    (mkv, mp4, wav): (bool, bool, bool),
+    timeout: Duration,
+) -> Result<()> {
+    let valid =
+        (mp4 && a["codec_name"] == "aac") || ((mkv || wav) && a["codec_name"] == "pcm_s16le");
+    checked.audio_rate = number(&a["sample_rate"])?;
+    checked.channels = number(&a["channels"])?;
+    if !valid
+        || ![24000, 44100, 48000].contains(&checked.audio_rate)
+        || ![1, 2].contains(&checked.channels)
+        || !match a["channel_layout"].as_str() {
+            None | Some("unknown") => true,
+            Some("mono") => checked.channels == 1,
+            Some("stereo") => checked.channels == 2,
+            _ => false,
+        }
+    {
+        return Err(unsupported(
+            "Audio requires PCM16 or MP4/MOV AAC, mono/stereo, 24/44.1/48 kHz",
+        ));
+    }
+    let tb = ratio(&a["time_base"])?;
+    let decoded = frames(&checked.path, "a:0", timeout)?;
+    for f in decoded {
+        let t = Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?;
+        let expected = Time::new(checked.samples, checked.audio_rate)?;
+        let diff = if t.compare(expected)? == Ordering::Less {
+            expected.minus(t)?
+        } else {
+            t.minus(expected)?
+        };
+        if (checked.samples == 0 && t.num != 0)
+            || diff.compare(Time::new(1, 1000)?)? == Ordering::Greater
+        {
+            return Err(unsupported(
+                "Audio must be zero-origin and continuous within container precision",
+            ));
+        }
+        let n = number(&f["nb_samples"])?;
+        checked.samples = checked
+            .samples
+            .checked_add(n)
+            .ok_or_else(|| unsupported("Audio count overflow"))?;
+        if n == 0 || checked.samples > checked.audio_rate * SOURCE_AUDIO_SECONDS {
+            return Err(error("LIMIT_EXCEEDED", "Decoded audio exceeds one hour"));
+        }
+    }
+    if checked.samples == 0 {
+        return Err(unsupported("Audio stream has no samples"));
+    }
+    Ok(())
 }
 #[derive(Serialize)]
 struct FrameSample {
@@ -460,6 +490,17 @@ impl Recipe {
     fn clock(&self) -> Result<Time> {
         render::clock::rate(self.frame_rate.unwrap_or(FPS))
     }
+    /// The output picture's size, or None for an audio-only WAV (neither `width` nor `height`).
+    pub(crate) fn picture(&self) -> Result<Option<(u32, u32)>> {
+        match (self.width, self.height) {
+            (Some(width), Some(height)) => Ok(Some((width, height))),
+            (None, None) => Ok(None),
+            _ => Err(error(
+                "INVALID_CONFORM",
+                "Give width and height together, or neither for an audio-only WAV",
+            )),
+        }
+    }
 }
 fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
     if recipe.source.sdr.is_some() != recipe.working_transfer.is_some() {
@@ -474,19 +515,24 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
             "LUT application requires explicit SDR normalization and working_transfer",
         ));
     }
+    let picture = recipe.picture()?;
     let rate = recipe.clock()?;
-    let count = recipe.duration.units(rate)?;
-    recipe.duration.units(Time::new(48000, 1)?)?;
+    let samples = recipe.duration.units(Time::new(48000, 1)?)?;
+    // An audio-only output has no frames; its length is checked in samples below.
+    let count = match picture {
+        Some(_) => recipe.duration.units(rate)?,
+        None => 0,
+    };
+    let (width, height) = picture.unwrap_or((1, 1));
     if recipe.schema_version != 1
         || recipe.id.trim().is_empty()
         || recipe.id.len() > 128
-        || count == 0
-        || count > OUTPUT_FRAMES
-        || recipe.width == 0
-        || recipe.height == 0
-        || recipe.width > 4096
-        || recipe.height > 2160
-        || recipe.width as u64 * recipe.height as u64 > 8_000_000
+        || (picture.is_some() && (count == 0 || count > OUTPUT_FRAMES))
+        || width == 0
+        || height == 0
+        || width > 4096
+        || height > 2160
+        || width as u64 * height as u64 > 8_000_000
         || recipe.rate.compare(Time::new(1, 16)?)? == Ordering::Less
         || recipe.rate.compare(Time::new(16, 1)?)? == Ordering::Greater
     {
@@ -494,6 +540,23 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
             "INVALID_CONFORM",
             "Conform v1 requires 1..45000 output frames (30 minutes), dimensions up to 4096x2160/8M pixels and rate 1/16..16",
         ));
+    }
+    if picture.is_none() {
+        if recipe.frame_rate.is_some() || samples == 0 || samples > AUDIO_ONLY_SAMPLES {
+            return Err(error(
+                "INVALID_CONFORM",
+                "An audio-only output (no width and height) has no frame_rate and lasts 1 sample to one hour",
+            ));
+        }
+        if !source.pts.is_empty()
+            || !matches!(recipe.audio, Audio::Resample)
+            || recipe.decode.is_some()
+        {
+            return Err(error(
+                "INVALID_CONFORM",
+                "An audio-only output resamples a WAV source with audio: resample and no decode option; give width and height to convert a video",
+            ));
+        }
     }
     recipe.source_in.validate()?;
     if recipe.freeze
@@ -632,7 +695,12 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
 }
 fn report(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Value {
     let selected = mapped.frames.iter().map(|f| f.first).collect::<Vec<_>>();
-    let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"frame_rate":recipe.clock().expect("validated"),"frames":recipe.duration.units(recipe.clock().expect("validated")).expect("validated"),"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":"latest_source_timestamp_at_or_before_output_clock_plus_half_source_tick","resize":"nearest_top_left","audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
+    let rate = recipe.clock().expect("validated");
+    let audio_only = recipe.width.is_none();
+    // An audio-only output has no frames, frame rate, frame selection or resize.
+    let picture = |value: Value| if audio_only { Value::Null } else { value };
+    let frames = picture(json!(recipe.duration.units(rate).unwrap_or_default()));
+    let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"audio_only":audio_only,"frame_rate":picture(json!(rate)),"frames":frames,"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":picture(json!("latest_source_timestamp_at_or_before_output_clock_plus_half_source_tick")),"resize":picture(json!("nearest_top_left")),"audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
     if let Some(remap) = &mapped.remap {
         let request = recipe.remap.as_ref().expect("compiled remap");
         report["remap"] = json!({"segments":remap.spans,"source_times":mapped.times,"video_samples":mapped.frames,"video_sampling":request.video_sampling,"audio_pitch":request.audio_pitch,"clock":"exact_integral_of_linear_speed","interpolation_space":"working_rgb_values_after_normalization_and_lut"});
@@ -708,88 +776,92 @@ fn audio_window(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Result<(
     Ok((first.min(source.samples - 1), last.min(source.samples - 1)))
 }
 
-/// Decoded source frames, read in nondecreasing index order (stream) or by random access (window).
-enum SourceFrames {
-    Window {
-        file: File,
-        first: usize,
-    },
-    Stream {
-        reader: media::StreamReader,
-        next: usize,
-    },
+/// The source samples the resampler reads, decoded once into memory: interleaved PCM16 and the
+/// first sample's index. Empty when the output's audio is silent.
+fn decode_audio(
+    recipe: &Recipe,
+    source: &Checked,
+    mapped: &Mapping,
+    scratch: &Path,
+    timeout: Duration,
+) -> Result<(Vec<i16>, u64)> {
+    if source.samples == 0 || !matches!(recipe.audio, Audio::Resample) {
+        return Ok((Vec::new(), 0));
+    }
+    let (first, last) = audio_window(recipe, source, mapped)?;
+    let bytes = (last - first + 1) * source.channels * 2;
+    if bytes > AUDIO_BYTES {
+        return Err(error(
+            "LIMIT_EXCEEDED",
+            "The source audio read by this recipe exceeds the 512 MiB decode window",
+        ));
+    }
+    let path = scratch.join("source.pcm");
+    let mut args = input_args(&source.path);
+    args.extend([
+        "-map".into(),
+        "0:a:0".into(),
+        "-vn".into(),
+        "-af".into(),
+        format!("atrim=start_sample={first}:end_sample={}", last + 1),
+        "-c:a".into(),
+        "pcm_s16le".into(),
+        "-f".into(),
+        "s16le".into(),
+    ]);
+    args.push(path.to_string_lossy().into_owned());
+    media::capture(&media::tool("ffmpeg"), &args, timeout)?;
+    if fs::metadata(&path)?.len() != bytes {
+        return Err(error(
+            "RENDER_VALIDATION_FAILED",
+            "Decoded source audio count changed",
+        ));
+    }
+    // Read in blocks, so the samples are held once rather than as bytes and samples both.
+    let mut file = File::open(&path)?;
+    let mut decoded = Vec::with_capacity((bytes / 2) as usize);
+    let mut block = vec![0u8; 1 << 20];
+    let mut remaining = bytes;
+    while remaining > 0 {
+        let n = remaining.min(block.len() as u64) as usize;
+        file.read_exact(&mut block[..n])?;
+        decoded.extend(
+            block[..n]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|v| i16::from_le_bytes(*v)),
+        );
+        remaining -= n as u64;
+    }
+    drop(file);
+    fs::remove_file(&path)?;
+    Ok((decoded, first))
 }
 
-pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> Result<Value> {
-    let started = Instant::now();
-    let output = render::destination(output, output_root)?;
-    let source = check(&recipe.source, root)?;
-    let selected = mapping(recipe, &source)?;
-    let decoder = crate::acceleration::select(recipe.decode, &source.metadata)?;
-    let lut = recipe.lut.as_ref().map(|lut| lut.load(root)).transpose()?;
-    let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
-    let source_video = scratch.0.join("source.rgb");
-    let source_audio = scratch.0.join("source.pcm");
-    let rate = recipe.clock()?;
-    let count = recipe.duration.units(rate)?;
-    let media_seconds = seconds(source.video_end)
-        .max(source.samples as f64 / source.audio_rate.max(1) as f64)
-        + count as f64 * rate.den as f64 / rate.num as f64;
-    let timeout = tool_timeout(media_seconds);
-    let mut decode_video_micros = 0;
-
-    // Audio: decode only the sample window the resampler reads.
-    let mut decoded = Vec::new();
-    let mut audio_first = 0u64;
-    if source.samples > 0 && matches!(recipe.audio, Audio::Resample) {
-        let (first, last) = audio_window(recipe, &source, &selected)?;
-        let bytes = (last - first + 1) * source.channels * 2;
-        if bytes > AUDIO_BYTES {
-            return Err(error(
-                "LIMIT_EXCEEDED",
-                "The source audio read by this recipe exceeds the 512 MiB decode window",
-            ));
-        }
-        let mut args = input_args(&source.path);
-        args.extend([
-            "-map".into(),
-            "0:a:0".into(),
-            "-vn".into(),
-            "-af".into(),
-            format!("atrim=start_sample={first}:end_sample={}", last + 1),
-            "-c:a".into(),
-            "pcm_s16le".into(),
-            "-f".into(),
-            "s16le".into(),
-        ]);
-        args.push(source_audio.to_string_lossy().into_owned());
-        media::capture(&media::tool("ffmpeg"), &args, timeout)?;
-        if fs::metadata(&source_audio)?.len() != bytes {
-            return Err(error(
-                "RENDER_VALIDATION_FAILED",
-                "Decoded source audio count changed",
-            ));
-        }
-        let raw = fs::read(&source_audio)?;
-        decoded = raw
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|v| i16::from_le_bytes(*v))
-            .collect::<Vec<_>>();
-        audio_first = first;
-    }
-    let raw_audio = scratch.0.join("audio.pcm");
-    let mut audio = BufWriter::new(File::create_new(&raw_audio)?);
-    let source_in = if decoded.is_empty() || selected.remap.is_some() {
+/// The output's 48 kHz stereo PCM16, written to `sink` in blocks: each sample interpolates the
+/// two source samples around its exact source position, rounded once to nearest with ties away
+/// from zero; mono feeds both channels. `decoded` starts at source sample `first`; when it is
+/// empty the output is exact silence.
+fn resample(
+    recipe: &Recipe,
+    source: &Checked,
+    mapped: &Mapping,
+    decoded: &[i16],
+    first: u64,
+    mut sink: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    const BLOCK: usize = 64 * 1024;
+    let source_in = if decoded.is_empty() || mapped.remap.is_some() {
         0
     } else {
         recipe.source_in.units(Time::new(source.audio_rate, 1)?)?
     };
+    let mut block = Vec::with_capacity(BLOCK + 4);
     for n in 0..recipe.duration.units(Time { num: 48000, den: 1 })? {
         let (a, remainder, denominator) = if decoded.is_empty() {
             (0, 0, 1)
-        } else if let Some(remap) = &selected.remap {
+        } else if let Some(remap) = &mapped.remap {
             let position = remap
                 .source_time(Time::new(n, 48000)?)?
                 .times(Time::new(source.audio_rate, 1)?)?;
@@ -819,14 +891,122 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             } else {
                 let b = (a + 1).min(source.samples - 1);
                 let ch = if source.channels == 1 { 0 } else { channel };
-                let x = decoded[((a - audio_first) * source.channels + ch) as usize] as i128;
-                let y = decoded[((b - audio_first) * source.channels + ch) as usize] as i128;
+                let x = decoded[((a - first) * source.channels + ch) as usize] as i128;
+                let y = decoded[((b - first) * source.channels + ch) as usize] as i128;
                 let sum = x * (denominator - remainder) + y * remainder;
                 ((sum.abs() + denominator / 2) / denominator * sum.signum()) as i16
             };
-            audio.write_all(&value.to_le_bytes())?;
+            block.extend_from_slice(&value.to_le_bytes());
+        }
+        if block.len() >= BLOCK {
+            sink(&block)?;
+            block.clear();
         }
     }
+    if !block.is_empty() {
+        sink(&block)?;
+    }
+    Ok(())
+}
+
+/// An audio-only output: the WAV source's samples resampled into a new 48 kHz stereo PCM16 WAV,
+/// which audio tracks play directly. No picture is made. Before publishing, the written samples
+/// are read back by the renderer's own WAV reader and decoded by FFmpeg, and both must equal
+/// what was written.
+fn run_audio(
+    recipe: &Recipe,
+    root: &Path,
+    output_root: &Path,
+    output: &Path,
+    started: Instant,
+) -> Result<Value> {
+    let output = render::destination_extension(output, output_root, "wav")?;
+    // The receipt's tool versions are read beside the conversion, which is otherwise mostly
+    // waiting for tool processes to start.
+    let version = |name: &'static str| std::thread::spawn(move || media::version(name));
+    let versions = [version("ffmpeg"), version("ffprobe")];
+    let source = check(&recipe.source, root)?;
+    let selected = mapping(recipe, &source)?;
+    let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
+    let samples = recipe.duration.units(Time::new(48000, 1)?)?;
+    let timeout =
+        tool_timeout(source.samples as f64 / source.audio_rate as f64 + samples as f64 / 48000.0);
+    let (decoded, first) = decode_audio(recipe, &source, &selected, &scratch.0, timeout)?;
+    let temp = scratch.0.join("output.wav");
+    let mut writer = crate::pcm_stream::Writer::create(&temp, samples)?;
+    resample(recipe, &source, &selected, &decoded, first, |block| {
+        writer.push(block)
+    })?;
+    drop(decoded);
+    let written = writer.finish_file()?;
+    let verified = crate::pcm_stream::inspect(&temp, &media::Uncontrolled)?;
+    if verified.frames != samples
+        || verified.pcm_sha256 != written
+        || decoded_hash(&temp, false, samples * 4, timeout)? != written
+    {
+        return Err(error(
+            "RENDER_VALIDATION_FAILED",
+            "Conformed audio counts or decoded samples differ",
+        ));
+    }
+    scene::identity_file(&recipe.source.file, root, SOURCE_BYTES)?;
+    let mut result = report(recipe, &source, &selected);
+    result["decode"] = Value::Null;
+    result["timing"] = json!({"elapsed_micros":started.elapsed().as_micros()});
+    result["lut"] = Value::Null;
+    result["output"] = json!(output);
+    result["sha256"] = json!(verified.sha256);
+    result["pcm_sha256"] = json!(written);
+    let [ffmpeg, ffprobe] = versions.map(|v| {
+        v.join()
+            .unwrap_or_else(|_| Err(error("TOOL_FAILED", "Version thread failed")))
+    });
+    result["ffmpeg"] = json!(ffmpeg?);
+    result["ffprobe"] = json!(ffprobe?);
+    result["asset"] = json!({"id":recipe.id,"path":output,"duration":recipe.duration,"identity":{"sha256":verified.sha256,"bytes":verified.bytes}});
+    media::publish(&temp, &output)?;
+    Ok(result)
+}
+
+/// Decoded source frames, read in nondecreasing index order (stream) or by random access (window).
+enum SourceFrames {
+    Window {
+        file: File,
+        first: usize,
+    },
+    Stream {
+        reader: media::StreamReader,
+        next: usize,
+    },
+}
+
+pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> Result<Value> {
+    let started = Instant::now();
+    let Some((width, height)) = recipe.picture()? else {
+        return run_audio(recipe, root, output_root, output, started);
+    };
+    let output = render::destination(output, output_root)?;
+    let source = check(&recipe.source, root)?;
+    let selected = mapping(recipe, &source)?;
+    let decoder = crate::acceleration::select(recipe.decode, &source.metadata)?;
+    let lut = recipe.lut.as_ref().map(|lut| lut.load(root)).transpose()?;
+    let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
+    let source_video = scratch.0.join("source.rgb");
+    let rate = recipe.clock()?;
+    let count = recipe.duration.units(rate)?;
+    let media_seconds = seconds(source.video_end)
+        .max(source.samples as f64 / source.audio_rate.max(1) as f64)
+        + count as f64 * rate.den as f64 / rate.num as f64;
+    let timeout = tool_timeout(media_seconds);
+    let mut decode_video_micros = 0;
+
+    // Audio: decode only the sample window the resampler reads.
+    let (decoded, audio_first) = decode_audio(recipe, &source, &selected, &scratch.0, timeout)?;
+    let raw_audio = scratch.0.join("audio.pcm");
+    let mut audio = BufWriter::new(File::create_new(&raw_audio)?);
+    resample(recipe, &source, &selected, &decoded, audio_first, |block| {
+        Ok(audio.write_all(block)?)
+    })?;
     audio.flush()?;
     drop(audio);
     drop(decoded);
@@ -918,7 +1098,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         }
     }
     let temp = scratch.0.join("output.mkv");
-    let (ffv1_level, ffv1_slices) = media::ffv1_encoding(recipe.width, recipe.height);
+    let (ffv1_level, ffv1_slices) = media::ffv1_encoding(width, height);
     // An audio-only source gets its silent black picture from FFmpeg's color source instead of
     // gigabytes of zero pixels through a pipe (an 80 s 1080p picture is 12.5 GB of RGB).
     let silent = frames_in.is_none();
@@ -930,7 +1110,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             "-i".into(),
             format!(
                 "color=c=black:s={}x{}:r={}/{},format=rgb24",
-                recipe.width, recipe.height, rate.num, rate.den
+                width, height, rate.num, rate.den
             ),
         ]);
     } else {
@@ -940,7 +1120,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             "-pixel_format".into(),
             "rgb24".into(),
             "-video_size".into(),
-            format!("{}x{}", recipe.width, recipe.height),
+            format!("{}x{}", width, height),
             "-framerate".into(),
             format!("{}/{}", rate.num, rate.den),
             "-i".into(),
@@ -1007,7 +1187,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     args.push(temp.to_string_lossy().into_owned());
     let source_size = source.width as usize * source.height as usize * 3;
     let mut video_hash = Sha256::new();
-    let frame_bytes = recipe.width as u64 * recipe.height as u64 * 3;
+    let frame_bytes = width as u64 * height as u64 * 3;
     // The expected digest of a silent picture is that of all-zero frames, hashed while it encodes.
     let mut silent_hash = None;
     if silent {
@@ -1025,7 +1205,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             let mut first_index = None;
             let mut second_index = None;
             let mut native_pixels = vec![0u8; native_size];
-            let mut pixels = vec![0u8; recipe.width as usize * recipe.height as usize * 3];
+            let mut pixels = vec![0u8; width as usize * height as usize * 3];
             for n in 0..count {
                 if let Some(frames_in) = &mut frames_in {
                     let sample = &selected.frames[n as usize];
@@ -1083,13 +1263,13 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
                         second_index = Some(sample.second);
                     }
                     let weight = sample.second_weight;
-                    for y in 0..recipe.height as usize {
-                        for x in 0..recipe.width as usize {
-                            let p = ((y * source.height as usize / recipe.height as usize)
+                    for y in 0..height as usize {
+                        for x in 0..width as usize {
+                            let p = ((y * source.height as usize / height as usize)
                                 * source.width as usize
-                                + x * source.width as usize / recipe.width as usize)
+                                + x * source.width as usize / width as usize)
                                 * 3;
-                            let out = (y * recipe.width as usize + x) * 3;
+                            let out = (y * width as usize + x) * 3;
                             for c in 0..3 {
                                 pixels[out + c] = if weight.num == 0 {
                                     first_pixels[p + c]
@@ -1115,13 +1295,8 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     let video_hash = silent_hash.unwrap_or_else(|| format!("{:x}", video_hash.finalize()));
     // Frame timing from FFV1 packets: the decoded-content digests below decode every frame and
     // check its exact byte count, so a second full decode for timestamps would add nothing.
-    let verified = render::inspect_reference_audio(
-        &temp,
-        recipe.width,
-        recipe.height,
-        rate,
-        &media::Uncontrolled,
-    )?;
+    let verified =
+        render::inspect_reference_audio(&temp, width, height, rate, &media::Uncontrolled)?;
     let samples = recipe.duration.units(Time::new(48000, 1)?)?;
     if verified.frames != count
         || verified.samples != samples
@@ -1172,7 +1347,137 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
+    let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","audio_only_output":"wav_pcm16_48000_stereo_without_width_height","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A decoded audio-only source of `samples` frames at `rate` with `channels`.
+    fn wav(rate: u64, channels: u64, samples: u64) -> Checked {
+        Checked {
+            path: PathBuf::from("source.wav"),
+            width: 0,
+            height: 0,
+            pts: Vec::new(),
+            video_end: Time::ZERO,
+            audio_rate: rate,
+            channels,
+            samples,
+            metadata: json!({"streams":[{"codec_type":"audio"}]}),
+            layout: None,
+            normalization: Value::Null,
+        }
+    }
+
+    fn audio_only(changes: Value) -> Recipe {
+        let mut recipe = json!({"schema_version":1,"id":"voice","source":{"file":{"path":"source.wav","sha256":"0".repeat(64),"bytes":44},"color":null},
+            "source_in":0,"duration":{"num":1,"den":6000},"rate":1,"reverse":false,"freeze":false,"audio":"resample"});
+        for (key, value) in changes.as_object().expect("changes") {
+            recipe[key] = value.clone();
+        }
+        serde_json::from_value(recipe).expect("recipe")
+    }
+
+    /// The written stereo samples of a recipe over `decoded`.
+    fn output(recipe: &Recipe, source: &Checked, decoded: &[i16]) -> Vec<i16> {
+        let mapped = mapping(recipe, source).expect("valid mapping");
+        let mut bytes = Vec::new();
+        resample(recipe, source, &mapped, decoded, 0, |block| {
+            bytes.extend_from_slice(block);
+            Ok(())
+        })
+        .expect("resampled");
+        bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect()
+    }
+
+    #[test]
+    fn audio_only_resampling_is_sample_exact() {
+        // 24 kHz mono to 48 kHz: every other sample lies halfway, and halves round away from
+        // zero; the final position past the last sample holds that sample.
+        let source = wav(24_000, 1, 4);
+        let decoded = [1, 2, -1, -2];
+        let recipe = audio_only(json!({}));
+        assert_eq!(recipe.picture().unwrap(), None);
+        let stereo = output(&recipe, &source, &decoded);
+        let expected = [1, 2, 2, 1, -1, -2, -2, -2];
+        assert_eq!(
+            stereo,
+            expected.iter().flat_map(|&v| [v, v]).collect::<Vec<i16>>()
+        );
+        // 44.1 kHz stereo at 3/2 speed from source sample 2: output n reads position
+        // 2 + n * 441 * 3 / (480 * 2), so channels interpolate independently.
+        let source = wav(44_100, 2, 64);
+        let decoded: Vec<i16> = (0..128).map(|i| (i * 997 % 4001 - 2000) as i16).collect();
+        let recipe = audio_only(
+            json!({"source_in":{"num":2,"den":44100},"rate":{"num":3,"den":2},
+            "duration":{"num":40,"den":48000}}),
+        );
+        let actual = output(&recipe, &source, &decoded);
+        for n in 0..40i128 {
+            let (num, den) = (n * 441 * 3, 480 * 2);
+            let a = 2 + num / den;
+            let r = num % den;
+            for c in 0..2 {
+                let x = decoded[(a * 2 + c) as usize] as i128;
+                let y = decoded[(a * 2 + 2 + c) as usize] as i128;
+                let sum = x * (den - r) + y * r;
+                let rounded = (2 * sum.abs() + den) / (2 * den) * sum.signum();
+                assert_eq!(
+                    actual[(n * 2 + c) as usize] as i128,
+                    rounded,
+                    "sample {n} channel {c}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn audio_only_recipes_are_checked() {
+        let source = wav(24_000, 1, 24_000);
+        let code = |changes: Value| {
+            let recipe = audio_only(changes);
+            recipe
+                .picture()
+                .and_then(|_| mapping(&recipe, &source).map(|_| ()))
+                .unwrap_err()
+                .code
+        };
+        assert_eq!(code(json!({"width":64})), "INVALID_CONFORM");
+        assert_eq!(
+            code(json!({"frame_rate":{"num":25,"den":1}})),
+            "INVALID_CONFORM"
+        );
+        assert_eq!(code(json!({"audio":"mute"})), "INVALID_CONFORM");
+        assert_eq!(code(json!({"decode":{"backend":"cpu"}})), "INVALID_CONFORM");
+        assert_eq!(
+            code(json!({"duration":{"num":1,"den":96000}})),
+            "UNALIGNED_TIME"
+        );
+        assert_eq!(
+            code(json!({"duration":{"num":3601,"den":1}})),
+            "INVALID_CONFORM"
+        );
+        assert_eq!(code(json!({"duration":{"num":2,"den":1}})), "INVALID_RANGE");
+        // Whole 48 kHz samples need not be whole frames: one sample is a valid output.
+        let recipe = audio_only(json!({"duration":{"num":1,"den":48000}}));
+        assert!(mapping(&recipe, &source).is_ok());
+        // A video source needs width and height.
+        let mut video = wav(48_000, 2, 48_000);
+        video.pts = vec![Time::ZERO];
+        video.video_end = Time::new(1, 1).unwrap();
+        let recipe = audio_only(json!({}));
+        assert_eq!(
+            mapping(&recipe, &video).map(|_| ()).unwrap_err().code,
+            "INVALID_CONFORM"
+        );
+    }
 }

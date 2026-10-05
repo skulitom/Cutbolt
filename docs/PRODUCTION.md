@@ -59,7 +59,7 @@ Costs of this choice, recorded as open gaps:
    - `speech_runtime` is the engine's [transcription runtime](TRANSCRIPTS.md); alignment and the speech check use it.
    - `tts.model` is the pinned CustomVoice snapshot from [YOUTUBE_PIPELINE.md](YOUTUBE_PIPELINE.md#preset-speaker-model-customvoice). A copy on the WSL distribution's own disk loads in about 12-17 s instead of 34-44 s from `/mnt/c`.
    - `lanes` is how many engine job queues run at once (scene renders, voice preparation).
-   - `cache` is an optional kit cache: the prepared music bed is kept once per music file, frame size and engine build, so later productions in the same style copy it instead of converting it again.
+   - `cache` is an optional kit cache: a music bed that had to be resampled is kept once per music file and engine build, so later productions in the same style copy it instead of converting it again. A 48 kHz stereo bed is used as it is and never cached.
 2. **A manifest.** For example, [example.production.json](pipeline/example.production.json) is the six-scene pilot with every beat type. Inputs (music, fonts, supplied takes) are absolute local paths. The coordinator copies each one, by content, into the production's `sources/`.
 3. **Check, then build:**
 
@@ -130,7 +130,7 @@ The template's colours have names: Pip (`outline`, `body`, `body_shade`, `body_l
 flowchart LR
     I[inputs] --> A[art: PixelForge, every recipe at once]
     I --> T[tts-batch: one Qwen model load]
-    T --> M[music prepare, or the kit cache]
+    I --> M[music: audio-only asset, or the kit cache]
     T --> V[voice prepare: one job per take]
     T --> TM[timing]
     V --> AU[audio timeline]
@@ -232,7 +232,7 @@ What the coordinator does about the 75 minutes and the compute:
   - The talker's cost follows the total audio, not the longest line. Splitting into sentences (`voice.split`) changes delivery, not speed.
   - The worker decodes each line's codes on its own, because decoding a padded batch hits a masking bug in the installed torch 2.3.
 - **Alignment.** Known scripts are aligned in one job instead of recognized, on the prepared voice assets, so the transcripts bind to what the timeline plays and the mix is measured while alignment, captions and scenes run.
-- **Running at once.** Art renders while the narration is generated. Music is prepared once the takes exist, because converting it slows the narration's Python loop, or it is copied from the kit cache. Voice assets are prepared one job per take on separate lanes, scenes render one per lane, and the mix is measured while alignment, captions and scenes run.
+- **Running at once.** Art renders while the narration is generated. Music and voice become [audio-only assets](USAGE.md#voice-overs-and-music): 48 kHz stereo WAVs with no picture, used as they are or resampled in a fraction of a second, one job per take on separate lanes. Music starts at once. Scenes render one per lane, and the mix is measured while alignment, captions and scenes run.
 - **The speech check.** It listens to an audio-only render of the same revision while the picture exports. The final review then checks only picture, sound and timing, without the 360p preview copy unless asked.
 
 Measured times are in [pipeline/RESULTS.md](pipeline/RESULTS.md#production-coordinator-5-october-2026).
