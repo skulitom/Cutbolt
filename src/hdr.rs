@@ -512,22 +512,33 @@ pub fn inspect(recipe: &Recipe, root: &Path) -> Result<Value> {
     let (source, selected, _) = prepare(recipe, root)?;
     Ok(report(recipe, &source, &selected))
 }
-fn decoded_hash(path: &Path, pixel: Option<&str>) -> Result<String> {
+/// SHA-256 of `bytes` decoded raw video (`pixel` format) or PCM16 audio, hashed in Rust
+/// (crate::digest) rather than by FFmpeg's much slower hash muxer.
+fn decoded_hash(path: &Path, pixel: Option<&str>, bytes: u64) -> Result<String> {
     let mut args = input_args(path);
     if let Some(fmt) = pixel {
         args.extend(
-            ["-map", "0:v:0", "-an", "-pix_fmt", fmt, "-c:v", "rawvideo"].map(str::to_owned),
+            [
+                "-map", "0:v:0", "-an", "-pix_fmt", fmt, "-c:v", "rawvideo", "-f", "rawvideo", "-",
+            ]
+            .map(str::to_owned),
         );
     } else {
-        args.extend(["-map", "0:a:0", "-vn", "-c:a", "pcm_s16le"].map(str::to_owned));
+        args.extend(
+            [
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-c:a",
+                "pcm_s16le",
+                "-f",
+                "s16le",
+                "-",
+            ]
+            .map(str::to_owned),
+        );
     }
-    args.extend(["-f", "hash", "-hash", "sha256", "-"].map(str::to_owned));
-    let bytes = media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(180))?;
-    String::from_utf8_lossy(&bytes)
-        .trim()
-        .strip_prefix("SHA256=")
-        .map(str::to_owned)
-        .ok_or_else(|| error("RENDER_VALIDATION_FAILED", "Decoded HDR hash missing"))
+    crate::digest::raw_sha256(&args, bytes, Duration::from_secs(180))
 }
 pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> Result<Value> {
     let output = render::destination_extension(output, output_root, "mkv")?;
@@ -730,8 +741,10 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         || checked.height != recipe.height
         || checked.frames != selected.len() as u64
         || checked.pix_fmt != encoded
-        || decoded_hash(&temp, Some(pixel))? != media::file_hash(&raw_video)?
-        || decoded_hash(&temp, None)? != media::file_hash(&raw_audio)?
+        || decoded_hash(&temp, Some(pixel), fs::metadata(&raw_video)?.len())?
+            != media::file_hash(&raw_video)?
+        || decoded_hash(&temp, None, fs::metadata(&raw_audio)?.len())?
+            != media::file_hash(&raw_audio)?
     {
         return Err(error(
             "RENDER_VALIDATION_FAILED",

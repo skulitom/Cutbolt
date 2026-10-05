@@ -454,7 +454,12 @@ pub fn run(recipe: &Recipe, input_root: &Path, output_root: &Path, output: &Path
             "Sequence audio duration differs",
         ));
     }
-    let digest = decoded_hash(&temp, "0:v:0", if transparent { "rgba" } else { "rgb24" })?;
+    let digest = decoded_hash(
+        &temp,
+        "0:v:0",
+        if transparent { "rgba" } else { "rgb24" },
+        fs::metadata(scratch.0.join("video.raw"))?.len(),
+    )?;
     if digest != format!("{:x}", expected.finalize()) {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
@@ -462,7 +467,8 @@ pub fn run(recipe: &Recipe, input_root: &Path, output_root: &Path, output: &Path
         ));
     }
     let expected_audio = media::file_hash(&scratch.0.join("audio.pcm"))?;
-    if decoded_hash(&temp, "0:a:0", "s16le")? != expected_audio {
+    let audio_bytes = fs::metadata(scratch.0.join("audio.pcm"))?.len();
+    if decoded_hash(&temp, "0:a:0", "s16le", audio_bytes)? != expected_audio {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
             "Silent soundtrack count or samples changed",
@@ -484,7 +490,9 @@ pub fn run(recipe: &Recipe, input_root: &Path, output_root: &Path, output: &Path
     media::publish(&temp, &output)?;
     Ok(p.report)
 }
-fn decoded_hash(path: &Path, stream: &str, format: &str) -> Result<String> {
+/// SHA-256 of `bytes` decoded raw bytes of one stream, hashed in Rust (crate::digest) rather than
+/// by FFmpeg's much slower hash muxer.
+fn decoded_hash(path: &Path, stream: &str, format: &str, bytes: u64) -> Result<String> {
     let mut args: Vec<String> = [
         "-v",
         "error",
@@ -514,19 +522,19 @@ fn decoded_hash(path: &Path, stream: &str, format: &str) -> Result<String> {
     } else {
         args.extend(["-vn", "-c:a", "pcm_s16le"].map(str::to_owned));
     }
-    args.extend(["-f", "hash", "-hash", "sha256", "-"].map(str::to_owned));
-    let output = String::from_utf8(media::capture(
-        &media::tool("ffmpeg"),
-        &args,
-        Duration::from_secs(600),
-    )?)
-    .map_err(|_| invalid("Invalid digest output"))?;
-    output
-        .trim()
-        .strip_prefix("SHA256=")
-        .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .map(str::to_owned)
-        .ok_or_else(|| invalid("Missing decoded digest"))
+    args.extend(
+        [
+            "-f",
+            if stream == "0:v:0" {
+                "rawvideo"
+            } else {
+                "s16le"
+            },
+            "-",
+        ]
+        .map(str::to_owned),
+    );
+    crate::digest::raw_sha256(&args, bytes, Duration::from_secs(600))
 }
 
 pub fn capabilities() -> Value {
