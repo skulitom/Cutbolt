@@ -205,6 +205,10 @@ Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool exec
 - A file that is already a timeline source and fits the project's frame rate and size, or any ready file when no project is given, comes back unchanged as `{"converted": false, "asset": ...}`.
 - Anything else is converted with the [`media.inspect` readiness recipe](#local-media-and-rendering) through [`media.conform`](CONFORM.md). With a project, it uses the project's frame rate and size. Without one, it keeps the source's own size and rate when that is a timeline rate, and uses 25 fps otherwise. The output defaults to `<name>-prepared.mkv` in `output_root`.
 - The result holds the `asset` for `media.add`, the `recipe` it ran, `frames` and `frame_rate`.
+- With `paths` instead of `path`, one job prepares up to 200 files, absolute or relative to `input_root`.
+  - **IDs and outputs.** Asset IDs come from the file names, made unique within the batch and against the project's assets (`clip`, `clip-2`, and so on). A conversion is written to `<id>-prepared.mkv`.
+  - **Failures.** A file that fails is listed with its error code and message, and the others continue.
+  - **Result.** It lists each file's outcome and returns the prepared assets as `media.add` `operations` for one `session.apply`.
 
 A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. Stills, audio-only files, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
 

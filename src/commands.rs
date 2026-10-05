@@ -189,8 +189,12 @@ pub enum Request {
     },
     #[serde(rename = "media.prepare")]
     MediaPrepare {
-        /// Video file to prepare; any format FFmpeg decodes, such as a phone or camera MP4.
-        path: PathBuf,
+        /// Video file to prepare; any format FFmpeg decodes, such as a phone or camera MP4. Give this or `paths`.
+        #[serde(default)]
+        path: Option<PathBuf>,
+        /// Several video files to prepare in one job, 1-200, absolute or relative to input_root. Each is prepared as `path` would be; asset IDs come from the file names, made unique, and the result includes `media.add` operations for the prepared assets.
+        #[serde(default)]
+        paths: Option<Vec<PathBuf>>,
         /// Existing absolute directory that must contain `path`.
         input_root: PathBuf,
         /// Existing absolute directory for the converted asset.
@@ -1302,17 +1306,27 @@ pub fn handle(request: Request) -> Result<Value> {
         }),
         Request::MediaPrepare {
             path,
+            paths,
             input_root,
             output_root,
             output,
             project,
-        } => crate::readiness::prepare(
-            &path,
-            &input_root,
-            &output_root,
-            output.as_deref(),
-            project.as_ref(),
-        ),
+        } => match (path, paths, output) {
+            (Some(path), None, output) => crate::readiness::prepare(
+                &path,
+                &input_root,
+                &output_root,
+                output.as_deref(),
+                project.as_ref(),
+            ),
+            (None, Some(paths), None) => {
+                crate::readiness::prepare_many(&paths, &input_root, &output_root, project.as_ref())
+            }
+            _ => Err(crate::error(
+                "INVALID_ARGUMENT",
+                "Give path (with an optional output) or paths, not both",
+            )),
+        },
         Request::MediaSheet {
             path,
             input_root,

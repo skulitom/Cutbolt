@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: batch preparation
+
+Bringing twenty camera files into a project took twenty `media.prepare` jobs, twenty waits and hand-built `media.add` operations. `media.prepare` now also takes `paths` and prepares them all in one job. Asset IDs come from the file names, made unique within the batch and against the project's existing assets. One file's failure is reported without stopping the others, and the result includes ready `media.add` operations.
+
+The conform fixture batch-prepares four files: a duplicate name in a subfolder, an absolute path, and an unsupported audio-only file. Each converted output must be frame-identical to preparing that file alone. It also checks that the operations apply, that IDs avoid the project's assets on a second batch, and the argument rejections. No scoring changed.
+
 ## 5 October 2026: filler-word removal
 
 Cutting the ums and uhs out of a talking-head edit took one hand-built ripple deletion per word. The read-only `transcript.fillers` now finds listed words (common English hesitations by default) wherever the timeline speaks them, using the shared transcript word projection. It proposes ripple deletions that merge consecutive fillers, keep optional padding out of the neighbouring words, and snap to the cut grid without entering them. It reuses the cut application from `audio.tighten`, now a shared helper, so each cut is checked on a working copy.

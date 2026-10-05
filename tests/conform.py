@@ -170,6 +170,30 @@ def run(root):
     prepare("audio-48000-2.wav",error="UNSUPPORTED_MEDIA")
     prepare("hdr.mkv",error="UNSUPPORTED_MEDIA")
     passed.append("conform.one_step_preparation")
+    # Batch preparation: one job for several files, IDs unique within the batch and the project,
+    # one file's failure reported without stopping the others, and media.add operations returned.
+    inputs=root/"batch-sources";(inputs/"sub").mkdir(parents=True)
+    for name in ("fractional.mp4","rgb25.mkv","audio-48000-2.wav"):(inputs/name).write_bytes((sources/name).read_bytes())
+    (inputs/"sub"/"fractional.mp4").write_bytes((sources/"fractional.mp4").read_bytes())
+    batch=output/"batch";batch.mkdir()
+    many=request({"command":"media.prepare","paths":["fractional.mp4",str(inputs/"rgb25.mkv"),"audio-48000-2.wav","sub/fractional.mp4"],
+                  "input_root":str(inputs),"output_root":str(batch)})
+    assert [item.get("asset_id") for item in many["prepared"]]==["fractional","rgb25",None,"fractional-2"],many
+    assert many["prepared"][2]["error"]["code"]=="UNSUPPORTED_MEDIA" and many["failed"]==1 and many["converted"]+many["ready"]==3
+    assert [o["asset"]["id"] for o in many["operations"]]==["fractional","rgb25","fractional-2"]
+    single=output/"single";single.mkdir()
+    for item in (many["prepared"][0],many["prepared"][1],many["prepared"][3]):
+        alone=request({"command":"media.prepare","path":item["path"],"input_root":str(inputs),"output_root":str(single),"output":str(single/(item["asset_id"]+"-prepared.mkv"))})
+        assert alone["converted"]==item["result"]["converted"]
+        if alone["converted"]:
+            assert frame_digests(single/(item["asset_id"]+"-prepared.mkv"))==frame_digests(batch/(item["asset_id"]+"-prepared.mkv")),item["asset_id"]
+    added=request({"command":"timeline.apply","project":p25,"expected_revision":0,"operations":many["operations"]})
+    assert sorted(a["id"] for a in added["assets"])==["fractional","fractional-2","rgb25"]
+    again=request({"command":"media.prepare","paths":["rgb25.mkv"],"input_root":str(inputs),"output_root":str(batch),"project":added})
+    assert again["prepared"][0]["asset_id"]=="rgb25-2" and again["operations"][0]["asset"]["id"]=="rgb25-2"
+    for fields in ({"path":str(inputs/"rgb25.mkv"),"paths":["rgb25.mkv"]},{"paths":["rgb25.mkv"],"output":str(batch/"x.mkv")},{"paths":[]},{}):
+        request({"command":"media.prepare","input_root":str(inputs),"output_root":str(batch),**fields},"INVALID_ARGUMENT")
+    passed.append("conform.batch_preparation")
     # Use conformed media as ordinary identity-bound assets in saved timeline edits.
     project=request({"command":"project.create","id":"conformed","width":W,"height":H,"frame_rate":time(25)})
     request({"command":"session.create","store_root":str(store),"project":project,"request_id":"create"})

@@ -199,6 +199,67 @@ pub fn prepare(
     )
 }
 
+/// Prepare several files in one job, each as [`prepare`] does. Asset IDs come from the file names,
+/// made unique within the batch and against the project's assets (`<stem>`, `<stem>-2`, …), and a
+/// conversion is written to `<id>-prepared.mkv`. One file's failure is reported without stopping
+/// the others; the prepared assets come back as `media.add` operations.
+pub fn prepare_many(
+    paths: &[std::path::PathBuf],
+    input_root: &Path,
+    output_root: &Path,
+    project: Option<&crate::model::Project>,
+) -> crate::Result<Value> {
+    use crate::error;
+    if paths.is_empty() || paths.len() > 200 {
+        return Err(error("INVALID_ARGUMENT", "paths must list 1-200 files"));
+    }
+    let mut used: std::collections::BTreeSet<String> = project
+        .map(|p| p.assets.iter().map(|a| a.id.clone()).collect())
+        .unwrap_or_default();
+    let mut results = Vec::new();
+    let mut operations = Vec::new();
+    let (mut converted, mut ready) = (0, 0);
+    for path in paths {
+        let path = if path.is_relative() {
+            input_root.join(path)
+        } else {
+            path.clone()
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let base = asset_id(&name);
+        let mut id = base.clone();
+        let mut n = 2;
+        while !used.insert(id.clone()) {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        let output = output_root.join(format!("{id}-prepared.mkv"));
+        match prepare(&path, input_root, output_root, Some(&output), project) {
+            Ok(mut result) => {
+                result["asset"]["id"] = json!(id);
+                if result["converted"] == true {
+                    converted += 1;
+                } else {
+                    ready += 1;
+                }
+                operations.push(json!({"op":"media.add","asset":result["asset"]}));
+                results.push(json!({"path":path,"asset_id":id,"result":result}));
+            }
+            Err(e) => {
+                results.push(json!({"path":path,"error":{"code":e.code,"message":e.message}}));
+            }
+        }
+    }
+    let failed = results.len() - converted - ready;
+    Ok(
+        json!({"prepared":results,"converted":converted,"ready":ready,"failed":failed,"operations":operations,
+        "next":"apply operations with session.apply to add the prepared assets"}),
+    )
+}
+
 fn dimension(value: &Value) -> u32 {
     value
         .as_u64()
