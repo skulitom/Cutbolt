@@ -68,15 +68,17 @@ Costs of this choice, recorded as open gaps:
    python tools/production.py build my-film.production.json --root C:\DEV\CutboltData\my-film --config C:\DEV\CutboltData\production-config.json
    ```
 
-   `check` validates the manifest and lists its scenes, art recipes and labels without running anything. `build` prints one JSON object, `{"ok": true, "result": ...}` or `{"ok": false, "error": {code, message, stages}}`, with progress lines on stderr. The result holds:
+   `check` validates the manifest and lists its scenes, art recipes and labels without running anything. It also estimates the film's length (see [warnings](#warnings)). `build` prints one JSON object, `{"ok": true, "result": ...}` or `{"ok": false, "error": {code, message, stages, warnings}}`, with progress lines on stderr. The result holds:
    - the export path, duration and scene boundaries;
    - the review summary and the speech check;
+   - `mix`: the limiter ceiling and the AAC true peak it was chosen for;
+   - `warnings`: what the checks found, also printed on stderr as `WARNING` lines;
    - the saved project revision;
    - which stages were built or reused, and how long each took.
 
-   Look at `reviews/review-*/sheet.png`.
+   `"ok": true` means every stage ran, not that the delivery is right. Read `warnings`, then look at `reviews/review-*/sheet.png`.
 4. **Inspect or revise.**
-   - `status --root DIR` lists every stage's state, the last build and the review gates.
+   - `status --root DIR` lists every stage's state, the last build with its warnings, and the review gates.
    - `show STAGE --root DIR` prints one receipt, for example `show timing` or `show scene:s2`.
    - Edit the manifest and run `build` again: only stages whose inputs changed run.
 
@@ -94,11 +96,11 @@ Unknown fields fail with the field named; nothing is guessed. Times are exact se
 | `inputs` | Map of name to absolute local file. Network paths, relative paths and alternate data streams are refused. |
 | `fonts` | `{"bold": <input>, "regular": <input>}`, TrueType or OpenType, for captions and the end card |
 | `voice` | `speaker` (a CustomVoice preset such as `ryan`), `language` (`English`), `seed`, optional `instruct`, and `split`: `none` (default, each line in one breath) or `sentence` (each sentence on its own, joined by `pause`, default 0.3 s) |
-| `music` | `null`, or `input` (a PCM16 WAV), `bpm`, `bed_db_under_voice` (default 6), `duck_milli` (default 300), `fade_out` (default 1.92 s) |
+| `music` | `null`, or `input` (a PCM16 WAV), `bpm`, `bed_db_under_voice` (default 6), `duck_milli` (default 300), `fade_out` (default 1.92 s), `loop`: `none` (default; the bed plays once) or `bars` (it repeats on whole bars, which needs `bpm`; see [music](#music-beds)) |
 | `palette` | Optional overrides of the template's [named colours](#palette-slots), as `#rrggbb` |
 | `patterns` | Custom motions: name to `[[pose, frames at 25 fps], ...]` |
 | `timing` | `lead` before each line (default 0.24 s), `tail` after it (0.4 s), `snap` (`frame`, `beat` or `bar`; default `beat` with a tempo, else `frame`), `title_bars` (2), `end_min_bars` (4), `min_scene` (3 s) |
-| `delivery` | `captions` (`burn_in` true; `sidecars` `["srt", "vtt"]`; `line_chars` 40; `lines` 2); `loudness_lkfs` (-14); `peak_dbfs` (-1); `review` (`speech` true, `frames` 16, `preview` false) |
+| `delivery` | `captions` (`burn_in` true; `sidecars` `["srt", "vtt"]`; `line_chars` 40; `lines` 2); `loudness_lkfs` (-14); `peak_dbfs` (-1), the delivered file's highest true peak; `review` (`speech` true, `frames` 16, `preview` false, `min_speech_match` 0.95: the share of expected words the speech check must hear) |
 | `review_policy` | `version`, `gates` (from script, storyboard, narration, rough_cut, final_export) and `human_required` (default final_export) |
 | `scenes` | 1-24 scenes: `id`, optional `script` (1-600 characters; omit for a silent scene), `beat` (optional when `overrides.scenes` gives the scene a recipe), optional fixed `duration` (seconds or `{"bars": n}`) |
 | `overrides` | `narration.<scene>.input`: a supplied PCM16 WAV used instead of synthesis. `scenes.<scene>.input`: a [hand-written scene recipe](#hand-written-scenes) (JSON) used instead of the template's, whose layers can start on words of the script and name files by input; captions are still added. |
@@ -136,7 +138,7 @@ flowchart LR
     V --> AU[audio timeline]
     M --> AU
     TM --> AU
-    AU --> X[mix: meters, duck, normalize]
+    AU --> X[mix: meters, duck, normalize, AAC trial]
     V --> L[align-batch: one engine job on the voice assets]
     L --> C[captions]
     AU --> C
@@ -239,6 +241,8 @@ For example, a label that fades in on "zooms" and leaves two frames before "gold
 
 `status` derives each gate from the latest decision: `approved` or `changes_requested` when its subject still matches, `stale` when it does not, otherwise `pending`. Decisions are appended, never rewritten. An agent's decision on a gate the policy marks `human_required` is kept as advice and does not approve it. Gates never block a build; the delivery is a candidate until a person approves `final_export`.
 
+`final_export` also lists the [warnings](#warnings) of the build that delivered the current export. A decision on it records the warning codes it was made over, and `review` says when an approval is given over open warnings. A warning that appears later on the same export, for example after the speech check is run again, makes that approval `stale`, with `stale_because` naming it.
+
 ### The production folder
 
 | Folder | Contents |
@@ -251,9 +255,50 @@ For example, a label that fades in on "zooms" and leaves two frames before "gold
 | `media/` | Prepared voice and music assets |
 | `scenes/`, `renders/` | Scene recipes (base and captioned) and compiled scene assets |
 | `exports/` | The MP4 and the SRT/WebVTT sidecars |
-| `reviews/` | The review (sheet, `review.json`) and the speech check (the audio-only mix, transcripts, `review.json`) |
+| `reviews/` | The review (sheet, `review.json`), the speech check (the audio-only mix, transcripts, `review.json`) and the mix's AAC trials (`aac-*.m4a` with their `review.json`) |
 | `state/` | Stage receipts, revisions, events, engine and companion call logs, review decisions, the engine's job queues (`state/jobs/<lane>`) |
 | `.cutbolt/` | The engine's workspace store and inspection cache |
+
+## Warnings
+
+A build that runs every stage succeeds, but its checks can still find a delivery that is not what the manifest asked for. Each finding is a warning, `{code, stage, message, detail}`, and appears in four places:
+- a `WARNING CODE (stage): message` line on stderr when it is found, and a count when the build finishes;
+- `warnings` in the build's result, or in its error when the build fails later;
+- the build record, shown by `status` under `last_build.warnings`;
+- the `final_export` gate (see [review gates](#review-gates)).
+
+Warnings are derived on every build from the stage results and the review folders, so a reused stage still reports what it found, and a changed threshold applies without running anything again.
+
+| Code | Stage | When |
+| --- | --- | --- |
+| `SPEECH_CHECK_FAILED` | speech-review | Recognition of the delivered narration failed, so the words were not compared. The message carries the engine's error, for example `UNSUPPORTED_ALIGNMENT_TEXT`. |
+| `SPEECH_CHECK_SKIPPED` | speech-review | The film has narration, but `delivery.review.speech` is false. |
+| `SPEECH_CHECK_INCOMPLETE` | speech-review | The check ran but compared no words. |
+| `SPEECH_MISMATCH` | speech-review | It heard fewer than `min_speech_match` of the expected words. The first five differences are listed. |
+| `UNCOVERED_SPEECH` | speech-review | It heard sounds no word covers: a garbled or extra word in a take, or a word recognition missed. |
+| `PEAK_OVER_TARGET` | review (or mix) | The delivered file's true peak is above `peak_dbfs`. The message lists the mix's AAC trials. Without a review (`--until`), the mix reports it when no trial got under the target. |
+| `LOUDNESS_OFF_TARGET`, `LOUDNESS_UNMEASURED` | review | The delivered loudness is more than 1 LU from `loudness_lkfs`, or could not be measured. |
+| `AUDIO_CLIPPING`, `BLACK_PICTURE`, `TIMING_MISMATCH`, `CUT_WORDS` | review | The review of the delivered file found clipped runs, black runs, video or audio of a different length than the project, or narrated words cut by clip edges. |
+| `AUDIO_SILENCE` | review | Silent runs although the film has a music bed: usually a bed that ended early. Without music, silence under a silent title is expected and not reported. |
+| `MUSIC_ENDS_EARLY` | audio-timeline | The prepared bed is shorter than the timed film and `music.loop` is `none`. |
+| `MUSIC_MAY_END_EARLY`, `NARRATION_MAY_OVERFLOW`, `SCENE_TOO_LONG`, `TOO_LONG` | check | From the length estimate below. |
+
+**The length estimate.** `check` reports `estimate`: each narrated line at the speaker's words per second, or a supplied take at its own length, through the same timing plan as a build. Qwen's `ryan` speaks about 2.6 words/s; other speakers use that figure, and `rate_measured` says so. If the music bed is shorter than the estimated film, or within 10% of it, `check` warns `MUSIC_MAY_END_EARLY`. A fixed-duration scene whose estimated narration may not fit warns `NARRATION_MAY_OVERFLOW`.
+
+### The delivered peak
+
+`peak_dbfs` bounds the delivered file's true peak, not just the mix's. AAC encoding moves peaks by an amount that depends on the signal. On the part-two progress demo, a mix limited to -1.0 dBFS delivered -0.6 dBFS. In measurements on synthetic beds here, a lower ceiling sometimes delivered a higher peak. So no fixed headroom is safe, and the mix measures the encode instead:
+1. It normalizes to `loudness_lkfs` with the limiter ceiling 0.5 dB under `peak_dbfs`.
+2. It encodes that mix to an audio-only AAC M4A with the export's own settings, and meters the decoded file the way `export.review` meters the delivery. The M4A decodes to exactly the samples of the MP4's audio.
+3. If the true peak is over `peak_dbfs`, it lowers the ceiling by the excess plus 0.05 dB and tries again, up to three trials. It keeps the first trial under the target, or, if none is, the one with the lowest peak, and the review then warns `PEAK_OVER_TARGET`.
+
+The mix receipt lists every trial: its ceiling, loudness, peaks, M4A and review folder. The final review checks the delivered file's true peak against `peak_dbfs` either way. Each trial costs one normalize, an audio-only encode and a decode, and it runs while alignment, captions and scenes do.
+
+### Music beds
+
+Without a loop, the bed is placed once from the start and faded out at its end, which is the film's end when the bed is longer. A shorter bed ends early: `check` warns from its estimate, and the build warns `MUSIC_ENDS_EARLY` once timing is known.
+
+With `"loop": "bars"`, the bed repeats from its start every whole number of 4/4 bars at `bpm` that fits it. For example, an 81 s bed at 125 BPM repeats every 42 bars (80.64 s). The repeats are clips `m-music`, `m-music-2` and so on, joined on the bar without a crossfade. The last one is cut at the film's end and carries the fade-out, and ducking shapes each one. The loop assumes the bed starts on a downbeat; anything after its last whole bar, such as a reverb tail, is not played. A bed shorter than one bar fails with `MUSIC_TOO_SHORT`.
 
 ## Speed
 
@@ -295,7 +340,8 @@ Not implemented:
 - **One template.** A different look needs a new template module and beat catalog.
 - **Cue words** must appear in the script and are matched by letters and digits. In a hand-written recipe they can time a layer's start, its end and the keyframes inside it, in whole frames; not frame holds, curve retiming or the scene's own audio.
 - **Narration.** The CustomVoice preset speakers only; no reference-voice cloning. English alignment only.
-- **Music** is placed once from the start and faded out at its end, which is the film's end when the music is longer. It is never looped, so a shorter bed simply ends early.
+- **Music** plays once, or loops on whole bars without a crossfade. A bed that does not start on a downbeat, or is not in 4/4 at its `bpm`, loops off the beat. See [music beds](#music-beds).
+- **Narration length** is estimated at `check` time at about 2.6 words/s, the rate measured for `ryan` only.
 - **Composition limits.** Scenes last at most 120 s, so long scripts must be split across scenes; films at most 600 s; 24 scenes.
 - **Gates** are recorded but do not block a build.
 - **MCP-only hosts** cannot start a production without a shell (see the decision above).

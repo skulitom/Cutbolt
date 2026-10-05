@@ -140,15 +140,20 @@ def validate(raw):
 
     music = raw.get("music")
     if music is not None:
-        fields(music, {"input", "bpm", "bed_db_under_voice", "duck_milli", "fade_out"}, "music", ["input"])
+        fields(music, {"input", "bpm", "bed_db_under_voice", "duck_milli", "fade_out", "loop"}, "music", ["input"])
         bpm = music.get("bpm")
         out["music"] = {"input": input_ref(music["input"], "music.input", (".wav",)),
                         "bpm": None if bpm is None else exact_time(bpm, "music.bpm", F(40), F(240)),
                         "bed_db_under_voice": exact_time(music.get("bed_db_under_voice", 6), "music.bed_db_under_voice", F(0), F(30)),
                         "duck_milli": int(music.get("duck_milli", 300)),
-                        "fade_out": exact_time(music.get("fade_out", "48/25"), "music.fade_out", F(0), F(10))}
+                        "fade_out": exact_time(music.get("fade_out", "48/25"), "music.fade_out", F(0), F(10)),
+                        "loop": music.get("loop", "none")}
         if not 0 <= out["music"]["duck_milli"] <= 1000:
             raise ManifestError("music.duck_milli: 0-1000")
+        if out["music"]["loop"] not in ("none", "bars"):
+            raise ManifestError('music.loop: "none" (play the bed once) or "bars" (repeat it on whole bars of music.bpm)')
+        if out["music"]["loop"] == "bars" and bpm is None:
+            raise ManifestError('music.loop: "bars" needs music.bpm')
     else:
         out["music"] = None
 
@@ -180,14 +185,17 @@ def validate(raw):
     if not isinstance(sidecars, list) or set(sidecars) - {"srt", "vtt"}:
         raise ManifestError("delivery.captions.sidecars: a list of srt and/or vtt")
     review = delivery.get("review") or {}
-    fields(review, {"speech", "frames", "preview"}, "delivery.review")
+    fields(review, {"speech", "frames", "preview", "min_speech_match"}, "delivery.review")
     out["delivery"] = {
         "captions": {"burn_in": bool(captions.get("burn_in", True)), "sidecars": sorted(set(sidecars)),
                      "line_chars": int(captions.get("line_chars", 40)), "lines": int(captions.get("lines", 2))},
         "loudness_lkfs": float(delivery.get("loudness_lkfs", -14)), "peak_dbfs": float(delivery.get("peak_dbfs", -1)),
-        "review": {"speech": bool(review.get("speech", True)), "frames": int(review.get("frames", 16)), "preview": bool(review.get("preview", False))}}
+        "review": {"speech": bool(review.get("speech", True)), "frames": int(review.get("frames", 16)), "preview": bool(review.get("preview", False)),
+                   "min_speech_match": float(review.get("min_speech_match", 0.95))}}
     if not -40 <= out["delivery"]["loudness_lkfs"] <= -5 or not -20 <= out["delivery"]["peak_dbfs"] <= 0:
         raise ManifestError("delivery: loudness_lkfs -40..-5 and peak_dbfs -20..0")
+    if not 0 <= out["delivery"]["review"]["min_speech_match"] <= 1:
+        raise ManifestError("delivery.review.min_speech_match: 0..1, the share of expected words the speech check must hear")
 
     policy = raw.get("review_policy") or {}
     fields(policy, {"version", "gates", "human_required"}, "review_policy")

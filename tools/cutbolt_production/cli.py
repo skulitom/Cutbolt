@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import manifest as manifest_module
 from .engine import ToolError
-from .pipeline import Production
+from .pipeline import Production, estimate
 from .state import State, StateError, now
 
 CONFIG_FIELDS = {"engine", "ffmpeg", "ffprobe", "pixelforge", "tts", "speech_runtime", "lanes", "cache"}
@@ -26,6 +26,23 @@ GATE_STAGES = {
 def emit(value, code=0):
     print(json.dumps(value, indent=1, ensure_ascii=False))
     sys.exit(code)
+
+
+def warn(warnings):
+    for w in warnings:
+        print(f"WARNING {w['code']} ({w['stage']}): {w['message']}", file=sys.stderr, flush=True)
+
+
+def delivery_warnings(state, receipts):
+    """The warnings of the build that delivered the current export, or None when no recorded build did."""
+    sha = (receipts.get("export", {}).get("outputs") or [{}])[0].get("sha256")
+    if not sha:
+        return None
+    for number in reversed(state.revisions()):
+        record = state.revision(number)
+        if (record.get("delivery") or {}).get("export_sha256") == sha:
+            return record.get("warnings", [])
+    return None
 
 
 def fail(code, message, **extra):
@@ -75,9 +92,22 @@ def gates(root, receipts=None):
             status = "stale"
         else:
             status = latest["decision"]
-        out[gate] = {"status": status, "human_required": gate in policy["human_required"],
-                     "last": {k: latest[k] for k in ("id", "reviewer", "decision", "time")} if latest else None,
-                     "advisory": [{k: e[k] for k in ("reviewer", "decision", "time", "reason")} for e in events if e.get("advisory")][-3:]}
+        entry = {"status": status, "human_required": gate in policy["human_required"],
+                 "last": {k: latest[k] for k in ("id", "reviewer", "decision", "time")} if latest else None,
+                 "advisory": [{k: e[k] for k in ("reviewer", "decision", "time", "reason")} for e in events if e.get("advisory")][-3:]}
+        if gate == "final_export":
+            # The delivery's open warnings are shown with the gate. An approval holds while every warning was on the
+            # list it was given over; one that appeared since makes it stale.
+            warnings = delivery_warnings(state, receipts)
+            entry["warnings"] = [{"code": w["code"], "stage": w["stage"], "message": w["message"]} for w in warnings or []]
+            if warnings is None and receipts.get("export"):
+                entry["warnings_unknown"] = "no recorded build delivered this export; build again to check it"
+            seen = set((latest or {}).get("warnings", []))
+            new = sorted({w["code"] for w in warnings or []} - seen)
+            if status == "approved" and new:
+                entry["status"] = "stale"
+                entry["stale_because"] = f"warning(s) {new} appeared after the approval"
+        out[gate] = entry
     return out
 
 
@@ -119,8 +149,11 @@ def main(argv=None):
             if s["id"] in m["overrides"]["scenes"]:
                 row["override"] = m["overrides"]["scenes"][s["id"]]
             scenes.append(row)
+        length, warnings = estimate(m)
+        warn(warnings)
         emit({"ok": True, "result": {"production_id": m["production_id"], "manifest_sha256": m["manifest_sha256"], "scenes": scenes,
-                                     "art_recipes": sorted(recipes), "labels": sorted(index["labels"])}})
+                                     "art_recipes": sorted(recipes), "labels": sorted(index["labels"]),
+                                     "estimate": length, "warnings": warnings}})
 
     if args.action == "build":
         try:
@@ -134,9 +167,12 @@ def main(argv=None):
         try:
             result = production.build()
         except (ToolError, StateError) as error:
-            fail(getattr(error, "code", "FAILED"), str(error), stages=production.outcomes)
+            fail(getattr(error, "code", "FAILED"), str(error), stages=production.outcomes, warnings=production.warnings)
         except KeyboardInterrupt:
-            fail("INTERRUPTED", "stopped; run build again to resume", stages=production.outcomes)
+            fail("INTERRUPTED", "stopped; run build again to resume", stages=production.outcomes, warnings=production.warnings)
+        if result["warnings"]:
+            print(f"build finished with {len(result['warnings'])} warning(s): {', '.join(w['code'] for w in result['warnings'])}",
+                  file=sys.stderr, flush=True)
         emit({"ok": True, "result": result})
 
     root = root_of(args.root)
@@ -153,7 +189,7 @@ def main(argv=None):
         emit({"ok": True, "result": {
             "root": str(root), "revisions": len(revisions),
             "last_build": {k: last[k] for k in ("revision", "parent_revision", "manifest_sha256", "started", "finished", "outcome", "elapsed_s",
-                                                "engine_calls", "stages", "error") if k in last} if last else None,
+                                                "engine_calls", "stages", "error", "warnings") if k in last} if last else None,
             "stages": {name: {"state": r["state"], "attempt": r.get("attempt"), "elapsed_s": r.get("elapsed_s"), "finished": r.get("finished"),
                               "outputs": [o["path"] for o in r.get("outputs", [])][:4]} for name, r in sorted(receipts.items())},
             "review_gates": gates(root, receipts)}})
@@ -174,10 +210,15 @@ def main(argv=None):
         record = {"id": str(uuid.uuid4()), "gate": args.gate, "reviewer_type": kind, "reviewer": args.reviewer, "decision": args.decision,
                   "subject": subject, "policy_version": policy["version"], "production_revision": last["revision"], "time": now(),
                   "reason": args.reason, "advisory": advisory}
+        notes = ["agent decisions on a human-required gate are kept as advice and do not approve it"] if advisory else []
+        if args.gate == "final_export":
+            # The decision is made over the delivery's open warnings; a warning that appears later makes an approval stale.
+            open_warnings = delivery_warnings(state, receipts) or []
+            record["warnings"] = sorted({w["code"] for w in open_warnings})
+            if open_warnings and args.decision == "approved":
+                notes.append(f"approved over {len(open_warnings)} open warning(s): {', '.join(record['warnings'])}")
         state.add_review(record)
-        emit({"ok": True, "result": {"recorded": record["id"], "advisory": advisory,
-                                     "note": "agent decisions on a human-required gate are kept as advice and do not approve it" if advisory else None,
-                                     "gates": gates(root)}})
+        emit({"ok": True, "result": {"recorded": record["id"], "advisory": advisory, "note": "; ".join(notes) or None, "gates": gates(root)}})
 
 
 if __name__ == "__main__":

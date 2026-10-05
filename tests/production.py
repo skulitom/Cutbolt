@@ -7,7 +7,10 @@ boundaries; reconcile() checked by applying its operations with the engine and c
 the TTS worker refusing a missing model before loading anything; the build's order, with stubbed stages, starting
 alignment on the voice assets while the music is still being prepared; a hand-written scene override with word cues
 and input references, checked against its script, resolved from a stand-in alignment, rendered by the coordinator's
-scene stage and re-keyed when a cue time or an input changes.
+scene stage and re-keyed when a cue time or an input changes; delivery warnings from speech checks and reviews
+(an engine-shaped recognition failure, a delivered peak over its target, a short music bed at check and build time);
+music looped on whole bars; and the mix's AAC trial encode through the engine, whose decoded audio must equal the
+delivered MP4's, with each correction of the limiter ceiling following the documented rule.
 
 With CUTBOLT_PRODUCTION_CONFIG (PixelForge, the Qwen worker and the speech runtime installed): a complete four-scene
 production, a repeated build that reuses every stage, a one-line script change that rebuilds only that line's chain
@@ -16,21 +19,24 @@ and the delivery, and a palette change that re-renders art and scenes but keeps 
 from engine import ENGINE, per_frame
 import argparse
 import copy
+import hashlib
 import io
 import json
 import os
 import subprocess
 import sys
 import threading
+import wave
 from fractions import Fraction as F
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from cutbolt_production import manifest as manifest_module, pixel_stage  # noqa: E402
-from cutbolt_production.pipeline import Production, arrangement_differences, plan_timing, reconcile  # noqa: E402
+from cutbolt_production import manifest as manifest_module, pixel_stage, quality  # noqa: E402
+from cutbolt_production.pipeline import CODEC_CHECK, Production, arrangement_differences, estimate, music_clips, plan_timing, reconcile  # noqa: E402
 from cutbolt_production.engine import Engine, ToolError  # noqa: E402
 from cutbolt_production.state import State, sha256_file  # noqa: E402
 
@@ -282,6 +288,28 @@ def check_offline(out, passed):
                                        capture_output=True, timeout=60).stdout)["result"]
     assert status["review_gates"]["narration"]["status"] == "stale", status["review_gates"]
     assert [r["decision"] for r in state.reviews()] == ["approved", "approved"]
+    # final_export shows the delivery's open warnings. An approval records the warnings it was given over, and a
+    # warning that appears later (here a peak check of the same export) makes it stale.
+    state.save({"stage": "export", "key": "e1", "state": "completed", "attempt": 1, "request": {},
+                "outputs": [{"path": "exports/film.mp4", "sha256": "e" * 64, "bytes": 1}], "result": {"project_revision": 2}})
+    failed = quality.warning("SPEECH_CHECK_FAILED", "speech-review", "the speech check failed")
+    over = quality.warning("PEAK_OVER_TARGET", "review", "the delivered file's true peak is -0.60 dBTP")
+
+    def delivered(warnings):
+        record = state.start_revision("m", manifest_module.summary(m))
+        state.finish_revision({**record, "outcome": "completed", "warnings": warnings, "delivery": {"export_sha256": "e" * 64}})
+    delivered([failed])
+    approval = review("final_export", "approved", "human:editor")
+    assert approval["note"] == "approved over 1 open warning(s): SPEECH_CHECK_FAILED", approval
+    gate = approval["gates"]["final_export"]
+    assert gate["status"] == "approved" and [w["code"] for w in gate["warnings"]] == ["SPEECH_CHECK_FAILED"], gate
+    assert state.reviews()[-1]["warnings"] == ["SPEECH_CHECK_FAILED"]
+    delivered([failed, over])
+    status = json.loads(subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "status", "--root", str(production)],
+                                       capture_output=True, timeout=60).stdout)["result"]
+    gate = status["review_gates"]["final_export"]
+    assert gate["status"] == "stale" and "PEAK_OVER_TARGET" in gate["stale_because"], gate
+    assert [w["code"] for w in status["last_build"]["warnings"]] == ["SPEECH_CHECK_FAILED", "PEAK_OVER_TARGET"], status["last_build"]
     passed.append("production.review_gates_bind_and_stale")
 
     # 7. The narration worker refuses a missing model before importing any model code (nothing is downloaded).
@@ -438,6 +466,9 @@ def check_overrides(out, inputs, font, passed):
     assert [s["id"] for s in manifest_module.templated(m)] == ["title", "one", "two", "end", "cards", "strip", "recolor"]
     _, art_index = pixel_stage.art_plan(manifest_module.templated(m), m["colors"], pixel_stage.check_patterns(m["patterns"]))
     assert "TRAVEL" not in art_index["labels"], art_index["labels"]
+    # check's length estimate plans a scene without a beat as the build's timing does.
+    length, _ = estimate(m)
+    assert "scenes" in length and length["scenes"][-1]["id"] == "effects", length
 
     cases = []
 
@@ -552,6 +583,183 @@ def check_overrides(out, inputs, font, passed):
     passed.append("production.override_build_refusals")
 
 
+def write_wav(path, samples, rate):
+    """Original synthetic PCM16 from floats in -1..1, mono (n,) or stereo (n, 2)."""
+    data = np.clip(np.round(np.asarray(samples) * 32767), -32768, 32767).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1 if data.ndim == 1 else 2)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(data.tobytes())
+
+
+def speech_like(seconds, seed, rate=24000):
+    """Voiced bursts with sharp onsets: a sawtooth-rich buzz and hiss, gated like syllables."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(seconds * rate)) / rate
+    gate = (np.sin(2 * np.pi * 3.1 * t) > -0.3) * np.minimum(1, t / 0.01)
+    buzz = 2 * ((t * (118 + 15 * np.sin(2 * np.pi * 0.6 * t))) % 1) - 1
+    signal = gate * (0.7 * buzz + 0.3 * rng.standard_normal(t.size))
+    return signal / np.max(np.abs(signal)) * 0.9
+
+
+def harsh_bed(seconds, seed, rate=48000):
+    """Square-wave chords with noise hits on every eighth at 125 BPM: hard on a lossy encoder's peaks."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(seconds * rate)) / rate
+    tone = np.sign(np.sin(2 * np.pi * 330 * t)) * 0.3 + np.sign(np.sin(2 * np.pi * 440.5 * t)) * 0.3
+    bed = np.stack([tone, np.roll(tone, 37)], 1)
+    for hit in np.arange(0, seconds, 0.24):
+        i = int(hit * rate)
+        bed[i:i + 960] += rng.standard_normal((min(960, t.size - i), 2)) * 0.6
+    return bed / np.max(np.abs(bed)) * 0.95
+
+
+def check_quality(out, passed):
+    """Warnings, the music loop, the check-time estimate and the mix's AAC trial, without the companions."""
+    # 8. Speech checks: a recognition failure as export.review writes it (the demo's numeral "80"), a check turned off,
+    #    one below the threshold, one above it, a silent film, and sounds no word covers.
+    failure = {"summary": "speech: 140 words expected; not compared because recognition failed with UNSUPPORTED_ALIGNMENT_TEXT: ...\n",
+               "speech": {"expected_words": 140, "unused_transcripts": [], "cut_words": {"count": 0, "listed": []},
+                          "recognition": {"ok": False, "error": {"code": "UNSUPPORTED_ALIGNMENT_TEXT", "message": "\"80\" has no letters to align"}}}}
+    found = quality.speech_warnings(True, True, failure, 0.95)
+    assert [w["code"] for w in found] == ["SPEECH_CHECK_FAILED"] and "UNSUPPORTED_ALIGNMENT_TEXT" in found[0]["message"], found
+    assert [w["code"] for w in quality.speech_warnings(False, True, None, 0.95)] == ["SPEECH_CHECK_SKIPPED"]
+    assert quality.speech_warnings(False, False, None, 0.95) == [] and quality.speech_warnings(True, False, None, 0.95) == []
+
+    def heard(matched, expected, differences=(), uncovered=0):
+        listed = [{"expected": e, "heard": h, "start": {"num": 3 * i + 1, "den": 2}, "end": {"num": 3 * i + 2, "den": 2}}
+                  for i, (e, h) in enumerate(differences)]
+        speech = {"recognition": {"ok": True}, "comparison": {"expected_words": expected, "heard_words": matched, "matched": matched,
+                  "match_ratio": round(matched / expected, 3), "differences": {"count": len(listed), "listed": listed}}}
+        if uncovered:
+            speech["uncovered"] = {"count": uncovered, "listed": [{"letters": "um", "start": {"num": 2973, "den": 100}, "end": {"num": 303, "den": 10}}]}
+        return {"speech": speech}
+    low = quality.speech_warnings(True, True, heard(18, 20, [("eighty", "80"), ("pixel", "")]), 0.95)
+    assert [w["code"] for w in low] == ["SPEECH_MISMATCH"] and 'expected "eighty" heard "80" at 0.50 s' in low[0]["message"], low
+    assert quality.speech_warnings(True, True, heard(136, 138, [("pixelforge", "pixel forge")]), 0.95) == []
+    assert [w["code"] for w in quality.speech_warnings(True, True, heard(138, 138, uncovered=1), 0.95)] == ["UNCOVERED_SPEECH"]
+
+    # Reviews of the delivered file: each finding is reported, and a clean review reports nothing.
+    def delivered(peak=-1.2, lkfs=-14.0, black=0, clipping=0, silence=0, frames_ok=True, cut=0):
+        run = {"start": {"num": 1, "den": 1}, "end": {"num": 2, "den": 1}}
+        return {"picture": {"black": {"count": black, "runs": [run] * black}},
+                "sound": {"meters": {"integrated_lkfs": lkfs, "sample_peak_dbfs": [peak - 0.4, peak - 0.5], "true_peak_dbtp": [peak, peak - 0.3]},
+                          "over_time": {"clipping": {"count": clipping, "runs": [run] * clipping}, "silence": {"count": silence, "runs": [run] * silence}}},
+                "timing": {"video": {"ok": frames_ok}, "audio": {"ok": True}}, "speech": {"cut_words": {"count": cut}}}
+    assert quality.review_warnings(delivered(), -14, -1, True) == []
+    over = quality.review_warnings(delivered(peak=-0.6), -14, -1, True)
+    assert [w["code"] for w in over] == ["PEAK_OVER_TARGET"] and "-0.60 dBTP, above the manifest's peak_dbfs of -1" in over[0]["message"], over
+    assert quality.review_warnings(delivered(peak=-1.004), -14, -1, True) == []
+    every = quality.review_warnings(delivered(lkfs=-16.5, black=1, clipping=2, silence=1, frames_ok=False, cut=1), -14, -1, True)
+    assert [w["code"] for w in every] == ["BLACK_PICTURE", "AUDIO_CLIPPING", "AUDIO_SILENCE", "TIMING_MISMATCH", "CUT_WORDS", "LOUDNESS_OFF_TARGET"], every
+    assert "AUDIO_SILENCE" not in [w["code"] for w in quality.review_warnings(delivered(silence=1), -14, -1, False)]
+    passed.append("production.delivery_warnings")
+
+    # 9. Music: placed once, or repeated on whole bars with the fade on the last repeat; a short bed warns at build
+    #    time, and at check time from narration estimated at the speaker's words per second.
+    beat = F(12, 25)
+    assert music_clips(F(8064, 100), F(9216, 100), "none", beat) == [("m-music", 0, F(8064, 100))]
+    # 80.64 s holds 42 whole 1.92 s bars exactly; a 81 s bed loops after the same 42 bars.
+    assert music_clips(F(81), F(180), "bars", beat) == [("m-music", 0, F(8064, 100)), ("m-music-2", F(8064, 100), F(8064, 100)),
+                                                        ("m-music-3", F(16128, 100), F(180) - F(16128, 100))]
+    try:
+        music_clips(F(1), F(10), "bars", beat)
+        raise AssertionError("a bed shorter than one bar was looped")
+    except ToolError as error:
+        assert error.code == "MUSIC_TOO_SHORT"
+    early = quality.music_warnings("audio-timeline", 80.64, 92.16, "none")
+    assert [w["code"] for w in early] == ["MUSIC_ENDS_EARLY"] and "ends 11.52 s before the film" in early[0]["message"], early
+    assert quality.music_warnings("audio-timeline", 96.0, 92.16, "none") == [] and quality.music_warnings("audio-timeline", 80.64, 92.16, "bars") == []
+    sources = out / "quality-sources"
+    sources.mkdir()
+    for name in ("bold.ttf", "regular.ttf"):
+        (sources / name).write_bytes(b"stand-in")
+    # The fixture film: title 2 bars (3.84 s); "one" 9 words / 2.6 + 0.24 + 0.4 s -> 9 beats (4.32 s); "two" 8 words -> 8 beats
+    # (3.84 s); the end card at least 4 bars (7.68 s): 19.68 s in all.
+    expected = {"words_per_second": 2.6, "rate_measured": True, "narration_seconds": 7.69, "film_seconds": 19.68}
+    for seconds, loop, codes in ((16, "none", ["MUSIC_MAY_END_EARLY"]), (21, "none", ["MUSIC_MAY_END_EARLY"]), (22, "none", []), (16, "bars", [])):
+        bed = sources / f"bed-{seconds}.wav"
+        if not bed.exists():
+            write_wav(bed, np.zeros(8000 * seconds), 8000)
+        raw = base_manifest({"music": str(bed), "bold": str(sources / "bold.ttf"), "regular": str(sources / "regular.ttf")})
+        raw["music"]["loop"] = loop
+        length, warnings = estimate(manifest_module.validate(raw))
+        assert {k: length[k] for k in expected} == expected and length["music_seconds"] == seconds, length
+        assert [w["code"] for w in warnings] == codes, (seconds, loop, warnings)
+    assert "would end about 3.7 s before it" in estimate(manifest_module.validate({**raw, "music": {**raw["music"], "loop": "none"}}))[1][0]["message"]
+    path = out / "short-bed.production.json"
+    path.write_text(json.dumps({**raw, "music": {**raw["music"], "loop": "none"}}), encoding="utf-8")
+    done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "check", str(path)], capture_output=True, timeout=60)
+    result = json.loads(done.stdout)["result"]
+    assert [w["code"] for w in result["warnings"]] == ["MUSIC_MAY_END_EARLY"], result
+    assert "WARNING MUSIC_MAY_END_EARLY (check): the music bed lasts 16.00 s" in done.stderr.decode("utf-8"), done.stderr
+    rejected({**raw, "music": {"input": "music", "loop": "bars"}}, 'music.loop: "bars" needs music.bpm')
+    rejected({**raw, "music": {**raw["music"], "loop": "forever"}}, "music.loop")
+    rejected({**raw, "delivery": {"review": {"min_speech_match": 1.5}}}, "min_speech_match")
+    passed.append("production.music_loop_and_estimate")
+
+    # 10. The mix through the engine: a supplied take over a harsh bed looped on bars, normalized loud. Each AAC trial
+    #     encodes the mix as the export will; a true peak over the target lowers the limiter ceiling by the excess plus
+    #     the margin. The chosen trial's decoded audio equals the delivered MP4's, and its review reads the same peak.
+    root = out / "mix"
+    root.mkdir()
+    # With this FFmpeg 6.1.1 the first trial reads -0.30 dBTP and the corrected ceiling of -2.25 dBFS -1.45 dBTP; other
+    # encoder builds may need fewer or more trials, so the rule is checked rather than the count.
+    write_wav(sources / "take.wav", speech_like(5.2, 41), 24000)
+    write_wav(sources / "bed.wav", harsh_bed(4.0, 42), 48000)
+    raw = {"contract_version": "cutbolt-production-1", "production_id": "mix-fixture", "template": {"id": "pixel-stage-explainer", "version": 1},
+           "inputs": {"take": str(sources / "take.wav"), "music": str(sources / "bed.wav"), "bold": str(sources / "bold.ttf"),
+                      "regular": str(sources / "regular.ttf")},
+           "fonts": {"bold": "bold", "regular": "regular"}, "music": {"input": "music", "bpm": 125, "loop": "bars", "bed_db_under_voice": 0},
+           "delivery": {"loudness_lkfs": -10, "peak_dbfs": -1},
+           "scenes": [{"id": "one", "script": "Pip travels across the stage.", "beat": {"type": "travel", "label": "GO", "hops": 2}}],
+           "overrides": {"narration": {"one": {"input": "take"}}}}
+    m = manifest_module.validate(raw)
+    production = Production(m, root, {"engine": str(ENGINE), "lanes": 2}, log=open(os.devnull, "w"))
+    production.engine = Engine(str(ENGINE), root, {}, production.state, 2)
+    production.engine_identity, production.lanes = {"sha256": sha256_file(ENGINE)}, 2
+    for d in ("sources", "media", "reviews", "exports"):
+        production.mkdir(d)
+    inputs = production.stage_inputs()
+    takes = production.stage_tts(inputs)
+    timing = production.stage_timing(takes)
+    audio = production.stage_audio_timeline(timing, production.stage_prepare_voice(takes), production.stage_music(inputs))
+    total = F(timing["result"]["total"])
+    snapshot = json.loads((root / audio["result"]["snapshot"]).read_text(encoding="utf-8"))
+    music = [c for t in snapshot["tracks"]["tracks"] if t["id"] == "music" for c in t["clips"]]
+    assert [(c["id"], F(c["start"]["num"], c["start"]["den"]), F(c["duration"]["num"], c["duration"]["den"])) for c in music] == \
+        [("m-music", 0, F(384, 100)), ("m-music-2", F(384, 100), total - F(384, 100))], music
+    assert "fade_out" not in music[0] and music[1]["fade_out"] == {"num": 48, "den": 25}, music
+    codec = production.stage_mix(audio)["result"]["report"]["codec"]
+    trials = codec["trials"]
+    assert trials[0]["ceiling_dbfs"] == -1 - CODEC_CHECK["headroom_db"] and 1 <= len(trials) <= CODEC_CHECK["trials"], trials
+    for before, after in zip(trials, trials[1:]):
+        assert round(before["true_peak_dbtp"], 2) > -1, trials
+        assert after["ceiling_dbfs"] == max(-20, round(before["ceiling_dbfs"] - (round(before["true_peak_dbtp"], 2) + 1) - CODEC_CHECK["margin_db"], 2)), trials
+    under = [i for i, t in enumerate(trials) if round(t["true_peak_dbtp"], 2) <= -1]
+    assert codec["passed"] == bool(under) and (codec["chosen"] == under[0] if under else
+                                               codec["chosen"] == min(range(len(trials)), key=lambda i: trials[i]["true_peak_dbtp"])), codec
+    chosen = trials[codec["chosen"]]
+    production.engine.call("export.run", {"project": {"file": chosen["snapshot"]}, "output": "exports/mix.mp4", "profile": "h264_aac",
+                                          "streams": "audio_video"})
+
+    def pcm(path):
+        return hashlib.sha256(subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(root / path), "-map", "0:a:0", "-f", "s16le", "-"],
+                                             capture_output=True, check=True).stdout).hexdigest()
+    assert pcm("exports/mix.mp4") == pcm(chosen["file"])
+    production.engine.call("export.review", {"path": "exports/mix.mp4", "output": "reviews/mix-delivered", "frames": 1, "rendition_height": 0})
+    review = json.loads((root / "reviews" / "mix-delivered" / "review.json").read_text(encoding="utf-8"))
+    peak = max(review["sound"]["meters"]["true_peak_dbtp"])
+    assert peak == chosen["true_peak_dbtp"], (peak, chosen)
+    # The delivered file's true peak is what the review compares with the target.
+    assert "PEAK_OVER_TARGET" in [w["code"] for w in quality.review_warnings(review, -10, round(peak - 0.1, 2), True, codec)]
+    assert "PEAK_OVER_TARGET" not in [w["code"] for w in quality.review_warnings(review, -10, min(0, round(peak + 0.1, 2)), True, codec)]
+    assert bool(quality.codec_warnings(codec, -1)) != codec["passed"]
+    passed.append(f"production.mix_aac_trial ({len(trials)} trial(s), ceiling {chosen['ceiling_dbfs']} dBFS, "
+                  f"delivered {chosen['true_peak_dbtp']:.2f} dBTP)")
+
+
 def build(manifest_path, root, config, *extra):
     done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "build", str(manifest_path), "--root", str(root),
                            "--config", str(config), *extra], capture_output=True, timeout=3600)
@@ -575,7 +783,17 @@ def check_full(out, config, passed):
     assert "black: none" in review and "timing: matches project" in review, review
     speech = first["speech_check"]["summary"]
     assert "100.0%" in speech or "of " in speech, speech
-    passed.append(f"production.full_build ({first['duration']} s, {first['elapsed_s']} s)")
+    # Every finding is a warning in the result and the build record; the delivered peak matches the mix's AAC trial.
+    codes = [w["code"] for w in first["warnings"]]
+    assert all(set(w) == {"code", "stage", "message", "detail"} for w in first["warnings"]), first["warnings"]
+    assert first["mix"]["aac_under_peak"] == ("PEAK_OVER_TARGET" not in codes), (first["mix"], codes)
+    delivered = json.loads((root / first["review"]["folder"] / "review.json").read_text(encoding="utf-8"))
+    assert max(delivered["sound"]["meters"]["true_peak_dbtp"]) == first["mix"]["aac_true_peak_dbtp"], first["mix"]
+    status = json.loads(subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "status", "--root", str(root)],
+                                       capture_output=True, timeout=60).stdout)["result"]
+    assert status["last_build"]["warnings"] == first["warnings"] and \
+        [w["code"] for w in status["review_gates"]["final_export"]["warnings"]] == codes, status
+    passed.append(f"production.full_build ({first['duration']} s, {first['elapsed_s']} s, warnings {codes})")
 
     again = build(path, root, config)
     assert again["stages"]["built"] == [], again["stages"]["built"]
@@ -606,15 +824,18 @@ def run(out, config):
     out.mkdir(parents=True, exist_ok=True)
     passed = []
     check_offline(out, passed)
+    check_quality(out, passed)
     # The full run needs the companions and two inputs; verification without them runs the offline checks only.
     full = bool(config) and bool(os.environ.get("CUTBOLT_PRODUCTION_MUSIC")) and bool(os.environ.get("CUTBOLT_PRODUCTION_FONT"))
     if full:
         check_full(out, config, passed)
     report = {"passed": passed, "full_run": full,
               "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal, build order, "
-                       "hand-written scene overrides with word cues and input references; with a "
-                       "production config, a real PixelForge/Qwen/Cutbolt build with stage reuse and selective rebuilds",
-              "oracle": "Hand-computed boundaries and cue frames, the engine's own scene.inspect and timeline.apply, recipe digests and stage keys"}
+                       "hand-written scene overrides with word cues and input references, delivery warnings, music loops and "
+                       "length estimates, the mix's AAC trial; with a production config, a real PixelForge/Qwen/Cutbolt build "
+                       "with stage reuse and selective rebuilds",
+              "oracle": "Hand-computed boundaries, cue frames, loop placements and estimates, the engine's own scene.inspect, "
+                        "timeline.apply and export.review, decoded AAC from FFmpeg, recipe digests and stage keys"}
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))
 

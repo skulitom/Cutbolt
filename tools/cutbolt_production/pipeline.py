@@ -12,9 +12,12 @@ Order (independent branches run at the same time; each stage waits only for the 
              and tts (one batched Qwen run)
     tts → timing and voice prepare (one job per take)
     voice prepare → align (one job on the voice assets; it waits for nothing else)
-    timing, voice prepare, music → audio timeline → mix (meters, duck, normalize)
+    timing, voice prepare, music → audio timeline → mix (meters, duck, normalize, AAC trial)
     audio timeline, align → captions → scenes (lanes, with the art)
     mix, scenes → cut → export → review, beside the speech check (an audio-only render of the same revision)
+
+What the checks find (a speech check that failed, a delivered peak over its target, a music bed that ends early)
+becomes a warning: a WARNING line on stderr, the result's `warnings`, the build record and `status`. See quality.py.
 """
 import json
 import os
@@ -26,13 +29,18 @@ from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction as F
 from pathlib import Path
 
-from . import COORDINATOR_VERSION, CONTRACT_VERSION, override as override_module, pixel_stage
+from . import COORDINATOR_VERSION, CONTRACT_VERSION, override as override_module, pixel_stage, quality
 from .engine import Engine, PixelForge, Qwen, ToolError
 from .manifest import digest, summary, templated
 from .state import State, Timer, now, sha256_file
 
 STAGE_VERSION = "1"
 FPS = pixel_stage.FPS
+# AAC encoding moves peaks, by an amount that depends on the signal and is not monotonic in the limiter ceiling:
+# on the progress demo a -1 dBFS ceiling delivered -0.6 dBFS, and commit 2313efd measured +0.2 to +0.5 dB. The mix
+# therefore starts 0.5 dB under the delivery peak, encodes the mix to AAC exactly as the export will, measures the
+# decoded true peak, and lowers the ceiling by the measured excess plus a margin, for up to `trials` encodes.
+CODEC_CHECK = {"version": 1, "profile": "h264_aac", "headroom_db": 0.5, "margin_db": 0.05, "trials": 3}
 
 
 def rt(x):
@@ -61,10 +69,33 @@ class Production:
         self.t0 = time.perf_counter()
         self.outcomes = {}
         self.elapsed = {}
+        self.warnings = []
+        self.delivery = None
+        self.codec = None
 
     # ------------------------------------------------------------------ helpers
     def log(self, message):
         print(f"[{time.perf_counter() - self.t0:7.1f}s] {message}", file=self.log_stream, flush=True)
+
+    def note(self, warnings):
+        """Record warnings: a WARNING line on stderr, an event, and the build's result and record."""
+        for w in warnings:
+            self.warnings.append(w)
+            self.log(f"WARNING {w['code']} ({w['stage']}): {w['message']}")
+            self.state.event({"event": "warning", **w})
+
+    def review_json(self, folder):
+        path = self.root / folder / "review.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def unused(self, relative):
+        """A workspace-relative path that does not exist yet: <relative>, or <stem>-2, -3 ... beside it."""
+        base = self.root / relative
+        candidate, n = base, 1
+        while candidate.exists():
+            n += 1
+            candidate = base.with_name(f"{base.stem}-{n}{base.suffix}")
+        return self.rel(candidate)
 
     def rel(self, path):
         return Path(path).resolve().relative_to(self.root).as_posix()
@@ -153,6 +184,9 @@ class Production:
         finally:
             record["finished"] = now()
             record["stages"] = dict(self.outcomes)
+            record["warnings"] = list(self.warnings)
+            if self.delivery:
+                record["delivery"] = self.delivery
             record["elapsed_s"] = round(time.perf_counter() - self.t0, 2)
             record["engine_calls"] = getattr(getattr(self, "engine", None), "calls", 0)
             self.state.finish_revision(record)
@@ -183,12 +217,16 @@ class Production:
             align_future = pool.submit(self.stage_align, voice)
             music = music_future.result() if music_future else None
             audio = self.stage_audio_timeline(timing, voice, music)
+            if music:
+                self.note(quality.music_warnings("audio-timeline", float(fr(music["duration"])), float(F(timing["result"]["total"])),
+                                                 self.m["music"]["loop"]))
             mix_future = pool.submit(self.stage_mix, audio)
             aligned = align_future.result()
             captions = self.stage_captions(audio, aligned)
             art = art_future.result()
             rendered = self.stage_scenes(timing, aligned, captions, art, inputs)
             mixed = mix_future.result()
+        self.codec = mixed["result"]["report"].get("codec")
         if self.until == "scenes":
             return self.finish(stopped="scenes")
         cut = self.stage_cut(mixed, rendered, timing)
@@ -201,9 +239,23 @@ class Production:
             exported = self.stage_export(cut)
             reviewed = self.stage_review(exported, cut, aligned)
             heard = heard_future.result() if heard_future else None
+        review = self.m["delivery"]["review"]
+        self.note(quality.speech_warnings(review["speech"], bool(aligned), self.review_json(heard["result"]["folder"]) if heard else None,
+                                          review["min_speech_match"]))
+        delivered = self.review_json(reviewed["result"]["folder"])
+        if delivered is None:
+            self.note([quality.warning("REVIEW_MISSING", "review", f"{reviewed['result']['folder']}/review.json is missing")])
+        else:
+            self.note(quality.review_warnings(delivered, self.m["delivery"]["loudness_lkfs"], self.m["delivery"]["peak_dbfs"],
+                                              bool(self.m["music"]), self.codec))
+        self.delivery = {"export_sha256": exported["outputs"][0]["sha256"], "review": reviewed["key"],
+                         "speech_check": heard["key"] if heard else None}
         return self.finish(cut=cut, exported=exported, reviewed=reviewed, heard=heard, timing=timing, captions=captions, scenes=scenes)
 
     def finish(self, stopped=None, cut=None, exported=None, reviewed=None, heard=None, timing=None, captions=None, scenes=None):
+        if not reviewed:
+            # No delivered file was reviewed, so the mix's own AAC trial is the only peak evidence.
+            self.note(quality.codec_warnings(self.codec, self.m["delivery"]["peak_dbfs"]))
         built = sorted(k for k, v in self.outcomes.items() if v == "built")
         reused = sorted(k for k, v in self.outcomes.items() if v == "reused")
         result = {"production_id": self.m["production_id"], "root": str(self.root), "revision": self.revision["revision"],
@@ -226,7 +278,13 @@ class Production:
             result["review"] = {"folder": reviewed["result"]["folder"], "summary": reviewed["result"]["summary"]}
         if heard:
             result["speech_check"] = {"folder": heard["result"]["folder"], "summary": heard["result"]["summary"]}
-        self.state.event({"event": "build_finished", "revision": self.revision["revision"], "built": built, "reused": reused})
+        if self.codec:
+            chosen = self.codec["trials"][self.codec["chosen"]]
+            result["mix"] = {"limiter_ceiling_dbfs": chosen["ceiling_dbfs"], "aac_true_peak_dbtp": chosen["true_peak_dbtp"],
+                             "aac_trials": len(self.codec["trials"]), "aac_under_peak": self.codec["passed"]}
+        result["warnings"] = list(self.warnings)
+        self.state.event({"event": "build_finished", "revision": self.revision["revision"], "built": built, "reused": reused,
+                          "warnings": [w["code"] for w in self.warnings]})
         return result
 
     # ------------------------------------------------------------------ inputs
@@ -560,12 +618,14 @@ class Production:
             ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "voice", "collision": "reject", "clip": {
                 "id": f"a-{scene_id}", "asset_id": asset["id"], "start": rt(F(row["voice_start"])), "source_in": rt(0), "duration": rt(length)}}})
         if music:
-            length = min(fr(music["duration"]), total)
-            ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "music", "collision": "reject", "clip": {
-                "id": "m-music", "asset_id": music["id"], "start": rt(0), "source_in": rt(0), "duration": rt(length)}}})
+            clips = music_clips(fr(music["duration"]), total, self.m["music"]["loop"], self.m["timing"]["beat"])
+            for clip_id, start, length in clips:
+                ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "music", "collision": "reject", "clip": {
+                    "id": clip_id, "asset_id": music["id"], "start": rt(start), "source_in": rt(0), "duration": rt(length)}}})
+            last, _, length = clips[-1]
             fade = min(self.m["music"]["fade_out"], length)
             if fade > 0:
-                ops.append({"op": "tracks.edit", "edit": {"op": "clip_audio", "clip_ids": ["m-music"], "fade_out": rt(fade)}})
+                ops.append({"op": "tracks.edit", "edit": {"op": "clip_audio", "clip_ids": [last], "fade_out": rt(fade)}})
         request = {"ops": ops}
         key = self.key("audio-timeline", request, {"engine": self.engine_identity})
 
@@ -615,13 +675,15 @@ class Production:
     def stage_mix(self, audio):
         timer = Timer()
         music = self.m["music"]
+        delivery = self.m["delivery"]
         request = {"audio": audio["key"], "music": None if not music else {"bed_db": fstr(music["bed_db_under_voice"]), "duck": music["duck_milli"]},
-                   "target": self.m["delivery"]["loudness_lkfs"], "peak": self.m["delivery"]["peak_dbfs"]}
+                   "target": delivery["loudness_lkfs"], "peak": delivery["peak_dbfs"], "codec": CODEC_CHECK}
         key = self.key("mix", request, {"engine": self.engine_identity})
 
         def run(attempt):
             snapshot = json.loads((self.root / audio["result"]["snapshot"]).read_text(encoding="utf-8"))
             report = {}
+            music_ids = [c["id"] for t in snapshot["tracks"]["tracks"] if t["id"] == "music" for c in t["clips"]]
             if music:
                 meters = self.engine.call("timeline.meters", {"project": snapshot, "tracks": True}, label="mix")
                 per = {t["track_id"]: t["meters"] for t in meters.get("tracks", [])}
@@ -630,24 +692,65 @@ class Production:
                 gain = max(1, min(4000, gain))
                 report["before"] = {"voice_lkfs": voice_lk, "music_lkfs": music_lk, "music_gain_milli": gain}
                 snapshot = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": [
-                    {"op": "tracks.edit", "edit": {"op": "clip_audio", "clip_ids": ["m-music"], "gain_milli": gain}}]})
+                    {"op": "tracks.edit", "edit": {"op": "clip_audio", "clip_ids": music_ids, "gain_milli": gain}}]})
                 duck = self.engine.call("audio.duck", {"project": snapshot, "voice_track_id": "voice", "music_track_id": "music",
                                                        "duck_milli": music["duck_milli"], "attack": "3/10", "release": "4/5", "bridge": "6/5"}, label="mix")
                 if duck.get("operations"):
                     snapshot = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": duck["operations"]})
                 report["duck"] = {"speech_runs": len(duck.get("speech", duck.get("runs", [])) or []), "operations": len(duck.get("operations", []))}
-            norm = self.engine.call("audio.normalize", {"project": snapshot, "target_lkfs": self.m["delivery"]["loudness_lkfs"],
-                                                        "peak_ceiling_dbfs": self.m["delivery"]["peak_dbfs"]}, label="mix")
-            if norm.get("operations"):
-                snapshot = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": norm["operations"]})
-            report["normalize"] = {k: norm.get(k) for k in ("result", "limited_by", "factor") if k in norm}
-            path = f"generated/timeline/mixed-{key[:12]}-{attempt}.json"
-            write_new(self.root / path, snapshot)
+            # Normalize under the delivery peak, then hear the mix as the export will encode it: the same AAC encoder,
+            # bitrate and samples (an audio-only M4A decodes identically to the MP4's audio). A true peak over the target
+            # lowers the limiter ceiling by the excess and tries again.
+            peak = delivery["peak_dbfs"]
+            ceiling = max(-20.0, round(peak - CODEC_CHECK["headroom_db"], 2))
+            trials, chosen = [], None
+            for n in range(1, CODEC_CHECK["trials"] + 1):
+                norm = self.engine.call("audio.normalize", {"project": snapshot, "target_lkfs": delivery["loudness_lkfs"],
+                                                            "peak_ceiling_dbfs": ceiling}, label="mix")
+                mixed = snapshot
+                if norm.get("operations"):
+                    mixed = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"],
+                                                                "operations": norm["operations"]})
+                path = f"generated/timeline/mixed-{key[:12]}-{attempt}-t{n}.json"
+                write_new(self.root / path, mixed)
+                trial = {"ceiling_dbfs": ceiling, "snapshot": path, "normalize": {k: norm.get(k) for k in ("result", "limited_by", "factor") if k in norm},
+                         **self.aac_trial(path, f"{key[:12]}-{attempt}-t{n}")}
+                trials.append(trial)
+                excess = None if trial["true_peak_dbtp"] is None else round(trial["true_peak_dbtp"], 2) - peak
+                self.log(f"mix: AAC trial {n} at a {ceiling:g} dBFS ceiling: {db(trial['integrated_lkfs'], 'LKFS')}, "
+                         f"true peak {db(trial['true_peak_dbtp'], 'dBTP')}")
+                if excess is None or excess <= 0:
+                    chosen = len(trials) - 1
+                    break
+                lower = max(-20.0, round(ceiling - excess - CODEC_CHECK["margin_db"], 2))
+                if lower >= ceiling:
+                    break
+                ceiling = lower
+            passed = chosen is not None
+            if not passed:
+                chosen = min(range(len(trials)), key=lambda i: trials[i]["true_peak_dbtp"])
+            report["normalize"] = trials[chosen]["normalize"]
+            report["codec"] = {"profile": CODEC_CHECK["profile"], "passed": passed, "chosen": chosen, "peak_dbfs": peak,
+                               "trials": [{k: v for k, v in t.items() if k != "normalize"} for t in trials]}
+            path = trials[chosen]["snapshot"]
             return [self.ident(path)], {"snapshot": path, "report": report}
         receipt = self.stage("mix", key, request, run, {"engine": self.engine_identity})
         if self.outcomes.get("mix") == "built":
-            self.log(f"mix: bed, duck and loudness set ({timer.seconds():.1f}s)")
+            codec = receipt["result"]["report"]["codec"]
+            chosen = codec["trials"][codec["chosen"]]
+            self.log(f"mix: bed, duck and loudness set; limiter ceiling {chosen['ceiling_dbfs']:g} dBFS, AAC true peak "
+                     f"{db(chosen['true_peak_dbtp'], 'dBTP')} after {len(codec['trials'])} trial(s) ({timer.seconds():.1f}s)")
         return receipt
+
+    def aac_trial(self, snapshot, tag):
+        """Encode a mixed snapshot's audio to AAC as the delivery will, and meter the decoded file like the final review."""
+        out = self.unused(f"reviews/aac-{tag}.m4a")
+        self.engine.call("export.run", {"project": {"file": snapshot}, "output": out, "profile": CODEC_CHECK["profile"], "streams": "audio"}, label="mix")
+        folder = self.unused(f"reviews/aac-{tag}")
+        self.engine.call("export.review", {"path": out, "output": folder, "frames": 1, "rendition_height": 0}, label="mix")
+        meters = ((self.review_json(folder) or {}).get("sound") or {}).get("meters") or {}
+        return {"file": out, "review": folder, "integrated_lkfs": meters.get("integrated_lkfs"),
+                "sample_peak_dbfs": quality.highest(meters.get("sample_peak_dbfs")), "true_peak_dbtp": quality.highest(meters.get("true_peak_dbtp"))}
 
     # ------------------------------------------------------------------ scenes
     def stage_scenes(self, timing, aligned, captions, art, inputs):
@@ -860,9 +963,12 @@ class Production:
                                                        "language": self.m["language"], "output": folder, "frames": 1, "rendition_height": 0},
                                      request_id=f"speech-{key[:20]}-{attempt}", lane="speech", label="speech-review")
             speech = result.get("speech") or {}
+            comparison, recognition = speech.get("comparison") or {}, speech.get("recognition") or {}
             return [self.ident(audio), self.ident(f"{folder}/review.json")], {
                 "folder": folder, "audio": audio, "summary": result.get("summary"),
-                "speech": {k: speech.get(k) for k in ("match_ratio", "matched", "expected", "heard", "differences") if k in speech}}
+                "speech": {"recognition_ok": recognition.get("ok"), "recognition_error": recognition.get("error"),
+                           **{k: comparison.get(k) for k in ("match_ratio", "matched", "expected_words", "heard_words") if k in comparison},
+                           "differences": (comparison.get("differences") or {}).get("count")}}
         receipt = self.stage("speech-review", key, request, run, {"engine": self.engine_identity})
         if self.outcomes.get("speech-review") == "built":
             self.log(f"speech check: {receipt['result']['folder']} ({timer.seconds():.1f}s)")
@@ -908,6 +1014,80 @@ def plan_timing(t, scenes):
     if start > 600:
         raise ToolError("production", "TOO_LONG", f"the film would last {float(start):.1f} s; this template stops at 600 s")
     return {"scenes": rows, "total": fstr(start)}
+
+
+def db(value, unit):
+    return "unmeasured" if value is None else f"{value:.2f} {unit}"
+
+
+def music_clips(duration, total, loop, beat):
+    """The music track's clips as (id, start, length). Without a loop the bed plays once from the start and stops at its
+    end or the film's. With `bars` it repeats from its start every whole number of 4/4 bars that fits the bed."""
+    if loop != "bars":
+        return [("m-music", F(0), min(duration, total))]
+    bar = 4 * beat
+    period = (duration // bar) * bar
+    if period <= 0:
+        raise ToolError("production", "MUSIC_TOO_SHORT", f"music.loop bars: the bed lasts {float(duration):.2f} s, less than one "
+                        f"{float(bar):.2f} s bar at music.bpm")
+    clips, start = [], F(0)
+    while start < total:
+        clips.append(("m-music" if not clips else f"m-music-{len(clips) + 1}", start, min(period, total - start)))
+        start += period
+    return clips
+
+
+def wav_seconds(path):
+    """A WAV file's length from its header, or None when it cannot be read."""
+    try:
+        with wave.open(str(path)) as w:
+            return F(w.getnframes(), w.getframerate())
+    except (OSError, EOFError, wave.Error):
+        return None
+
+
+def estimate(m):
+    """The film's length before anything is synthesized: each narrated line at the speaker's words per second (a supplied
+    take at its own length), through the same timing plan as a build. Warns about a music bed shorter than the estimate,
+    and a fixed-duration scene its estimated narration would overflow."""
+    rate, measured = quality.words_per_second(m["voice"])
+    t, rows, warnings, narration, counted = m["timing"], [], [], F(0), 0
+    for s in m["scenes"]:
+        take = None
+        if s["script"]:
+            override = m["overrides"]["narration"].get(s["id"])
+            seconds = wav_seconds(m["inputs"][override["input"]]) if override else None
+            if seconds is None:
+                counted += 1
+                seconds = F(len(pixel_stage.words_of(s["script"]))) / F(str(rate))
+                if m["voice"] and m["voice"]["split"] == "sentence":
+                    seconds += m["voice"]["pause"] * (len(sentences(s["script"])) - 1)
+            narration += seconds
+            if s["duration"] and t["lead"] + seconds > s["duration"]:
+                warnings.append(quality.warning("NARRATION_MAY_OVERFLOW", "check", f"scene {s['id']}: its narration is estimated at "
+                                                f"{float(seconds):.1f} s, which may not fit its fixed {float(s['duration']):.2f} s duration"))
+            elif not s["duration"]:
+                take = {"samples": -(-seconds * 24000 // 1), "rate": 24000}
+        rows.append({"id": s["id"], "duration": fstr(s["duration"]) if s["duration"] else None,
+                     "type": s["beat"]["type"] if s["beat"] else "override", "take": take})
+    out = {"words_per_second": rate, "rate_measured": measured, "narration_seconds": round(float(narration), 2)}
+    try:
+        planned = plan_timing(t, rows)
+    except ToolError as error:
+        warnings.append(quality.warning(error.code, "check", f"estimated: {error.message}"))
+        return out, warnings
+    out["film_seconds"] = round(float(F(planned["total"])), 2)
+    out["scenes"] = [{"id": r["id"], "start": round(float(F(r["start"])), 2), "duration": round(float(F(r["duration"])), 2)} for r in planned["scenes"]]
+    music = m["music"]
+    if music:
+        seconds = wav_seconds(m["inputs"][music["input"]])
+        out["music_seconds"] = None if seconds is None else round(float(seconds), 3)
+        speaker = (m["voice"] or {}).get("speaker")
+        basis = ("narration from the supplied takes" if not counted else
+                 f"narration at {rate} words/s, " + (f"as measured for {speaker}" if measured else f"the rate measured for ryan; {speaker} is unmeasured"))
+        warnings += quality.music_warnings("check", None if seconds is None else float(seconds), float(F(planned["total"])),
+                                           music["loop"], estimated=True, basis=basis)
+    return out, warnings
 
 
 def sentences(text):

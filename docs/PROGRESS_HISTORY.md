@@ -225,6 +225,51 @@ The offline part, old checks and new, passed in a Linux cloud session. There a l
 
 No capability points change: this is agent workflow over existing editing capabilities. Evidence stays stale until the next thorough run.
 
+## 5 October 2026: production builds report their delivery quality
+
+The part-two progress demo (`C:\DEV\CutboltData\demo-progress2-20261005`, ISSUES.md items 3, 8 and 9) found three gaps in `tools/production.py`:
+- **A hidden speech-check failure.** The build printed `{"ok": true}`, but recognition had failed (`UNSUPPORTED_ALIGNMENT_TEXT` on the numeral "80", fixed separately). Only `speech_check.summary` said so; stderr and `status` did not.
+- **AAC overshoot.** The mix met -14.0 LKFS and a -1.0 dBFS peak, but the delivered H.264/AAC file read -0.6 dBFS. The mix had been normalized straight to the manifest's `peak_dbfs: -1`.
+- **A short music bed.** The morning's 80.64 s bed was shorter than the film and simply ended, so the demo had to generate a 96 s variant.
+
+The changes:
+- **Warnings.** Each finding is now a warning, `{code, stage, message, detail}`, in four places:
+  - a `WARNING` line on stderr;
+  - `warnings` in the build's result, or in its error;
+  - the build record, which `status` shows;
+  - the `final_export` gate.
+
+  Warnings are derived on every build from the stage results and review folders, so reused stages still report. They cover:
+  - a speech check that failed, was turned off or compared nothing;
+  - one below the new `delivery.review.min_speech_match` (default 0.95);
+  - sounds no word covers;
+  - in the delivered file: a true peak over `peak_dbfs`, loudness more than 1 LU off target, clipping, black runs, silence under a music bed, timing that differs from the project, and words cut by clip edges;
+  - a bed shorter than the film.
+
+  The `final_export` gate lists the delivery's warnings. A decision on it records the warnings it was made over, and a warning that appears later on the same export makes an approval stale.
+- **The delivered peak is measured, not assumed.** The mix normalizes 0.5 dB under `peak_dbfs` (the headroom from `2313efd`). It then encodes an audio-only AAC M4A with the export's settings and meters it as `export.review` does. If the true peak is over the target, it lowers the limiter ceiling by the excess plus 0.05 dB, for up to three trials. The final review checks the delivered file's true peak and warns when it is over. The result's `mix` gives the chosen ceiling and the AAC true peak.
+- **Music beds.**
+  - `check` estimates the film's length: narration at 2.6 words/s (measured for `ryan`) or a supplied take's own length, through the build's timing plan. It warns `MUSIC_MAY_END_EARLY` when the bed is shorter than the estimate, or within 10% of it.
+  - The build warns `MUSIC_ENDS_EARLY` once timing is known.
+  - New `music.loop: "bars"` repeats the bed from its start on whole 4/4 bars at `bpm`. The repeats are butt-joined clips, the last one fades out, and each is ducked.
+- The speech check's receipt now keeps its comparison (`match_ratio`, `matched` and so on). Before, it read them from the wrong level and stored nothing.
+
+Measured on Linux with FFmpeg 6.1.1's AAC encoder at the default 320 kb/s, on original synthetic mixes (not the demo):
+- The audio-only M4A decodes to exactly the samples of the MP4's audio from the same snapshot, by SHA-256 of the decoded PCM. So the trial predicts the delivery.
+- Overshoot is not monotonic in the ceiling. One harsh bed delivered -0.83 dBTP from a -1.0 dBFS ceiling and -0.70 from -1.5. It delivered +1.54 from -1.85, -1.88 from -2.0 and +0.50 from -2.3. That is why the mix measures each encode instead of trusting a fixed headroom.
+
+Verification:
+- **New `tests/production.py` cases.**
+  - Speech and review warnings, from engine-shaped review documents.
+  - Exact loop placements, and `MUSIC_TOO_SHORT`.
+  - The length estimate against a hand-computed 19.68 s for four bed lengths, and `check`'s stderr line.
+  - The `final_export` gate's warnings and staleness.
+  - The mix through the engine: a looped harsh bed at -10 LKFS. It took two trials here: -1.5 dBFS gave -0.30 dBTP, and -2.25 dBFS gave -1.45. Each correction must follow the rule. The chosen trial's decoded audio must equal an MP4 export's, and its review must read the same true peak.
+- **Where it ran.** This session ran on Linux, where the fixture cannot run unchanged, even at the previous commit: manifests require Windows drive paths, the engine's job queue and speech runtime are Windows-only, and the template scenes need `arial.ttf`. The offline part passed here with a local shim that allowed POSIX paths and ran queued commands synchronously; it has not run on the Windows machine.
+- **Linux harness.** The real coordinator built a 12.96 s film with a PixelForge stand-in, supplied narration, and stubbed alignment and recognition. It warned `MUSIC_ENDS_EARLY` and `AUDIO_SILENCE` with a 9 s bed, and `SPEECH_CHECK_FAILED` from an injected recognition failure. `status` and the gate showed all three. `music.loop: "bars"` cleared the music warnings. A harsh bed at -9 LKFS showed the trials failing honestly, with every trial listed in `PEAK_OVER_TARGET`.
+- **Not done here.** The demo was not rebuilt, because its folder and the companions (PixelForge, Qwen, the WSL speech runtime) are on the Windows machine. `tools/ship.py` could not gate on Linux either: `cargo clippy -D warnings` fails on Windows-only dead code at the previous commit, and the fixtures need Windows. The full companion run of `tests/production.py` is also outstanding.
+
+No capability points change: this is agent workflow over existing editing capabilities. Evidence in `verification/latest.json` stays stale until the next thorough run.
 ## 5 October 2026: H.264 exports stream straight from the timeline
 
 On main `d3c9140`, the progress demo's final cut (`pip-explainer` revision 13: 80.64 s of 1080p25, 14 FFV1 scene shots, 7 narration clips and a ducked music bed) exported to H.264 in 127 s. Revision 10, with a caption overlay and a picture-in-picture clip, took 112 s warm. Export was the slowest single step of a new video. A logging shim on FFmpeg timed revision 13's warm export:
