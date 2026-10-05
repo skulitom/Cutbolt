@@ -74,7 +74,7 @@ On the demo, with a release build, on a copy of the saved session store. The dem
 | Master limiter | none | ceiling -1.01 dBFS, 5 ms lookahead, 150 ms release |
 | Gain reduction | none | at most 7.97 dB; active 7.76 s of 80.64 s (9.6 %) |
 
-The proposal took 36.4 s and 5 measured passes, with other sessions running. It has three operations: the limiter, with its ceiling lowered 0.01 dB to keep the true peak under -1 dBTP, and `clip_audio` levels raised by 7.95 dB on 8 clips. The delivered H.264/AAC export (278 s on the loaded machine) measures -14.0 LUFS in FFmpeg's `ebur128`, but -0.8 dBTP: AAC encoding adds about 0.2 dB of overshoot. Lossy deliveries that must stay under -1 dBTP should normalize with a lower ceiling, such as -1.5 dBFS.
+The proposal took 36.4 s and 5 measured passes, with other sessions running. It has three operations: the limiter, with its ceiling lowered 0.01 dB to keep the true peak under -1 dBTP, and `clip_audio` levels raised by 7.95 dB on 8 clips. The delivered H.264/AAC export (278 s on the loaded machine) measures -14.0 LUFS in FFmpeg's `ebur128`, but -0.8 dBTP: AAC encoding adds about 0.2 dB of overshoot. Normalizing with a -1.5 dBFS ceiling instead gives -14.03 LKFS on the timeline. Its audio-only AAC exports then read -14.1 LUFS, and -1.0 dBTP at 192 kb/s or -1.2 dBTP at 320 kb/s (`aac-check` in the same folder). Lossy deliveries that must stay under -1 dBTP should therefore normalize to a ceiling about 0.5 dB lower.
 
 Verification:
 - **New `tests/dynamics.py`.** An independent integer oracle of the documented design checks every sample of 13 renders (1,501,440 stereo sample frames):

@@ -299,7 +299,7 @@ The factor is the smallest of three values:
 
 `limiter` in the proposal holds the proposed settings, and its `audio_dynamics` operation comes first. With `limiter: false` the gain stops at the ceiling, as before.
 
-`result` is the measured outcome of the operations, not a prediction: integrated loudness, sample peak, `true_peak_dbtp`, the number of measured passes and, with a limiter, its gain reduction under `dynamics` (`max_reduction_db`, `reduced_seconds`, `reduced_fraction`). `measured` gives the same before any change. Clips that share a level share one `clip_audio` operation. Apply the operations with `session.apply`.
+`result` is the measured outcome of the operations, not a prediction: integrated loudness, sample peak, `true_peak_dbtp`, the number of measured passes and, with a limiter, its gain reduction under `dynamics` (`max_reduction_db`, `reduced_seconds`, `reduced_fraction`). `measured` gives the same before any change. Clips that share a level share one `clip_audio` operation. Apply the operations with `session.apply`. Lossy encoding adds overshoot: on the progress demo, AAC raised the true peak by about 0.2 dB, so normalize a lossy delivery that must stay under -1 dBTP to a ceiling of about -1.5 dBFS.
 
 ## Reviewing edits and footage
 
