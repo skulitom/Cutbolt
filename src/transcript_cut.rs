@@ -495,6 +495,7 @@ mod tests {
             .collect();
         project.tracks = Some(tracks::Arrangement {
             duration: t(6, 1),
+            master: None,
             tracks: clips
                 .iter()
                 .enumerate()
@@ -510,6 +511,7 @@ mod tests {
                     clips: vec![clip.clone()],
                     transitions: Vec::new(),
                     composite: Default::default(),
+                    dynamics: None,
                 })
                 .collect(),
             links: vec![tracks::Link {

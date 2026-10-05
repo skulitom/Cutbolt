@@ -1,5 +1,58 @@
 # Progress history
 
+## 5 October 2026: timeline limiters, so normalizing reaches its target
+
+On the progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md item 17), `audio.normalize` was asked for -14 LKFS and stopped at -20.95 LKFS with `limited_by: "peak_ceiling"`. The Qwen3-TTS narration peaks near -2 dBFS while measuring about -21 LKFS, and timeline tracks had no limiter or compressor. The mix-recipe compressor (`audio.render`) would have meant rendering, conforming and swapping every line and binding its transcripts again.
+
+The changes:
+- **Track and master limiters on placed-track timelines.** The `tracks.edit` operation `audio_dynamics` sets a limiter on an audio track or on the master mix: `ceiling_dbfs` -20..0, `lookahead_ms` 1..20 (default 5) and `release_ms` 10..2000 (default 150).
+  - Snapshots store them as a track's `dynamics` and the arrangement's `master`, with schema, validation and session diffs.
+  - Interchange export reports them as a blocking loss. Video tracks, locked tracks and sequence definitions refuse them.
+- **An original limiter in integer arithmetic** (`dynamics.rs`, [AUDIO.md](AUDIO.md#timeline-limiters)).
+  - It finds peaks at the samples and at 4x-interpolated points between them (a 16-tap Kaiser-windowed sinc), takes the smallest required gain over the lookahead, releases linearly and ramps down linearly over the lookahead.
+  - No output sample passes the ceiling, and peaks between samples are held at it as well.
+  - A sample's output depends only on a bounded neighbourhood (lookahead + release + 15 samples before, lookahead + 16 after). Every render, range, preview, chunk, export and meter therefore gives exactly the whole timeline's samples.
+  - FFmpeg writes each group's unsaturated sum as exact 32-bit codes. The engine limits, adds and saturates them, and hands the render graph a PCM16 input.
+  - Timelines without limiters render exactly as before, and a limiter that never engages changes no sample.
+  - Receipts and meters report each limiter's `max_reduction_db`, `reduced_seconds` and `reduced_fraction`.
+- **True peak.** Every stereo meter (`timeline.meters`, `audio.inspect`, `export.review`) now reports `true_peak_dbtp`, using the limiter's interpolation filter. On steady tones it agrees with FFmpeg's `ebur128` to that meter's 0.1 dB display; an abruptly starting 7 kHz tone reads 0.29 dB lower, because the filters ring differently. No certification is claimed.
+- **`audio.normalize` proposes the limiter it needs.** When the peak ceiling would stop the gain, the proposal adds a master limiter at the ceiling and keeps raising the gain through it.
+  - Each step is measured: up to six more passes, stepping by the measured loudness slope.
+  - A true peak over the ceiling lowers the limiter's ceiling by the excess.
+  - The gain stops at `max_limiting_db` of gain reduction (default 12).
+  - `limiter: false` keeps the old behaviour. `measured` and `result` now include true peak, and `result.dynamics` gives the limiter's gain reduction.
+
+On the demo, with a release build, on a copy of the saved session store. The demo's own store is unchanged (same SHA-256), and the outputs are in `ws\remeasure\timeline-limiter`:
+
+| Final cut (revision 13) | Before | With the proposal applied |
+| --- | ---: | ---: |
+| Integrated loudness | -20.95 LKFS | -14.01 LKFS |
+| Sample peak | -1.00 dBFS | -1.01 dBFS |
+| True peak | -0.99 dBTP | -1.01 dBTP |
+| Voice track / music track, each alone | -19.99 / -32.01 LKFS | -13.10 / -24.06 LKFS |
+| Master limiter | none | ceiling -1.01 dBFS, 5 ms lookahead, 150 ms release |
+| Gain reduction | none | at most 7.97 dB; active 7.76 s of 80.64 s (9.6 %) |
+
+The proposal took 36.4 s and 5 measured passes, with other sessions running. It has three operations: the limiter, with its ceiling lowered 0.01 dB to keep the true peak under -1 dBTP, and `clip_audio` levels raised by 7.95 dB on 8 clips. The delivered H.264/AAC export (278 s on the loaded machine) measures -14.0 LUFS in FFmpeg's `ebur128`, but -0.8 dBTP: AAC encoding adds about 0.2 dB of overshoot. Lossy deliveries that must stay under -1 dBTP should normalize with a lower ceiling, such as -1.5 dBFS.
+
+Verification:
+- **New `tests/dynamics.py`.** An independent integer oracle of the documented design checks every sample of 13 renders (1,501,440 stereo sample frames):
+  - master limiters, track limiters, and track and master limiters together;
+  - three preview ranges, a meter range and a chunked 70-clip render;
+  - inactive limiters, which change nothing.
+
+  It also checks true peaks against its own filter arithmetic and FFmpeg's `ebur128`, the normalize proposal and its applied result, saved sessions and the schema, and 13 rejected requests.
+- **Changed fixtures.** `audio_processing` now compares true peak with `ebur128`. `transitions` keeps its exact normalize oracle by passing `limiter: false`.
+
+Quick runs of `dynamics`, `audio_processing`, `audio`, `tracks`, `transitions`, `track_edits`, `sequences` and `sessions` passed; `interchange` was skipped because no OTIO runtime is configured here. The 139 Rust tests, clippy and rustfmt pass.
+
+No scoring changed; evidence stays stale until the next thorough run.
+
+Follow-ups:
+- A track compressor, the issue's optional part, is not implemented; the limiter alone reached the target here.
+- Limiters inside nested sequences.
+- Headroom that knows the delivery codec.
+
 ## 5 October 2026: fast overlay exports, stoppable queued commands, cached source checks
 
 The progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md items 18-21) could not export its 80.64 s 1080p25 timeline, which has a full-length caption overlay and one picture-in-picture clip:

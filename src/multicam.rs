@@ -233,6 +233,7 @@ pub(crate) fn project(group: &Group, project: &Project) -> Result<Arrangement> {
         clips: vec![],
         transitions: vec![],
         composite: Default::default(),
+        dynamics: None,
     };
     let mut video = make_track("multicam-video", Kind::Video);
     let mut audio = make_track("multicam-audio", Kind::Audio);
@@ -270,6 +271,7 @@ pub(crate) fn project(group: &Group, project: &Project) -> Result<Arrangement> {
         duration: group.duration,
         tracks: vec![video, audio],
         links: vec![],
+        master: None,
     };
     result.validate(project)?;
     Ok(result)

@@ -105,11 +105,15 @@ pub struct TrackState {
     pub locked: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<crate::tracks::Transition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<crate::dynamics::Dynamics>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrackLayout {
     pub tracks: Vec<TrackState>,
     pub links: Vec<crate::tracks::Link>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub master: Option<crate::dynamics::Dynamics>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrackLayoutChange {
@@ -127,9 +131,11 @@ fn track_layout(project: &Project) -> Option<TrackLayout> {
                 enabled: t.enabled,
                 locked: t.locked,
                 transitions: t.transitions.clone(),
+                dynamics: t.dynamics.clone(),
             })
             .collect(),
         links: a.links.clone(),
+        master: a.master.clone(),
     })
 }
 

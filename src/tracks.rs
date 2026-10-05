@@ -263,6 +263,9 @@ pub struct Track {
     /// Video only: `alpha_over` composites this track's straight-alpha clips over the result below.
     #[serde(default, skip_serializing_if = "Composite::is_opaque")]
     pub composite: Composite,
+    /// Audio tracks of the project timeline only: dynamics on this track's summed clips before they join the mix; omitted when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<crate::dynamics::Dynamics>,
 }
 /// How a video track combines with lower tracks.
 #[derive(
@@ -396,6 +399,9 @@ pub struct Arrangement {
     pub tracks: Vec<Track>,
     /// Synchronization links between clips, at most 500.
     pub links: Vec<Link>,
+    /// Project timeline only: dynamics on the sum of the enabled audio tracks, before final PCM16 rounding; omitted when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub master: Option<crate::dynamics::Dynamics>,
 }
 /// Overlap policy on destination tracks: `reject` fails on any overlap with an existing clip; `replace_clips` removes each whole colliding clip together with its linked partners.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -565,6 +571,15 @@ pub enum Edit {
         /// New transform for every listed clip; null restores the full, unchanged frame.
         transform: Option<OverlayTransform>,
     },
+    /// Set or clear the dynamics (a limiter) of an unlocked audio track, or of the master mix when `track_id` is omitted. Project timeline only.
+    AudioDynamics {
+        /// Audio track to change; omit for the master mix.
+        #[serde(default)]
+        track_id: Option<String>,
+        /// New dynamics; null or omitted removes them.
+        #[serde(default)]
+        dynamics: Option<crate::dynamics::Dynamics>,
+    },
 }
 fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_TRACKS", message)
@@ -694,6 +709,18 @@ impl Arrangement {
             if track.transitions.len() > 1000 {
                 return Err(error("LIMIT_EXCEEDED", "Too many transitions"));
             }
+            if let Some(dynamics) = &track.dynamics {
+                if track.kind != Kind::Audio {
+                    return Err(error(
+                        "UNSUPPORTED_TIMELINE",
+                        format!("Track {:?}: dynamics apply to audio tracks", track.id),
+                    ));
+                }
+                dynamics
+                    .limiter
+                    .validate()
+                    .at(|| format!("track {:?} dynamics", track.id))?;
+            }
             let mut intervals = Vec::new();
             for effect in &track.transitions {
                 id(&effect.id)?;
@@ -776,6 +803,9 @@ impl Arrangement {
                     ));
                 }
             }
+        }
+        if let Some(master) = &self.master {
+            master.limiter.validate().at(|| "master dynamics".into())?;
         }
         let mut linked = BTreeSet::new();
         let mut links = BTreeSet::new();
@@ -1036,6 +1066,7 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                 duration,
                 tracks: vec![],
                 links: vec![],
+                master: None,
             });
         }
         Edit::Promote {
@@ -1056,6 +1087,7 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                         clips: vec![],
                         transitions: vec![],
                         composite: Default::default(),
+                        dynamics: None,
                     },
                     Track {
                         id: audio_track_id,
@@ -1065,9 +1097,11 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                         clips: vec![],
                         transitions: vec![],
                         composite: Default::default(),
+                        dynamics: None,
                     },
                 ],
                 links: vec![],
+                master: None,
             };
             let mut start = Time::ZERO;
             let mut ids: BTreeSet<_> = project.clips.iter().map(|c| c.id.clone()).collect();
@@ -1317,6 +1351,23 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                 a.tracks[t].clips[c].transform = transform.clone();
             }
         }
+        Edit::AudioDynamics { track_id, dynamics } => {
+            let a = arrangement(project)?;
+            match track_id {
+                None => a.master = dynamics,
+                Some(id) => {
+                    let index = a.track(&id)?;
+                    let track = &mut a.tracks[index];
+                    unlocked(track)?;
+                    if track.kind != Kind::Audio {
+                        return Err(invalid(format!(
+                            "track {id:?} is a video track; dynamics apply to audio tracks"
+                        )));
+                    }
+                    track.dynamics = dynamics;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1408,5 +1459,5 @@ pub(crate) fn range(project: &Project, start: Time, duration: Time) -> Result<Pr
 }
 
 pub fn capabilities() -> serde_json::Value {
-    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_chunking":"windows_over_64_clips_render_as_exactly_joined_chunks","render_frame_rates":"native_project_rate","audio_clock":48000,"video":"highest_enabled_opaque_track","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"gain_curve":{"clock":"clip_source_time","maximum_keys":2000,"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"rounding":"curve_value_nearest_then_one_sample_rounding"},"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
+    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform","audio_dynamics"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_chunking":"windows_over_64_clips_render_as_exactly_joined_chunks","render_frame_rates":"native_project_rate","audio_clock":48000,"video":"highest_enabled_opaque_track","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"gain_curve":{"clock":"clip_source_time","maximum_keys":2000,"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"rounding":"curve_value_nearest_then_one_sample_rounding"},"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"dynamics":crate::dynamics::capabilities(),"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
 }

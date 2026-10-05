@@ -48,6 +48,14 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
             true,
         );
     }
+    if arrangement.master.is_some() {
+        a.loss(
+            "$/tracks/master",
+            "audio_dynamics",
+            "The master limiter is omitted, so the exported mix is not limited",
+            true,
+        );
+    }
     if !arrangement.links.is_empty() {
         a.loss(
             "$/tracks/links",
@@ -150,6 +158,14 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
                 &format!("{path}/clips/{}", clip.id),
                 "clip_audio_levels",
                 "Clip gain and fades are omitted, so the exported audio plays at unity",
+                true,
+            );
+        }
+        if track.dynamics.is_some() {
+            a.loss(
+                &format!("{path}/dynamics"),
+                "audio_dynamics",
+                "The track limiter is omitted, so the exported track is not limited",
                 true,
             );
         }

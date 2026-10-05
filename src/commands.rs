@@ -111,9 +111,15 @@ pub enum Request {
         /// Integrated loudness to reach, -40 to -5 LKFS; default -14, common for online video.
         #[serde(default)]
         target_lkfs: Option<f64>,
-        /// Highest allowed sample peak after the change, -20 to 0 dBFS; default -1. When the target would pass it, the gain stops at the ceiling.
+        /// Highest allowed peak after the change, -20 to 0 dBFS; default -1. When the target would pass it, a master limiter at the ceiling is proposed (see limiter), keeping sample and true peak under it.
         #[serde(default)]
         peak_ceiling_dbfs: Option<f64>,
+        /// Propose a master limiter when the ceiling would stop the gain short of the target; default true. False stops the gain at the ceiling.
+        #[serde(default)]
+        limiter: Option<bool>,
+        /// Most gain reduction the limiter may apply, 0 to 24 dB; default 12.
+        #[serde(default)]
+        max_limiting_db: Option<f64>,
     },
     #[serde(rename = "audio.tighten")]
     AudioTighten {
@@ -1878,11 +1884,15 @@ pub fn handle(request: Request) -> Result<Value> {
             input_root,
             target_lkfs,
             peak_ceiling_dbfs,
+            limiter,
+            max_limiting_db,
         } => crate::normalize::propose(
             &project,
             &input_root,
             target_lkfs.unwrap_or(-14.0),
             peak_ceiling_dbfs.unwrap_or(-1.0),
+            limiter.unwrap_or(true),
+            max_limiting_db.unwrap_or(12.0),
         ),
         Request::CaptionsDraft {
             project,

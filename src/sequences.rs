@@ -75,6 +75,17 @@ pub(crate) fn validate(project: &Project) -> Result<()> {
     }
     for s in &project.sequences {
         s.arrangement.validate(project)?;
+        if s.arrangement.master.is_some()
+            || s.arrangement.tracks.iter().any(|t| t.dynamics.is_some())
+        {
+            return Err(error(
+                "UNSUPPORTED_TIMELINE",
+                format!(
+                    "Sequence {:?}: dynamics apply to the project timeline's tracks and master, not to sequences",
+                    s.id
+                ),
+            ));
+        }
         crate::multicam::validate(s, project)?;
     }
     fn depth(
@@ -120,6 +131,7 @@ pub(crate) fn create(project: &mut Project, id: String, duration: Time) -> Resul
             duration,
             tracks: vec![],
             links: vec![],
+            master: None,
         },
     });
     Ok(())

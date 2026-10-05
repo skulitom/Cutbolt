@@ -243,7 +243,8 @@ def run(root):
         operations=[{'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':ids,'gain_milli':level}} for level,ids in sorted(groups.items())]+curves
         return first,f,limited,operations,(loud,peak),passes
     def normalize(p,target,ceiling,label):
-        proposal=call({'command':'audio.normalize','project':p,'input_root':str(root),'target_lkfs':target,'peak_ceiling_dbfs':ceiling})
+        # Without a limiter the gain stops at the ceiling; tests/dynamics.py covers the limiter proposal.
+        proposal=call({'command':'audio.normalize','project':p,'input_root':str(root),'target_lkfs':target,'peak_ceiling_dbfs':ceiling,'limiter':False})
         first,factor,limited,operations,final,passes=normalized(p,target,ceiling)
         assert proposal['operations']==operations and proposal['limited_by']==limited,(proposal,operations,limited)
         assert abs(proposal['measured']['integrated_lkfs']-first[0])<=.006 and abs(proposal['measured']['sample_peak_dbfs']-first[1])<=.006

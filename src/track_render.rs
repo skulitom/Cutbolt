@@ -1,6 +1,8 @@
 //! Compile placed tracks and transitions using exact frame/sample interval boundaries.
 use crate::{
-    Result, error, media,
+    Result,
+    dynamics::{self, Limiter},
+    error, media,
     model::Project,
     render::{self, Plan, Source},
     time::Time,
@@ -18,6 +20,11 @@ fn timebase(rate: Time) -> String {
     format!("{}/{}", rate.den, rate.num)
 }
 const SAMPLES: Time = Time { num: 48000, den: 1 };
+/// A premix group: its limited track's ID and limiter (none for the unlimited tracks) and the
+/// indices of the tracks it sums.
+type Group = (Option<(String, Limiter)>, Vec<usize>);
+/// Graphs made by this process, to keep generated file names apart.
+static GRAPHS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 struct Graph<'a> {
     project: &'a Project,
@@ -67,9 +74,11 @@ impl<'a> Graph<'a> {
             audio_only: false,
             inputs: 0,
             generated: Vec::new(),
+            // Graphs made in the same clock tick (a premix beside its render) still differ.
             nonce: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos()),
+                .map_or(0, |d| d.as_nanos())
+                ^ (u128::from(GRAPHS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) << 96),
         }
     }
     fn input(
@@ -421,7 +430,7 @@ impl<'a> Graph<'a> {
                 ));
                 self.args
                     .extend(["-i".into(), path.to_string_lossy().into_owned()]);
-                self.generated.push(render::Generated {
+                self.generated.push(render::Generated::Gain {
                     path,
                     curve: curve.clone(),
                     start: clip.source_in.plus(at)?.minus(clip.start)?,
@@ -713,50 +722,186 @@ impl<'a> Graph<'a> {
                 timebase(rate)
             ));
         } else {
-            let begin = start.units(SAMPLES)?;
-            let mut labels = String::new();
-            let mut voices = 0;
-            for track in a
-                .tracks
-                .iter()
-                .filter(|t| t.enabled && t.kind == Kind::Audio)
-            {
-                let edges: Vec<_> = boundaries(track, start, end, SAMPLES)?
-                    .into_iter()
-                    .collect();
-                for part in edges.windows(2) {
-                    let at = Time::new(part[0], 48000)?;
-                    let length = Time::new(part[1] - part[0], 48000)?;
-                    if let Some(clip) = track.clips.iter().find(|c| {
-                        c.start.compare(at).expect("validated").is_le()
-                            && c.end()
-                                .expect("validated")
-                                .compare(at)
-                                .expect("validated")
-                                .is_gt()
-                    }) {
-                        let label = self.label()?;
-                        if let Some(fx) = track.transition_at(at)? {
-                            self.effect(track, fx, at, length, &label)?;
-                        } else {
-                            self.audio_source(clip, at, length, &label)?;
-                        }
-                        self.filters.push(format!(
-                            "[{label}]adelay=delays={}S:all=1[{label}d]",
-                            part[0] - begin
-                        ));
-                        labels.push_str(&format!("[{label}d]"));
-                        voices += 1;
+            let tracks: Vec<usize> = (0..a.tracks.len())
+                .filter(|&i| a.tracks[i].enabled && a.tracks[i].kind == Kind::Audio)
+                .collect();
+            // A child is a reusable PCM16 sequence, so saturate at its own mix boundary.
+            self.mix(a, &tracks, start, duration, output, true)?;
+        }
+        Ok(())
+    }
+    /// The voices of the listed audio tracks of `a` over `[start, start + duration)`, summed into
+    /// `output` (silence when none plays); `saturate` rounds the sum to PCM16, as at a mix
+    /// boundary, and otherwise the sum keeps its full range.
+    fn mix(
+        &mut self,
+        a: &crate::tracks::Arrangement,
+        tracks: &[usize],
+        start: Time,
+        duration: Time,
+        output: &str,
+        saturate: bool,
+    ) -> Result<()> {
+        let end = start.plus(duration)?;
+        let begin = start.units(SAMPLES)?;
+        let count = duration.units(SAMPLES)?;
+        let mut labels = String::new();
+        let mut voices = 0;
+        for track in tracks.iter().map(|&i| &a.tracks[i]) {
+            let edges: Vec<_> = boundaries(track, start, end, SAMPLES)?
+                .into_iter()
+                .collect();
+            for part in edges.windows(2) {
+                let at = Time::new(part[0], 48000)?;
+                let length = Time::new(part[1] - part[0], 48000)?;
+                if let Some(clip) = track.clips.iter().find(|c| {
+                    c.start.compare(at).expect("validated").is_le()
+                        && c.end()
+                            .expect("validated")
+                            .compare(at)
+                            .expect("validated")
+                            .is_gt()
+                }) {
+                    let label = self.label()?;
+                    if let Some(fx) = track.transition_at(at)? {
+                        self.effect(track, fx, at, length, &label)?;
+                    } else {
+                        self.audio_source(clip, at, length, &label)?;
                     }
+                    self.filters.push(format!(
+                        "[{label}]adelay=delays={}S:all=1[{label}d]",
+                        part[0] - begin
+                    ));
+                    labels.push_str(&format!("[{label}d]"));
+                    voices += 1;
                 }
             }
-            if voices == 0 {
-                self.filters.push(format!("anullsrc=r=48000:cl=stereo,atrim=end_sample={count},asetpts=N/SR/TB,aformat=sample_fmts=dblp[{output}]"));
+        }
+        if voices == 0 {
+            self.filters.push(format!("anullsrc=r=48000:cl=stereo,atrim=end_sample={count},asetpts=N/SR/TB,aformat=sample_fmts=dblp[{output}]"));
+        } else {
+            let rounding = if saturate {
+                ",aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo,aformat=sample_fmts=dblp"
             } else {
-                // A child is a reusable PCM16 sequence, so saturate at its own mix boundary.
-                self.filters.push(format!("{labels}amix=inputs={voices}:duration=longest:dropout_transition=0:normalize=0,apad=whole_len={count},atrim=end_sample={count},aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo,aformat=sample_fmts=dblp[{output}]"));
+                ""
+            };
+            self.filters.push(format!("{labels}amix=inputs={voices}:duration=longest:dropout_transition=0:normalize=0,apad=whole_len={count},atrim=end_sample={count}{rounding}[{output}]"));
+        }
+        Ok(())
+    }
+    /// The top-level audio of a window as `aout`: the plain mix, or with track or master limiters,
+    /// the mix through them.
+    fn audio(&mut self, a: &crate::tracks::Arrangement, start: Time, duration: Time) -> Result<()> {
+        self.check_arrangement(a, start, duration, Kind::Audio)?;
+        let limited = a.master.is_some()
+            || a.tracks
+                .iter()
+                .any(|t| t.enabled && t.kind == Kind::Audio && t.dynamics.is_some());
+        if !limited {
+            return self.compose(a, start, duration, Kind::Audio, "aout");
+        }
+        // Each limited track is a group, and the other enabled audio tracks one more.
+        let mut groups: Vec<Group> = Vec::new();
+        let mut rest = Vec::new();
+        for (index, track) in a.tracks.iter().enumerate() {
+            if !track.enabled || track.kind != Kind::Audio {
+                continue;
+            }
+            match &track.dynamics {
+                Some(d) => groups.push((Some((track.id.clone(), d.limiter.clone())), vec![index])),
+                None => rest.push(index),
             }
         }
+        if !rest.is_empty() || groups.is_empty() {
+            groups.push((None, rest));
+        }
+        let master = a.master.as_ref().map(|d| d.limiter.clone());
+        // Mix enough around the window that every limited sample in it is exact.
+        let (before, after) = groups
+            .iter()
+            .filter_map(|(g, _)| g.as_ref().map(|(_, l)| l.reach()))
+            .fold((0, 0), |(b, f), (x, y)| (b.max(x), f.max(y)));
+        let (master_before, master_after) = master.as_ref().map_or((0, 0), Limiter::reach);
+        let window = (start.units(SAMPLES)?, start.plus(duration)?.units(SAMPLES)?);
+        let first = window.0.saturating_sub(before + master_before);
+        let last = (window.1 + after + master_after).min(a.duration.units(SAMPLES)?);
+        let mut runs = Vec::new();
+        for (from, to) in audio_windows(a, first, last)? {
+            let mut premix = Graph::new(self.project, self.root, self.control);
+            premix.audio_only = true;
+            premix.sources = self.sources.clone();
+            premix.overlay_assets = self.overlay_assets.clone();
+            premix.alpha_assets = self.alpha_assets.clone();
+            premix.inspected = self.inspected;
+            let (at, length) = (Time::new(from, 48000)?, Time::new(to - from, 48000)?);
+            let mut labels = String::new();
+            for (index, (_, tracks)) in groups.iter().enumerate() {
+                premix.mix(a, tracks, at, length, &format!("p{index}"), false)?;
+                labels.push_str(&format!("[p{index}]"));
+            }
+            // Scaling by 2^-16 is exact, so signed 32-bit output holds each sum's PCM16 code
+            // unsaturated, rounded as the PCM16 conversion of a plain mix would round it.
+            let merge = if groups.len() == 1 {
+                String::new()
+            } else {
+                format!("amerge=inputs={},", groups.len())
+            };
+            premix.filters.push(format!(
+                "{labels}{merge}volume=volume=0.0000152587890625:precision=double,aformat=sample_fmts=s32[premix]"
+            ));
+            self.inspected = premix.inspected;
+            for (id, source) in &premix.sources {
+                self.sources
+                    .entry(id.clone())
+                    .or_insert_with(|| source.clone());
+            }
+            let (mut arguments, _, generated) = premix.finish();
+            arguments.extend(
+                [
+                    "-map",
+                    "[premix]",
+                    "-c:a",
+                    "pcm_s32le",
+                    "-f",
+                    "s32le",
+                    "pipe:1",
+                ]
+                .map(str::to_owned),
+            );
+            if arguments.iter().map(|s| s.len() + 3).sum::<usize>() > 24000 {
+                return Err(error(
+                    "LIMIT_EXCEEDED",
+                    "Limited audio mix arguments exceed supported size",
+                ));
+            }
+            runs.push(dynamics::Run {
+                arguments,
+                generated,
+                frames: to - from,
+            });
+        }
+        let index = self.inputs;
+        self.inputs += 1;
+        let path = std::env::temp_dir().join(format!(
+            ".cutbolt-mix-{}-{}-{index}.wav",
+            std::process::id(),
+            self.nonce
+        ));
+        self.args
+            .extend(["-i".into(), path.to_string_lossy().into_owned()]);
+        self.filters.push(format!(
+            "[{index}:a:0]aformat=sample_fmts=dblp:channel_layouts=stereo[aout]"
+        ));
+        self.generated
+            .push(render::Generated::Mix(Box::new(dynamics::Premix {
+                path,
+                runs,
+                groups: groups.into_iter().map(|(g, _)| g).collect(),
+                master,
+                first,
+                window,
+                report: Default::default(),
+            })));
         Ok(())
     }
     fn sources(&self) -> Vec<Source> {
@@ -942,8 +1087,17 @@ pub(crate) fn window_clips(
     start: Time,
     end: Time,
 ) -> Result<usize> {
+    clips_where(a, start, end, |_| true)
+}
+/// `window_clips` over the tracks `include` selects.
+fn clips_where(
+    a: &crate::tracks::Arrangement,
+    start: Time,
+    end: Time,
+    include: impl Fn(&Track) -> bool,
+) -> Result<usize> {
     let mut ids = std::collections::BTreeSet::new();
-    for track in &a.tracks {
+    for track in a.tracks.iter().filter(|t| include(t)) {
         for clip in &track.clips {
             if clip.start.compare(end)?.is_lt() && clip.end()?.compare(start)?.is_gt() {
                 ids.insert(&clip.id);
@@ -958,6 +1112,45 @@ pub(crate) fn window_clips(
         }
     }
     Ok(ids.len())
+}
+/// Samples `[first, end)` split into consecutive windows, each one graph's worth of enabled
+/// audio clips (at most MAX_GRAPH_CLIPS, transition endpoints included).
+fn audio_windows(a: &crate::tracks::Arrangement, first: u64, end: u64) -> Result<Vec<(u64, u64)>> {
+    let count = |from: u64, to: u64| -> Result<usize> {
+        clips_where(a, Time::new(from, 48000)?, Time::new(to, 48000)?, |t| {
+            t.enabled && t.kind == Kind::Audio
+        })
+    };
+    let mut windows = Vec::new();
+    let mut cursor = first;
+    while cursor < end {
+        if count(cursor, end)? <= render::MAX_GRAPH_CLIPS {
+            windows.push((cursor, end));
+            break;
+        }
+        // The longest window that still fits, by bisection over a monotone count.
+        let (mut low, mut high) = (0, end - cursor);
+        while low < high {
+            let middle = (low + high).div_ceil(2);
+            if count(cursor, cursor + middle)? <= render::MAX_GRAPH_CLIPS {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        if low == 0 {
+            return Err(error(
+                "LIMIT_EXCEEDED",
+                format!(
+                    "More than {} audio clips overlap at sample {cursor}",
+                    render::MAX_GRAPH_CLIPS
+                ),
+            ));
+        }
+        windows.push((cursor, cursor + low));
+        cursor += low;
+    }
+    Ok(windows)
 }
 /// A compiled window: one FFmpeg graph, or, when top-level `alpha_over` clips show, the base
 /// picture's graph and the overlay clips for the engine compositor beside the encoder's graph.
@@ -1052,8 +1245,7 @@ fn compile<'a>(
             if !layers.is_empty() {
                 let mut encoder = graph.successor();
                 if audio {
-                    encoder.check_arrangement(a, start, duration, Kind::Audio)?;
-                    encoder.compose(a, start, duration, Kind::Audio, "aout")?;
+                    encoder.audio(a, start, duration)?;
                 }
                 return Ok(Compiled {
                     graph: encoder,
@@ -1065,8 +1257,7 @@ fn compile<'a>(
         }
     }
     if audio {
-        graph.check_arrangement(a, start, duration, Kind::Audio)?;
-        graph.compose(a, start, duration, Kind::Audio, "aout")?;
+        graph.audio(a, start, duration)?;
     }
     Ok(Compiled {
         graph,

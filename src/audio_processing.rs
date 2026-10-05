@@ -431,7 +431,7 @@ impl Profile {
     }
 }
 
-/// Final PCM measurement: stereo only, 48 kHz block counts, no true-peak claim.
+/// Final PCM measurement: stereo only, 48 kHz block counts, an uncertified 4x true-peak estimate.
 pub(crate) fn meters(pcm: &[i16]) -> Value {
     let mut meter = Meter::new();
     pcm.as_chunks::<2>()
@@ -450,6 +450,7 @@ pub(crate) struct Meter {
     blocks: Vec<f64>,
     squares: [f64; 2],
     peaks: [f64; 2],
+    true_peak: crate::dynamics::TruePeak,
     frames: usize,
 }
 impl Meter {
@@ -465,12 +466,14 @@ impl Meter {
             blocks: Vec::new(),
             squares: [0.0; 2],
             peaks: [0.0; 2],
+            true_peak: crate::dynamics::TruePeak::new(),
             frames: 0,
         }
     }
     pub(crate) fn push(&mut self, pair: [i16; 2]) {
         let n = self.frames;
         self.frames += 1;
+        self.true_peak.push(pair);
         let mut energy = 0.0;
         for (ch, &sample) in pair.iter().enumerate() {
             let x = sample as f64 / 32768.0;
@@ -489,6 +492,7 @@ impl Meter {
     pub(crate) fn finish(self) -> Value {
         const WINDOW: usize = Meter::WINDOW;
         const HOP: usize = Meter::HOP;
+        let true_peak = self.true_peak.finish();
         let (frames, blocks, squares, peaks) = (self.frames, self.blocks, self.squares, self.peaks);
         let absolute = 10.0_f64.powf((-70.0 + 0.691) / 10.0);
         let above: Vec<_> = blocks.iter().copied().filter(|x| *x > absolute).collect();
@@ -519,7 +523,7 @@ impl Meter {
             "loudness_status":status,"relative_gate_lkfs":relative.and_then(decibels).map(|x| x-0.691),
             "gating_blocks":blocks.len(),"absolute_gated_blocks":above.len(),"relative_gated_blocks":gated.len(),
             "unmeasured_tail_samples":if frames < WINDOW {frames} else {(frames-WINDOW)%HOP},
-            "true_peak_available":false})
+            "true_peak_dbtp":true_peak,"true_peak_available":true})
     }
 }
 

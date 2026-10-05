@@ -208,7 +208,7 @@ STAGES = [
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
     fixture("audio_processing"), fixture("conform"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
     fixture("templates"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
-    fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("track_edits"),
+    fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
     fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech"]), fixture("remapping"),
@@ -582,6 +582,7 @@ report = {
     "remapping_evidence": remapping,
     "audio_routing_evidence": audio_routing,
     "audio_repair_evidence": audio_repair,
+    "dynamics_evidence": dynamics,
     "recording_evidence": recording,
     "unicode_text_evidence": unicode_text,
     "reframing_evidence": reframing,
@@ -638,6 +639,7 @@ report["passed"] += stabilization["passed"]
 report["passed"] += remapping["passed"]
 report["passed"] += audio_routing["passed"]
 report["passed"] += audio_repair["passed"]
+report["passed"] += dynamics["passed"]
 report["passed"] += recording["passed"]
 report["passed"] += unicode_text["passed"]
 report["passed"] += reframing["passed"]
@@ -669,6 +671,7 @@ print(f"Passed {len(remapping['passed'])} variable-speed remapping checks.")
 
 print(f"Passed {len(audio_routing['passed'])} audio routing checks.")
 print(f"Passed {len(audio_repair['passed'])} dialogue repair checks.")
+print(f"Passed {len(dynamics['passed'])} timeline limiter checks.")
 print(f"Passed {len(recording['passed'])} recording checks, including sustained native capture.")
 print(f"Passed {len(unicode_text['passed'])} Unicode layout and rendered-integration checks.")
 print(f"Passed {len(reframing['passed'])} subject-reframing checks.")

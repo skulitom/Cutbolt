@@ -162,13 +162,22 @@ def run(root):
             else:
                 assert meter["sample_peak_dbfs"][ch] is None and meter["rms_dbfs"][ch] is None
         if name not in ("quiet","silence","short"):
-            result = subprocess.run(["ffmpeg","-hide_banner","-nostats","-i",str(output/("meter-"+name+".wav")),"-af","ebur128=peak=sample:framelog=verbose","-f","null","-"],capture_output=True,text=True,check=True,timeout=60)
+            result = subprocess.run(["ffmpeg","-hide_banner","-nostats","-i",str(output/("meter-"+name+".wav")),"-af","ebur128=peak=true:framelog=verbose","-f","null","-"],capture_output=True,text=True,check=True,timeout=60)
             matches = re.findall(r"I:\s+(-?[0-9.]+) LUFS",result.stderr)
             assert matches, result.stderr
             other = float(matches[-1]); difference = abs(meter["integrated_lkfs"]-other)
             assert difference <= .11, (name,meter,other)
-            meter_comparisons.append({"case":name,"engine_lkfs":meter["integrated_lkfs"],"reference_lufs":other,"absolute_difference":difference})
-        assert meter["true_peak_available"] is False
+            # The 4x true-peak estimate against FFmpeg's own true-peak meter, which prints 0.1 dB
+            # steps. The two interpolation filters ring differently at an abrupt start; that
+            # dominates only the 7 kHz tone, which starts at full level (faded, both read -20.0).
+            reference_peak = float(re.search(r"True peak:\s+Peak:\s+(-?[0-9.]+) dBFS",result.stderr).group(1))
+            true_peak = max(v for v in meter["true_peak_dbtp"] if v is not None)
+            assert abs(true_peak-reference_peak) <= (.35 if name == "high" else .06), (name,meter["true_peak_dbtp"],reference_peak)
+            meter_comparisons.append({"case":name,"engine_lkfs":meter["integrated_lkfs"],"reference_lufs":other,"absolute_difference":difference,"engine_true_peak_dbtp":true_peak,"reference_true_peak_dbtp":reference_peak})
+        assert meter["true_peak_available"] is True
+        for ch in range(2):
+            assert (meter["true_peak_dbtp"][ch] is None) == (meter["sample_peak_dbfs"][ch] is None)
+            assert meter["true_peak_dbtp"][ch] is None or meter["true_peak_dbtp"][ch] >= meter["sample_peak_dbfs"][ch]-1e-9
     assert abs(readings["mono"]["integrated_lkfs"]+23.01)<.02
     assert abs(readings["tone"]["integrated_lkfs"]+20)<.02
     assert abs(readings["tone"]["integrated_lkfs"]-readings["half"]["integrated_lkfs"]-20*math.log10(3277/1638))<.002
@@ -294,7 +303,7 @@ def run(root):
         assert tool["annotations"]["readOnlyHint"] and client.call("audio.beats", path=str(music/"click128.wav"), input_root=str(music))["tempo_bpm"] == request({"command":"audio.beats","path":str(music/"click128.wav"),"input_root":str(music)})["tempo_bpm"]
     finally:client.close()
     passed.append("audio_processing.beats_match_ground_truth")
-    report={"passed":passed,"pcm_sample_frames_compared":total,"pcm_tolerance":1,"comparisons":comparisons,"meter_reference":"FFmpeg ebur128, original 997 Hz calibration, independent PCM peak/RMS math; no true-peak certification", "meter_tolerance_lu":.11,"meter_comparisons":meter_comparisons,"rejected_cases":len(bad),"ffmpeg":subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True).stdout.splitlines()[0]}
+    report={"passed":passed,"pcm_sample_frames_compared":total,"pcm_tolerance":1,"comparisons":comparisons,"meter_reference":"FFmpeg ebur128 (loudness and true peak), original 997 Hz calibration, independent PCM peak/RMS math; no true-peak certification", "meter_tolerance_lu":.11,"meter_comparisons":meter_comparisons,"rejected_cases":len(bad),"ffmpeg":subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True).stdout.splitlines()[0]}
     (root/"verification.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     (root/"mix.json").write_text(json.dumps(first,indent=2)+"\n",encoding="utf-8")
     print(json.dumps(report))

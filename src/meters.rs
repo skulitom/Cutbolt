@@ -116,5 +116,8 @@ pub(crate) fn measure(
     if let Some(over_time) = over_time {
         meters["over_time"] = over_time;
     }
+    if let Some(dynamics) = plan.dynamics() {
+        meters["dynamics"] = dynamics;
+    }
     Ok(meters)
 }

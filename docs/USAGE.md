@@ -277,9 +277,16 @@ The factor is the smallest of three values:
 - the one that puts the higher channel's sample peak on `peak_ceiling_dbfs` (default -1 dBFS);
 - the one that lifts the highest clip level to the 4,000 maximum (+12 dB).
 
-`limited_by` names the limit that applied, or is null. The engine measures the mix at the proposed levels and refines the factor from that measurement, up to three times, until the levels stop changing. A mix that already clips hides its true peak until it is lowered, which is why the refinement exists. `result` is the measured outcome of the operations, not a prediction.
+`limited_by` names the limit that applied, or is null. The engine measures the mix at the proposed levels and refines the factor from that measurement, up to three times, until the levels stop changing. A mix that already clips hides its true peak until it is lowered, which is why the refinement exists.
 
-Clips that share a level share one `clip_audio` operation. Apply them with `session.apply`. There is no true-peak limiter, so material with a high peak-to-loudness ratio may stop at the ceiling below the target.
+**Through a limiter.** Speech often peaks far above its loudness; synthesized narration can peak at -2 dBFS while measuring -21 LKFS. When the ceiling is what stops the factor and `limiter` is true (the default), the proposal also sets a master [timeline limiter](AUDIO.md#timeline-limiters) at `peak_ceiling_dbfs`. It keeps the lookahead and release of an existing master limiter, or uses 5 ms and 150 ms. The factor then keeps rising through the limiter toward the target:
+- Loudness grows more slowly than the gain once the limiter works, so the engine measures up to six more times and steps by the measured slope.
+- When a measured true peak passes the ceiling, the limiter's own ceiling is lowered by the excess, to hundredths of a dB.
+- The gain stops at the clip gain range, or where the limiter's deepest gain reduction would pass `max_limiting_db` (default 12 dB); `limited_by` is then `"limiter_reduction"`.
+
+`limiter` in the proposal holds the proposed settings, and its `audio_dynamics` operation comes first. With `limiter: false` the gain stops at the ceiling, as before.
+
+`result` is the measured outcome of the operations, not a prediction: integrated loudness, sample peak, `true_peak_dbtp`, the number of measured passes and, with a limiter, its gain reduction under `dynamics` (`max_reduction_db`, `reduced_seconds`, `reduced_fraction`). `measured` gives the same before any change. Clips that share a level share one `clip_audio` operation. Apply the operations with `session.apply`.
 
 ## Reviewing edits and footage
 

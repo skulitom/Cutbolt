@@ -40,7 +40,7 @@ pub struct Plan {
         serialize_with = "chunk_summary"
     )]
     pub chunks: Vec<Plan>,
-    /// Gain streams this graph reads, written when it runs.
+    /// Gain streams and limited mixes this graph reads, written when it runs.
     #[serde(skip)]
     pub(crate) generated: Vec<Generated>,
     /// When top-level `alpha_over` clips show: the engine compositor whose frames `arguments`
@@ -48,34 +48,49 @@ pub struct Plan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) compositor: Option<crate::track_composite::Compositor>,
 }
-/// A per-sample gain stream a track graph reads as an input: a clip's gain curve sampled on its
-/// source clock from `start`, `samples` long, as 16-bit mono PCM (gains are at most 4000, so
-/// every value is exact). Written just before the graph runs and removed after.
+/// An input a track graph reads that the engine writes just before the graph runs and removes
+/// after.
 #[derive(Debug, Clone)]
-pub(crate) struct Generated {
-    pub path: PathBuf,
-    pub curve: crate::animation::Curve,
-    pub start: Time,
-    pub samples: u64,
+pub(crate) enum Generated {
+    /// A per-sample gain stream: a clip's gain curve sampled on its source clock from `start`,
+    /// `samples` long, as 16-bit mono PCM (gains are at most 4000, so every value is exact).
+    Gain {
+        path: PathBuf,
+        curve: crate::animation::Curve,
+        start: Time,
+        samples: u64,
+    },
+    /// A window's audio mixed through track and master limiters.
+    Mix(Box<crate::dynamics::Premix>),
 }
 impl Generated {
-    fn write(&self) -> Result<TempFile> {
+    fn write(&self, control: &dyn media::Control, timeout: Duration) -> Result<TempFile> {
         use std::io::Write;
+        let (path, curve, start, samples) = match self {
+            Generated::Gain {
+                path,
+                curve,
+                start,
+                samples,
+            } => (path, curve, *start, *samples),
+            Generated::Mix(premix) => {
+                let file = TempFile(premix.path.clone());
+                premix.write(control, timeout)?;
+                return Ok(file);
+            }
+        };
         // Keys were validated against the clip's source; the latest key bounds evaluation here.
-        let span = self
-            .curve
+        let span = curve
             .keys
             .iter()
             .map(|k| k.time)
             .max_by(|a, b| a.compare(*b).expect("valid key times"))
             .unwrap_or(Time::ZERO);
-        let sampler = self
-            .curve
-            .prepare_keys(span, 0, 4000, crate::tracks::MAX_GAIN_KEYS)?;
-        let file = TempFile(self.path.clone());
-        let bytes = u32::try_from(self.samples * 2)
+        let sampler = curve.prepare_keys(span, 0, 4000, crate::tracks::MAX_GAIN_KEYS)?;
+        let file = TempFile(path.clone());
+        let bytes = u32::try_from(samples * 2)
             .map_err(|_| error("LIMIT_EXCEEDED", "Gain automation window exceeds 4 GiB"))?;
-        let mut out = std::io::BufWriter::new(fs::File::create_new(&self.path)?);
+        let mut out = std::io::BufWriter::new(fs::File::create_new(path)?);
         out.write_all(b"RIFF")?;
         out.write_all(&(36 + bytes).to_le_bytes())?;
         out.write_all(b"WAVEfmt ")?;
@@ -84,12 +99,45 @@ impl Generated {
         }
         out.write_all(b"data")?;
         out.write_all(&bytes.to_le_bytes())?;
-        for n in 0..self.samples {
-            let gain = sampler.sample(self.start.plus(Time::new(n, 48_000)?)?)?;
+        for n in 0..samples {
+            let gain = sampler.sample(start.plus(Time::new(n, 48_000)?)?)?;
             out.write_all(&(gain as i16).to_le_bytes())?;
         }
         out.flush()?;
         Ok(file)
+    }
+}
+
+/// Write a graph's generated inputs; they are removed when the returned guards drop.
+pub(crate) fn write_generated(
+    generated: &[Generated],
+    control: &dyn media::Control,
+    timeout: Duration,
+) -> Result<Vec<TempFile>> {
+    generated
+        .iter()
+        .map(|g| g.write(control, timeout))
+        .collect()
+}
+
+impl Plan {
+    /// Gain reduction of the limiters this plan ran, once it has run; None without dynamics.
+    pub(crate) fn dynamics(&self) -> Option<Value> {
+        fn collect(plan: &Plan, report: &mut Option<crate::dynamics::Report>) {
+            for generated in &plan.generated {
+                if let Generated::Mix(premix) = generated
+                    && let Some(part) = &*premix.report.lock().expect("dynamics report")
+                {
+                    report.get_or_insert_default().merge(part);
+                }
+            }
+            for chunk in &plan.chunks {
+                collect(chunk, report);
+            }
+        }
+        let mut report = None;
+        collect(self, &mut report);
+        report.map(|r| r.value())
     }
 }
 
@@ -268,11 +316,7 @@ pub(crate) fn run_plan(
     let tool = control.tool("ffmpeg");
     // One graph into `target`; `done` frames precede it in the whole render.
     let single = |plan: &Plan, target: &Path, done: u64| -> Result<()> {
-        let _inputs = plan
-            .generated
-            .iter()
-            .map(Generated::write)
-            .collect::<Result<Vec<_>>>()?;
+        let _inputs = write_generated(&plan.generated, control, timeout)?;
         let mut arguments = plan.arguments.to_vec();
         *arguments.last_mut().expect("output argument") = target.to_string_lossy().into_owned();
         if let Some(compositor) = &plan.compositor {
@@ -852,7 +896,7 @@ fn plan_controlled(
     })
 }
 
-struct TempFile(PathBuf);
+pub(crate) struct TempFile(pub(crate) PathBuf);
 impl Drop for TempFile {
     fn drop(&mut self) {
         // Windows job termination can close inherited pipes before the encoder's
@@ -1152,11 +1196,13 @@ pub(crate) fn run_audio_range(
         }
     }
     media::publish(&temp.0, &plan.output)?;
-    Ok(
-        json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,
+    let mut receipt = json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,
         "samples":plan.samples,"project_revision":plan.project_revision,"sha256":rendered.sha256,"pcm_sha256":rendered.pcm_sha256,
-        "sources":plan.sources,"ffmpeg":ffmpeg_version}),
-    )
+        "sources":plan.sources,"ffmpeg":ffmpeg_version});
+    if let Some(dynamics) = plan.dynamics() {
+        receipt["dynamics"] = dynamics;
+    }
+    Ok(receipt)
 }
 
 pub(crate) fn run_range(
@@ -1244,9 +1290,12 @@ fn execute(
             return Err(error("MEDIA_CHANGED", "Source changed during rendering"));
         }
     }
-    let receipt = json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,"samples":plan.samples,
+    let mut receipt = json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,"samples":plan.samples,
         "project_revision":plan.project_revision,"frame_rate":project.frame_rate,"sha256":rendered.sha256,"sources":plan.sources,
         "ffmpeg":ffmpeg_version,"ffprobe":ffprobe_version});
+    if let Some(dynamics) = plan.dynamics() {
+        receipt["dynamics"] = dynamics;
+    }
     control.publish(&temp.0, &plan.output, &receipt)?;
     Ok(receipt)
 }

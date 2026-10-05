@@ -21,6 +21,7 @@ pub mod delivery;
 mod digest;
 pub mod documents;
 pub mod duck;
+pub mod dynamics;
 pub mod effects;
 pub mod expressions;
 pub mod files;

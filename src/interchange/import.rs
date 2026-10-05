@@ -132,6 +132,7 @@ pub(super) fn prepare(request: &Import, document: &Value, a: &mut Analysis) -> R
             clips: vec![],
             transitions: vec![],
             composite: Default::default(),
+            dynamics: None,
         };
         named(a, value, &path, &track.id);
         let values = children(value, &path)?;
@@ -327,6 +328,7 @@ pub(super) fn prepare(request: &Import, document: &Value, a: &mut Analysis) -> R
         duration,
         tracks,
         links: vec![],
+        master: None,
     });
     // Native validation independently enforces clocks, handles, collisions and bounds.
     if let Err(e) = project.validate() {
