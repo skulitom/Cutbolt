@@ -6,6 +6,7 @@ pub mod audio_repair;
 pub mod audio_routing;
 pub mod cache;
 mod cache_store;
+pub mod caption_overlay;
 pub mod captions;
 pub mod color;
 pub mod commands;

@@ -179,6 +179,62 @@ def run(root):
     assert compiled['frames']==10 and compiled['samples']==16016 and compiled['frame_rate']=={'num':30000,'den':1001}
     assert scene_cases[0][3](0)!=scene_cases[0][3](1) and scene_cases[0][3](2)!=scene_cases[0][3](3)
     passed.append('captions.sampled_multiline_overlap_pixels')
+    # A long caption track as one transparent overlay. Every frame is either empty or exactly the
+    # independently rasterized text of the one cue active at its start time.
+    words=['AB','C','ΩA','中']
+    track={'schema_version':1,'id':'track','revision':0,'overlap':'reject','styles':{'warm':{'color':[237,99,32]},'cool':{'color':[32,164,221]}},
+           'cues':[{'id':f'q{i}','start':time(4*i,10),'end':time(4*i+3,10),'text':words[i%4],'style':('warm','cool')[i%2],'align':('left','center','right')[i%3],'speaker':None} for i in range(20)]
+                  +[{'id':'late','start':time(12),'end':time(1304,100),'text':'AB\nC','style':'warm','align':'left','speaker':None},
+                    {'id':'seam','start':time(51,2),'end':time(53,2),'text':'ΩA','style':'cool','align':'right','speaker':None}]}
+    rasters={}
+    def overlay_frames(doc,rate,start,count):
+        frames=[]
+        for n in range(count):
+            t=rational(start)+F(n)/rate
+            active=[c for c in doc['cues'] if rational(c['start'])<=t<rational(c['end'])]
+            assert len(active)<=1
+            if not active:frames.append(bytes(96*64*4));continue
+            c=active[0]
+            if c['id'] not in rasters:
+                graphic={**layouts[c['style']],'kind':'text','text':c['text'],'color':[*doc['styles'][c['style']]['color'],255],'align':c['align']}
+                rasters[c['id']]=text_pixels(graphic,[96,64],font_data)[0].tobytes()
+            frames.append(rasters[c['id']])
+        return frames
+    def overlay(project,name,rate,start=time(0),**fields):
+        result=request({'command':'captions.render','document':track,'layouts':layouts,'project':project,'input_root':str(sources),
+                        'output_root':str(output),'output':str(output/name),**({'start':start} if start!=time(0) else {}),**fields})
+        decoded=subprocess.run(['ffmpeg','-v','error','-i',str(output/name),'-f','rawvideo','-pix_fmt','rgba','-'],capture_output=True,check=True).stdout
+        count=result['frames'];assert len(decoded)==count*96*64*4
+        expected=overlay_frames(track,rate,start,count)
+        for n in range(count):
+            assert decoded[n*96*64*4:(n+1)*96*64*4]==expected[n],(name,n)
+        samples=int(F(count)/rate*48000)
+        assert audio_bytes(output/name)==b'\0'*(samples*4)
+        assert result['asset']['identity']['bytes']==(output/name).stat().st_size and result['asset']['duration']==time(F(count)/rate)
+        return result
+    canvas={'schema_version':1,'id':'overlay-project','revision':0,'width':96,'height':64,'frame_rate':time(25),'assets':[],'clips':[]}
+    def timeline(duration,rate=time(25)):
+        p=copy.deepcopy(canvas);p['frame_rate']=rate
+        p['clips']=[{'id':'g','gap':True,'source_in':time(0),'duration':duration}]
+        return p
+    whole=overlay(timeline(time(30)),'track.mkv',F(25))
+    # The first window ends before its 16th cue starts (6 s); the next windows run ten seconds.
+    assert whole['frames']==750 and whole['windows']==4 and whole['covers']==time(30) and whole['cues']['no_sampled_frame']==[]
+    part=overlay(timeline(time(30)),'track-part.mkv',F(25),start=time(24),duration=time(3))
+    assert part['frames']==75 and part['windows']==1
+    ntsc=overlay(timeline(time(301*1001,30000),time(30000,1001)),'track-ntsc.mkv',F(30000,1001))
+    # Windows are whole multiples of 30 frames at 29.97 fps, so the asset runs to frame 330.
+    assert ntsc['frames']==330 and ntsc['covers']==time(301*1001,30000)
+    request({'command':'captions.render','document':track,'layouts':layouts,'project':timeline(time(30)),'input_root':str(sources),
+             'output_root':str(output),'output':str(output/'track.mkv')},'OUTPUT_EXISTS')
+    request({'command':'captions.render','document':track,'layouts':{'warm':layouts['warm']},'project':timeline(time(30)),'input_root':str(sources),
+             'output_root':str(output),'output':str(output/'track-missing.mkv')},'INVALID_CAPTIONS')
+    crowded={**track,'cues':[{'id':f'z{i}','start':time(i,1000),'end':time(i+1,1000),'text':'A','style':'warm','align':'left','speaker':None} for i in range(16)]}
+    request({'command':'captions.render','document':crowded,'layouts':layouts,'project':timeline(time(1)),'input_root':str(sources),
+             'output_root':str(output),'output':str(output/'crowded.mkv')},'LIMIT_EXCEEDED')
+    assert not (output/'track-missing.mkv').exists() and not (output/'crowded.mkv').exists()
+    assert not [p for p in output.iterdir() if p.name.startswith('.cutbolt')]
+    passed.append('captions.long_track_overlay_pixels')
 
     client=Client(exe)
     try:

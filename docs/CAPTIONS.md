@@ -1,6 +1,6 @@
 # Timed captions and subtitle files
 
-Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. `captions.draft` writes a document from transcripts of a timeline's sources. All seven `captions.*` commands are available through CLI/library and MCP stdio. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
+Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. `captions.draft` writes a document from transcripts of a timeline's sources. `captions.render` burns a whole document into one transparent overlay. Seven `captions.*` commands are MCP tools; `captions.render` runs through `job.start`. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
 
 ## Commands
 
@@ -15,6 +15,7 @@ Caption scene layouts also accept optional `text_layout` with the [Unicode text 
 | `captions.encode` | `document`, `format` | UTF-8 text, byte count/digests, cue ID mapping and loss report; no file write |
 | `captions.export` | `document`, `format`, `loss_policy`, `output_root`, `output` | The encoding report and a newly published file |
 | `captions.scene` | `document`, `scene`, `scene_id`, `offset`, `layouts`, `sampling`, `layer_prefix`, `input_root` | New scene, full inspection and sampled/skipped cue report |
+| `captions.render` | `document`, `layouts`, `project`, `input_root`, `output_root`, `output` | A transparent overlay asset covering the timeline, queued with `job.start` |
 
 Formats are `srt` and `webvtt`. Import uses a relative `{path, bytes, sha256}` source identity beneath an explicit absolute input root, as in [scene identities](SCENES.md). It verifies the actual bytes and never changes the source. Export requires an absolute destination within an existing output root, with `.srt` or `.vtt` respectively. Existing paths are rejected. A temporary file is synced and read back before publication without overwrite. Successful repeated exports to the same path fail with `OUTPUT_EXISTS`; use the returned digest to reconcile a lost response.
 
@@ -114,7 +115,15 @@ Use actual external font identities. Layout has the same size, box, spacing, wra
 
 The only sampling policy is `sample_start`: output frame `n` uses caption time `offset + n/frame_rate` on the base scene's clock (25 fps by default). `offset` may fall between video frames and remains exact; the document is unchanged. Active cue intervals are clipped to the selected window and sampled at its frame starts. The report identifies `sampled` cues with inclusive `first_frame` and exclusive `end_frame`, `outside_window` cues, and `no_sampled_frame` cues that lie entirely between samples. For example, `[0.081,0.082)` has no sample in a zero-offset 25 fps scene, but its original subtitle timing remains intact.
 
-Scene duration is 1 frame up to ten seconds at the scene's rate; offset must not exceed 24 hours. Each visible cue becomes one layer named `layer_prefix-cue_id`. The prefix is a bounded ID of at most 32 bytes and generated names must not collide with base layers. All normal scene limits still apply, including **16 layers total**, external font validation, canvas/output dimensions and decoded-memory limits. Repeated cues count as separate layers even when they do not overlap. Each caption layer's canvas is the whole scene, so at 1920 x 1080 a cue uses about 2.07 million of the 64 million decoded-pixel budget; up to the 16-layer limit fits. Select smaller windows when necessary. Scene conversion is read-only; call `scene.render` to compile the returned scene, then add its asset to a saved session. This does not add direct captions to arbitrary video timeline tracks or extend the general scene duration.
+Scene duration is 1 frame up to ten seconds at the scene's rate; offset must not exceed 24 hours. Each visible cue becomes one layer named `layer_prefix-cue_id`. The prefix is a bounded ID of at most 32 bytes and generated names must not collide with base layers. All normal scene limits still apply, including **16 layers total**, external font validation, canvas/output dimensions and decoded-memory limits. Repeated cues count as separate layers even when they do not overlap. Each caption layer's canvas is the whole scene, so at 1920 x 1080 a cue uses about 2.07 million of the 64 million decoded-pixel budget; up to the 16-layer limit fits. Select smaller windows when necessary. Scene conversion is read-only; call `scene.render` to compile the returned scene, then add its asset to a saved session. This does not extend the general scene duration; for a whole caption track, use `captions.render`.
+
+## Rendering a whole caption track
+
+`captions.render`, queued with `job.start`, renders a caption document over a timeline as one transparent asset. The asset is straight-alpha FFV1 `bgra` with silent PCM audio, the same profile as a transparent scene, ready for an `alpha_over` video track. It matches the `project`'s canvas and frame rate and covers `[start, start + duration)`, by default the whole timeline. Frame `n` shows the cues active at `start + n / frame_rate`, as `captions.scene` samples them, laid out with `layouts`.
+
+The track is compiled as consecutive caption windows. Each window is an ordinary transparent caption scene with one invisible layer, which keeps a window without cues valid. Windows are as long as ten seconds allows, in whole multiples of a step that keeps them exact in 48 kHz samples and milliseconds (1 frame at 25 fps, 30 frames at 29.97 fps). A window ends early, on a step, before its 16th cue would start, so no scene exceeds 16 layers. The windows are joined losslessly with their exact lengths, and the result is checked for frame count, samples and alpha before it is published. Because windows are whole steps, the asset can run a few frames past the requested duration; `covers` gives the requested length. Place the clip with that duration.
+
+More than 15 cues starting within one step is rejected with `LIMIT_EXCEEDED`. Layout errors, such as a style without a layout, come from `captions.scene` unchanged. No partial output or scratch file remains after a failure.
 
 ## Runnable local fixture and workflow
 

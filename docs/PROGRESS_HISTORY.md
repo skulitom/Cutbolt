@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: whole caption tracks as one overlay
+
+Burned-in captions went through scenes, which hold at most ten seconds and 16 layers. A ten-minute video therefore needed about sixty caption scenes, each rendered, added and placed by hand. `captions.render`, queued with `job.start`, now renders a whole caption document as one transparent overlay asset for an `alpha_over` track. Internally it compiles consecutive transparent caption windows through the existing `captions.scene` path. Each window is as long as ten seconds and the 16-layer limit allow, in steps exact in samples and milliseconds. The windows are joined losslessly with exact lengths and checked before publication.
+
+The captions fixture renders a 30-second, 22-cue track, a 3-second part and a 29.97 fps track. In the 30-second track, the first window shortens before its 16th cue, and one cue spans a window seam. Every frame is compared with the fixture's independent glyph rasterizer: each frame is empty or exactly the active cue's text. The audio must be silent, and the asset identity must be correct. Rejections leave no file behind. No scoring changed.
+
 ## 5 October 2026: captions drafted from transcripts
 
 Captions for an edited timeline had to be written by hand, cue by cue, even when transcripts of every source existed. The read-only `captions.draft` takes the whole transcript words inside audible audio clips, at their timeline times, and groups them into cues. A new cue starts at a pause, after a sentence end, at a maximum duration, or when the line budget is full. Lines are balanced, and cue times are exact milliseconds, so the draft exports to SRT or WebVTT unchanged. Clip-edge words are left out and counted.
