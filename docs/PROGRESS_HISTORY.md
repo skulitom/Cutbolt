@@ -1,5 +1,16 @@
 # Progress history
 
+## 5 October 2026: filler-word removal
+
+Cutting the ums and uhs out of a talking-head edit took one hand-built ripple deletion per word. The read-only `transcript.fillers` now finds listed words (common English hesitations by default) wherever the timeline speaks them, using the shared transcript word projection. It proposes ripple deletions that merge consecutive fillers, keep optional padding out of the neighbouring words, and snap to the cut grid without entering them. It reuses the cut application from `audio.tighten`, now a shared helper, so each cut is checked on a working copy.
+
+The transcripts fixture covers:
+- a filler in the word-cut timeline, whose render must equal the original with exactly its frames deleted;
+- a 29.97 fps sequential timeline, recomputed independently, with merged fillers, padding clamped at the neighbours, a custom word list and repeated split IDs;
+- the rejections.
+
+No scoring changed.
+
 ## 5 October 2026: scene stills
 
 An agent designing a title, lower third or thumbnail could check its scene's structure with `scene.inspect`, but could not see it without compiling the whole movie. `scene.still` renders the one frame shown at a given time to a PNG at the scene's output size: RGB, or straight RGBA for a transparent scene. Over MCP it comes back as an inline image. It uses the same composition as `scene.render`. A thumbnail is a still of a one-frame scene.

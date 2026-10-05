@@ -479,6 +479,26 @@ pub enum Request {
         /// Absolute path of a new .srt or .vtt file (matching format) inside output_root; never overwritten.
         output: PathBuf,
     },
+    #[serde(rename = "transcript.fillers")]
+    TranscriptFillers {
+        /// Project to clean up.
+        #[schemars(with = "crate::reference::ProjectInput")]
+        project: Project,
+        /// Transcripts of the project's source media, as for timeline.outline.
+        transcripts: Vec<crate::transcript::Document>,
+        /// Existing absolute directory; used only to match absolute asset paths to transcript source paths.
+        #[serde(default)]
+        input_root: Option<PathBuf>,
+        /// Audio tracks whose speech to search; default every enabled audio track. Not for sequential timelines.
+        #[serde(default)]
+        track_ids: Option<Vec<String>>,
+        /// Words to remove, 1-64, matched on letters and digits ignoring case and punctuation; default um, uh, erm, er, ah, uhm, umm, hmm and mm.
+        #[serde(default)]
+        words: Option<Vec<String>>,
+        /// Extra time cut on each side of a filler, never into a neighbouring word, at most 1/4 s; default zero.
+        #[serde(default)]
+        padding: Option<Time>,
+    },
     #[serde(rename = "captions.draft")]
     CaptionsDraft {
         /// Project whose speech to caption.
@@ -1809,6 +1829,25 @@ pub fn handle(request: Request) -> Result<Value> {
             &output,
             time.unwrap_or(Time::ZERO),
         ),
+        Request::TranscriptFillers {
+            project,
+            transcripts,
+            input_root,
+            track_ids,
+            words,
+            padding,
+        } => {
+            let words =
+                words.unwrap_or_else(|| crate::fillers::DEFAULT_WORDS.map(str::to_owned).to_vec());
+            crate::fillers::propose(&crate::fillers::Request {
+                project: &project,
+                transcripts: &transcripts,
+                input_root: input_root.as_deref(),
+                track_ids: track_ids.as_deref(),
+                words: &words,
+                padding: padding.unwrap_or(Time::ZERO),
+            })
+        }
         Request::FilesList {
             input_root,
             dir,
@@ -1853,7 +1892,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.still","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","transcript.fillers","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.still","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},

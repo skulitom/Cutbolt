@@ -20,6 +20,7 @@ pub mod duck;
 pub mod effects;
 pub mod expressions;
 pub mod files;
+pub mod fillers;
 pub mod geometry;
 pub mod graphics;
 pub mod hdr;

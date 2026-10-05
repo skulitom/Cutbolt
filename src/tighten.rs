@@ -105,6 +105,54 @@ fn ripple(project: &Project, start: Time, end: Time) -> Result<Value> {
     }
 }
 
+/// Cuts ripple-deleted from a project.
+pub(crate) struct Applied {
+    /// The operations that applied, in application order.
+    pub(crate) operations: Vec<Value>,
+    /// Each cut's index and outcome: applied, or the editor's refusal.
+    pub(crate) outcomes: Vec<(usize, std::result::Result<(), String>)>,
+    /// The project with every applied cut.
+    pub(crate) project: Project,
+    /// Total time removed.
+    pub(crate) removed: Time,
+}
+
+/// Ripple-delete `cuts` (`(index, start, end)`, in time order, original timeline times) from the
+/// latest back, each tried on a working copy.
+pub(crate) fn apply_cuts(project: &Project, cuts: &[(usize, Time, Time)]) -> Result<Applied> {
+    let mut working = project.clone();
+    let mut operations = Vec::new();
+    let mut outcomes = Vec::new();
+    let mut removed = Time::ZERO;
+    for &(index, start, end) in cuts.iter().rev() {
+        let op = ripple(&working, start, end)?;
+        let operation: Operation = serde_json::from_value(op.clone())?;
+        match working.apply(working.revision, vec![operation]) {
+            Ok(next) => {
+                working = next;
+                removed = removed.plus(end.minus(start)?)?;
+                operations.push(op);
+                outcomes.push((index, Ok(())));
+            }
+            Err(e) => outcomes.push((index, Err(format!("{}: {}", e.code, e.message)))),
+        }
+    }
+    Ok(Applied {
+        operations,
+        outcomes,
+        project: working,
+        removed,
+    })
+}
+
+/// Frames per cut-grid step: whole frames that, on placed tracks, are also whole 48 kHz samples.
+pub(crate) fn grid_step(project: &Project, rate: Time) -> u64 {
+    match project.tracks {
+        Some(_) => rate.num / gcd(rate.num, 48_000 * rate.den),
+        None => 1,
+    }
+}
+
 /// Propose ripple deletions that shorten the pauses of `voice` (or of the whole program on a
 /// sequential timeline).
 pub fn propose(
@@ -205,10 +253,7 @@ pub fn propose(
         }
     }
     // Cuts sit on a grid of whole frames that are also whole samples on placed tracks.
-    let step = match project.tracks {
-        Some(_) => rate.num / gcd(rate.num, 48_000 * rate.den),
-        None => 1,
-    };
+    let step = grid_step(project, rate);
     let grid = |sample: u64, up: bool| -> u64 {
         // Grid index of the time `sample / 48000`, rounded up or down.
         let n = sample as u128 * rate.num as u128;
@@ -238,22 +283,19 @@ pub fn propose(
         }
     }
     // Apply from the latest cut back, so every cut's times are original timeline times.
-    let mut working = project.clone();
-    let mut operations = Vec::new();
-    let mut removed = Time::ZERO;
-    for &(index, start, end) in cuts.iter().rev() {
-        let op = ripple(&working, start, end)?;
-        let operation: Operation = serde_json::from_value(op.clone())?;
-        match working.apply(working.revision, vec![operation]) {
-            Ok(next) => {
-                working = next;
-                removed = removed.plus(end.minus(start)?)?;
+    let Applied {
+        operations,
+        outcomes,
+        project: working,
+        removed,
+    } = apply_cuts(project, &cuts)?;
+    for (index, outcome) in outcomes {
+        match outcome {
+            Ok(()) => {
+                let (_, start, end) = cuts.iter().find(|c| c.0 == index).expect("cut");
                 listed[index]["cut"] = json!({"start":start,"end":end});
-                operations.push(op);
             }
-            Err(e) => {
-                listed[index]["skipped"] = json!(format!("{}: {}", e.code, e.message));
-            }
+            Err(reason) => listed[index]["skipped"] = json!(reason),
         }
     }
     let count = listed.len();

@@ -273,6 +273,56 @@ def caption_document(said, ident='captions', line_chars=42, lines=2, max_duratio
             'styles':{'default':{'color':list(color)}}, 'cues':cues}, sum(map(len, groups))
 
 
+def filler_cuts(p, said, rate, words=('um', 'uh', 'erm', 'er', 'ah', 'uhm', 'umm', 'hmm', 'mm'), padding=F(0)):
+    """Independent reading of the filler rules: runs of fillers, padded within the neighbours,
+    snapped to the nearest grid point (never into a neighbour), as ripple operations."""
+    import math
+    norm = lambda t:''.join(c for c in t if c.isalnum()).lower()
+    targets = {norm(w) for w in words}
+    runs = []
+    for i, w in enumerate(said):
+        if norm(w[2]) in targets:
+            if runs and runs[-1][1]+1 == i:runs[-1][1] = i
+            else:runs.append([i, i])
+    tracks = p.get('tracks')
+    step = 1
+    if tracks:
+        step = rate.numerator//math.gcd(rate.numerator, 48000*rate.denominator)
+    duration = seconds(tracks['duration']) if tracks else sum((seconds(c['duration']) for c in p['clips']), F(0))
+    unit = F(step)/rate
+    cuts = []
+    for first, last in runs:
+        floor = said[first-1][1] if first > 0 else F(0)
+        ceiling = said[last+1][0] if last+1 < len(said) else duration
+        start = max(said[first][0]-padding, floor);end = min(said[last][1]+padding, ceiling)
+        a = math.floor(start/unit+F(1, 2))
+        if a*unit < floor:a = math.ceil(floor/unit)
+        b = math.floor(end/unit+F(1, 2))
+        if b*unit > ceiling:b = math.floor(ceiling/unit)
+        if b > a:cuts.append((a*unit, b*unit))
+    used = {c['id'] for c in p['clips']}
+    if tracks:used |= {c['id'] for t in tracks['tracks'] for c in t['clips']} | {l['id'] for l in tracks['links']}
+    def fresh(base):
+        n = 1
+        while f'{base}-j{n}' in used:n += 1
+        used.add(f'{base}-j{n}');return f'{base}-j{n}'
+    operations = []
+    for s, e in reversed(cuts):
+        if tracks:
+            split = [c['id'] for t in tracks['tracks'] for c in t['clips'] if seconds(c['start']) < s and seconds(c['start'])+seconds(c['duration']) > e]
+            right = [{'id':c, 'new_id':fresh(c)} for c in split]
+            links = [{'id':l['id'], 'new_id':fresh(l['id'])} for l in tracks['links'] if all(m['clip_id'] in split for m in l['members'])]
+            operations.append({'op':'tracks.edit', 'edit':{'op':'ripple_delete', 'track_ids':[t['id'] for t in tracks['tracks']], 'start':time(s),
+                'duration':time(e-s), 'links':'include', 'right_clip_ids':right, 'right_link_ids':links, 'end_policy':'resize', 'transitions':'reject_affected'}})
+        else:
+            op = {'op':'timeline.ripple_delete', 'start':time(s), 'duration':time(e-s)};at = F(0)
+            for c in p['clips']:
+                if at < s and at+seconds(c['duration']) > e:op['right_id'] = fresh(c['id'])
+                at += seconds(c['duration'])
+            operations.append(op)
+    return cuts, operations
+
+
 def run(root):
     root = root.resolve()
     assert root != ROOT and ROOT not in root.parents
@@ -662,6 +712,35 @@ def run(root):
             call({**transcribing, **fields}, code)
         assert not (output/'whole.json').exists()
         passed.append('transcript.whole_file_recognition_rejections_leave_nothing')
+        # Filler words: a "Um," in the word-cut timeline is cut out exactly; the render is the
+        # original with those frames deleted.
+        filled = copy.deepcopy(doc);filled['words'][2]['text'] = 'Um,'
+        said = timeline_said(restored, {'voice':[filled]})
+        proposal = client.call('transcript.fillers', project=restored, transcripts=[filled])
+        cuts, operations = filler_cuts(restored, said, F(25))
+        assert cuts == [(F(30, 25), F(34, 25))] and proposal['operations'] == operations, (cuts, proposal['operations'], operations)
+        assert proposal['fillers']['count'] == 1 and proposal['removed'] == time(4, 25)
+        assert call({'command':'transcript.fillers', 'project':restored, 'transcripts':[filled]}) == proposal
+        cleaned = apply(restored, operations)
+        render(cleaned, (expected[0][:30*W*H*3]+expected[0][34*W*H*3:], expected[1][:30*1920*4]+expected[1][34*1920*4:]), 'fillers-removed')
+        # A 29.97 fps sequential timeline: consecutive fillers make one cut, padding stops at the
+        # neighbouring words, and a clip split twice gets two right-hand IDs.
+        hesitant = copy.deepcopy([early, late])
+        for i, text in ((44, 'um'), (45, 'Uh,'), (52, 'hmm.'), (60, 'er'), (70, 'Like')):
+            hesitant[0]['words'][i]['text'] = text
+        said = timeline_said(talk, {'talk':hesitant})
+        for padding in (F(0), F(1, 20)):
+            proposal = call({'command':'transcript.fillers', 'project':talk, 'transcripts':hesitant, 'padding':time(padding)})
+            cuts, operations = filler_cuts(talk, said, F(30000, 1001), padding=padding)
+            assert proposal['operations'] == operations and len(cuts) == 3 and proposal['fillers']['count'] == 3, (proposal, operations)
+        custom = call({'command':'transcript.fillers', 'project':talk, 'transcripts':hesitant, 'words':['like', 'ER']})
+        assert custom['operations'] == filler_cuts(talk, said, F(30000, 1001), words=('like', 'ER'))[1] and custom['fillers']['count'] == 2
+        assert {o.get('right_id') for o in proposal['operations']} >= {'c2-j1', 'c2-j2'}
+        assert next(t for t in catalog if t['name'] == 'cutbolt_transcript_fillers')['annotations']['readOnlyHint']
+        for p_, fields, code in ((talk, {'words':[]}, 'INVALID_ARGUMENT'), (talk, {'words':['...']}, 'INVALID_ARGUMENT'), (talk, {'padding':time(1, 2)}, 'INVALID_ARGUMENT'),
+                                 (talk, {'track_ids':['a']}, 'INVALID_ARGUMENT'), (restored, {'track_ids':['v']}, 'MISSING_TRACK')):
+            client.call('transcript.fillers', code, project=p_, transcripts=hesitant if p_ is talk else [filled], **fields)
+        passed.append('transcript.fillers_cut_exactly')
     finally:
         client.close()
 

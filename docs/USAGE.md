@@ -216,6 +216,10 @@ It then proposes a gain curve for every clip on `music_track_id` that overlaps s
 
 The result lists the speech runs with exact times, a summary per clip, and `clip_audio` `operations`. Check them with `session.preview`, apply them with `session.apply`, and listen back with `timeline.meters` `curve` or a preview range.
 
+## Removing filler words
+
+`transcript.fillers` proposes ripple deletions of um, uh and other listed words wherever the timeline speaks them, from transcripts of its sources, without cutting into the neighbouring words. See [TRANSCRIPTS.md](TRANSCRIPTS.md#removing-filler-words).
+
 ## Finding the beat
 
 `audio.beats` is read-only and analyses a music file for cutting to it. The file can be any format FFmpeg decodes, up to an hour (`start` and `duration` select a range). It reports the onsets, the tempo and a beat grid as exact file times. With `frame_rate`, it also gives each listed beat's nearest frame start.

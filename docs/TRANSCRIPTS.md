@@ -70,6 +70,14 @@ Overlapping or touching selections form one union. Separated intervals are delet
 
 The result reports requested and snapped boundaries, expansions, merged cuts, selected estimates, collateral word IDs and retained source/time fragments. A word crossing a clip edge has `binding_complete: false`; its intersecting portion is still checked for collateral cuts. Words fully outside the binding are reported separately. The projection describes this bound clip's words, not every occurrence of the source elsewhere in the project.
 
+## Removing filler words
+
+`transcript.fillers` is read-only. It takes a `project` and `transcripts` of its sources, as `timeline.outline` does, and finds `words` wherever the timeline speaks them, matched on letters and digits ignoring case and punctuation. The default list is um, uh, erm, er, ah, uhm, umm, hmm and mm. It then proposes ripple deletions that remove the fillers, built in four steps:
+1. **Runs.** Consecutive fillers form one cut.
+2. **Padding.** `padding` (default zero, at most 1/4 s) extends a cut on each side, but never into the neighbouring words.
+3. **Snapping.** Cut ends go to the nearest grid point, or away from a neighbouring word when the nearest would enter it. The grid is whole frames that, on placed tracks, are also whole 48 kHz samples. A filler shorter than one grid step between its neighbours is reported and left.
+4. **Rippling.** As for `audio.tighten`, cuts ripple every track, split clips and links get new right-hand IDs, and each cut is tried on a working copy. Refused cuts are listed with the reason, so the returned batch applies.
+
 ## Reading a cut against its transcripts
 
 `timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). `captions.draft` turns the same words into caption cues for the timeline. After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
