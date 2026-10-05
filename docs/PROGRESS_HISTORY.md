@@ -749,6 +749,9 @@ The scene, compositing, effect, spatial, temporal, geometry, graphics, caption, 
   - expressions: 25 nodes over 120 s are rejected;
   - tracking and stabilization read sources at 512 px or less.
 - **Encoding and verification** now take most of a scene's wall time: about 25 CPU-seconds each per 10 s of 1080p.
+## 5 October 2026: HyperFrames comparison and agent adoption strategy
+
+[HYPERFRAMES_STRATEGY.md](HYPERFRAMES_STRATEGY.md) compares Cutbolt with HyperFrames from public sources and recommends priorities for agent adoption. On Linux, MCP agents cannot run `job.start` (`UNSUPPORTED_PLATFORM`), so they cannot prepare media, compile scenes or export; the report makes cross-platform jobs and distribution the first priority. Documentation only: no code, criteria, evidence, weights, exclusions or denominators changed, and no points were awarded.
 
 ## 5 October 2026: fast overlay exports, stoppable queued commands, cached source checks
 

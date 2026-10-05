@@ -93,3 +93,7 @@ The user subsequently agreed to prepare a 60-90-second pixel-art explainer using
 ## v0.3 foundations update
 
 The ten bounded agent foundation checks now include a persisted Windows render queue and native MCP stdio. Verification covers typed tools, saved-session commands, the official Python client, render equivalence, progress, cancellation of queued/running work and descendants, and worker interruption. E04 basic raises editing coverage to 11/100; agent foundations are 10/10 separately. Automatic render retries, publication-crash reconciliation and cross-product benchmarks remain open. The proposed USP is still a hypothesis, not demonstrated superiority.
+
+## HyperFrames and agent adoption, 5 October 2026
+
+HyperFrames, an Apache-2.0 HTML-to-video framework for agents, had 57,081 GitHub stars and about 813,000 weekly npm downloads on that date. [HYPERFRAMES_STRATEGY.md](HYPERFRAMES_STRATEGY.md) compares it with Cutbolt and recommends positioning Cutbolt for editing real footage, with distribution and cross-platform job control as the first priorities. It is a recommendation, not a scope or points change.
