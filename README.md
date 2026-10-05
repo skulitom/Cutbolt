@@ -92,6 +92,8 @@ python tools/verify.py --thorough --decode-device 0  # evidence run
 .\target\debug\cutbolt.exe mcp
 # Or bind one workspace: roots default inside it and paths may be relative.
 .\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp
+# Or list a compact catalog (everyday tools plus cutbolt_run for the rest) to save model context.
+.\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp --tools core
 ```
 
 For a retained demo, use a new output directory outside the repository:

@@ -1,5 +1,17 @@
 # Progress history
 
+## 5 October 2026: compact MCP catalog
+
+The MCP catalog had grown to 83 tools and 255 KB of schemas, which a client loads into model context: about 60,000 tokens before any work. Most of that was repetition: every tool carries its own copy of shared definitions such as `Time`. `cutbolt mcp --tools core`, or `CUTBOLT_MCP_TOOLS=core`, now lists 31 everyday tools in full, plus `cutbolt_run`, which runs any other tool command by name with its usual arguments. That is 75 KB, 71% less, with every command still reachable. The full catalog remains the default.
+
+A unit test checks that every core name is a real tool command and that the compact catalog stays under 96 KiB. The agents fixture covers:
+- that the compact listing plus `cutbolt_run`'s commands equals the full catalog;
+- that a routed call returns what the direct call does;
+- that queued-only and unknown commands are refused;
+- the environment-variable form and an invalid `--tools` value.
+
+No scoring changed.
+
 ## 5 October 2026: static timeline check
 
 Several kinds of mistake only showed up in a render, or not at all: a two-frame flash clip, unlinked sound placed a few frames off its picture, a missing file. The read-only `timeline.check` now reports them without rendering:

@@ -357,6 +357,67 @@ const DOCUMENTS: [&str; 15] = [
     "transcript.correct",
 ];
 
+/// The everyday tools a compact catalog (`mcp --tools core`) lists in full; `cutbolt_run` runs
+/// every other tool command by name.
+pub(crate) const CORE: [&str; 31] = [
+    "capabilities",
+    "schema",
+    "files.list",
+    "project.create",
+    "session.create",
+    "session.get",
+    "session.apply",
+    "session.preview",
+    "session.undo",
+    "session.history",
+    "media.inspect",
+    "media.sheet",
+    "preview.frame",
+    "preview.sheet",
+    "preview.cuts",
+    "timeline.outline",
+    "timeline.check",
+    "timeline.meters",
+    "job.start",
+    "job.wait",
+    "job.status",
+    "transcript.assemble",
+    "transcript.fillers",
+    "captions.draft",
+    "audio.duck",
+    "audio.normalize",
+    "audio.tighten",
+    "audio.beats",
+    "scene.inspect",
+    "scene.still",
+    "export.inspect",
+];
+
+/// The compact catalog: the core tools, plus `cutbolt_run` for every other tool command.
+pub fn core_tools(workspace: Option<&Workspace>) -> Vec<Value> {
+    let all = tools(workspace);
+    let others: Vec<String> = crate::schema::commands()
+        .filter(|c| exposed(c) && !CORE.contains(c))
+        .map(str::to_owned)
+        .collect();
+    let mut listed: Vec<Value> = all
+        .into_iter()
+        .filter(|t| {
+            t["name"]
+                .as_str()
+                .and_then(|n| n.strip_prefix("cutbolt_"))
+                .is_some_and(|n| CORE.contains(&n.replace('_', ".").as_str()))
+        })
+        .collect();
+    listed.push(json!({"name":"cutbolt_run",
+        "description":format!("Run any other Cutbolt tool command by name, with its arguments exactly as for a direct call (cutbolt_schema {{\"name\": command}} returns their schema): {}. Long-running commands still go through job.start.", others.join(", ")),
+        "inputSchema":{"type":"object","additionalProperties":false,"required":["command"],"properties":{
+            "command":{"type":"string","enum":others,"description":"Command to run."},
+            "arguments":{"type":"object","description":"The command's arguments, without command; default none."}}},
+        "annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}}));
+    listed
+}
+
 /// Whether a command is offered as an MCP tool.
 pub(crate) fn exposed(command: &str) -> bool {
     !BLOCKING.contains(&command)
@@ -393,6 +454,8 @@ struct Server {
     initialized: bool,
     ready: bool,
     workspace: Option<Workspace>,
+    /// List the core tools and `cutbolt_run` instead of every tool.
+    core: bool,
     catalog: Option<Vec<Value>>,
     /// A validated tool call left by `route` for the caller to run.
     pending: Option<Call>,
@@ -517,7 +580,14 @@ fn preview_image(workspace: Option<&Workspace>, command: &str, result: &Value) -
 impl Server {
     fn catalog(&mut self) -> &[Value] {
         let workspace = self.workspace.as_ref();
-        self.catalog.get_or_insert_with(|| tools(workspace))
+        let core = self.core;
+        self.catalog.get_or_insert_with(|| {
+            if core {
+                core_tools(workspace)
+            } else {
+                tools(workspace)
+            }
+        })
     }
     /// Frame and contact-sheet previews also come back as a downscaled inline image, so a
     /// multimodal client sees the edit without opening the file.
@@ -537,6 +607,9 @@ impl Server {
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
         )
         .to_owned();
+        if self.core {
+            text.push_str(" This compact catalog lists the everyday tools; cutbolt_run runs any other command named here, with the same arguments.");
+        }
         if let Some(workspace) = &self.workspace {
             text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any object argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file, and save_as writes a large result to a new .json file instead of returning it.", workspace.root().display()));
         }
@@ -640,13 +713,38 @@ impl Server {
                         "Unknown tool; discover names with tools/list",
                     ));
                 }
+                // cutbolt_run names the command and nests its arguments.
+                let (command, arguments) = if name == "cutbolt_run" {
+                    let command = params["arguments"]["command"].as_str().unwrap_or_default();
+                    if !crate::schema::commands().any(|c| c == command) || !exposed(command) {
+                        return Some(rpc_error(
+                            id,
+                            -32602,
+                            &format!(
+                                "cutbolt_run cannot run {command:?}; its description lists the commands, and long-running ones go through job.start"
+                            ),
+                        ));
+                    }
+                    (
+                        command.to_owned(),
+                        params["arguments"]
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                    )
+                } else {
+                    (
+                        name.strip_prefix("cutbolt_").unwrap().replace('_', "."),
+                        params
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| json!({})),
+                    )
+                };
                 self.pending = Some(Call {
                     id,
-                    command: name.strip_prefix("cutbolt_").unwrap().replace('_', "."),
-                    arguments: params
-                        .get("arguments")
-                        .cloned()
-                        .unwrap_or_else(|| json!({})),
+                    command,
+                    arguments,
                     workspace: self.workspace.clone(),
                     progress_token: Some(&params["_meta"]["progressToken"])
                         .filter(|t| t.is_string() || t.is_i64())
@@ -693,9 +791,10 @@ fn send(output: &Mutex<io::Stdout>, message: &Value) -> io::Result<()> {
     output.flush()
 }
 
-pub fn serve(workspace: Option<Workspace>) -> Result<()> {
+pub fn serve(workspace: Option<Workspace>, core: bool) -> Result<()> {
     let mut server = Server {
         workspace,
+        core,
         ..Server::default()
     };
     let output = Arc::new(Mutex::new(io::stdout()));
@@ -782,6 +881,19 @@ mod tests {
             Value::Array(items) => items.iter().map(undescribed).sum(),
             _ => 0,
         }
+    }
+
+    /// The compact catalog names real tool commands only, and stays small.
+    #[test]
+    fn compact_catalog_lists_core_tools_and_run() {
+        let commands: Vec<&str> = crate::schema::commands().collect();
+        for command in CORE {
+            assert!(commands.contains(&command) && exposed(command), "{command}");
+        }
+        let compact = core_tools(None);
+        assert_eq!(compact.len(), CORE.len() + 1);
+        let bytes: usize = compact.iter().map(|t| t.to_string().len()).sum();
+        assert!(bytes <= 96 * 1024, "compact catalog uses {bytes} bytes");
     }
 
     /// Tool names replace dots with underscores, and calls map them back, so a command name with

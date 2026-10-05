@@ -21,8 +21,8 @@ TERMINAL = {"completed", "cancelled", "failed", "interrupted"}
 
 
 class Client:
-    def __init__(self, executable, env=None):
-        self.process = subprocess.Popen([str(executable), "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    def __init__(self, executable, env=None, args=("mcp",)):
+        self.process = subprocess.Popen([str(executable), *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         self.lines = queue.Queue()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -194,6 +194,25 @@ def run(executable, fixture):
               and "cutbolt_hdr_inspect" in names and "cutbolt_hdr_conform" not in names
               and "cutbolt_graphics_instantiate" in names
               and {"cutbolt_captions_"+operation for operation in ("import","inspect","apply","encode","export","scene")}.issubset(names))
+        # The compact catalog: the core tools in full, and cutbolt_run for every other tool command.
+        compact = Client(executable, args=("mcp", "--tools", "core"));clients.append(compact)
+        compact.initialize()
+        core = compact.rpc("tools/list")["result"]["tools"]
+        core_names = [tool["name"] for tool in core]
+        others = next(t for t in core if t["name"] == "cutbolt_run")["inputSchema"]["properties"]["command"]["enum"]
+        routed = {"cutbolt_" + c.replace(".", "_") for c in others}
+        check("mcp.compact_catalog", len(core_names) == len(set(core_names)) == 32 and not routed & set(core_names)
+              and (set(core_names) - {"cutbolt_run"}) | routed == set(names) and len(json.dumps(core)) * 3 < len(json.dumps(catalog)))
+        made = normal.call("project.create", id="compact", width=16, height=16, frame_rate={"num":25, "den":1})
+        routed_call = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"project.validate", "arguments":{"project":made}}})["result"]
+        assert routed_call["structuredContent"]["result"] == normal.call("project.validate", project=made) and not routed_call["isError"]
+        assert compact.call("files.list", input_root=str(root))["entries"] == normal.call("files.list", input_root=str(root))["entries"]
+        for command in ("export.run", "nope"):
+            assert compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":command, "arguments":{}}})["error"]["code"] == -32602
+        by_env = Client(executable, env={**os.environ, "CUTBOLT_MCP_TOOLS":"core"});clients.append(by_env)
+        by_env.initialize()
+        assert [t["name"] for t in by_env.rpc("tools/list")["result"]["tools"]] == core_names
+        assert subprocess.run([str(executable), "mcp", "--tools", "nope"], capture_output=True, timeout=30).returncode == 1
         (root / "listed").mkdir()
         (root / "listed" / "clip.MKV").write_bytes(b"x" * 3)
         listed = normal.call("files.list", input_root=str(root), recursive=True, extensions=["mkv"])

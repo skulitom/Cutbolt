@@ -84,6 +84,12 @@ Rust embedders can call `commands::handle` or the library modules. Background jo
 
 Launch `cutbolt.exe mcp`. The native adapter reads one JSON-RPC message per line and reserves stdout for protocol messages. EOF shuts down the adapter; submitted jobs continue. It negotiates `2025-11-25` or `2025-06-18`, supports initialize/initialized, ping, tools/list and tools/call, and advertises only tools. No resources, prompts, sampling, HTTP listener or MCP Tasks extension is advertised.
 
+Clients load the whole tool catalog into model context. `cutbolt.exe mcp --tools core`, or `CUTBOLT_MCP_TOOLS=core`, lists a compact catalog instead:
+- **Core tools.** Thirty-one everyday tools appear with their full schemas: sessions, files, media and preview images, outline, check and meters, jobs, paper edits, fillers, captions drafting, ducking, normalizing, tightening and beats, scene inspect and still, and export inspect.
+- **`cutbolt_run`.** One more tool runs every other tool command by name with its usual arguments: `{"command": "media.shots", "arguments": {...}}`. Its description lists those commands, and `cutbolt_schema` returns each one's arguments.
+
+Every command stays reachable, and results, inline images and progress are unchanged. The compact catalog is about 75 KB against 255 KB for the full one, and a unit test keeps it under 96 KiB. `--tools full`, the default, lists every tool.
+
 An example for clients accepting the common `mcpServers` configuration shape:
 
 ```json

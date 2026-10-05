@@ -6,7 +6,8 @@ use std::{
     path::PathBuf,
 };
 
-const USAGE: &str = "Usage: cutbolt [--workspace DIR] [capabilities | mcp | request.json]";
+const USAGE: &str =
+    "Usage: cutbolt [--workspace DIR] [capabilities | mcp [--tools core|full] | request.json]";
 
 /// An optional leading `--workspace DIR`, else CUTBOLT_WORKSPACE.
 fn workspace(args: &mut Vec<OsString>) -> Result<Option<Workspace>> {
@@ -81,8 +82,19 @@ fn main() {
         return;
     }
     let outcome = workspace(&mut args).and_then(|workspace| {
-        if args.len() == 1 && args[0] == "mcp" {
-            return cutbolt::mcp::serve(workspace).map(|()| None);
+        if args.first().is_some_and(|a| a == "mcp") {
+            // `--tools core` (or CUTBOLT_MCP_TOOLS=core) lists the everyday tools and cutbolt_run.
+            let choice = match args.len() {
+                1 => std::env::var("CUTBOLT_MCP_TOOLS").unwrap_or_else(|_| "full".into()),
+                3 if args[1] == "--tools" => args[2].to_string_lossy().into_owned(),
+                _ => return Err(error("INVALID_ARGUMENT", USAGE)),
+            };
+            let core = match choice.as_str() {
+                "core" => true,
+                "full" => false,
+                _ => return Err(error("INVALID_ARGUMENT", "--tools takes core or full")),
+            };
+            return cutbolt::mcp::serve(workspace, core).map(|()| None);
         }
         execute(&args, workspace.as_ref()).map(Some)
     });
