@@ -21,7 +21,7 @@ from PIL import Image
 from agents import Client
 from tracks import time, seconds, edit, placement, track
 from transcription_speech import generate
-from transcription_runtime import maximum, failures
+from transcription_runtime import maximum, failures, music_bed
 from transcription_guard import run as guard_checks
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -118,6 +118,8 @@ def run(root,setup):
         assert doc['recognition']['worker_sha256']==hashlib.sha256((ROOT/'tools/transcribe_worker.py').read_bytes()).hexdigest()
         assert doc['recognition']['supervisor_sha256']==hashlib.sha256((ROOT/'tools/transcribe_supervisor.py').read_bytes()).hexdigest()
         assert all(w['origin']=='estimated' and 'alignment' in w for w in words)
+        # Word text drops the recognizer's leading space; non-speech notes are reported apart.
+        assert all(w['text']==w['text'].strip() for w in words) and isinstance(result['non_speech'],list)
         match=correspondence(reference,words)
         assert not match['missing_reference_indices'] and not match['extra_word_indices'],match
         contextual_start=stats([abs(float(seconds(words[j]['start'])-origin)-reference[i]['start']) for i,j in match['pairs']])
@@ -147,10 +149,32 @@ def run(root,setup):
         for d in docs:
             assert d['source']=={'path':parent['path'].name,'identity':parent['identity'],'duration':time(parent['count'],48000)}
             call({'command':'transcript.inspect','document':d,'input_root':str(sources)})
+        # The gates of direct recognition: every word found, and the error rate only for passages;
+        # one substitution among six isolated words is already 17%.
         match=correspondence(speech[name]['reference'],[w for d in docs for w in d['words']])
-        assert match['rate']<=.10,(name,match)
+        assert not match['missing_reference_indices'] and not match['extra_word_indices'],(name,match)
+        assert name.startswith('isolated') or match['rate']<=.10,(name,match)
     preserved()
     passed.append('transcription.whole_file_documents_meet_and_bind_to_the_source')
+    # Known text: the passage is aligned instead of recognized. Words keep its spelling and
+    # punctuation, carry no recognizer confidence, and meet the recognition clock gates.
+    for name in ['pilot-en','pilot-el']:
+        fixture=speech[name];aligned=call({**requests[name],'id':name+'-text','text':fixture['text']})
+        doc=aligned['document'];words=doc['words'];origin=F(parents[name]['lead'],48000)
+        assert [w['text'] for w in words]==fixture['text'].split(),(name,words)
+        weights={'en':'model.safetensors','el':'pytorch_model.bin'}[fixture['language']]
+        assert doc['recognition']['profile']=='local-en-el-align-v1' and aligned['worker']['model_sha256'] is None
+        assert doc['recognition']['model']==doc['recognition']['alignment']['files'][weights]
+        assert all(w['origin']=='estimated' and w['probability_milli'] is None and 'alignment' in w for w in words)
+        assert aligned['worker']['recognition_blocks']==[{'start_sample':0,'end_sample':aligned['analysis']['sample_count'],
+            'end_policy':'given_text','first_word':0,'end_word':len(words)}]
+        match=correspondence(fixture['reference'],words)
+        onsets=stats([abs(float(seconds(words[j]['start'])-origin)-fixture['reference'][i]['start']) for i,j in match['pairs']])
+        assert not match['missing_reference_indices'] and not match['extra_word_indices'],(name,match)
+        assert onsets['maximum_ms']<=250 and onsets['p95_ms']<=150,(name,onsets)
+        quality.append({'fixture':name,'mode':'given_text','words':len(words),'contextual_start':onsets})
+        print(json.dumps(quality[-1]),flush=True);preserved()
+    passed.append('transcription.known_text_alignment_keeps_spelling_and_word_clocks')
 
     def decode(path,expected,label):
         nonlocal frames,samples
@@ -233,17 +257,19 @@ def run(root,setup):
         'stereo_sample_frames_compared':samples,'previews':previews,'rejected_cases':rejected},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     long_cases=maximum(root/'maximum input',speech,runtime,call,ff,correspondence,stats)
     passed.append('transcription.maximum_channels_resources_and_exact_clock')
+    bed_case=music_bed(root/'music bed',speech,runtime,call,ff,correspondence)
+    passed.append('transcription.music_bed_windows_cut_between_words')
     failure_cases=failures(root/'failures',requests['holdout-en'],runtime,call,preserved)
     passed.append('transcription.native_rejection_cancellation_and_owner_lifetime')
     guard=guard_checks(root/'guard',runtime)
     passed.append('transcription.supervisor_protocol_and_detached_descendants')
     preserved()
     report={'passed':passed,'quality':quality,'frames_compared':frames,'stereo_sample_frames_compared':samples,'previews':previews,'rejected_cases':rejected,
-        'maximum_inputs':long_cases,'native_failures':failure_cases,'supervisor':guard,
+        'maximum_inputs':long_cases,'music_bed':bed_case,'native_failures':failure_cases,'supervisor':guard,
         'gates':{'contextual_onset_max_ms':250,'contextual_onset_p95_ms':150,'isolated_end_max_ms':150,'isolated_end_p95_ms':100},
         'scope':'Pinned optional WSL/CUDA English/Greek profile, six short fixtures, full 120-second WAV parents, native movies, explicit contextual intervals and reviewed corrections; raw phonetic timing and arbitrary natural speech accuracy are not claimed'}
     (root/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','native_failures','supervisor']},indent=2))
+    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','native_failures','supervisor']},indent=2))
     return report
 
 

@@ -261,7 +261,7 @@ fn heard(documents: &[Document], identity: &Identity) -> Result<Vec<Said>> {
             let entry = Said {
                 start: word.start,
                 end: word.end,
-                text: word.text.clone(),
+                text: word.said().to_owned(),
             };
             let middle = entry.middle()?;
             if after.is_some_and(|t| middle.compare(t).is_ok_and(|o| o.is_lt()))
@@ -276,45 +276,94 @@ fn heard(documents: &[Document], identity: &Identity) -> Result<Vec<Said>> {
     Ok(said)
 }
 
+/// What recognition of the cut found: documents, sound it heard that is not speech (such as
+/// "[Music]") and windows that were digital silence.
+struct Recognized {
+    documents: Vec<Document>,
+    non_speech: Vec<Value>,
+    silent: Vec<Value>,
+}
+
 /// Recognize the cut's audio in overlapping windows with the local speech runtime.
 fn recognize(
     folder: &Path,
     samples: u64,
     identity: &Identity,
     settings: &Recognize,
-) -> Result<Vec<Document>> {
+) -> Result<Recognized> {
     let source = transcript::Source {
         path: PathBuf::from("audio.wav"),
         identity: identity.clone(),
         duration: Time::new(samples, 48_000)?,
     };
-    let mut documents = Vec::new();
+    let mut found = Recognized {
+        documents: Vec::new(),
+        non_speech: Vec::new(),
+        silent: Vec::new(),
+    };
+    // Each window's notes, kept between the middles of its overlaps with its neighbours.
+    let mut notes: Vec<(u64, u64, Vec<Value>)> = Vec::new();
     let mut start = 0;
+    let mut window = 0;
     while start < samples {
         let end = (start + WINDOW_SAMPLES).min(samples);
         if end - start < 1200 && start > 0 {
             break;
         }
-        let result = transcribe::run(&transcribe::Transcribe {
-            id: format!("heard-{}", documents.len()),
+        let (from, to) = (Time::new(start, 48_000)?, Time::new(end - start, 48_000)?);
+        match transcribe::run(&transcribe::Transcribe {
+            id: format!("heard-{window}"),
             source: source.clone(),
             format: transcribe::Format::StereoWav,
-            start: Time::new(start, 48_000)?,
-            duration: Time::new(end - start, 48_000)?,
+            start: from,
+            duration: to,
             channel: transcribe::Channel::Mean,
             language: settings.language,
             input_root: folder.to_path_buf(),
             scratch_root: std::env::temp_dir(),
             runtime: settings.runtime.clone(),
             timeout_seconds: 600,
-        })?;
-        documents.push(serde_json::from_value(result["document"].clone())?);
+            text: None,
+        }) {
+            Ok(result) => {
+                found
+                    .documents
+                    .push(serde_json::from_value(result["document"].clone())?);
+                let listed = result["non_speech"].as_array().cloned().unwrap_or_default();
+                notes.push((start, end, listed));
+            }
+            // A window of digital silence has nothing to recognize.
+            Err(e) if e.code == "NO_WORDS" => {
+                found
+                    .silent
+                    .push(json!({"start":from,"end":Time::new(end, 48_000)?}));
+            }
+            Err(e) => return Err(e),
+        }
+        window += 1;
         if end == samples {
             break;
         }
         start = end - OVERLAP_SAMPLES;
     }
-    Ok(documents)
+    for (i, (start, end, listed)) in notes.iter().enumerate() {
+        let low = match i.checked_sub(1).map(|j| &notes[j]) {
+            Some(previous) if previous.1 > *start => (start + previous.1) / 2,
+            _ => 0,
+        };
+        let high = match notes.get(i + 1) {
+            Some(next) if next.0 < *end => (next.0 + end) / 2,
+            _ => samples,
+        };
+        let (low, high) = (Time::new(low, 48_000)?, Time::new(high, 48_000)?);
+        for note in listed {
+            let at: Time = serde_json::from_value(note["start"].clone())?;
+            if !at.compare(low)?.is_lt() && at.compare(high)?.is_lt() {
+                found.non_speech.push(note.clone());
+            }
+        }
+    }
+    Ok(found)
 }
 
 /// Match expected and heard words in order: a heard word matches when its text is the same and
@@ -489,11 +538,15 @@ pub fn review(request: &Request) -> Result<Value> {
             "The file has no video or audio stream",
         ));
     }
-    if request.recognize.is_some() && !has_audio {
-        return Err(error(
-            "UNSUPPORTED_MEDIA",
-            "Recognition needs an audio stream",
-        ));
+    if let Some(settings) = request.recognize {
+        if !has_audio {
+            return Err(error(
+                "UNSUPPORTED_MEDIA",
+                "Recognition needs an audio stream",
+            ));
+        }
+        // A bad configuration fails here; a recognition failure later only loses the speech check.
+        transcribe::check_runtime(&settings.runtime)?;
     }
     let mut folder = create_folder(request.output, request.output_root)?;
     let dir = folder.path.clone();
@@ -702,8 +755,11 @@ pub fn review(request: &Request) -> Result<Value> {
         timing = json!({"project_id":project.id,"revision":project.revision,"duration":duration,"video":video_ok,"audio":audio_ok});
     }
 
-    // Speech: what the timeline should say against what the cut says.
+    // Speech: what the timeline should say against what the cut says. A recognition failure
+    // loses only this comparison; the picture and sound above are already reviewed.
     let mut speech = Value::Null;
+    let mut recognition = Value::Null;
+    let mut failure = None;
     let recognized = match (request.recognize, samples) {
         (Some(settings), Some(count)) => {
             let value = crate::identity::relative(&wav, &dir)?;
@@ -711,14 +767,45 @@ pub fn review(request: &Request) -> Result<Value> {
                 sha256: value["sha256"].as_str().unwrap_or_default().to_owned(),
                 bytes: value["bytes"].as_u64().unwrap_or_default(),
             };
-            let documents = recognize(&dir, count, &wav_identity, settings)?;
-            fs::write(
-                dir.join("transcripts.json"),
-                serde_json::to_vec_pretty(&json!({"transcripts":documents}))?,
-            )?;
-            files.push("audio.wav".to_owned());
-            files.push("transcripts.json".to_owned());
-            Some(heard(&documents, &wav_identity)?)
+            match recognize(&dir, count, &wav_identity, settings) {
+                Ok(found) => {
+                    fs::write(
+                        dir.join("transcripts.json"),
+                        serde_json::to_vec_pretty(
+                            &json!({"transcripts":found.documents,"non_speech":found.non_speech}),
+                        )?,
+                    )?;
+                    files.push("audio.wav".to_owned());
+                    files.push("transcripts.json".to_owned());
+                    if !found.non_speech.is_empty() {
+                        lines.push(format!(
+                            "heard besides speech: {}{}",
+                            found
+                                .non_speech
+                                .iter()
+                                .take(SUMMARY_RUNS)
+                                .map(|n| format!(
+                                    "{} {}",
+                                    n["text"].as_str().unwrap_or_default(),
+                                    clock.span(time_of(&n["start"]), time_of(&n["end"]))
+                                ))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            more(found.non_speech.len())
+                        ));
+                    }
+                    recognition = json!({"ok":true,"documents":found.documents.len(),
+                        "non_speech":{"count":found.non_speech.len(),
+                            "listed":found.non_speech.iter().take(MAX_LISTED).collect::<Vec<_>>()},
+                        "silent_windows":found.silent});
+                    Some(heard(&found.documents, &wav_identity)?)
+                }
+                Err(e) => {
+                    failure = Some(format!("recognition failed with {}: {}", e.code, e.message));
+                    recognition = json!({"ok":false,"error":e});
+                    None
+                }
+            }
         }
         _ => None,
     };
@@ -726,7 +813,7 @@ pub fn review(request: &Request) -> Result<Value> {
         let _ = fs::remove_file(&wav);
     }
     let heard_words = heard_given.or(recognized);
-    if script.is_some() || heard_words.is_some() {
+    if script.is_some() || heard_words.is_some() || !recognition.is_null() {
         let (said, cut, unused) = match script {
             Some((said, cut, unused)) => (Some(said), cut, unused),
             None => (None, Vec::new(), Vec::new()),
@@ -767,10 +854,16 @@ pub fn review(request: &Request) -> Result<Value> {
                 section["comparison"] = comparison;
             }
             (Some(said), None) => {
-                lines.push(format!(
-                    "speech: {} words expected; not compared (give heard transcripts or a recognition runtime)",
-                    said.len()
-                ));
+                lines.push(match &failure {
+                    Some(failure) => format!(
+                        "speech: {} words expected; not compared because {failure}",
+                        said.len()
+                    ),
+                    None => format!(
+                        "speech: {} words expected; not compared (give heard transcripts or a recognition runtime)",
+                        said.len()
+                    ),
+                });
                 section["expected_words"] = json!(said.len());
             }
             (None, Some(heard_words)) => {
@@ -780,7 +873,14 @@ pub fn review(request: &Request) -> Result<Value> {
                 ));
                 section["heard_words"] = json!(heard_words.len());
             }
-            (None, None) => {}
+            (None, None) => {
+                if let Some(failure) = &failure {
+                    lines.push(format!("speech: {failure}"));
+                }
+            }
+        }
+        if !recognition.is_null() {
+            section["recognition"] = recognition;
         }
         if !cut.is_empty() {
             lines.push(format!(

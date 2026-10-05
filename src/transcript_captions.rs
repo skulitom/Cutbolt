@@ -45,6 +45,12 @@ fn chars(text: &str) -> usize {
     text.chars().count()
 }
 
+/// The words of a cue with whitespace collapsed: one space between words and none around them,
+/// whatever spacing the transcript text carries.
+fn words_of<'a>(said: impl Iterator<Item = &'a Said>) -> Vec<&'a str> {
+    said.flat_map(|w| w.text.split_whitespace()).collect()
+}
+
 /// Whether a word ends a sentence: its last character, after closing quotes and brackets, is
 /// `.`, `?`, `!` or `…`.
 fn sentence_end(text: &str) -> bool {
@@ -183,16 +189,12 @@ pub fn draft(request: &Request) -> Result<Value> {
     for word in said {
         if let Some(current) = groups.last_mut() {
             let last = current.last().expect("nonempty group");
-            let texts: Vec<&str> = current
-                .iter()
-                .map(|w| w.text.as_str())
-                .chain([word.text.as_str()])
-                .collect();
+            let texts = words_of(current.iter().copied().chain([word]));
             let continues = word
                 .start
                 .minus(last.end)
                 .map_or(true, |gap| gap.compare(rules.pause).expect("valid").is_lt())
-                && !sentence_end(&last.text)
+                && !sentence_end(last.text.trim_end())
                 && !word
                     .end
                     .minus(current[0].start)?
@@ -246,7 +248,7 @@ pub fn draft(request: &Request) -> Result<Value> {
         if !end_ms.compare(start)?.is_gt() {
             end_ms = start.plus(Time::new(1, 1000)?)?;
         }
-        let texts: Vec<&str> = group.iter().map(|w| w.text.as_str()).collect();
+        let texts = words_of(group.iter().copied());
         cues.push(Cue {
             id: format!("c{}", i + 1),
             start,

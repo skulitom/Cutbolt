@@ -32,6 +32,10 @@ const MODEL_HASH: &str = "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf
 const MODEL_BYTES: u64 = 483617219;
 const PROTOCOL: &str = "cutbolt-transcription-v1";
 const PROFILE: &str = "local-en-el-context-v1";
+/// Known text aligned to the audio instead of recognized.
+const ALIGN_PROFILE: &str = "local-en-el-align-v1";
+/// Bytes of known text one request may align.
+const MAX_TEXT: usize = 32 * 1024;
 
 /// Trusted local speech runtime configuration; nothing is installed or downloaded.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -98,9 +102,81 @@ pub struct Transcribe {
     pub runtime: Runtime,
     /// Analysis deadline in seconds, 1-600.
     pub timeout_seconds: u32,
+    /// Known spoken text, such as a narration script: its words are aligned to the audio
+    /// instead of recognized, so names and spelling stay exactly as given. Words split at
+    /// whitespace; write numbers out in words. At most 32 KiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 fn invalid(message: &str) -> crate::Error {
     error("INVALID_TRANSCRIPTION", message)
+}
+/// The words of known text: whitespace-separated, with a token of only punctuation (such as a
+/// dash between spaces) joined to the word before it, or to the next word at the start.
+pub(crate) fn text_words(text: &str) -> Result<Vec<String>> {
+    if text.len() > MAX_TEXT {
+        return Err(invalid("Text to align is at most 32 KiB"));
+    }
+    let mut words: Vec<String> = Vec::new();
+    let mut leading = String::new();
+    for token in text.split_whitespace() {
+        if token.chars().any(char::is_control) {
+            return Err(invalid("Text to align has control characters"));
+        }
+        if !token.chars().any(char::is_alphanumeric) {
+            match words.last_mut() {
+                Some(last) => last.push_str(token),
+                None => leading.push_str(token),
+            }
+            continue;
+        }
+        words.push(format!("{}{token}", std::mem::take(&mut leading)));
+    }
+    if words.is_empty()
+        || words.len() > transcript::MAX_WORDS
+        || words.iter().any(|w| w.len() > 512)
+    {
+        return Err(invalid(
+            "Text to align needs 1-2048 words with a letter or digit, each at most 512 bytes",
+        ));
+    }
+    Ok(words)
+}
+/// Cheap checks of a runtime configuration, before any media work.
+pub(crate) fn check_runtime(runtime: &Runtime) -> Result<()> {
+    if !cfg!(windows) {
+        return Err(error(
+            "UNSUPPORTED_PLATFORM",
+            "This optional speech profile uses Windows with explicitly configured WSL/CUDA",
+        ));
+    }
+    if !runtime.model.is_absolute()
+        || !runtime.alignment_root.is_absolute()
+        || !runtime.model.is_file()
+        || !runtime.alignment_root.is_dir()
+    {
+        return Err(error(
+            "MODEL_UNAVAILABLE",
+            "Explicit local speech model and alignment directory are required",
+        ));
+    }
+    if runtime.distribution.is_empty()
+        || runtime.distribution.len() > 64
+        || !runtime
+            .distribution
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+        || !posix(&runtime.python)
+        || runtime.python_paths.is_empty()
+        || runtime.python_paths.len() > 8
+        || runtime.python_paths.iter().any(|p| !posix(p))
+        || !(1..=8).contains(&runtime.threads)
+    {
+        return Err(invalid(
+            "Explicit bounded WSL distribution, absolute Python/package paths and 1..8 threads required",
+        ));
+    }
+    Ok(())
 }
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -360,12 +436,21 @@ struct Word {
     text: String,
     start_sample: u64,
     end_sample: u64,
-    probability_milli: u16,
+    probability_milli: Option<u16>,
     ctc_start_sample: u64,
     ctc_end_sample: u64,
     acoustic_start_sample: u64,
     acoustic_end_sample: u64,
     alignment_score_milli: u16,
+}
+/// Recognized text that is not speech, such as "[Music]", on the analysis clock.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Note {
+    text: String,
+    kind: String,
+    start_sample: u64,
+    end_sample: u64,
 }
 pub fn run(request: &Transcribe) -> Result<Value> {
     run_controlled(request, &media::Uncontrolled)
@@ -392,32 +477,8 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         ));
     }
     let runtime = &request.runtime;
-    if !runtime.model.is_absolute()
-        || !runtime.alignment_root.is_absolute()
-        || !runtime.model.is_file()
-        || !runtime.alignment_root.is_dir()
-    {
-        return Err(error(
-            "MODEL_UNAVAILABLE",
-            "Explicit local speech model and alignment directory are required",
-        ));
-    }
-    if runtime.distribution.is_empty()
-        || runtime.distribution.len() > 64
-        || !runtime
-            .distribution
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
-        || !posix(&runtime.python)
-        || runtime.python_paths.is_empty()
-        || runtime.python_paths.len() > 8
-        || runtime.python_paths.iter().any(|p| !posix(p))
-        || !(1..=8).contains(&runtime.threads)
-    {
-        return Err(invalid(
-            "Explicit bounded WSL distribution, absolute Python/package paths and 1..8 threads required",
-        ));
-    }
+    check_runtime(runtime)?;
+    let given = request.text.as_deref().map(text_words).transpose()?;
     control.phase("transcription.source")?;
     let source = source_file(request, control)?;
     let actual = match request.format {
@@ -432,15 +493,21 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
             "Declared transcription duration differs from actual source samples",
         ));
     }
-    if fs::metadata(&runtime.model)?.len() != MODEL_BYTES
-        || media::file_hash_controlled(&runtime.model, control)? != MODEL_HASH
-    {
-        return Err(error(
-            "MODEL_CHANGED",
-            "Selected speech profile requires its pinned local model",
-        ));
-    }
-    let model_path = linux_path(&runtime.model)?;
+    // Aligning known text needs no recognition model.
+    let model_path = match given {
+        Some(_) => None,
+        None => {
+            if fs::metadata(&runtime.model)?.len() != MODEL_BYTES
+                || media::file_hash_controlled(&runtime.model, control)? != MODEL_HASH
+            {
+                return Err(error(
+                    "MODEL_CHANGED",
+                    "Selected speech profile requires its pinned local model",
+                ));
+            }
+            Some(linux_path(&runtime.model)?)
+        }
+    };
     let alignment_root = linux_path(&runtime.alignment_root)?;
     let scratch = Scratch::new(&request.scratch_root)?;
     let root = linux_path(&scratch.0)?;
@@ -520,7 +587,7 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
     let worker_hash = hash(WORKER.as_bytes());
     let payload = json!({"protocol":PROTOCOL,"source_path":format!("{root}/analysis.wav"),"source_sha256":analysis_hash,
         "source_bytes":pcm.len()+44,"sample_count":count,"model_path":model_path,"alignment_root":alignment_root,
-        "language":request.language,"threads":runtime.threads});
+        "language":request.language,"threads":runtime.threads,"text":given});
     let args = vec![
         "--distribution".into(),
         runtime.distribution.clone(),
@@ -543,11 +610,15 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         request.timeout_seconds,
         control,
     )?;
+    let (profile, model_hash) = match given {
+        Some(_) => (ALIGN_PROFILE, Value::Null),
+        None => (PROFILE, json!(MODEL_HASH)),
+    };
     if result["protocol"] != PROTOCOL
-        || result["profile"] != PROFILE
+        || result["profile"] != profile
         || result["source_sha256"] != analysis_hash
         || result["sample_count"] != count
-        || result["model_sha256"] != MODEL_HASH
+        || result["model_sha256"] != model_hash
         || result["language"] != json!(request.language)
         || result["network_interfaces"] != json!(["lo"])
         || result["python_network_attempts"] != 0
@@ -560,7 +631,12 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         ));
     }
     let raw: Vec<Word> = serde_json::from_value(result["words"].clone())?;
-    if raw.is_empty() || raw.len() > transcript::MAX_WORDS {
+    // Sound without speech gives no words; known text comes back word for word.
+    if raw.len() > transcript::MAX_WORDS
+        || given.as_ref().is_some_and(|given| {
+            given.len() != raw.len() || given.iter().zip(&raw).any(|(a, b)| *a != b.text)
+        })
+    {
         return Err(error(
             "INVALID_RESULT",
             "Speech returned an invalid word count",
@@ -580,11 +656,11 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         .map(|word| {
             Ok(transcript::Word {
                 id: word.id,
-                text: word.text,
+                text: word.text.trim().to_owned(),
                 start: source_time(word.start_sample)?,
                 end: source_time(word.end_sample)?,
                 origin: transcript::Origin::Estimated,
-                probability_milli: Some(word.probability_milli),
+                probability_milli: word.probability_milli,
                 alignment: Some(transcript::WordAlignment {
                     ctc_start: source_time(word.ctc_start_sample)?,
                     ctc_end: source_time(word.ctc_end_sample)?,
@@ -595,13 +671,42 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let files: BTreeMap<String, (u64, String)> =
+    let notes: Vec<Note> = serde_json::from_value(result["non_speech"].clone())?;
+    let non_speech = notes
+        .into_iter()
+        .map(|note| {
+            if note.start_sample > note.end_sample || note.text.len() > 4096 {
+                return Err(error(
+                    "INVALID_RESULT",
+                    "Speech returned an invalid non-speech note",
+                ));
+            }
+            Ok(json!({"text":note.text,"kind":note.kind,
+                "start":source_time(note.start_sample)?,"end":source_time(note.end_sample)?}))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let reported: BTreeMap<String, (u64, String)> =
         serde_json::from_value(result["alignment_files"].clone())?;
+    let files: BTreeMap<String, Identity> = reported
+        .into_iter()
+        .map(|(name, (bytes, sha256))| (name, Identity { bytes, sha256 }))
+        .collect();
+    // Aligned text records the acoustic model it was aligned with.
+    let model = match given {
+        Some(_) => files
+            .get(match request.language {
+                transcript::Language::En => "model.safetensors",
+                transcript::Language::El => "pytorch_model.bin",
+            })
+            .cloned()
+            .ok_or_else(|| error("INVALID_RESULT", "Alignment weights are not reported"))?,
+        None => Identity {
+            bytes: MODEL_BYTES,
+            sha256: MODEL_HASH.into(),
+        },
+    };
     let alignment = transcript::AlignmentProfile {
-        files: files
-            .into_iter()
-            .map(|(name, (bytes, sha256))| (name, Identity { bytes, sha256 }))
-            .collect(),
+        files,
         leading_context: Time::new(2, 25)?,
         trailing_context: Time::new(1, 50)?,
     };
@@ -615,11 +720,8 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         range_duration: request.duration,
         language: request.language,
         recognition: transcript::Recognition {
-            profile: PROFILE.into(),
-            model: Identity {
-                bytes: MODEL_BYTES,
-                sha256: MODEL_HASH.into(),
-            },
+            profile: profile.into(),
+            model,
             worker_sha256: worker_hash,
             supervisor_sha256: Some(hash(SUPERVISOR.as_bytes())),
             analysis_sha256: analysis_hash.clone(),
@@ -633,8 +735,42 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
     control.check()?;
     Ok(
         json!({"document":document,"fingerprint":document.fingerprint()?,"applied":false,"review_required":true,
-        "analysis":{"sha256":analysis_hash,"source_start":request.start,"source_duration":request.duration,"sample_rate":16000,"sample_count":count,"channel":request.channel,
+        "non_speech":non_speech,"analysis":{"sha256":analysis_hash,"source_start":request.start,"source_duration":request.duration,"sample_rate":16000,"sample_count":count,"channel":request.channel,
             "resampler":"swr_filter32_phase10_no_dither","last_sample_clamp_48000":count*3-length,
             "partial_tail_padding_16000":partial_padding},"worker":result}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_text_splits_into_words_with_punctuation_attached() {
+        assert_eq!(
+            text_words("  A tiny character —  stands still,\nnow ... it hops. ").unwrap(),
+            [
+                "A",
+                "tiny",
+                "character—",
+                "stands",
+                "still,",
+                "now...",
+                "it",
+                "hops."
+            ]
+        );
+        assert_eq!(text_words("“ Hello world").unwrap(), ["“Hello", "world"]);
+        assert_eq!(text_words("Cutbolt 2026").unwrap(), ["Cutbolt", "2026"]);
+        for bad in ["", "  \n ", "- ... !", "a\u{7}b"] {
+            assert_eq!(
+                text_words(bad).unwrap_err().code,
+                "INVALID_TRANSCRIPTION",
+                "{bad:?}"
+            );
+        }
+        assert!(text_words(&"x".repeat(513)).is_err());
+        assert!(text_words(&"a ".repeat(2049)).is_err());
+        assert_eq!(text_words(&"a ".repeat(2048)).unwrap().len(), 2048);
+    }
 }

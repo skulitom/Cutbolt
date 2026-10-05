@@ -29,7 +29,7 @@ Words join the current cue in time order, unless one of four things starts a new
 - the cue would last longer than `max_duration` (default 6 s) from its first word's start to the word's end;
 - its words would need more than `lines` (default 2) lines of `line_chars` (default 42) characters, filling each line in turn. A single longer word gets a line to itself.
 
-Each cue keeps that greedy line count. Among the ways to break its words into that many lines, it takes the one whose longest line is shortest; ties go to the shortest first line, then the shortest second.
+Each cue keeps that greedy line count. Among the ways to break its words into that many lines, it takes the one whose longest line is shortest; ties go to the shortest first line, then the shortest second. Words are joined by single spaces with none at line ends, whatever whitespace the transcript keeps around them (older recognized documents start each word with a space).
 
 A cue starts at its first word's start, rounded down to the millisecond. It lasts at least `min_duration` (default 1 s), but never past the next cue's start, and ends no earlier than its last word, rounded up to the millisecond. Times are then exact milliseconds, so the draft exports to SRT or WebVTT unchanged. Every cue uses the one style `default` (`color`, default white) and `align` (default `center`). The document's overlap policy is `reject` unless overlapping speech made two cues overlap.
 

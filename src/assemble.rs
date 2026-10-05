@@ -144,7 +144,7 @@ pub fn propose(request: &Request) -> Result<Value> {
         };
         let words: Vec<&str> = document.words[first..=last]
             .iter()
-            .map(|w| w.text.as_str())
+            .map(|w| w.said())
             .collect();
         let text = if words.len() <= 12 {
             words.join(" ")

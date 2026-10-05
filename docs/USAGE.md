@@ -323,7 +323,9 @@ Over MCP, the sheets come back as inline images.
 - **Expected speech.** With the `project` and `transcripts` of its sources (as for `timeline.outline`), the review lists what the cut should say. These are the whole words inside audio clips on enabled tracks, moved to timeline time; muted clips and child sequences are skipped. Words a clip edge cuts through are listed separately as `cut_words`.
 - **Heard speech.** What the cut actually says comes from one of two sources:
   - `heard`: transcripts of the reviewed file itself, whose source identity must be the file's.
-  - `runtime` and `language`: the local speech runtime transcribes the cut's audio in 120 s windows that overlap by 5 s. `audio.wav` and `transcripts.json` stay in the folder, so the documents remain bound to an existing file.
+  - `runtime` and `language`: the local speech runtime transcribes the cut's audio in 120 s windows that overlap by 5 s. `audio.wav` and `transcripts.json` stay in the folder, so the documents remain bound to an existing file. Sound the recognizer writes down that is not speech, such as `[Music]` under a narration, is not compared; it is listed in `speech.recognition.non_speech` and on a `heard besides speech` summary line.
+
+  A missing model or an invalid runtime is rejected before any decoding. If recognition itself fails, the review still completes with its picture, sound and timing sections. The speech section then reports `recognition.ok: false` with the error, and the summary says why the words were not compared.
 
   Overlapping transcripts split their overlap at its middle.
 - **Comparison.** The two lists are matched in time order. A heard word matches the next expected word when both have the same letters and digits, ignoring case and punctuation, and their middles are at most `tolerance` apart (default 0.5 s). Unmatched words between two matches form one difference, reported as missing, extra or changed words with their times. The result gives the match ratio and the first 50 differences.

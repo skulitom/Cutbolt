@@ -303,6 +303,9 @@ pub enum Request {
         /// Deadline per 120 s window in seconds, 1-600; default 600.
         #[serde(default)]
         timeout_seconds: Option<u32>,
+        /// Known spoken text, such as the script of a synthesized narration: its words are aligned to the audio instead of recognized, so names and spelling stay as written and nothing is misheard. The range must be at most 120 s. Words split at whitespace; write numbers out in words. At most 32 KiB.
+        #[serde(default)]
+        text: Option<String>,
     },
     #[serde(rename = "media.sheet")]
     MediaSheet {
@@ -1372,6 +1375,7 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             duration,
             timeout_seconds,
+            text,
         } => crate::media_transcribe::run(&crate::media_transcribe::Request {
             path: &path,
             input_root: &input_root,
@@ -1384,6 +1388,7 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             duration,
             timeout_seconds: timeout_seconds.unwrap_or(600),
+            text: text.as_deref(),
         }),
         Request::MediaPrepare {
             path,

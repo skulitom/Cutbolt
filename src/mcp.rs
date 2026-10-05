@@ -232,7 +232,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
         }
         "job.wait" => {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
@@ -268,7 +268,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Bring the whole mix to a loudness target such as -14 LKFS: measure the timeline's integrated loudness and sample peak, then propose clip_audio operations that scale every audio clip's level (and gain curve) by one factor, stopping at a peak ceiling (default -1 dBFS) or the clip gain range. The proposed levels are measured before they are returned (two to four renders of the mix), so result is what applying them gives. Read-only; apply the operations with session.apply."
         }
         "media.transcribe" => {
-            "Recognize a whole source file's speech with the local speech runtime, any length and any decodable format: its audio is extracted losslessly, recognized in overlapping 120 s windows, stitched at word boundaries into non-overlapping transcript documents bound to the source file, and saved as one JSON file. Run it with job.start."
+            "Recognize a whole source file's speech with the local speech runtime, any length and any decodable format: its audio is extracted losslessly, recognized in overlapping 120 s windows, stitched at word boundaries into non-overlapping transcript documents bound to the source file, and saved as one JSON file. Sound that is not speech, such as [Music], is reported apart from the words. Given text (the script of a synthesized narration, up to 120 s), its words are aligned to the audio instead of recognized, keeping names and spelling exact. Run it with job.start."
         }
         "media.prepare" => {
             "Turn any decodable video file, such as a phone or camera MP4, into a timeline asset in one step: a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. With paths, several files are prepared in one job and the result includes their media.add operations. Run it with job.start; the result's asset goes to media.add."
@@ -283,7 +283,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Write a contact sheet of exact timeline frames, laid out on a grid, to an unused PNG, and return it as an inline image so the edit can be seen. Uses the saved proxy selection."
         }
         "transcript.transcribe" => {
-            "Run optional local speech recognition through the explicitly configured external runtime and return a content-bound transcript document. Blocking CLI/library command."
+            "Run optional local speech recognition through the explicitly configured external runtime and return a content-bound transcript document; with text, align those known words instead. Blocking CLI/library command."
         }
         "audio.record" => {
             "Capture an explicitly selected local input to a new 48 kHz stereo PCM16 WAV for the requested duration. Blocking CLI/library command."

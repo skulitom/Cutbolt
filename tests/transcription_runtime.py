@@ -5,6 +5,7 @@ import copy
 from fractions import Fraction as F
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import time as clock
@@ -31,6 +32,17 @@ for count in [400,480000,480001,1920000]:
   assert all(0<b-a<=240000 for a,b,_ in result)
   assert all(p=='hard_12s' for _,_,p in result[:-1])
  out.append({'sample_count':count,'blocks':result})
+worker=runpy.run_path(sys.argv[1]);speech,gap=worker['speech'],worker['word_gap']
+w=lambda t,a,b,p=.9:{'word':t,'start':a,'end':b,'probability':p}
+# Annotations and music symbols are notes, not words; a glued "-" joins its word.
+kept,notes=speech([w(' A',0,.2),w(' f',.3,.4,.4),w('-',.4,.4,.3),w(' [Music]',1,2),w(' (upbeat',2,2.5),w(' music)',2.5,3),
+ w(' \\u266a',3,3.5),w(' ...',3.6,3.7),w(' (and',4,4.2),w(' then',4.2,4.4)],0,80000)
+assert [(k['word'],k['probability']) for k in kept]==[('A',.9),('f-',.3),('(and',.9),('then',.9)],kept
+assert [(n['kind'],n['text'],n['start_sample'],n['end_sample']) for n in notes]==[('annotation','[Music]',16000,32000),
+ ('annotation','(upbeat music)',32000,48000),('music','\\u266a',48000,56000),('symbols','...',57600,59200)],notes
+# Without a quiet gap the cut moves to the widest gap between recognized words in 8-14 s.
+assert gap([w(' a',7.,9.),w(' b',9.6,13.),w(' c',13.,14.)],0)==(144000+153600)//2
+assert gap([],0)==(128000+224000)//2 and gap([w(' a',7.,14.)],0) is None
 print(json.dumps(out))
 """,linux(ROOT/'tools/transcribe_worker.py'),json.dumps(runtime['python_paths']))
     (root/'segmentation.json').write_text(json.dumps(segmentation,indent=2)+'\n',encoding='utf-8')
@@ -83,6 +95,42 @@ print(json.dumps(out))
             'full_source_clock_samples':count,'source_preserved':True,'scratch_removed':True}
         records.append(record);print(json.dumps({k:v for k,v in record.items() if k!='word_errors'}),flush=True)
     return records
+
+
+def music_bed(root,speech,runtime,call,ff,correspondence):
+    """Isolated words over a steady two-tone bed: no RMS-quiet gap anywhere, so recognition
+    windows must end between recognized words rather than at a fixed 12 s cut."""
+    root.mkdir();fixture=speech['isolated-en']
+    up=ff(['-i',str(fixture['path']),'-af','aresample=48000:resampler=swr:dither_method=none:filter_size=32:phase_shift=10','-f','s16le','-'])
+    block=array('h',up);count=60*48000;repeats=count//len(block)
+    mono=block*repeats;mono.extend([0]*(count-len(mono)))
+    step=[2*math.pi*f/48000 for f in (110,165)];pcm=array('h')
+    for n,v in enumerate(mono):
+        x=max(-32768,min(32767,v+round(980*math.sin(step[0]*n)+980*math.sin(step[1]*n))));pcm.extend((x,x))
+    source=root/'speech over bed.wav'
+    with wave.open(str(source),'wb') as stream:
+        stream.setparams((2,2,48000,count,'NONE','not compressed'));stream.writeframes(pcm.tobytes())
+    identity={'bytes':source.stat().st_size,'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}
+    scratch=root/'scratch';scratch.mkdir()
+    local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots']['en']
+    request={'command':'transcript.transcribe','id':'bed','source':{'path':source.name,'identity':identity,'duration':time(60)},
+        'format':{'type':'stereo_wav'},'start':time(0),'duration':time(60),'channel':'mean','language':'en',
+        'input_root':str(root),'scratch_root':str(scratch),'runtime':local,'timeout_seconds':300}
+    started=clock.monotonic();result=call(request,timeout=340)
+    (root/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    words=result['document']['words'];windows=result['worker']['recognition_blocks'];period=len(block)/48000
+    spoken=[(w['start']+i*period,w['end']+i*period) for i in range(repeats) for w in fixture['reference']]
+    reference=[{'text':w['text'],'start':w['start']+i*period} for i in range(repeats) for w in fixture['reference']]
+    assert len(windows)>=4 and all(w['end_policy']=='word_gap' for w in windows[:-1]) and windows[-1]['end_policy']=='source_end',windows
+    cuts=[w['end_sample']/16000 for w in windows[:-1]]
+    assert not [(c,a,b) for c in cuts for a,b in spoken if a<c<b],(cuts,spoken)
+    match=correspondence(reference,words)
+    assert match['rate']<=.10,match
+    assert not list(scratch.iterdir()) and hashlib.sha256(source.read_bytes()).hexdigest()==identity['sha256']
+    record={'seconds':clock.monotonic()-started,'words':len(words),'reference_words':len(reference),'word_error_rate':match['rate'],
+        'recognition_blocks':windows,'source_preserved':True,'scratch_removed':True}
+    print(json.dumps({k:v for k,v in record.items() if k!='recognition_blocks'}),flush=True)
+    return record
 
 
 CANCEL_HELPER=r'''use cutbolt::{media::Control, transcribe::{Transcribe,run_controlled}, error};

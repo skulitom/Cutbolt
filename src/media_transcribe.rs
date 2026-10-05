@@ -1,6 +1,7 @@
 //! Whole-file speech recognition. A source's audio is extracted losslessly, recognized in
 //! overlapping windows within the 120 s transcription limit, stitched at word boundaries into
 //! documents that do not overlap, bound to the source file itself and saved as one JSON file.
+//! Given the spoken text instead, up to 120 s of audio is aligned to it in one document.
 use crate::{
     Result, error, media,
     registry::Identity,
@@ -34,6 +35,8 @@ pub struct Request<'a> {
     pub start: Option<Time>,
     pub duration: Option<Time>,
     pub timeout_seconds: u32,
+    /// Known spoken text to align instead of recognizing.
+    pub text: Option<&'a str>,
 }
 
 /// Owned scratch folder; removed afterwards.
@@ -116,6 +119,9 @@ pub fn run(request: &Request) -> Result<Value> {
             "timeout_seconds must be 1-600 per window",
         ));
     }
+    if let Some(text) = request.text {
+        transcribe::text_words(text)?;
+    }
     let path = media::allowed_file(request.path, request.input_root)?;
     let output = crate::render::destination_extension(request.output, request.output_root, "json")?;
     if output.try_exists()? {
@@ -197,9 +203,20 @@ pub fn run(request: &Request) -> Result<Value> {
     };
     let duration = Time::new(total, 48_000)?;
     let plan = windows(first, last);
+    if request.text.is_some() && plan.len() > 1 {
+        return Err(error(
+            "INVALID_RANGE",
+            format!(
+                "Text is aligned to at most 120 s of audio, and the range is {} s; give start and duration for the part the text covers",
+                Time::new(last - first, 48_000)?
+            ),
+        ));
+    }
     let mut documents = Vec::with_capacity(plan.len());
+    let mut notes = Vec::new();
+    let mut silent = Vec::new();
     for (index, &(from, to)) in plan.iter().enumerate() {
-        let result = transcribe::run(&transcribe::Transcribe {
+        let attempt = transcribe::run(&transcribe::Transcribe {
             id: format!("{}-{}", request.id, index + 1),
             source: Source {
                 path: PathBuf::from("audio.wav"),
@@ -215,7 +232,20 @@ pub fn run(request: &Request) -> Result<Value> {
             scratch_root: scratch.0.clone(),
             runtime: request.runtime.clone(),
             timeout_seconds: request.timeout_seconds,
-        })?;
+            text: request.text.map(str::to_owned),
+        });
+        let result = match attempt {
+            Ok(result) => result,
+            // Digital silence has nothing to recognize; other windows still do.
+            Err(e) if e.code == "NO_WORDS" && request.text.is_none() && plan.len() > 1 => {
+                silent.push(json!({"start":Time::new(from, 48_000)?,"end":Time::new(to, 48_000)?}));
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        if let Some(listed) = result["non_speech"].as_array() {
+            notes.extend(listed.iter().cloned());
+        }
         let mut document: Document = serde_json::from_value(result["document"].clone())?;
         // The extracted audio is the source's own audio, sample for sample.
         document.source = Source {
@@ -225,15 +255,36 @@ pub fn run(request: &Request) -> Result<Value> {
         };
         documents.push(document);
     }
+    if documents.is_empty() {
+        return Err(error(
+            "NO_WORDS",
+            "The audio is digital silence throughout the range",
+        ));
+    }
     let documents = stitch(documents)?;
     let words: usize = documents.iter().map(|d| d.words.len()).sum();
-    let saved = json!({"transcripts":documents});
+    // Overlapping windows can both hear one sound; keep each note inside one document's range.
+    let mut non_speech = Vec::new();
+    for note in notes {
+        let at: Time = serde_json::from_value(note["start"].clone())?;
+        let mut inside = false;
+        for d in &documents {
+            inside |= !at.compare(d.range_start)?.is_lt()
+                && at.compare(d.range_start.plus(d.range_duration)?)?.is_lt();
+        }
+        if inside && !non_speech.contains(&note) {
+            non_speech.push(note);
+        }
+    }
+    let saved = json!({"transcripts":documents,"non_speech":non_speech});
     let mut file = fs::File::create_new(&output)?;
     file.write_all(&serde_json::to_vec_pretty(&saved)?)?;
     file.sync_all()?;
     Ok(
         json!({"output":output,"source":source,"duration":duration,"documents":documents.len(),"words":words,
         "ranges":documents.iter().map(|d| json!({"id":d.id,"start":d.range_start,"duration":d.range_duration,"words":d.words.len()})).collect::<Vec<_>>(),
+        "non_speech":{"count":non_speech.len(),"listed":non_speech.iter().take(50).collect::<Vec<_>>()},
+        "silent_windows":silent,"aligned_text":request.text.is_some(),
         "review_required":true,
         "next":"pass the file's transcripts (with a workspace, {\"file\": output, \"select\": \"transcripts\"}) to timeline.outline, captions.draft, export.review or transcript.plan"}),
     )

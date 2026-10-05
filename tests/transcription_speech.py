@@ -71,7 +71,7 @@ $records=@(foreach($item in $items) {
         path=root/(item['id']+'.wav')
         item['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
         if not item['id'].startswith('word-'):
-            fixtures[item['id']]={'path':path,'language':item['language'],'pcm':read_wave(path),
+            fixtures[item['id']]={'path':path,'language':item['language'],'pcm':read_wave(path),'text':item['text'],
                 'reference':[{'text':w['text'],'start':w['ticks']/1e7} for w in item['events']]}
     for language in WORDS:
         pcm=array('h',[0]*6400);reference=[]

@@ -109,6 +109,13 @@ pub struct Word {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alignment: Option<WordAlignment>,
 }
+impl Word {
+    /// The word without surrounding whitespace. Older recognized documents keep the
+    /// recognizer's leading space (" tiny"); readers use this to join words with single spaces.
+    pub(crate) fn said(&self) -> &str {
+        self.text.trim()
+    }
+}
 /// Content-bound transcript of one source range; returned by transcript.transcribe and edited by transcript.correct.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -333,7 +340,11 @@ pub fn capabilities() -> Value {
             "platform":"windows_wsl_cuda","minimum_range_seconds":{"num":1,"den":40},"maximum_range_seconds":120,
             "maximum_seconds":600,"network":"isolated_namespace","source_profiles":["stereo_wav","reference_movie"],
             "analysis_rate":16000,"source_clock":48000,"channel_selection":["left","right","mean"],
-            "leading_context":{"num":2,"den":25},"trailing_context":{"num":1,"den":50},"review_required":true},"writes_state":false})
+            "leading_context":{"num":2,"den":25},"trailing_context":{"num":1,"den":50},"review_required":true,
+            "window_policies":["source_end","quiet_gap","word_gap","hard_12s"],"non_speech":"removed_before_alignment_and_reported",
+            "word_text":"no_surrounding_whitespace"},
+        "text_alignment":{"field":"text","commands":["transcript.transcribe","media.transcribe"],"profile":"local-en-el-align-v1",
+            "maximum_range_seconds":120,"maximum_bytes":32768,"maximum_words":2048,"numbers":"spelled_out_only"},"writes_state":false})
 }
 
 /// Caller-supplied word for transcript.correct; the result is marked `corrected` with no model confidence.
@@ -353,7 +364,7 @@ impl Correction {
     fn word(&self) -> Word {
         Word {
             id: self.id.clone(),
-            text: self.text.clone(),
+            text: self.text.trim().to_owned(),
             start: self.start,
             end: self.end,
             origin: Origin::Corrected,
@@ -436,6 +447,12 @@ pub fn correct(
                     .ok_or_else(|| error("MISSING_WORD", id))?;
                 next.words.remove(index);
             }
+        }
+    }
+    // A new revision drops the whitespace older recognizer output kept around words.
+    for word in &mut next.words {
+        if word.said().len() != word.text.len() {
+            word.text = word.said().to_owned();
         }
     }
     next.revision = next
@@ -526,6 +543,20 @@ pub(crate) mod tests {
         b.words[0].probability_milli = None;
         b.validate().unwrap();
         assert_ne!(original, b.fingerprint().unwrap());
+    }
+    #[test]
+    fn words_read_without_the_recognizer_spacing_and_corrections_write_it_so() {
+        let a = fixture();
+        assert_eq!(a.words[0].text, " One");
+        assert_eq!(a.words[0].said(), "One");
+        assert_eq!(a.words[1].said(), "two.");
+        let correction = Correction {
+            id: "first".into(),
+            text: " Uno ".into(),
+            start: a.words[0].start,
+            end: a.words[0].end,
+        };
+        assert_eq!(correction.word().text, "Uno");
     }
     #[test]
     fn invalid_intervals_duplicate_ids_and_hidden_fields_reject() {

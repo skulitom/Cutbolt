@@ -41,6 +41,27 @@ The narrated pixel-art demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES
 - **Faster `media.conform`.** Decoded content is hashed in Rust (`digest.rs`) instead of by FFmpeg's hash muxer (39 s for 80 s of 1080p). Output timing comes from packets instead of an `ffprobe -show_frames` decode (23 s). Audio-only sources get their black picture from FFmpeg's color source. The demo's 80.64 s music bed converts in 27 s instead of 74 s.
 
 Fixtures: `transcripts` covers the unmatched-transcript findings, and `conform` covers WAV preparation and the proposed recipe, with each conversion identical to running its recipe through `media.conform`. Unit tests cover the overflow message, the type-error note, the audio recipe at 25 and 30000/1001 fps, and the zero-frame digests. No scoring changed.
+## 5 October 2026: speech over music, caption spacing and known-text alignment
+
+The 5 October demo found three speech problems (its issues 14, 23 and 16):
+- **Caption spacing.** Recognized words kept the recognizer's leading space (`" tiny"`), and `captions.draft` joined them with another one. Every cue started with a space and had double spaces between words, and `timeline.outline` showed the same. Recognition now writes word text without surrounding whitespace, and `transcript.correct` trims every word of the revision it writes. Outline, captions, review, fillers and assembly read older documents' words trimmed, so those documents keep their fingerprints. `captions.draft` joins words with single spaces whatever the transcript holds.
+- **Speech over music.** `export.review` with a runtime, and `media.transcribe` of the delivered cut, failed after about 30 s with `UNSUPPORTED_ALIGNMENT_TEXT`. The cause was not a `[Music]` label. A music bed leaves no quiet gap, so every recognition window ended at a fixed 12 s cut. One cut split "float" into "f" and a lone "-", and that punctuation-only token failed alignment. The fixes:
+  - A window without a quiet gap now ends at the widest gap between the words recognized over the next 14 s (`word_gap`).
+  - Bracketed annotations and music symbols are removed before alignment and reported as `non_speech` notes.
+  - A punctuation token written against a word joins it.
+  - A letter the acoustic vocabulary lacks aligns as its base letter.
+  - Audio without speech gives an empty document instead of an error.
+  - `export.review` checks the runtime configuration before decoding. If recognition fails after that, the picture, sound and timing sections are kept and the speech section reports the error.
+- **Known text.** `transcript.transcribe` and `media.transcribe` accept `text`, such as a synthesized narration's script. Its words are aligned to up to 120 s of audio instead of recognized (profile `local-en-el-align-v1`, words without recognizer confidence).
+
+On the demo's delivered cut, `media.transcribe` now returns 140 words, and every recognition window ends between words. `export.review` matches 136 of 138 expected words; the two differences are "PixelForge" and "Cutbolt" (demo issue 6). Aligning the scripts of two narration lines keeps "um," as its own word and "PixelForge" and "Cutbolt" as written.
+
+Fixture coverage:
+- `transcripts` adds recognizer-spaced words to its outline, caption, review and correction cases. A recognizer that fails after the configuration check leaves a complete review, and invalid `text` is rejected before any media work.
+- `transcription` checks that words carry no whitespace, and aligns the English and Greek pilot passages within the recognition onset gates. It adds isolated words over a two-tone bed with no quiet gap: the old 12 s cuts would split four of them, and every window now ends between words, with all 54 words recognized. Pure checks cover annotation handling and word-gap cuts.
+- The whole-file check that came with `media.transcribe` applied the 10% word-error gate to the six isolated Greek words. The recognizer hears "κύπος" for "κήπος" there, also with the previous engine, which is 17%. Gates skip this fixture when no speech runtime is configured, so the check had not run since it was added. It now uses the gates of direct recognition: every word found, and the error rate only for passages.
+
+No scoring changed.
 
 ## 5 October 2026: colour matching between cameras
 

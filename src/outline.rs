@@ -192,7 +192,7 @@ fn snippet(spoken: &Spoken, from: Time, to: Time, limit: usize) -> Result<String
     for word in &spoken.words {
         if before(word.start, to)? && before(from, word.end)? {
             let partial = before(word.start, from)? || before(to, word.end)?;
-            words.push(format!("{}{}", word.text, if partial { "*" } else { "" }));
+            words.push(format!("{}{}", word.said(), if partial { "*" } else { "" }));
         }
     }
     let part = if covered.compare(to.minus(from)?)?.is_lt() {
@@ -694,14 +694,14 @@ pub(crate) fn timeline_words(
                 continue;
             }
             if word.start.compare(source_in)?.is_lt() {
-                cut.push(json!({"clip_id":id,"edge":"start","word":word.text,"time":start}));
+                cut.push(json!({"clip_id":id,"edge":"start","word":word.said(),"time":start}));
             } else if word.end.compare(source_end)?.is_gt() {
-                cut.push(json!({"clip_id":id,"edge":"end","word":word.text,"time":start.plus(duration)?}));
+                cut.push(json!({"clip_id":id,"edge":"end","word":word.said(),"time":start.plus(duration)?}));
             } else {
                 said.push(Said {
                     start: start.plus(word.start.minus(source_in)?)?,
                     end: start.plus(word.end.minus(source_in)?)?,
-                    text: word.text.clone(),
+                    text: word.said().to_owned(),
                 });
             }
         }

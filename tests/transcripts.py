@@ -63,7 +63,7 @@ def outline_text(p, docs=(), words=12, start=None, end=None, sequence=None, root
         covered = sum((max(F(0), min(e, b)-max(s, a)) for s, e in ranges), F(0))
         if covered == 0:return ' (not transcribed)'
         part = ' (partly transcribed)' if covered < b-a else ''
-        inside = [w['text']+('*' if seconds(w['start']) < a or seconds(w['end']) > b else '') for w in ws if seconds(w['start']) < b and a < seconds(w['end'])]
+        inside = [w['text'].strip()+('*' if seconds(w['start']) < a or seconds(w['end']) > b else '') for w in ws if seconds(w['start']) < b and a < seconds(w['end'])]
         n = len(inside)
         if not inside:return ' (no speech)'+part
         if words == 0:return f' ({plural(n, "word")}){part}'
@@ -167,9 +167,9 @@ def review_words(p, docs):
             for w in words:
                 ws, we = seconds(w['start']), seconds(w['end'])
                 if ws >= so or we <= si:continue
-                if ws < si:cut.append({'clip_id':c['id'], 'edge':'start', 'word':w['text'], 'time':time(st)})
-                elif we > so:cut.append({'clip_id':c['id'], 'edge':'end', 'word':w['text'], 'time':time(st+so-si)})
-                else:said.append((st+ws-si, st+we-si, w['text']))
+                if ws < si:cut.append({'clip_id':c['id'], 'edge':'start', 'word':w['text'].strip(), 'time':time(st)})
+                elif we > so:cut.append({'clip_id':c['id'], 'edge':'end', 'word':w['text'].strip(), 'time':time(st+so-si)})
+                else:said.append((st+ws-si, st+we-si, w['text'].strip()))
     said.sort(key=lambda w:w[0])
     return said, cut
 
@@ -222,7 +222,7 @@ def timeline_said(p, by_asset, track_ids=None):
     for st, si, dur, asset in clips:
         for w in sorted((w for d in by_asset.get(asset, []) for w in d['words']), key=lambda w:seconds(w['start'])):
             ws, we = seconds(w['start']), seconds(w['end'])
-            if si <= ws and we <= si+dur:said.append((st+ws-si, st+we-si, w['text']))
+            if si <= ws and we <= si+dur:said.append((st+ws-si, st+we-si, w['text'].strip()))
     return sorted(said, key=lambda w:w[0])
 
 
@@ -406,6 +406,11 @@ def run(root):
     assert [c['start'] for c in corrected_plan['merged_cuts']]==[time(26,25),time(45,25)]
     assert corrected_plan['word_projection'][4]['fragments'][0]['timeline_start']==time(46,25)
     assert corrected_plan['result_duration']==time(91,25)
+    # Recognizer output keeps a leading space (" red,"); a new revision drops it everywhere.
+    spaced = copy.deepcopy(document);spaced['words'][0]['text'] = ' red,';spaced['words'][4]['text'] = ' circle. '
+    trimmed = correct(spaced,[{'op':'replace','word':{'id':'w1','text':' square! ','start':time(21,25),'end':time(26,25)}}])['document']
+    assert [w['text'] for w in trimmed['words']] == ['red,','square!','κύκλος','blue','circle.'],trimmed['words']
+    assert trimmed['words'][0]['origin'] == 'estimated' and trimmed['words'][0]['probability_milli'] == 900
     passed.append('transcript.exact_source_corrections_and_projection')
 
     # Independent original timeline bytes, then literal deletion of stated intervals.
@@ -528,7 +533,7 @@ def run(root):
         def speech(name, path, first, count, offset=0):
             return {**document, 'id':name, 'source':{'path':path, 'identity':{'sha256':'e'*64, 'bytes':9}, 'duration':time(40)},
                 'range_start':time(first), 'range_duration':time(count),
-                'words':[{'id':f'{name}{i}', 'text':f'{name}{i}', 'start':time(first*4+i+offset, 4), 'end':time(first*20+5*(i+offset)+4, 20),
+                'words':[{'id':f'{name}{i}', 'text':(' ' if i % 3 == 0 else '')+f'{name}{i}', 'start':time(first*4+i+offset, 4), 'end':time(first*20+5*(i+offset)+4, 20),
                     'origin':'estimated', 'probability_milli':500} for i in range(count*4-1-offset)]}
         early, late = speech('a', 'talk.wav', 0, 20), speech('b', 'talk.wav', 20, 20)
         far = speech('z', 'abs.wav', 30, 10)
@@ -536,6 +541,7 @@ def run(root):
             outlined(talk, [early, late, far], **options)
         text = outlined(talk, [early, late, far])['outline']
         assert 'a13*' in text and '(no speech)' not in text and '~' in text and 'unused z (no asset has its source path: abs.wav)' in text, text
+        assert '  ' not in text.replace('\n  ', '\n') and '" a' not in text, text
         outlined(talk, [far, late], input_root=str(source))
         outlined(talk, [speech('q', 'talk.wav', 25, 1, 2)])
         # A child sequence is outlined on its own clock, and the parent lists it.
@@ -568,7 +574,7 @@ def run(root):
                        (said[2][0]-shift, said[2][1]-shift, 'circle'), (F(17, 5), F(7, 2), 'thanks')]
         heard_doc = {**document, 'id':'heard', 'source':{'path':'output/reviewed.mp4', 'identity':delivered_identity, 'duration':time(91, 25)},
                      'range_start':time(0), 'range_duration':time(91, 25),
-                     'words':[{'id':f'h{i}', 'text':t, 'start':time(a), 'end':time(b), 'origin':'estimated', 'probability_milli':700}
+                     'words':[{'id':f'h{i}', 'text':' '+t, 'start':time(a), 'end':time(b), 'origin':'estimated', 'probability_milli':700}
                               for i, (a, b, t) in enumerate(heard_words)]}
         reviewing = {'command':'export.review', 'path':str(delivered), 'input_root':str(root), 'output_root':str(output),
                      'project':restored, 'transcripts':[doc], 'heard':[heard_doc], 'rendition_height':120}
@@ -655,6 +661,15 @@ def run(root):
             if request.get('project') is None:request.pop('project')
             call(request, code)
             assert not (output/'review-rejected').exists(), fields
+        wrong = {'distribution':'Ubuntu', 'python':'/usr/bin/python3', 'python_paths':['/opt/speech'],
+                 'model':str(delivered), 'alignment_root':str(root), 'threads':1}
+        unheard = call({**reviewing, 'heard':[], 'runtime':wrong, 'language':'en', 'output':str(output/'review-unheard'), 'rendition_height':0})
+        failed = {'code':'MODEL_CHANGED', 'message':'Selected speech profile requires its pinned local model'}
+        assert unheard['speech']['recognition'] == {'ok':False, 'error':failed}, unheard['speech']
+        assert unheard['speech']['expected_words'] == 3 and 'comparison' not in unheard['speech']
+        assert (unheard['picture']['black'], unheard['sound'], unheard['timing']) == (reviewed['picture']['black'], reviewed['sound'], reviewed['timing'])
+        assert 'speech: 3 words expected; not compared because recognition failed with MODEL_CHANGED: '+failed['message'] in unheard['summary'], unheard['summary']
+        assert sorted(p.name for p in (output/'review-unheard').iterdir()) == ['review.json', 'sheet.png']
         passed.append('transcript.export_review_matches_independent_checks')
         # Captions drafted from transcripts: every cue is recomputed here from the documented rules.
         def drafted(p, by_asset, docs, rules={}, **options):
@@ -671,12 +686,15 @@ def run(root):
             assert got['inspection'] == call({'command':'captions.inspect', 'document':document_})
             return got
         spoken = copy.deepcopy([early, late])
-        for i, text in ((3, 'well.'), (7, 'right?'), (12, 'supercalifragilisticexpialidocious-and-then-some'), (20, 'κύκλος!'), (30, '"quoted."')):
+        for i, text in ((3, 'well.'), (7, 'right?'), (12, 'supercalifragilisticexpialidocious-and-then-some'), (20, 'κύκλος!'), (30, '"quoted."'),
+                        (35, ' leading'), (36, 'trailing '), (37, ' both. ')):
             spoken[0]['words'][i]['text'] = text
         spoken[0]['words'] = [w for i, w in enumerate(spoken[0]['words']) if i not in (15, 16, 17)]
         captioned = drafted(talk, {'talk':spoken}, spoken)
         assert captioned['document']['cues'] and captioned['cut_words']['count'] > 0 and captioned['unused_transcripts'] == []
         assert any('\n' in c['text'] for c in captioned['document']['cues'])
+        assert all(c['text'] == c['text'].strip() and '  ' not in c['text'] and ' \n' not in c['text'] and '\n ' not in c['text']
+                   for c in captioned['document']['cues'])
         drafted(talk, {'talk':spoken}, spoken, {'line_chars':12, 'lines':1, 'max_duration':time(2), 'min_duration':time(0), 'pause':time(1, 10)})
         drafted(talk, {'talk':spoken}, spoken, {'lines':3, 'line_chars':80, 'max_duration':time(10), 'min_duration':time(5)}, id='long', color=[255, 220, 0], align='left')
         drafted(talk, {'talk':spoken}, spoken, start=time(4), end=time(12))
@@ -708,7 +726,8 @@ def run(root):
         (output/'taken.json').write_text('{}', encoding='utf-8')
         for fields, code in (({'output':str(output/'taken.json')}, 'OUTPUT_EXISTS'), ({'id':' '}, 'INVALID_ID'),
                              ({'timeout_seconds':0}, 'INVALID_ARGUMENT'), ({'start':time(4)}, 'INVALID_RANGE'),
-                             ({'start':time(3), 'duration':time(2)}, 'INVALID_RANGE'), ({'output':str(output/'whole.txt')}, 'UNSUPPORTED_OUTPUT')):
+                             ({'start':time(3), 'duration':time(2)}, 'INVALID_RANGE'), ({'output':str(output/'whole.txt')}, 'UNSUPPORTED_OUTPUT'),
+                             ({'text':' — … '}, 'INVALID_TRANSCRIPTION'), ({'text':'x'*(32*1024+1)}, 'INVALID_TRANSCRIPTION')):
             call({**transcribing, **fields}, code)
         assert not (output/'whole.json').exists()
         passed.append('transcript.whole_file_recognition_rejections_leave_nothing')
