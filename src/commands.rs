@@ -137,6 +137,12 @@ pub enum Request {
         /// Also cut silence before the first and after the last speech, keeping `keep` next to the speech; default true.
         #[serde(default = "crate::commands::yes")]
         edges: bool,
+        /// Cut only pauses after this timeline time; default the start.
+        #[serde(default)]
+        start: Option<Time>,
+        /// Cut only pauses before this timeline time; default the end.
+        #[serde(default)]
+        end: Option<Time>,
     },
     #[serde(rename = "color.match")]
     ColorMatch {
@@ -546,6 +552,15 @@ pub enum Request {
         /// Extra time cut on each side of a filler, never into a neighbouring word, at most 1/4 s; default zero.
         #[serde(default)]
         padding: Option<Time>,
+        /// Only fillers after this timeline time; default the start.
+        #[serde(default)]
+        start: Option<Time>,
+        /// Only fillers before this timeline time; default the end.
+        #[serde(default)]
+        end: Option<Time>,
+        /// Silence the fillers on track_ids, moving nothing, instead of ripple-deleting them from every track (which also cuts music and picture).
+        #[serde(default)]
+        lift: bool,
     },
     #[serde(rename = "captions.draft")]
     CaptionsDraft {
@@ -1890,6 +1905,8 @@ pub fn handle(request: Request) -> Result<Value> {
             min_pause,
             keep,
             edges,
+            start,
+            end,
         } => crate::tighten::propose(
             &project,
             &input_root,
@@ -1899,6 +1916,7 @@ pub fn handle(request: Request) -> Result<Value> {
                 min_pause: min_pause.unwrap_or(Time::new(3, 4)?),
                 keep: keep.unwrap_or(Time::new(1, 5)?),
                 edges,
+                window: (start, end),
             },
         ),
         Request::AudioBeats {
@@ -1938,6 +1956,9 @@ pub fn handle(request: Request) -> Result<Value> {
             track_ids,
             words,
             padding,
+            start,
+            end,
+            lift,
         } => {
             let words =
                 words.unwrap_or_else(|| crate::fillers::DEFAULT_WORDS.map(str::to_owned).to_vec());
@@ -1948,6 +1969,8 @@ pub fn handle(request: Request) -> Result<Value> {
                 track_ids: track_ids.as_deref(),
                 words: &words,
                 padding: padding.unwrap_or(Time::ZERO),
+                window: (start, end),
+                lift,
             })
         }
         Request::TranscriptAssemble {

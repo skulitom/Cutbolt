@@ -228,6 +228,8 @@ The result lists the speech runs with exact times, a summary per clip, and `clip
 
 `transcript.fillers` proposes ripple deletions of um, uh and other listed words wherever the timeline speaks them, from transcripts of its sources, without cutting into the neighbouring words. See [TRANSCRIPTS.md](TRANSCRIPTS.md#removing-filler-words).
 
+`start` and `end` limit the proposal to fillers wholly inside that timeline window. A ripple deletion cuts every track, music and picture included. With `lift: true` and the `track_ids` to silence (such as the voice track), each filler is instead lifted: removed from those tracks with an empty `overwrite`, leaving silence. The explicit end and every other placement stay as they were, so a cut timed to music or picture keeps its timing. The result reports `silenced` instead of `removed`. Lifting a clip linked to picture is refused as a synchronization conflict and listed with the reason; unlink it first if that is intended.
+
 ## Finding the beat
 
 `audio.beats` is read-only and analyses a music file for cutting to it. The file can be any format FFmpeg decodes, up to an hour (`start` and `duration` select a range). It reports the onsets, the tempo and a beat grid as exact file times. With `frame_rate`, it also gives each listed beat's nearest frame start.
@@ -261,7 +263,7 @@ On placed tracks every cut ripples every track, with linked partners, so picture
 
 The cuts are ordered from the latest back, so each start is an original timeline time. Each is applied to a working copy first. A cut the editor refuses is listed with its reason and left out, so the returned batch always applies. Refusals include a cut inside a fade or a transition, or one that would split a link unevenly.
 
-The result lists each pause, its cut or the reason it was skipped, the time removed, and the durations before and after. Ripple deletions also cut music on other tracks, so tighten the speech before laying a music bed, or accept the jumps.
+The result lists each pause, its cut or the reason it was skipped, the time removed, and the durations before and after. Ripple deletions also cut music on other tracks, so tighten the speech before laying a music bed, or accept the jumps. `start` and `end` limit the cuts to a timeline window, such as one take or one scene. Pauses outside it are not listed, and a pause crossing an edge is cut only inside the window.
 
 ## Normalizing loudness
 

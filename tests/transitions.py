@@ -356,6 +356,12 @@ def run(root):
     tightened=apply(talking,operations);result=render(tightened,'tightened')
     assert result==(whole_talk[0][:35*W*H*3]+whole_talk[0][50*W*H*3:107*W*H*3],whole_talk[1][:35*1920*4]+whole_talk[1][50*1920*4:107*1920*4])
     assert {c['id'] for t in tightened['tracks']['tracks'] for c in t['clips']}=={'tv','tv-j1','ta','ta-j1','mb','mb-j1'} and {l['id'] for l in tightened['tracks']['links']}=={'talk','talk-j1'}
+    # A window limits the cuts: only the second pause, then only its part before frame 120.
+    later=call({'command':'audio.tighten','project':talking,'input_root':str(root),'voice_track_id':'a','start':time(100,25)})
+    assert later['operations']==[operations[0]] and later['pauses']['count']==1 and later['removed']==time(43,25),later
+    clipped=call({'command':'audio.tighten','project':talking,'input_root':str(root),'voice_track_id':'a','start':time(100,25),'end':time(120,25)})
+    assert clipped['pauses']['listed'][0]['cut']=={'start':time(107,25),'end':time(120,25)} and clipped['removed']==time(13,25),clipped
+    call({'command':'audio.tighten','project':talking,'input_root':str(root),'voice_track_id':'a','start':time(2),'end':time(1)},'INVALID_RANGE')
     # A sequential timeline is analysed whole; its cut keeps the right part as a new clip.
     plain=call({'command':'project.create','id':'plain-talk','width':W,'height':H,'frame_rate':time(25)})
     plain=apply(plain,[{'op':'media.add','asset':talk_asset},{'op':'clip.append','clip':{'id':'c1','asset_id':'3','source_in':time(0),'duration':time(100,25)}}])

@@ -24,6 +24,8 @@ pub struct Settings {
     pub keep: Time,
     /// Also cut silence before the first and after the last speech.
     pub edges: bool,
+    /// Only cut within this timeline window; `None` ends are the timeline's own.
+    pub window: (Option<Time>, Option<Time>),
 }
 
 fn gcd(a: u64, b: u64) -> u64 {
@@ -105,7 +107,38 @@ fn ripple(project: &Project, start: Time, end: Time) -> Result<Value> {
     }
 }
 
-/// Cuts ripple-deleted from a project.
+/// Lift `[start, end)` from `tracks`: remove what plays there and keep every other placement, so
+/// the interval falls silent without moving picture, music or later speech.
+fn lift(project: &Project, tracks: &[String], start: Time, end: Time) -> Result<Value> {
+    let arrangement = project
+        .tracks
+        .as_ref()
+        .ok_or_else(|| error("UNSUPPORTED_TIMELINE", "Lifting needs placed tracks"))?;
+    let mut used = all_ids(project);
+    let mut right_clips = Vec::new();
+    for track in arrangement.tracks.iter().filter(|t| tracks.contains(&t.id)) {
+        for clip in &track.clips {
+            if clip.start.compare(start)?.is_lt() && clip.end()?.compare(end)?.is_gt() {
+                right_clips.push(json!({"id":clip.id,"new_id":fresh(&clip.id, &mut used)}));
+            }
+        }
+    }
+    Ok(
+        json!({"op":"tracks.edit","edit":{"op":"overwrite","track_ids":tracks,"at":start,
+        "duration":end.minus(start)?,"clips":[],"links":"reject_partial","right_clip_ids":right_clips,
+        "right_link_ids":[],"end_policy":"keep","transitions":"reject_affected"}}),
+    )
+}
+
+/// How a cut is made.
+pub(crate) enum How<'a> {
+    /// Ripple-delete the interval from every track.
+    Ripple,
+    /// Silence the interval on these tracks only.
+    Lift(&'a [String]),
+}
+
+/// Cuts applied to a project.
 pub(crate) struct Applied {
     /// The operations that applied, in application order.
     pub(crate) operations: Vec<Value>,
@@ -113,24 +146,37 @@ pub(crate) struct Applied {
     pub(crate) outcomes: Vec<(usize, std::result::Result<(), String>)>,
     /// The project with every applied cut.
     pub(crate) project: Project,
-    /// Total time removed.
+    /// Total time removed; lifted time is silenced instead.
     pub(crate) removed: Time,
+    /// Total time silenced by lifts.
+    pub(crate) silenced: Time,
 }
 
-/// Ripple-delete `cuts` (`(index, start, end)`, in time order, original timeline times) from the
-/// latest back, each tried on a working copy.
-pub(crate) fn apply_cuts(project: &Project, cuts: &[(usize, Time, Time)]) -> Result<Applied> {
+/// Apply `cuts` (`(index, start, end)`, in time order, original timeline times) from the latest
+/// back, each tried on a working copy.
+pub(crate) fn apply_cuts(
+    project: &Project,
+    cuts: &[(usize, Time, Time)],
+    how: &How,
+) -> Result<Applied> {
     let mut working = project.clone();
     let mut operations = Vec::new();
     let mut outcomes = Vec::new();
     let mut removed = Time::ZERO;
+    let mut silenced = Time::ZERO;
     for &(index, start, end) in cuts.iter().rev() {
-        let op = ripple(&working, start, end)?;
+        let op = match how {
+            How::Ripple => ripple(&working, start, end)?,
+            How::Lift(tracks) => lift(&working, tracks, start, end)?,
+        };
         let operation: Operation = serde_json::from_value(op.clone())?;
         match working.apply(working.revision, vec![operation]) {
             Ok(next) => {
                 working = next;
-                removed = removed.plus(end.minus(start)?)?;
+                match how {
+                    How::Ripple => removed = removed.plus(end.minus(start)?)?,
+                    How::Lift(_) => silenced = silenced.plus(end.minus(start)?)?,
+                }
                 operations.push(op);
                 outcomes.push((index, Ok(())));
             }
@@ -142,7 +188,30 @@ pub(crate) fn apply_cuts(project: &Project, cuts: &[(usize, Time, Time)]) -> Res
         outcomes,
         project: working,
         removed,
+        silenced,
     })
+}
+
+/// The window's ends as 48 kHz sample counts within `[0, total]`, or an error when it is empty.
+pub(crate) fn window_samples(
+    window: (Option<Time>, Option<Time>),
+    total: u64,
+) -> Result<(u64, u64)> {
+    let samples = Time::new(48_000, 1)?;
+    let start = window.0.map(|t| t.units(samples)).transpose()?.unwrap_or(0);
+    let end = window
+        .1
+        .map(|t| t.units(samples))
+        .transpose()?
+        .unwrap_or(total)
+        .min(total);
+    if start >= end {
+        return Err(error(
+            "INVALID_RANGE",
+            "start must come before end, within the timeline",
+        ));
+    }
+    Ok((start, end))
 }
 
 /// Frames per cut-grid step: whole frames that, on placed tracks, are also whole 48 kHz samples.
@@ -232,6 +301,7 @@ pub fn propose(
     let keep = settings.keep.units(samples)?;
     let duration = project.duration()?;
     let total = (duration.num as u128 * 48_000 / duration.den as u128) as u64;
+    let (from, to) = window_samples(settings.window, total)?;
     let regions = crate::duck::speech(
         project,
         input_root,
@@ -264,17 +334,21 @@ pub fn propose(
     let at = |index: u64| Time::new(index * step * rate.den, rate.num);
     let mut listed: Vec<Value> = Vec::new();
     let mut cuts: Vec<(usize, Time, Time)> = Vec::new();
+    // Only pauses that overlap the window, cut no further than its ends.
+    pauses.retain(|&(a, b, _)| b > from && a < to);
     for (index, &(a, b, kind)) in pauses.iter().enumerate() {
         let first = if kind == "leading" {
             0
         } else {
             grid(a + keep, true)
-        };
+        }
+        .max(grid(from, true));
         let last = if kind == "trailing" {
             end_index
         } else {
             grid(b.saturating_sub(keep), false)
-        };
+        }
+        .min(grid(to, false));
         listed.push(json!({"start":Time::new(a, 48_000)?,"end":Time::new(b, 48_000)?,"kind":kind}));
         if last > first {
             cuts.push((index, at(first)?, at(last)?));
@@ -288,7 +362,8 @@ pub fn propose(
         outcomes,
         project: working,
         removed,
-    } = apply_cuts(project, &cuts)?;
+        ..
+    } = apply_cuts(project, &cuts, &How::Ripple)?;
     for (index, outcome) in outcomes {
         match outcome {
             Ok(()) => {
@@ -301,7 +376,8 @@ pub fn propose(
     let count = listed.len();
     listed.truncate(MAX_LISTED);
     Ok(json!({"voice_track_id":voice,
-        "settings":{"threshold_db":settings.threshold_db,"min_pause":settings.min_pause,"keep":settings.keep,"edges":settings.edges},
+        "settings":{"threshold_db":settings.threshold_db,"min_pause":settings.min_pause,"keep":settings.keep,"edges":settings.edges,
+            "start":Time::new(from, 48_000)?,"end":Time::new(to, 48_000)?},
         "speech_regions":regions.len(),"pauses":{"count":count,"cuts":operations.len(),"listed":listed},
         "removed":removed,"duration_before":duration,"duration_after":working.duration()?,
         "operations":operations,

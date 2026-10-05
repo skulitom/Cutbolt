@@ -22,6 +22,14 @@ On the demo file the result is now:
 - 328 onsets, all on eighths.
 
 The audio-processing fixture now generates arranged music: that backbeat arrangement at 125 BPM, with intro and outro bars without drums, and four on the floor at 100 BPM after a 0.35 s lead-in. It checks exact beat times, frames, onsets and levels, a range, and a narrowed tempo range. The previous engine fails it at 62.5 BPM. Outside the fixture, a sweep of both arrangements from 72 to 174 BPM kept every beat within a hop of the reported level's true grid, and an hour of looped music took about 6 s in a debug build. No scoring changed.
+## 5 October 2026: windowed tightening and lifted fillers
+
+The demo's finished timeline had a music bed and scenes cut on the bar line. `audio.tighten` proposed ripple-deleting 16.4 s across every track, music and picture included, and filler cuts would have done the same (ISSUES.md 25).
+- Both proposals now take a `start`/`end` window.
+- `transcript.fillers` takes `lift` with `track_ids`. Each filler is silenced on those tracks by an empty `overwrite`, and nothing moves.
+
+The `transitions` fixture checks windowed and edge-clipped pause cuts and an empty window. The `transcripts` fixture checks the lift operation and renders it exactly: the picture is unchanged, and the audio is silent only over the filler. It also checks the required tracks and a window that excludes the filler. No scoring changed.
+
 ## 5 October 2026: fixes from the PixelForge progress demo
 
 The narrated pixel-art demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md) recorded 25 problems. Four are being fixed in their own sessions: overlay export speed and cancellation, caption spacing and music labels, beat detection, and the scene caps. This batch fixes several others:

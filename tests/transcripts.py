@@ -723,6 +723,16 @@ def run(root):
         assert call({'command':'transcript.fillers', 'project':restored, 'transcripts':[filled]}) == proposal
         cleaned = apply(restored, operations)
         render(cleaned, (expected[0][:30*W*H*3]+expected[0][34*W*H*3:], expected[1][:30*1920*4]+expected[1][34*1920*4:]), 'fillers-removed')
+        # Lift: the filler falls silent on the voice track only; picture and timing are unchanged.
+        unlinked = apply(restored, [edit('unlink', id=l['id']) for l in restored['tracks']['links']])
+        lifted = call({'command':'transcript.fillers', 'project':unlinked, 'transcripts':[filled], 'track_ids':['a'], 'lift':True})
+        op = lifted['operations'][0]['edit']
+        assert (op['op'], op['track_ids'], op['at'], op['duration'], op['clips'], op['end_policy']) == ('overwrite', ['a'], time(30, 25), time(4, 25), [], 'keep'), lifted
+        assert lifted['silenced'] == time(4, 25) and lifted['removed'] == time(0) and lifted['duration_after'] == lifted['duration_before']
+        render(apply(unlinked, lifted['operations']), (expected[0], expected[1][:30*1920*4]+bytes(4*1920*4)+expected[1][34*1920*4:]), 'fillers-lifted')
+        call({'command':'transcript.fillers', 'project':unlinked, 'transcripts':[filled], 'lift':True}, 'INVALID_ARGUMENT')
+        outside = call({'command':'transcript.fillers', 'project':restored, 'transcripts':[filled], 'start':time(2)})
+        assert outside['fillers']['count'] == 0 and outside['operations'] == [], outside
         # A 29.97 fps sequential timeline: consecutive fillers make one cut, padding stops at the
         # neighbouring words, and a clip split twice gets two right-hand IDs.
         hesitant = copy.deepcopy([early, late])

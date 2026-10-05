@@ -18,6 +18,10 @@ pub struct Request<'a> {
     pub track_ids: Option<&'a [String]>,
     pub words: &'a [String],
     pub padding: Time,
+    /// Only fillers wholly inside this timeline window; `None` ends are the timeline's own.
+    pub window: (Option<Time>, Option<Time>),
+    /// Silence fillers on `track_ids` instead of ripple-deleting them from every track.
+    pub lift: bool,
 }
 
 /// Lowercase letters and digits only, so "Um," matches "um".
@@ -43,9 +47,18 @@ pub fn propose(request: &Request) -> Result<Value> {
             "words must be 1-64 entries with a letter or digit each, and padding at most 1/4 s",
         ));
     }
+    if request.lift && request.track_ids.is_none_or(<[String]>::is_empty) {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            "lift silences the fillers on track_ids, so give the tracks to silence, such as the voice track",
+        ));
+    }
     let rate = crate::render::clock::rate(project.frame_rate)?;
     let step = crate::tighten::grid_step(project, rate);
     let duration = project.duration()?;
+    let total = (duration.num as u128 * 48_000 / duration.den as u128) as u64;
+    let (from, to) = crate::tighten::window_samples(request.window, total)?;
+    let (from, to) = (Time::new(from, 48_000)?, Time::new(to, 48_000)?);
     let words = crate::outline::timeline_words(
         project,
         request.transcripts,
@@ -56,7 +69,10 @@ pub fn propose(request: &Request) -> Result<Value> {
     // Runs of consecutive filler words become one cut.
     let mut runs: Vec<(usize, usize)> = Vec::new();
     for (i, word) in said.iter().enumerate() {
-        if !targets.contains(&normalized(&word.text)) {
+        if !targets.contains(&normalized(&word.text))
+            || word.start.compare(from)?.is_lt()
+            || word.end.compare(to)?.is_gt()
+        {
             continue;
         }
         match runs.last_mut() {
@@ -118,12 +134,17 @@ pub fn propose(request: &Request) -> Result<Value> {
             listed[n]["skipped"] = json!("shorter than one cut-grid step between its neighbours");
         }
     }
+    let how = match (request.lift, request.track_ids) {
+        (true, Some(tracks)) => crate::tighten::How::Lift(tracks),
+        _ => crate::tighten::How::Ripple,
+    };
     let crate::tighten::Applied {
         operations,
         outcomes,
         project: working,
         removed,
-    } = crate::tighten::apply_cuts(project, &cuts)?;
+        silenced,
+    } = crate::tighten::apply_cuts(project, &cuts, &how)?;
     for (n, outcome) in outcomes {
         match outcome {
             Ok(()) => {
@@ -135,9 +156,11 @@ pub fn propose(request: &Request) -> Result<Value> {
     }
     let count = listed.len();
     listed.truncate(MAX_LISTED);
-    Ok(json!({"words":targets,"padding":request.padding,
+    Ok(
+        json!({"words":targets,"padding":request.padding,"start":from,"end":to,"lift":request.lift,
         "fillers":{"count":count,"cuts":operations.len(),"listed":listed},
-        "removed":removed,"duration_before":duration,"duration_after":working.duration()?,
+        "removed":removed,"silenced":silenced,"duration_before":duration,"duration_after":working.duration()?,
         "cut_words":words.cut.len(),"unused_transcripts":words.unused,"operations":operations,
-        "next":"apply operations in order with session.apply (or check them with session.preview); later cuts come first, so each start is an original timeline time"}))
+        "next":"apply operations in order with session.apply (or check them with session.preview); later cuts come first, so each start is an original timeline time"}),
+    )
 }
