@@ -577,11 +577,12 @@ The changes:
   - `media.inspect` returns that reason in `timeline.reasons`, with no `conform` proposal.
   - `media.prepare` with `path` fails with `UNSUPPORTED_MEDIA` and the same message before converting anything. With `paths`, the file is listed as a failure and the others continue.
   - The limit is counted at the conversion's rate, so a 13-minute 60 fps clip is refused at 60 fps but fits a 30 fps project. Exactly 45,000 frames is still proposed whole.
+- **Integrated with audio-only assets.** This change was made before WAVs became audio-only assets (`277f0d2`) and was merged onto them afterwards. The 45,000-frame limit now applies to video and to the older black-picture audio kind (`conform_audio`, from an explicit `.mkv` output). A WAV prepared as an audio-only asset has no frames: `conform_audio_only` refuses one longer than its one-hour limit in the same way, instead of cutting it to the hour.
 - **`color.match` checks its target first.** It builds the target's recipe before decoding histograms or writing the `.cube` table. A target it cannot convert whole is refused with no table left behind. Before, an HDR or BT.601 target was refused only after its table had been written.
 - **Docs.** [USAGE.md](USAGE.md) (media readiness and `media.prepare`), [CONFORM.md](CONFORM.md), [LUTS_SCOPES.md](LUTS_SCOPES.md) and the MCP descriptions of `media.inspect` and `media.prepare` state the limit and the refusal.
 
 Tests:
-- Rust tests cover the 780 s, 60 fps case with its exact message, a source of exactly 45,000 frames, `media.prepare`'s verified duration at 24 and 25 fps, the 1501.5 s limit at 30000/1001, and an over-long PCM16 WAV.
+- Rust tests cover the 780 s, 60 fps case with its exact message, a source of exactly 45,000 frames, `media.prepare`'s verified duration at 24 and 25 fps, the 1501.5 s limit at 30000/1001, and an over-long PCM16 WAV. Since the merge, that test checks that a 1801 s WAV becomes an audio-only asset whole, that the black-picture kind refuses it at 25 fps and fits it at 24, and that audio-only preparation accepts 3600 s and refuses 3601 s.
 - The `conform` fixture adds a 781 s, 60 fps FFV1 source (46,860 frames). `media.inspect` gives no recipe, `media.prepare` with `path` and with `paths` fails with `UNSUPPORTED_MEDIA`, and no output is written.
 
 This is a correctness fix: no scoring changed. Evidence stays stale until the next thorough run.

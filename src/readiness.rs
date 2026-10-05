@@ -168,7 +168,7 @@ fn audio_only(path: &Path, relative: &str, audio: &Value, metadata: &Value) -> V
             "next":"media.prepare converts it in one step; or check the recipe with media.conform.inspect and run it with job.start run media.conform. Then media.add the returned asset and place it on an audio track"}})
         }
         Err(why) => {
-            reasons.push(why.into());
+            reasons.push(why);
             json!({"ready":false,"audio_only":true,"reasons":reasons})
         }
     }
