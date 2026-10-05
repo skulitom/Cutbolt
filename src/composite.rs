@@ -131,6 +131,62 @@ pub(crate) fn normal_row(
     }
 }
 
+/// Normal blend of an RGBA source row over an opaque RGB row with per-pixel mask `coverage`, with
+/// the values of `masked_channel`. Runs at full coverage take `normal_row`, whose values are
+/// `channel`'s, which is `masked_channel` at full coverage; zero coverage keeps the destination
+/// exactly, as `masked_channel` does; partial coverage calls `masked_channel` itself. `white` is
+/// opaque white with the source alpha, as in `normal_row`.
+pub(crate) fn masked_normal_row(
+    dest: &mut [u8],
+    source: &[u8],
+    coverage: &[u32],
+    opacity: u8,
+    encoding: AlphaMode,
+    white: bool,
+) {
+    let class = |value: u32| match value {
+        0 => 0,
+        MASK_WEIGHT => 2,
+        _ => 1,
+    };
+    let mut start = 0;
+    while start < coverage.len() {
+        let kind = class(coverage[start]);
+        let end = coverage[start..]
+            .iter()
+            .position(|&value| class(value) != kind)
+            .map_or(coverage.len(), |n| start + n);
+        match kind {
+            0 => {}
+            2 => normal_row(
+                &mut dest[start * 3..end * 3],
+                &source[start * 4..end * 4],
+                opacity,
+                encoding,
+                white,
+            ),
+            _ => {
+                let mode = if white { AlphaMode::Straight } else { encoding };
+                for i in start..end {
+                    let s = &source[i * 4..i * 4 + 4];
+                    for c in 0..3 {
+                        dest[i * 3 + c] = masked_channel(
+                            dest[i * 3 + c],
+                            if white { 255 } else { s[c] },
+                            s[3],
+                            opacity,
+                            BlendMode::Normal,
+                            mode,
+                            coverage[i],
+                        );
+                    }
+                }
+            }
+        }
+        start = end;
+    }
+}
+
 /// Rectangle limiting layer opacity, in source-canvas pixels before crop and transform.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -259,22 +315,88 @@ impl RectMask {
             .min(2 * (left + width - x) - 1)
             .min(2 * (y - top) + 1)
             .min(2 * (top + height - y) - 1);
-        let radius = i64::from(feather.radius) * 2;
-        let (n, d) = match feather.edge {
-            FeatherEdge::Inner => (distance, radius),
-            FeatherEdge::Centered => (distance + radius, 2 * radius),
-            FeatherEdge::Outer => (distance + radius, radius),
-        };
         let value = if width == 0 || height == 0 {
             0
         } else {
-            ((n.clamp(0, d) * i64::from(MASK_WEIGHT) + d / 2) / d) as u32
+            ramp(feather, distance)
         };
         if self.inverted {
             MASK_WEIGHT - value
         } else {
             value
         }
+    }
+
+    /// The mask's coverage over the source-canvas area `[x, y, width, height]`, by axis.
+    pub(crate) fn axes(&self, rect: [i32; 4], area: [i64; 4]) -> MaskAxes {
+        let [left, top, width, height] = rect.map(i64::from);
+        let empty = width == 0 || height == 0;
+        // The value of one axis: whether a position lies in the rectangle's span, or the feather
+        // ramp of its doubled distance to the span's nearer edge.
+        let axis = |start: i64, size: i64, from: i64, count: i64| {
+            (from..from + count)
+                .map(|p| match &self.feather {
+                    None if start <= p && p < start + size => MASK_WEIGHT,
+                    None => 0,
+                    Some(_) if empty => 0,
+                    Some(feather) => ramp(
+                        feather,
+                        (2 * (p - start) + 1).min(2 * (start + size - p) - 1),
+                    ),
+                })
+                .collect()
+        };
+        MaskAxes {
+            origin: [area[0], area[1]],
+            columns: axis(left, width, area[0], area[2]),
+            rows: axis(top, height, area[1], area[3]),
+            inverted: self.inverted,
+        }
+    }
+}
+
+/// The feather weight of a doubled signed edge distance; it never decreases as the distance grows.
+fn ramp(feather: &Feather, distance: i64) -> u32 {
+    let radius = i64::from(feather.radius) * 2;
+    let (n, d) = match feather.edge {
+        FeatherEdge::Inner => (distance, radius),
+        FeatherEdge::Centered => (distance + radius, 2 * radius),
+        FeatherEdge::Outer => (distance + radius, radius),
+    };
+    ((n.clamp(0, d) * i64::from(MASK_WEIGHT) + d / 2) / d) as u32
+}
+
+/// A rectangle mask's coverage over an area, separated by axis. A hard mask covers a pixel when
+/// both its column and its row lie in the rectangle. A feathered mask ramps the smaller of the
+/// horizontal and vertical edge distances, and the ramp never decreases, so the ramp of the
+/// smaller distance is the smaller of the two ramps. Either way, `RectMask::coverage` is the
+/// smaller of a column value and a row value, inverted when the mask is.
+pub(crate) struct MaskAxes {
+    origin: [i64; 2],
+    columns: Vec<u32>,
+    rows: Vec<u32>,
+    inverted: bool,
+}
+
+impl MaskAxes {
+    /// The value shared by source-canvas row `y`, before inversion.
+    pub(crate) fn row(&self, y: i64) -> u32 {
+        self.rows[(y - self.origin[1]) as usize]
+    }
+
+    /// Coverage at source-canvas column `x` of a row with value `row`.
+    pub(crate) fn at(&self, x: i64, row: u32) -> u32 {
+        let value = self.columns[(x - self.origin[0]) as usize].min(row);
+        if self.inverted {
+            MASK_WEIGHT - value
+        } else {
+            value
+        }
+    }
+
+    /// `RectMask::coverage` at source-canvas pixel `(x, y)` inside the area.
+    pub(crate) fn coverage(&self, x: i64, y: i64) -> u32 {
+        self.at(x, self.row(y))
     }
 }
 
@@ -366,6 +488,121 @@ mod tests {
                                     p[3]
                                 );
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mask_axes_match_per_pixel_coverage() {
+        let feathers = [
+            None,
+            Some((1, FeatherEdge::Inner)),
+            Some((1, FeatherEdge::Outer)),
+            Some((2, FeatherEdge::Centered)),
+            Some((3, FeatherEdge::Inner)),
+            Some((5, FeatherEdge::Outer)),
+            Some((7, FeatherEdge::Centered)),
+            Some((4096, FeatherEdge::Centered)),
+        ];
+        let rects = [
+            [3, 4, 10, 6],
+            [-5, 2, 8, 30],
+            [0, 0, 0, 7],
+            [6, 6, 9, 0],
+            [12, -3, 1, 1],
+            [-40, -40, 100, 100],
+            [30, 30, 5, 5],
+        ];
+        for feather in feathers {
+            for rect in rects {
+                for inverted in [false, true] {
+                    let mask = RectMask {
+                        rect,
+                        inverted,
+                        animation: None,
+                        feather: feather.map(|(radius, edge)| Feather { radius, edge }),
+                    };
+                    let area = [-6, -4, 28, 25];
+                    let axes = mask.axes(rect, area);
+                    for y in area[1]..area[1] + area[3] {
+                        for x in area[0]..area[0] + area[2] {
+                            assert_eq!(
+                                axes.coverage(x, y),
+                                mask.coverage(rect, x, y),
+                                "rect {rect:?} feather {feather:?} inverted {inverted} at {x},{y}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn masked_rows_match_the_reference_channel() {
+        // Runs of zero, partial and full coverage in every order, including single pixels.
+        let pattern = [
+            0,
+            1,
+            MASK_WEIGHT,
+            MASK_WEIGHT,
+            32768,
+            0,
+            0,
+            MASK_WEIGHT - 1,
+            MASK_WEIGHT,
+            65,
+            12345,
+            0,
+            MASK_WEIGHT,
+        ];
+        for opacity in [0u8, 1, 77, 200, 254, 255] {
+            for (encoding, white) in [
+                (AlphaMode::Straight, false),
+                (AlphaMode::Premultiplied, false),
+                (AlphaMode::Straight, true),
+            ] {
+                for shift in 0..pattern.len() {
+                    let coverage: Vec<u32> = (0..256)
+                        .map(|i| pattern[(i + shift) % pattern.len()])
+                        .collect();
+                    let pixels: Vec<u8> = (0..=255u8)
+                        .flat_map(|a| {
+                            let s = a.wrapping_mul(37).wrapping_add(shift as u8);
+                            // Premultiplied channels never exceed alpha.
+                            if matches!(encoding, AlphaMode::Premultiplied) {
+                                let s = s.min(a);
+                                [s, s / 3, a - s, a]
+                            } else {
+                                [s, s / 3, 255 - s, a]
+                            }
+                        })
+                        .collect();
+                    let dest: Vec<u8> = (0..256 * 3).map(|i| (i * 89 + shift * 7) as u8).collect();
+                    let mut row = dest.clone();
+                    masked_normal_row(&mut row, &pixels, &coverage, opacity, encoding, white);
+                    for i in 0..256 {
+                        let p = &pixels[i * 4..i * 4 + 4];
+                        for c in 0..3 {
+                            let mode = if white { AlphaMode::Straight } else { encoding };
+                            let s = if white { 255 } else { p[c] };
+                            assert_eq!(
+                                row[i * 3 + c],
+                                masked_channel(
+                                    dest[i * 3 + c],
+                                    s,
+                                    p[3],
+                                    opacity,
+                                    BlendMode::Normal,
+                                    mode,
+                                    coverage[i]
+                                ),
+                                "pixel {i} channel {c} coverage {} opacity {opacity}",
+                                coverage[i]
+                            );
                         }
                     }
                 }

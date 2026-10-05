@@ -284,13 +284,14 @@ struct SelectionStage<'a> {
     mask_rect: Option<[i32; 4]>,
 }
 impl SelectionStage<'_> {
-    fn weight(&self, color: [f64; 3], position: [i64; 2]) -> f64 {
+    /// `bytes`, when known, are `color.map(encoded_byte)`.
+    fn weight(&self, color: [f64; 3], bytes: Option<[u8; 3]>, position: [i64; 2]) -> f64 {
         self.mix
             * self
                 .effect
                 .qualifier
                 .as_ref()
-                .map(|q| q.weight(color.map(encoded_byte)))
+                .map(|q| q.weight(bytes.unwrap_or_else(|| color.map(encoded_byte))))
                 .unwrap_or(1.0)
             * self
                 .effect
@@ -336,6 +337,24 @@ fn encoded(value: f64) -> f64 {
 }
 fn encoded_byte(value: f64) -> u8 {
     (encoded(value) * 255.0).round().clamp(0.0, 255.0) as u8
+}
+/// `linear` of each 8-bit straight value, and `encoded` and `encoded_byte` of that, computed once
+/// by the same functions, so a lookup returns the very value a call would.
+struct Transfer {
+    linear: [f64; 256],
+    encoded: [f64; 256],
+    byte: [u8; 256],
+}
+fn transfer() -> &'static Transfer {
+    static TABLES: std::sync::OnceLock<Transfer> = std::sync::OnceLock::new();
+    TABLES.get_or_init(|| {
+        let linear: [f64; 256] = std::array::from_fn(|v| linear(v as f64 / 255.0));
+        Transfer {
+            encoded: linear.map(encoded),
+            byte: linear.map(encoded_byte),
+            linear,
+        }
+    })
 }
 pub(crate) struct Processor<'a> {
     stages: Vec<Stage<'a>>,
@@ -467,15 +486,24 @@ impl<'a> Processor<'a> {
             return None;
         }
         if self.per_pixel {
-            let denominator = match alpha {
-                AlphaMode::Straight => 255.0,
-                AlphaMode::Premultiplied => rgba[3] as f64,
+            // While no stage has changed a straight pixel, its linear, encoded and quantized
+            // values are those of its stored bytes, which the transfer tables hold.
+            let tables = transfer();
+            let mut source = match alpha {
+                AlphaMode::Straight => Some([rgba[0], rgba[1], rgba[2]].map(usize::from)),
+                AlphaMode::Premultiplied => None,
             };
-            let mut color = [
-                linear(rgba[0] as f64 / denominator),
-                linear(rgba[1] as f64 / denominator),
-                linear(rgba[2] as f64 / denominator),
-            ];
+            let mut color = match source {
+                Some(rgb) => rgb.map(|v| tables.linear[v]),
+                None => {
+                    let denominator = rgba[3] as f64;
+                    [
+                        linear(rgba[0] as f64 / denominator),
+                        linear(rgba[1] as f64 / denominator),
+                        linear(rgba[2] as f64 / denominator),
+                    ]
+                }
+            };
             let mut changed = false;
             let mut coverage = rgba[3] as f64;
             for stage in &self.stages {
@@ -485,14 +513,22 @@ impl<'a> Processor<'a> {
                 let stage = match stage {
                     Stage::Grade(g) => g,
                     Stage::Key(k) => {
+                        let encoded_color = match source {
+                            Some(rgb) => rgb.map(|v| tables.encoded[v]),
+                            None => color.map(encoded),
+                        };
                         if let Some((candidate, retention, weight)) =
-                            k.apply(color.map(encoded), position)
+                            k.apply(encoded_color, position)
                         {
-                            for (value, candidate) in color.iter_mut().zip(candidate) {
-                                *value = *value * (1.0 - weight) + linear(candidate) * weight;
-                            }
                             coverage *= retention;
                             changed = true;
+                            source = None;
+                            // A fully keyed pixel is returned transparent whatever its color.
+                            if coverage != 0.0 {
+                                for (value, candidate) in color.iter_mut().zip(candidate) {
+                                    *value = *value * (1.0 - weight) + linear(candidate) * weight;
+                                }
+                            }
                         }
                         if coverage == 0.0 {
                             return Some([0; 4]);
@@ -503,7 +539,10 @@ impl<'a> Processor<'a> {
                 let weight = stage
                     .selection
                     .as_ref()
-                    .map(|s| s.weight(color, position))
+                    .map(|s| {
+                        let bytes = source.map(|rgb| rgb.map(|v| tables.byte[v]));
+                        s.weight(color, bytes, position)
+                    })
                     .unwrap_or(1.0);
                 if weight <= 0.0 {
                     continue;
@@ -512,6 +551,7 @@ impl<'a> Processor<'a> {
                     *value = *value * (1.0 - weight) + stage.apply(*value, c) * weight;
                 }
                 changed = true;
+                source = None;
             }
             if !changed {
                 return None;
@@ -531,4 +571,193 @@ impl<'a> Processor<'a> {
 }
 pub fn capabilities() -> Value {
     json!({"scope":"scene_layer","types":["grade","selective_grade","chroma_key"],"maximum_per_layer":8,"working_space":"linear_srgb_f64","output":"straight_srgb_u8_before_compositing","order":"exposure_and_white_balance_then_contrast_then_master_curve_then_channel_curve","contrast_pivot":0.18,"clipping":"after_contrast_in_each_grade","exposure_milli":[-8000,8000],"contrast_milli":[0,4000],"white_balance_milli":[100,4000],"tone_curve":{"domain":[0,65535],"maximum_points":32,"interpolation":"linear","animated_points":false},"animated_properties":["exposure_milli","contrast_milli","red_balance_milli","green_balance_milli","blue_balance_milli"],"clock":"layer_local","alpha":"unpremultiply_before_processing_grades_preserve_keys_reduce","neutral_chain":"exact_integer_bypass","keying":crate::keying::capabilities(),"selection":{"qualifier":"quantized_srgb8_hsl_integer","hue_unit":"millidegrees","hue_range":[0,359999],"saturation_lightness_unit":"thousandths","achromatic_hue":"excluded_before_inversion","combination":"product_then_qualifier_inversion_then_mask_then_mix","mask":"source_canvas_rectangle_inward_linear_feather","mask_maximum_feather":4096,"animated":["grade_controls","mix_milli","mask_rect"],"unselected_pixels":"preserve_original_alpha_encoding"}})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl Processor<'_> {
+        /// The former `pixel`, as the reference for the table lookups.
+        fn reference_pixel(
+            &self,
+            rgba: &[u8],
+            alpha: AlphaMode,
+            position: [i64; 2],
+        ) -> Option<[u8; 4]> {
+            if rgba[3] == 0 {
+                return None;
+            }
+            if self.per_pixel {
+                let denominator = match alpha {
+                    AlphaMode::Straight => 255.0,
+                    AlphaMode::Premultiplied => rgba[3] as f64,
+                };
+                let mut color = [
+                    linear(rgba[0] as f64 / denominator),
+                    linear(rgba[1] as f64 / denominator),
+                    linear(rgba[2] as f64 / denominator),
+                ];
+                let mut changed = false;
+                let mut coverage = rgba[3] as f64;
+                for stage in &self.stages {
+                    if stage.identity() {
+                        continue;
+                    }
+                    let stage = match stage {
+                        Stage::Grade(g) => g,
+                        Stage::Key(k) => {
+                            if let Some((candidate, retention, weight)) =
+                                k.apply(color.map(encoded), position)
+                            {
+                                for (value, candidate) in color.iter_mut().zip(candidate) {
+                                    *value = *value * (1.0 - weight) + linear(candidate) * weight;
+                                }
+                                coverage *= retention;
+                                changed = true;
+                            }
+                            if coverage == 0.0 {
+                                return Some([0; 4]);
+                            }
+                            continue;
+                        }
+                    };
+                    let weight = stage
+                        .selection
+                        .as_ref()
+                        .map(|s| s.weight(color, None, position))
+                        .unwrap_or(1.0);
+                    if weight <= 0.0 {
+                        continue;
+                    }
+                    for (c, value) in color.iter_mut().enumerate() {
+                        *value = *value * (1.0 - weight) + stage.apply(*value, c) * weight;
+                    }
+                    changed = true;
+                }
+                if !changed {
+                    return None;
+                }
+                let [r, g, b] = color.map(encoded_byte);
+                return Some([r, g, b, coverage.round().clamp(0.0, 255.0) as u8]);
+            }
+            let mut result = [0, 0, 0, rgba[3]];
+            for c in 0..3 {
+                result[c] = match alpha {
+                    AlphaMode::Straight => self.tables[c][rgba[c] as usize],
+                    AlphaMode::Premultiplied => self.channel(rgba[c] as f64 / rgba[3] as f64, c),
+                };
+            }
+            Some(result)
+        }
+    }
+
+    #[test]
+    fn transfer_tables_hold_the_function_values() {
+        let tables = transfer();
+        for v in 0..256 {
+            let value = linear(v as f64 / 255.0);
+            assert_eq!(tables.linear[v].to_bits(), value.to_bits());
+            assert_eq!(tables.encoded[v].to_bits(), encoded(value).to_bits());
+            assert_eq!(tables.byte[v], encoded_byte(value));
+        }
+    }
+
+    #[test]
+    fn per_pixel_chains_match_the_former_processing() {
+        let effect = |value: Value| -> Effect { serde_json::from_value(value).unwrap() };
+        let key = |rgb: [u8; 3], strength: i32, unmix: u16, mask: Value| {
+            let mut key = json!({"kind":"chroma_key","key_rgb":rgb,"inner_milli":80,"outer_milli":260,
+                "strength_milli":1000,"unmix_milli":unmix,"spill":{"channel":"green","strength_milli":600}});
+            if !mask.is_null() {
+                key["mask"] = mask;
+            }
+            (
+                effect(key),
+                Sample::ChromaKey {
+                    strength_milli: strength,
+                    mask_rect: Some([3, 2, 9, 7]),
+                },
+            )
+        };
+        let grade = |exposure: i32| {
+            (
+                effect(
+                    json!({"kind":"grade","exposure_milli":exposure,"contrast_milli":1150,"white_balance_milli":[1000,1050,900],
+                    "master_curve":{"points":[[0,0],[20000,16000],[65535,65535]]}}),
+                ),
+                Sample::Grade {
+                    exposure_milli: exposure,
+                    contrast_milli: 1150,
+                    white_balance_milli: [1000, 1050, 900],
+                },
+            )
+        };
+        let selective = |mix: i32, inverted: bool, mask: Value| {
+            let mut value = json!({"kind":"selective_grade","grade":{"exposure_milli":600,"contrast_milli":900,
+                "white_balance_milli":[1100,1000,950]},"mix_milli":mix,"qualifier":{"hue":{"center":120000,"inner":30000,"outer":80000},
+                "saturation":{"low":150,"high":1000,"feather":120},"inverted":inverted}});
+            if !mask.is_null() {
+                value["mask"] = mask;
+            }
+            (
+                effect(value),
+                Sample::SelectiveGrade {
+                    exposure_milli: 600,
+                    contrast_milli: 900,
+                    white_balance_milli: [1100, 1000, 950],
+                    mix_milli: mix,
+                    mask_rect: Some([3, 2, 9, 7]),
+                },
+            )
+        };
+        let mask = json!({"rect":[3,2,9,7],"feather":3});
+        let selective_mask = json!({"rect":[3,2,9,7],"feather":4,"inverted":true});
+        let chains = vec![
+            vec![key([40, 200, 90], 1000, 0, Value::Null)],
+            vec![key([40, 200, 90], 700, 500, mask.clone())],
+            vec![selective(800, false, Value::Null)],
+            vec![selective(350, true, selective_mask.clone())],
+            vec![key([20, 60, 230], 1000, 300, Value::Null), grade(400)],
+            vec![grade(-300), selective(1000, false, Value::Null)],
+            vec![
+                key([40, 200, 90], 0, 0, Value::Null),
+                selective(600, false, Value::Null),
+            ],
+            vec![
+                selective(0, false, Value::Null),
+                key([200, 40, 60], 900, 0, Value::Null),
+            ],
+            vec![
+                key([40, 200, 90], 600, 0, Value::Null),
+                key([30, 220, 70], 1000, 800, mask),
+            ],
+        ];
+        for chain in chains {
+            let (effects, samples): (Vec<_>, Vec<_>) = chain.into_iter().unzip();
+            let processor = Processor::new(&effects, &samples).expect("a per-pixel chain");
+            assert!(processor.tables().is_none());
+            for r in (0..=255u8).step_by(7) {
+                for g in (0..=255u8).step_by(5) {
+                    for b in (0..=255u8).step_by(9) {
+                        for a in [1u8, 77, 200, 255] {
+                            let position = [(r / 7 % 12) as i64, (g / 5 % 10) as i64];
+                            let straight = [r, g, b, a];
+                            let premultiplied = [r.min(a), g.min(a), b.min(a), a];
+                            for (rgba, mode) in [
+                                (straight, AlphaMode::Straight),
+                                (premultiplied, AlphaMode::Premultiplied),
+                            ] {
+                                assert_eq!(
+                                    processor.pixel(&rgba, mode, position),
+                                    processor.reference_pixel(&rgba, mode, position),
+                                    "{effects:?} {rgba:?} {mode:?} {position:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

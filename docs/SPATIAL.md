@@ -85,6 +85,8 @@ After filtering, layer opacity and the existing normal/multiply/screen blend are
 
 Nearest sampling preserves pixel-art cells. Bilinear provides local interpolation, including fractional movement and rotation; it is not an area filter for strong minification, a general polygon coverage integrator, or motion blur. Those distinctions remain visible in capability discovery. Shear, perspective and 3D transforms are not implied by this option.
 
+Rendering reaches these values through faster paths: direct reads of source pixels, effects evaluated once per sampled source pixel rather than per tap, per-column and per-row mapping of axis-aligned transforms, and parallel row bands when processors are idle. The values are unchanged. See [the scene limits](SCENES.md#limits) and the 5 October 2026 entry in [PROGRESS_HISTORY.md](PROGRESS_HISTORY.md) for measured costs.
+
 ## Animated parameters
 
 `spatial.animation` supports `translate_x_milli`, `translate_y_milli`, `scale_x_milli`, `scale_y_milli` and `rotation_mdeg`. Each curve uses the existing [exact property keyframe contract](SCENES.md#property-keyframes), including hold/linear/quadratic easing, independent retiming, endpoint holds and integer half-away rounding. Values use the same units/bounds as their static fields. Scale remains positive; mirroring is explicit static state. Rotation interpolates the supplied signed angle values, not an inferred shortest arc.

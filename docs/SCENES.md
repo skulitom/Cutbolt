@@ -184,7 +184,16 @@ The work limit counts a bottom layer once when its recipe alone proves that it n
 - has no position or opacity curves and no expression bindings;
 - has no mask curves, no effect curves or animated effect masks, and no spatial curves or stabilization compensation. A curve whose keys are all equal still counts as a curve.
 
-`work.static_layers` reports how many layers counted once, and `capabilities` describes the rule under `scenes.limits.unchanging_layers`. For example, eleven unchanging full-frame layers at 1920 x 1080 for 120 seconds count 22.8 million pixels instead of 68.4 billion; that scene rendered in 44.6 s on the development machine, half busy with other work, peaking at 277 MB in the engine. A render composites at least those layers once; it fails with `LIMIT_EXCEEDED` rather than do more work than it counted. 3D scenes composite every sample. Unscaled, unrotated, unmasked normal-blend layers without effects take a row-by-row path with the same equation and rounding.
+`work.static_layers` reports how many layers counted once, and `capabilities` describes the rule under `scenes.limits.unchanging_layers`. For example, eleven unchanging full-frame layers at 1920 x 1080 for 120 seconds count 22.8 million pixels instead of 68.4 billion; that scene rendered in 44.6 s on the development machine, half busy with other work, peaking at 277 MB in the engine. A render composites at least those layers once; it fails with `LIMIT_EXCEEDED` rather than do more work than it counted. 3D scenes composite every sample.
+
+Faster paths keep the same equations and rounding:
+- Unscaled, unrotated normal-blend layers composite row by row, masked or not; premultiplied layers do so only without effects. A rectangle mask's coverage is the smaller of a per-column and a per-row value. Fully covered runs therefore take the unmasked row equation, uncovered runs are skipped, and only feathered edges use the masked equation.
+- [Spatial layers](SPATIAL.md) read their pixels directly wherever all of a sample's taps lie inside the image.
+  - Effects that change during the scene run once for each source pixel a frame can sample, rather than once per tap, on straight layers whose sampled pixels do not outnumber the taps.
+  - An axis-aligned mapping (no rotation off the quarter turns) maps each column and each row once.
+  - Each row visits only the columns whose samples can land on the source.
+- Keys and selective grades whose strength or mix changes over time read the transfer values of unchanged 8-bit inputs from tables.
+- Processors that no frame keeps busy draw a large spatial layer's rows in parallel bands. This happens for a still, and for a render whose few frames or memory-bounded workers leave processors idle.
 
 Measured with the release build on the development machine (32 logical processors) while another session's fixtures were running, for native 1920 x 1080 scenes built from the 5 October 2026 demo's art:
 

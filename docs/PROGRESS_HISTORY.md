@@ -42,6 +42,74 @@ Tests:
 - the dynamics fixture exports its master-limited timeline to H.264, and requires the PCM the encoder received to equal the limiter oracle exactly.
 
 These fixtures pass: delivery, delivery_profiles, overlays, tracks, transitions, native_timing, export_formats, agent_ergonomics, color, hdr, native_scenes, transcripts, queue_recovery and dynamics (quick mode, with the CUDA decode device). No scoring changed. Evidence stays stale until the next thorough run.
+## 5 October 2026: spatial and masked layers composite about three times faster
+
+The visual-effects stress test (`C:\DEV\CutboltData\vfx-stress-20261005`, VFX-STRESS.md items 7 and 8) left two compositing paths slow after `d4eaf9d`:
+- a bilinear Ken Burns zoom of one full-frame 1080p layer cost about 42 CPU-seconds per 10 s;
+- eight rotating 512 px sprites cost about 35 CPU-seconds;
+- a layer with a feathered or animated mask took the general per-pixel path, about 24 ms per 1080p layer-frame against 9 ms for the row kernel.
+
+Profiling a single 1080p frame showed that libm `round`, suspected first, was not the cost: a rounding helper without it measured no faster, and was dropped. The time went into per-tap callbacks, 128-bit sums and per-pixel mapping.
+
+The changes. Decoded frames and audio stay identical:
+- **Masks by axis.** A rectangle mask's coverage depends on the smaller of the horizontal and vertical edge distances through a ramp that never decreases. Coverage is therefore the smaller of a per-column and a per-row value, inverted when the mask is. Each layer-frame computes those values once (`MaskAxes`) instead of evaluating the mask per pixel.
+- **Masked rows.** Unscaled, unrotated normal-blend layers take the row path with a mask too. Runs at full coverage use the unmasked 32-bit row kernel, uncovered runs are skipped, and only feathered edges evaluate `masked_channel`.
+- **Spatial taps.**
+  - Sums of tap weight x coverage x premultiplied color stay below 2^64, so taps accumulate in 64 bits; only the final blend uses 128-bit products.
+  - A spatial layer without per-frame effects reads its stored pixels directly wherever all of a sample's taps lie inside the image. Other pixels call the per-tap closure, as before.
+  - Direct reads use exact closed forms. At full coverage the normal blend factors out 2^16, which removes the 128-bit products. One nearest tap reduces to the 32-bit row equation. Four opaque bilinear taps reduce to ((N + 255 x 2^31) >> 32) / 255. Bilinear weights interpolate each row, then the two rows.
+- **Axis-aligned mappings.** When a cross term of the inverse mapping is zero (no rotation off the quarter turns), it adds the same signed zero in every row. Each column's source x, or each row's source y, is then rounded once with the same operations. This covers Ken Burns zooms, pans, flips and aspect fits.
+- **Row spans.** Each row visits only the columns whose samples can land within a pixel of the crop, solved from the mapping with one source pixel and two destination pixels of margin. A rotated sprite no longer visits the empty corners of its bounding box.
+- **Row bands.** Processors that no frame keeps busy draw a large spatial layer's rows in parallel bands. This applies to `scene.still`, static bases, and renders whose few frames or memory-bounded workers leave processors idle.
+- **Effects once per sampled source pixel.** Spatial layers whose effects change over time used to evaluate the chain at every tap, four times per bilinear pixel. A straight layer now processes once per frame the source pixels its taps can reach, with the bound mapped back from the destination area, unless those pixels outnumber the taps. It then reads them directly. Effects read only a pixel and its position, so the values are unchanged, and any tap outside the region still evaluates the chain itself.
+- **Transfer tables.** Animated keys and selective grades still run per pixel per frame. While a stage has not yet changed a straight pixel, its linear, encoded and quantized values come from 256-entry tables of the same functions. A fully keyed pixel returns transparent before its color is computed.
+
+Release builds of `b546b1a` (before) and this change ran back to back on each scene, on the 32-thread development machine. Other sessions kept it 7-81 % busy. "Engine CPU" is the engine process's own CPU time for a 10 s 1080p25 render. Every row's decoded video and audio hashes match (`scripts/ab.py`, which now records the load and takes the builds from `CUTBOLT_AB_OLD`/`CUTBOLT_AB_NEW`).
+
+| 10 s 1080p25 scene | Engine CPU before | After | Wall before | After |
+| --- | ---: | ---: | ---: | ---: |
+| Bilinear Ken Burns zoom of one full-frame layer | 39.1 s | 13.4 s | 5.9 s | 5.1 s |
+| The same with a constant grade | 42.5 s | 13.6 s | 9.2 s | 6.2 s |
+| The same with nearest sampling | 19.9 s | 10.2 s | 5.3 s | 5.5 s |
+| The same with a feathered mask, over a full-frame layer | 49.2 s | 23.2 s | 5.8 s | 5.0 s |
+| The same as a transparent overlay of an alpha layer | 86.6 s | 47.3 s | 5.3 s | 4.0 s |
+| The same zooming a chroma key with animated strength | 618.6 s | 82.7 s | 27.3 s | 5.6 s |
+| 8 rotating 512 px sprites | 35.0 s | 13.9 s | 6.3 s | 5.6 s |
+| The same with feathered masks | 38.4 s | 20.1 s | 8.8 s | 8.0 s |
+| The same with an animated selective grade | 238.0 s | 29.6 s | 14.6 s | 6.4 s |
+| 9 animated layers with feathered moving masks | 69.5 s | 26.4 s | 5.7 s | 4.2 s |
+| 9 animated layers with still feathered masks | 72.9 s | 25.3 s | 5.3 s | 4.1 s |
+| 9 animated layers with hard inverted masks | 49.8 s | 20.6 s | 4.5 s | 3.9 s |
+| One full-frame chroma key with animated strength, moving | 141.3 s | 79.5 s | 7.5 s | 6.0 s |
+| 8 selective grades with animated mix on animated layers | 628.1 s | 188.0 s | 33.5 s | 12.8 s |
+
+Unchanged paths stayed within noise: the explainer stage, 9 animated layers, animated grades, constant keys and selective grades, and 8 transparent layers. Most 10 s scenes still take 4-8 s of wall time, because encoding and verification cost about 25 CPU-seconds each.
+
+One 1080p frame on one thread, timed with a temporary benchmark (minimum of 15 interleaved rounds):
+
+| Frame | Before | After | After, 16 bands |
+| --- | ---: | ---: | ---: |
+| Bilinear Ken Burns at 1.1x | 75.8 ms | 24.1 ms | 3.3 ms |
+| Nearest Ken Burns at 1.1x | 48.4 ms | 16.0 ms | 2.8 ms |
+| One 512 px sprite rotated 37 degrees | 13.3 ms | 5.2 ms | 1.3 ms |
+
+`scene.still` of these scenes (median of 7 alternating runs, `scripts/stills.py`) went from 0.69 to 0.67 s for the Ken Burns zoom and from 0.70 to 0.57 s with its mask. Decoding, hashing and PNG encoding dominate a still.
+
+Tests:
+- `spatial` compares `draw` with the former per-pixel implementation, kept as a test reference, on 3,000 random cases. They cover arbitrary and quadrant rotations, scales, flips, pixel aspect, both samplings and edges, viewports, compensation clipping, three blends, opacity, straight, premultiplied, opaque and matte sources, per-pixel and rectangle coverage, direct reads, and one and three bands.
+- `composite` checks mask axes against per-pixel coverage for every feather edge, inversion and empty rectangle, and the masked row kernel against `masked_channel` for every alpha.
+- `effects` checks the tables bit for bit, and nine per-pixel chains against the former processing on about 56,000 colors at four alphas in each encoding.
+- `scene` composes a scene with masked rows, masked, keyed, graded and plain spatial layers, rotated and axis-aligned, opaque and transparent, with and without the static base and processed sources. Every frame equals the former per-pixel paths at one and three threads.
+- Three injected faults were caught: a wrong mask axis value, an "unchanged pixel" flag left set after a grade, and a source position off by one in the per-frame effect region.
+
+The scenes, compositing, spatial, keying, selection, grading, temporal, geometry, reframing, stabilization, tracking, captions, overlays, native_scenes, animation, easing and graphics fixtures pass with this change (quick tier, 17 of 17).
+
+**Still slow (open):**
+- Keys and selective grades that change over time on non-spatial layers still cost 80-190 CPU-seconds per 10 s of 1080p.
+- Transparent scenes compose every layer twice, once for color and once for the matte.
+- Encoding and verification take most of a scene's wall time.
+
+These are speed improvements only and earn no capability points. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: recognition vocabulary and uncovered speech
 
