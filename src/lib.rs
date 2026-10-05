@@ -1,5 +1,6 @@
 pub mod acceleration;
 pub mod animation;
+pub mod assemble;
 pub mod audio;
 pub mod audio_processing;
 pub mod audio_repair;

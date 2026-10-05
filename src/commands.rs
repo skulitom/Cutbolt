@@ -483,6 +483,25 @@ pub enum Request {
         /// Absolute path of a new .srt or .vtt file (matching format) inside output_root; never overwritten.
         output: PathBuf,
     },
+    #[serde(rename = "transcript.assemble")]
+    TranscriptAssemble {
+        /// Sequential project to append to; its assets must include the transcripts' sources.
+        #[schemars(with = "crate::reference::ProjectInput")]
+        project: Project,
+        /// Transcripts of the source media, as for timeline.outline.
+        transcripts: Vec<crate::transcript::Document>,
+        /// Word runs to use, in timeline order, 1-500.
+        selections: Vec<crate::assemble::Selection>,
+        /// Existing absolute directory; used only to match absolute asset paths to transcript source paths.
+        #[serde(default)]
+        input_root: Option<PathBuf>,
+        /// Extra source kept before the first and after the last word of each run, at most 2 s; default zero.
+        #[serde(default)]
+        padding: Option<Time>,
+        /// Prefix for new clip IDs `<prefix><n>`; default `s`.
+        #[serde(default)]
+        clip_prefix: Option<String>,
+    },
     #[serde(rename = "transcript.fillers")]
     TranscriptFillers {
         /// Project to clean up.
@@ -1862,6 +1881,21 @@ pub fn handle(request: Request) -> Result<Value> {
                 padding: padding.unwrap_or(Time::ZERO),
             })
         }
+        Request::TranscriptAssemble {
+            project,
+            transcripts,
+            selections,
+            input_root,
+            padding,
+            clip_prefix,
+        } => crate::assemble::propose(&crate::assemble::Request {
+            project: &project,
+            transcripts: &transcripts,
+            selections: &selections,
+            input_root: input_root.as_deref(),
+            padding: padding.unwrap_or(Time::ZERO),
+            clip_prefix: clip_prefix.as_deref().unwrap_or("s"),
+        }),
         Request::FilesList {
             input_root,
             dir,
@@ -1906,7 +1940,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","transcript.fillers","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.still","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","transcript.fillers","transcript.assemble","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.still","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},

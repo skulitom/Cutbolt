@@ -593,13 +593,13 @@ def run(root):
         frames_ = len(pcm)//2
         assert reviewed['file']['audio']['samples'] == frames_ and reviewed['timing']['audio']['expected_samples'] == 91*1920
         assert reviewed['timing']['audio']['ok'] == (abs(frames_-91*1920) <= 2048)
-        sound = reviewed['sound']
+        levels = reviewed['sound']
         for ch in range(2):
             peak = max(abs(v) for v in pcm[ch::2])/32768
-            assert abs(sound['sample_peak_dbfs'][ch]-20*math.log10(peak)) < 1e-9
+            assert abs(levels['sample_peak_dbfs'][ch]-20*math.log10(peak)) < 1e-9
         reference = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', str(delivered), '-af', 'ebur128=peak=sample', '-f', 'null', '-'],
                                    capture_output=True, text=True, check=True, timeout=60)
-        assert abs(sound['integrated_lkfs']-float(re.findall(r'I:\s+(-?[0-9.]+) LUFS', reference.stderr)[-1])) <= .11, sound
+        assert abs(levels['integrated_lkfs']-float(re.findall(r'I:\s+(-?[0-9.]+) LUFS', reference.stderr)[-1])) <= .11, levels
         def runs(test, minimum):
             found, start = [], None
             for n in range(frames_):
@@ -611,13 +611,13 @@ def run(root):
             if start is not None and frames_-start >= minimum:found.append({'start':time(start, 48000), 'end':time(frames_, 48000)})
             return found
         silent = runs(lambda l, r:abs(l) <= 32 and abs(r) <= 32, 24000)
-        assert sound['silence']['runs'] == silent[:50] and sound['silence']['count'] == len(silent)
+        assert levels['silence']['runs'] == silent[:50] and levels['silence']['count'] == len(silent)
         full = lambda v:v in (32767, -32768)
-        assert sound['clipping']['clipped_samples'] == sum(1 for v in pcm if full(v))
-        assert sound['clipping']['runs'] == runs(lambda l, r:full(l) or full(r), 1)[:50]
+        assert levels['clipping']['clipped_samples'] == sum(1 for v in pcm if full(v))
+        assert levels['clipping']['runs'] == runs(lambda l, r:full(l) or full(r), 1)[:50]
         details = json.loads((folder/'review.json').read_text(encoding='utf-8'))
         assert details['summary'] == reviewed['summary'] and len(details['sound']['over_time']['short_term_lkfs']) == frames_//48000
-        assert details['sound']['meters']['integrated_lkfs'] == sound['integrated_lkfs'] and reviewed['details'] == 'review.json'
+        assert details['sound']['meters']['integrated_lkfs'] == levels['integrated_lkfs'] and reviewed['details'] == 'review.json'
         # The sheet is media.sheet's sheet of the same file; the small copy is H.264/AAC at the source size.
         sheet = call({'command':'media.sheet', 'path':str(delivered), 'input_root':str(root), 'output_root':str(output), 'output':str(output/'review-check.png')})
         assert (folder/'sheet.png').read_bytes() == (output/'review-check.png').read_bytes()
@@ -741,6 +741,35 @@ def run(root):
                                  (talk, {'track_ids':['a']}, 'INVALID_ARGUMENT'), (restored, {'track_ids':['v']}, 'MISSING_TRACK')):
             client.call('transcript.fillers', code, project=p_, transcripts=hesitant if p_ is talk else [filled], **fields)
         passed.append('transcript.fillers_cut_exactly')
+        # Paper edit: word runs become frame-widened clip.append operations; the render is exactly
+        # the source frames and samples of those ranges, in the chosen order.
+        paper = call({'command':'project.create', 'id':'paper', 'width':W, 'height':H, 'frame_rate':time(25)})
+        paper = apply(paper, [{'op':'media.add', 'asset':asset}])
+        runs = [('w3', 'w4'), ('w0', 'w0'), ('w1', 'w2')]
+        selections = [{'document_id':'words', 'first_word_id':a, 'last_word_id':b} for a, b in runs]
+        proposal = client.call('transcript.assemble', project=paper, transcripts=[document], selections=selections, padding=time(1, 10))
+        words = {w['id']:w for w in document['words']}
+        ranges = []
+        for a, b in runs:
+            start = max(seconds(words[a]['start'])-F(1, 10), F(0));end = min(seconds(words[b]['end'])+F(1, 10), F(4))
+            ranges.append((math.floor(start*25), min(math.ceil(end*25), 100)))
+        assert ranges == [(37, 57), (7, 17), (17, 37)]
+        assert proposal['operations'] == [{'op':'clip.append', 'clip':{'id':f's{i+1}', 'asset_id':'voice', 'source_in':time(a, 25), 'duration':time(b-a, 25)}}
+                                          for i, (a, b) in enumerate(ranges)], proposal['operations']
+        assert [c['text'] for c in proposal['clips']] == ['blue circle.', 'red,', 'square κύκλος'] and proposal['added'] == time(2)
+        assert call({'command':'transcript.assemble', 'project':paper, 'transcripts':[document], 'selections':selections, 'padding':time(1, 10)}) == proposal
+        assembled = apply(paper, proposal['operations'])
+        render(assembled, (b''.join(b''.join(pictures[a:b]) for a, b in ranges), b''.join(sound[a*1920*2:b*1920*2].tobytes() for a, b in ranges)), 'paper-edit')
+        more = call({'command':'transcript.assemble', 'project':assembled, 'transcripts':[document], 'selections':selections[:1]})
+        assert more['operations'][0]['clip']['id'] == 's4' and more['operations'][0]['clip']['source_in'] == time(40, 25) and more['operations'][0]['clip']['duration'] == time(14, 25)
+        bare = call({'command':'project.create', 'id':'bare', 'width':W, 'height':H, 'frame_rate':time(25)})
+        for p_, fields, code in ((paper, {'selections':[{**selections[0], 'document_id':'other'}]}, 'MISSING_TRANSCRIPT'),
+                                 (paper, {'selections':[{**selections[0], 'last_word_id':'w9'}]}, 'MISSING_WORD'),
+                                 (paper, {'selections':[{**selections[0], 'first_word_id':'w4', 'last_word_id':'w3'}]}, 'INVALID_ARGUMENT'),
+                                 (paper, {'selections':[]}, 'INVALID_ARGUMENT'), (paper, {'padding':time(3)}, 'INVALID_ARGUMENT'),
+                                 (restored, {}, 'UNSUPPORTED_TIMELINE'), (bare, {}, 'MISSING_ASSET')):
+            client.call('transcript.assemble', code, **{'project':p_, 'transcripts':[document], 'selections':selections, **fields})
+        passed.append('transcript.paper_edit_assembles_exactly')
     finally:
         client.close()
 

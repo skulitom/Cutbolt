@@ -220,6 +220,10 @@ It then proposes a gain curve for every clip on `music_track_id` that overlaps s
 
 The result lists the speech runs with exact times, a summary per clip, and `clip_audio` `operations`. Check them with `session.preview`, apply them with `session.apply`, and listen back with `timeline.meters` `curve` or a preview range.
 
+## Paper edits from transcripts
+
+`transcript.assemble` turns transcript word selections into frame-aligned `clip.append` operations, so a rough cut can be built from what people say. See [TRANSCRIPTS.md](TRANSCRIPTS.md#paper-edits).
+
 ## Removing filler words
 
 `transcript.fillers` proposes ripple deletions of um, uh and other listed words wherever the timeline speaks them, from transcripts of its sources, without cutting into the neighbouring words. See [TRANSCRIPTS.md](TRANSCRIPTS.md#removing-filler-words).

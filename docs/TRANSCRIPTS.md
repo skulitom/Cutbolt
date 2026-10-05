@@ -70,6 +70,16 @@ Overlapping or touching selections form one union. Separated intervals are delet
 
 The result reports requested and snapped boundaries, expansions, merged cuts, selected estimates, collateral word IDs and retained source/time fragments. A word crossing a clip edge has `binding_complete: false`; its intersecting portion is still checked for collateral cuts. Words fully outside the binding are reported separately. The projection describes this bound clip's words, not every occurrence of the source elsewhere in the project.
 
+## Paper edits
+
+`transcript.assemble` is read-only and builds a rough cut from what people say. It takes a sequential `project` and the `transcripts` of its sources. Each of its `selections` names a transcript and a first and last word; the project must already have an asset for that transcript's source (matched as for `timeline.outline`).
+
+Each selection becomes one `clip.append`, in the given order, covering its words' source:
+- **Padding.** `padding` (default zero, at most 2 s) extends each side, clipped to the asset.
+- **Whole frames.** The start rounds down and the end rounds up to whole frames, so no selected word is clipped. The end never passes the asset's last whole frame.
+
+New clip IDs are `<clip_prefix><n>` (default `s1`, `s2`, …), skipping IDs the project already uses. The result lists each clip with its words. The batch is checked to apply. Placed-track projects are refused: assemble first, then promote to tracks for music and overlays.
+
 ## Removing filler words
 
 `transcript.fillers` is read-only. It takes a `project` and `transcripts` of its sources, as `timeline.outline` does, and finds `words` wherever the timeline speaks them, matched on letters and digits ignoring case and punctuation. The default list is um, uh, erm, er, ah, uhm, umm, hmm and mm. It then proposes ripple deletions that remove the fillers, built in four steps:

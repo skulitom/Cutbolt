@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: paper edits
+
+Building a rough cut from transcripts meant converting word times to frame-aligned source ranges by hand for every selection. The read-only `transcript.assemble` takes word runs (transcript, first word, last word) and returns `clip.append` operations in order. Each covers its words plus optional padding, widened to whole frames so no word is clipped, with fresh clip IDs. The batch is checked to apply.
+
+The transcripts fixture assembles three out-of-order runs with padding. The ranges are recomputed independently, and the render must equal the source frames and samples of those ranges in order. It also covers appending to an assembled project, which continues the IDs, and the rejections. A test variable that shadowed the fixture's source audio was renamed. No scoring changed.
+
 ## 5 October 2026: batch preparation
 
 Bringing twenty camera files into a project took twenty `media.prepare` jobs, twenty waits and hand-built `media.add` operations. `media.prepare` now also takes `paths` and prepares them all in one job. Asset IDs come from the file names, made unique within the batch and against the project's existing assets. One file's failure is reported without stopping the others, and the result includes ready `media.add` operations.
