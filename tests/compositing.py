@@ -191,7 +191,7 @@ def run(root):
     client=Client(exe)
     try:
         client.initialize()
-        assert client.call("scene.inspect",scene=animated,input_root=str(sources))["timing"]==inspect(animated)["timing"]
+        assert client.call("scene.inspect",scene=animated,input_root=str(sources),detail="full")["timing"]==inspect(animated)["timing"]
     finally:
         client.close()
     passed.append("composite.mcp_inspection")

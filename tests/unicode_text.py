@@ -186,8 +186,8 @@ def run(root):
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         for tool_name,args in [('cutbolt_scene_inspect',{'scene':moving,'input_root':str(sources)}),('cutbolt_captions_scene',{k:v for k,v in request.items() if k!='command'})]:
             tool=next(t for t in catalog if t['name']==tool_name);assert tool['annotations']['readOnlyHint'];Draft202012Validator(tool['inputSchema']).validate(args)
-        assert client.call('scene.inspect',scene=moving,input_root=str(sources))==moving_info
-        assert client.call('captions.scene',**{k:v for k,v in request.items() if k!='command'})==caption
+        assert client.call('scene.inspect',scene=moving,input_root=str(sources),detail='full')==moving_info
+        assert client.call('captions.scene',detail='full',**{k:v for k,v in request.items() if k!='command'})==caption
         project=call({'command':'project.create','id':'unicode-edit','width':512,'height':256,'frame_rate':time(25)})
         client.call('session.create',store_root=str(store),project=project,request_id='create')
         edit={'store_root':str(store),'project_id':'unicode-edit','request_id':'place','expected_revision':0,'operations':[{'op':'media.add','asset':moving_receipt['asset']},{'op':'clip.append','clip':{'id':'title','asset_id':moving['id'],'source_in':time(1,25),'duration':time(6,25)}}]}

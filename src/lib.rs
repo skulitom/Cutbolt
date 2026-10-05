@@ -68,6 +68,7 @@ pub mod sequences;
 pub mod spatial;
 pub mod stabilize;
 pub mod store;
+pub mod summary;
 pub mod sync;
 pub mod templates;
 pub mod temporal;

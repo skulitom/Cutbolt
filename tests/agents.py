@@ -421,6 +421,49 @@ def run(executable, fixture):
         failed = terminal(failed_ticket)
         check("jobs.failure_receipt", failed["status"] == "failed" and failed["error"]["code"] == "IO_ERROR" and not (root / "failure.mkv").exists())
         check("jobs.sources_preserved", all(file_hash(path) == value for path, value in source_hashes.items()))
+
+        # Compact receipts: over MCP a scene result has one line per layer unless detail is full;
+        # the CLI returns everything, as it always has.
+        eighth = {"num": 8, "den": 25}
+        slide = {"keys": [{"time": time_value(0), "value": 0, "interpolation": "linear"}, {"time": {"num": 6, "den": 25}, "value": 12, "interpolation": "hold"}]}
+        box = {"id": "box", "canvas": [32, 18], "start": time_value(0), "duration": eighth, "frames": [], "timing": "strict", "end": "hold_last",
+               "graphics": {"kind": "shape", "shape": "rectangle", "rect": [2, 2, 12, 8], "fill": [200, 40, 40, 255], "stroke": None},
+               "transform": {"position": [0, 0], "crop": [0, 0, 32, 18], "scale": 1, "quarter_turns": 0, "opacity": 255}, "animation": {"position_x": slide}}
+        tiny = {"schema_version": 1, "id": "tiny", "width": 32, "height": 18, "output_scale": 1, "duration": eighth,
+                "background": [10, 20, 30], "color": "srgb_straight_encoded", "layers": [box], "audio": None}
+        scenes = root / "scenes"
+        scenes.mkdir()
+        brief = normal.call("scene.inspect", scene=tiny, input_root=str(scenes))
+        full = normal.call("scene.inspect", scene=tiny, input_root=str(scenes), detail="full")
+        cli = json.loads(subprocess.run([str(executable)], input=json.dumps({"command": "scene.inspect", "scene": tiny, "input_root": str(scenes)}),
+                                        capture_output=True, text=True, encoding="utf-8", timeout=60).stdout)["result"]
+        check("mcp.compact_receipts", brief["layers"] == ["box: frames 0-7, source frame 0, opacity 255, position [0,0]→[12,0] (7 values), shape rectangle"]
+              and "timing" not in brief and brief["detail"].startswith("summary") and brief["frames"] == full["frames"] == 8
+              and full == cli and len(full["timing"]) == 1)
+        normal.call("scene.inspect", "INVALID_JSON", scene=tiny, input_root=str(scenes), detail="brief")
+
+        # One wait for several jobs, until all have finished (the default) or any has.
+        tickets = [normal.call("job.start", job_root=str(job_root), request_id=f"tiny-{n}", run="scene.render",
+                               arguments={"scene": tiny, "input_root": str(scenes), "output_root": str(scenes), "output": str(scenes / f"tiny-{n}.mkv")})["job_id"]
+                   for n in range(3)]
+        jobs.extend((job_root, t) for t in tickets)
+        batch = normal.call("job.wait", job_root=str(job_root), job_ids=tickets, timeout_seconds=120)
+        entries = batch["jobs"]
+        check("jobs.batch_wait", batch["finished"] and batch["until"] == "all" and batch["counts"] == {"completed": 3}
+              and [e["job_id"] for e in entries] == tickets and "jobs[].result.timing" in batch["detail"]
+              and all(e["command"] == "scene.render" and e["status"] == "completed" and e["result"]["layers"] == brief["layers"]
+                      and e["result"]["asset"]["path"].endswith(f"tiny-{n}.mkv") for n, e in enumerate(entries)))
+        whole = normal.call("job.wait", job_root=str(job_root), job_ids=tickets, detail="full")
+        assert all(e["result"]["timing"] == full["timing"] for e in whole["jobs"]), whole
+        later, _ = start(normal, "after-batch", root / "after-batch.mkv")
+        first = normal.call("job.wait", job_root=str(job_root), job_ids=[later["job_id"], ticket["job_id"]], until="any", timeout_seconds=60)
+        assert first["finished"] and first["until"] == "any" and first["jobs"][1]["status"] == "completed", first
+        assert "progress" in first["jobs"][0] or first["jobs"][0]["status"] in TERMINAL, first
+        normal.call("job.cancel", job_root=str(job_root), job_id=later["job_id"])
+        for wrong, code in [({"job_id": ticket["job_id"], "job_ids": tickets}, "INVALID_ARGUMENT"), ({"job_ids": [tickets[0], tickets[0]]}, "INVALID_ARGUMENT"),
+                            ({"job_ids": []}, "INVALID_ARGUMENT"), ({"job_ids": ["absent"]}, "JOB_NOT_FOUND"),
+                            ({"job_id": ticket["job_id"], "until": "any"}, "INVALID_ARGUMENT"), ({}, "INVALID_ARGUMENT")]:
+            normal.call("job.wait", code, job_root=str(job_root), **wrong)
         asyncio.run(sdk_roundtrip(executable))
         check("mcp.official_sdk_interop", True)
         report = {"passed": passed, "development_dependencies": {name: importlib.metadata.version(name) for name in ["jsonschema", "mcp"]}}

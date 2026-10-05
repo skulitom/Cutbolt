@@ -42,6 +42,36 @@ Tests:
 - the conform fixture compares four audio-only conversions sample by sample with an integer resampler computed from the formula that generated the sources. It reads each one back with Python's own WAV reader and with FFmpeg, and checks preparation as it is, resampled, in batches and with transcripts. It then mixes the assets on placed tracks and compares every rendered and exported sample, including the older black-picture asset in their place. It also runs meters, ducking, normalizing, tightening, beats, outline, an H.264 export and its review on them, and checks the picture refusals and recipe rejections.
 
 These fixtures pass in the quick tier: conform, tracks, recording, proxies, cache_previews, synchronization, transcripts, integration, agent_ergonomics, production (offline part), overlays and multicam. No capability points change: this is a new asset kind and a speed-up, not a new editing checkpoint: this is a new asset kind and a speed-up, not a new editing checkpoint. Evidence stays stale until the next thorough run.
+## 5 October 2026: compact MCP results and one wait for many jobs
+
+The morning progress demo's agent received 1,412 KB over 299 MCP calls, about 400k tokens (`C:\DEV\CutboltData\demo-progress2-20261005\research\RESEARCH.md`, C1 and C2). `job.wait` returned 810 KB of it, mostly `scene.render` receipts of 30-42 KB, and `scene.inspect` returned 314 KB over 22 calls. About 90 % of a scene receipt was `timing`: per-layer selected frames, sampled-parameter runs and tile selections, which long scenes push to 0.5-2.7 MB. The agent also made 98 `job.wait` calls for 71 jobs, because a wait took one `job_id`.
+
+**Compact results.** MCP results are now summaries unless a call gives `"detail": "full"`:
+- Scene inspections and render receipts replace `timing` with `layers`, one line per layer: the frames it shows, its source frames, how each sampled parameter changes, and its blend, mask, graphics (with clipped pixels) and tilemap. `sources` becomes a count. The per-sample arrays of expressions, motion blur and 3D geometry become counts, without their echoed specifications. Tool versions are left out, and `frame_matte` keeps only `matted_pairs`.
+- `graphics.instantiate` and `captions.scene` summarize their inspection the same way, and return their scenes whole.
+- `job.wait` and `job.status` summarize a receipt as its command's own result would be.
+- `resolved_identities`, `audio.beats` onset times and `export.run` sources become counts. `preview.cuts` leaves out its cell rectangles: each cut already lists its cells and times.
+
+A summarized result names what it shortened in `detail`. Errors are never shortened, and `save_as` files get full results. The CLI keeps returning full results (scripts and fixtures read `timing`) and accepts `"detail": "summary"`. The job store keeps full receipts. `session.get` stays full: it is the call that reads the project document, and `timeline.outline` is the compact read of a cut.
+
+**Batch waits.** `job.wait` takes `job_ids` (up to 64) and `until` (`all`, the default, or `any`). It waits on the jobs' named events, reads receipts once when it returns, and lists each job's status with its summarized receipt, error or progress, plus counts by status. Progress notifications now come from inside the wait, about once a second for one job or for several, instead of from repeated one-second waits.
+
+Measured by replaying the morning's scene traffic against a debug build of this change in a scratch copy of the demo workspace. Bytes are `structuredContent`, as `research/call_logs.py` counts them:
+
+| Traffic | Full | Summary |
+| --- | ---: | ---: |
+| The 22 logged `scene.inspect` calls | 359,491 B | 36,145 B |
+| The 15 caption-scene renders, one `job.wait` with `job_ids` (13.3 s) | 470,222 B | 33,843 B |
+| The same 15 renders, one `job.wait` each | 474,505 B | 39,596 B |
+
+The morning spent 30 waits and 715 KB on scene renders. The tool catalog grows by the `detail` property on seven listings and by `job_ids`: with a workspace it is 222,907 bytes (85 % of its budget), and the core catalog is 67,930 bytes.
+
+Tests:
+- unit tests for scene, job and list summaries and the `detail` argument;
+- the agents fixture checks summaries against full results and the CLI (`mcp.compact_receipts`), and a three-render batch wait, `until: "any"` and the batch argument errors (`jobs.batch_wait`);
+- fixtures that compare full MCP results with the CLI now ask for `detail: "full"`.
+
+A full quick verification of this change passed 56 fixtures, with 5 skipped for runtimes not installed here. Two failed under that run's parallel load and passed when rerun alone: reframing (twice), and recording, whose real-time capture reported packet timing gaps (`CAPTURE_DISCONTINUITY`) as it had in the background run of the catalog commit. No scoring changed. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: the MCP catalog regains 16 % headroom
 

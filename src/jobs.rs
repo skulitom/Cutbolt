@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -20,6 +20,70 @@ use std::{
 };
 mod pool;
 mod recovery;
+
+/// When a wait for several jobs returns: once `all` have finished, or as soon as `any` has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Until {
+    All,
+    Any,
+}
+
+/// Most jobs one wait may name. A root holds at most 32 unfinished jobs, so the events of those
+/// still running always fit one Windows wait (64 handles).
+pub const MAX_WAIT_JOBS: usize = 64;
+
+/// Receives a wait's progress: seconds waited and a one-line message.
+type Report = Box<dyn Fn(u64, &str)>;
+
+thread_local! {
+    /// Where job waits on this thread report their progress, if anywhere.
+    static REPORT: RefCell<Option<Report>> = const { RefCell::new(None) };
+}
+
+/// Run `body` while job waits on this thread report their progress to `report` about once a
+/// second, with the whole seconds waited (strictly increasing) and a one-line message. The MCP
+/// adapter turns these into progress notifications; the wait's result is unchanged.
+pub fn reporting<T>(report: impl Fn(u64, &str) + 'static, body: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            REPORT.with(|r| *r.borrow_mut() = None);
+        }
+    }
+    REPORT.with(|r| *r.borrow_mut() = Some(Box::new(report)));
+    let _reset = Reset;
+    body()
+}
+
+/// Paces a wait's progress reports: at most one per second, counted from the wait's start.
+struct Pace {
+    started: Instant,
+    last: u64,
+}
+impl Pace {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            last: 0,
+        }
+    }
+    fn report(&mut self, message: impl FnOnce() -> String) {
+        let seconds = self.started.elapsed().as_secs();
+        if seconds > self.last {
+            self.last = seconds;
+            REPORT.with(|r| {
+                if let Some(report) = r.borrow().as_ref() {
+                    report(seconds, &message());
+                }
+            });
+        }
+    }
+}
+
+fn terminal(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "cancelled" | "interrupted")
+}
 
 /// Retry policy for a queued render.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -957,26 +1021,160 @@ pub fn wait(root: &Path, id: &str, seconds: u32) -> Result<Value> {
     // The worker sets the job's event when it finishes, so the wait ends at once; the event is
     // opened before the first look, so a finish in between is never missed. Without it, poll.
     let signal = pool::job_signal(&root, id);
+    let mut pace = Pace::new();
     loop {
         if let Some(signal) = &signal {
             signal.reset();
         }
         recover_if_idle(&root, &connection)?;
         let mut state = state(&connection, id)?;
-        let done = matches!(
-            state["status"].as_str(),
-            Some("completed" | "failed" | "cancelled" | "interrupted")
-        );
+        let done = terminal(state["status"].as_str().unwrap_or_default());
         let now = Instant::now();
         if done || now >= deadline {
             state["finished"] = json!(done);
             return Ok(state);
         }
+        pace.report(|| {
+            let progress = &state["progress"];
+            let mut message = progress["phase"].as_str().unwrap_or("waiting").to_string();
+            if let (Some(done), Some(total)) = (
+                progress["frames"].as_u64(),
+                progress["total_frames"].as_u64(),
+            ) && total > 0
+            {
+                message.push_str(&format!(", {done} of {total} frames"));
+            }
+            message
+        });
         match &signal {
             Some(signal) => signal.wait((deadline - now).min(Duration::from_millis(500))),
             None => thread::sleep((deadline - now).min(Duration::from_millis(50))),
         }
     }
+}
+
+/// Wait up to `seconds` until all, or any, of several jobs have finished, then list each job's
+/// status with its receipt (completed), error (failed, cancelled or interrupted) or progress.
+/// Receipts are read once, when the wait returns.
+pub fn wait_many(root: &Path, ids: &[String], until: Until, seconds: u32) -> Result<Value> {
+    if !(1..=120).contains(&seconds) {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            "timeout_seconds must be 1 to 120",
+        ));
+    }
+    if ids.is_empty() || ids.len() > MAX_WAIT_JOBS {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            format!("job_ids must name 1 to {MAX_WAIT_JOBS} jobs"),
+        ));
+    }
+    if let Some((n, id)) = ids
+        .iter()
+        .enumerate()
+        .find(|(n, id)| ids[..*n].contains(id))
+    {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            format!("job_ids[{n}] repeats {id:?}"),
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(seconds.into());
+    let root = root_path(root)?;
+    let connection = connect(&root, false)?;
+    let signals: Vec<Option<pool::Signal>> =
+        ids.iter().map(|id| pool::job_signal(&root, id)).collect();
+    let mut pace = Pace::new();
+    loop {
+        for signal in signals.iter().flatten() {
+            signal.reset();
+        }
+        recover_if_idle(&root, &connection)?;
+        let statuses = ids
+            .iter()
+            .map(|id| status_only(&connection, id))
+            .collect::<Result<Vec<_>>>()?;
+        let done = statuses.iter().filter(|s| terminal(s)).count();
+        let finished = match until {
+            Until::All => done == ids.len(),
+            Until::Any => done > 0,
+        };
+        let now = Instant::now();
+        if finished || now >= deadline {
+            return outcomes(&connection, ids, finished, until);
+        }
+        pace.report(|| format!("{done} of {} jobs finished", ids.len()));
+        let running: Vec<&pool::Signal> = signals
+            .iter()
+            .zip(&statuses)
+            .filter(|(_, status)| !terminal(status))
+            .filter_map(|(signal, _)| signal.as_ref())
+            .collect();
+        let slice = (deadline - now).min(Duration::from_millis(if running.is_empty() {
+            50
+        } else {
+            500
+        }));
+        pool::wait_any(&running, slice);
+    }
+}
+
+/// Each job's compact outcome, and how many jobs are in each state.
+fn outcomes(
+    connection: &Connection,
+    ids: &[String],
+    finished: bool,
+    until: Until,
+) -> Result<Value> {
+    let mut counts = serde_json::Map::new();
+    let mut jobs = Vec::with_capacity(ids.len());
+    for id in ids {
+        let mut state = state(connection, id)?;
+        let status = state["status"].as_str().unwrap_or_default().to_owned();
+        let tally = counts.entry(status.clone()).or_insert(json!(0));
+        *tally = json!(tally.as_u64().unwrap_or(0) + 1);
+        // Reference renders' tickets name no command.
+        let command = state["ticket"]
+            .get("command")
+            .cloned()
+            .unwrap_or(json!("render.run"));
+        let mut job = json!({"job_id":id,"command":command,"status":status});
+        let (field, value) = match status.as_str() {
+            "completed" => ("result", state["result"].take()),
+            done if terminal(done) => ("error", state["error"].take()),
+            _ => ("progress", state["progress"].take()),
+        };
+        job[field] = value;
+        jobs.push(job);
+    }
+    Ok(json!({"finished":finished,"until":until,"counts":counts,"jobs":jobs}))
+}
+
+/// A job's status alone, without reading its receipt.
+fn status_only(connection: &Connection, id: &str) -> Result<String> {
+    match connection
+        .query_row("SELECT status FROM jobs WHERE id=?1", [id], |r| r.get(0))
+        .optional()?
+    {
+        Some(status) => Ok(status),
+        None => Err(not_found(connection, id)?),
+    }
+}
+
+/// JOB_NOT_FOUND, listing the first job IDs in the queue.
+fn not_found(connection: &Connection, id: &str) -> Result<crate::Error> {
+    let count: i64 = connection.query_row("SELECT count(*) FROM jobs", [], |r| r.get(0))?;
+    let first = connection
+        .prepare("SELECT id FROM jobs ORDER BY id LIMIT ?1")?
+        .query_map([crate::LISTED_IDS as i64], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(crate::missing_listed(
+        "JOB_NOT_FOUND",
+        "job",
+        id,
+        &first,
+        count as usize,
+    ))
 }
 
 type JobRow = (
@@ -996,18 +1194,7 @@ fn state(connection: &Connection, id: &str) -> Result<Value> {
         "SELECT status,phase,cancel_requested,frames,total_frames,result,failure,ticket,worker_pid FROM jobs WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?))).optional()?;
     let Some((status, phase, cancelled, frames, total, result, failure, ticket, worker_pid)) = row
     else {
-        let count: i64 = connection.query_row("SELECT count(*) FROM jobs", [], |r| r.get(0))?;
-        let first = connection
-            .prepare("SELECT id FROM jobs ORDER BY id LIMIT ?1")?
-            .query_map([crate::LISTED_IDS as i64], |r| r.get(0))?
-            .collect::<rusqlite::Result<Vec<String>>>()?;
-        return Err(crate::missing_listed(
-            "JOB_NOT_FOUND",
-            "job",
-            id,
-            &first,
-            count as usize,
-        ));
+        return Err(not_found(connection, id)?);
     };
     let parse = |s: Option<String>| -> Result<Value> {
         Ok(s.map(|s| serde_json::from_str(&s))

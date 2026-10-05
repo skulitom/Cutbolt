@@ -19,7 +19,7 @@ Create an existing absolute local `job_root` outside the repository. It contains
 | `job.cancel` | `job_root`, `job_id` | Request cancellation; poll for a terminal state |
 | `job.resume` | `job_root` | Wake a worker to drain queued work after restart |
 | `job.start` | `job_root`, `request_id`, `run` (a long-running command), `arguments` (its arguments) | Stable ticket: `job_id`, `command` |
-| `job.wait` | `job_root`, `job_id`, optional `timeout_seconds` (1-120, default 30) | The `job.status` view once the job finishes or the wait ends, with `finished` |
+| `job.wait` | `job_root`, `job_id` or `job_ids` (up to 64) with optional `until` (`all`, the default, or `any`), optional `timeout_seconds` (1-120, default 30) | One job: the `job.status` view once it finishes or the wait ends, with `finished`. Several: `finished`, `until`, `counts` by status, and `jobs`, each with `job_id`, `command`, `status` and its `result`, `error` or `progress` |
 
 `job.start` queues the long-running commands that are not direct MCP tools: `export.run`, `media.prepare`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe`. Its `arguments` are prepared and validated at submission exactly like a direct call. That includes workspace defaults, saved-project references and path-only identities, and an invalid argument fails immediately, named `arguments.<field>`. The job's result is the command's own receipt.
 
@@ -96,7 +96,7 @@ Clients load the whole tool catalog into model context. `cutbolt.exe mcp --tools
 - **Core tools.** Thirty-one everyday tools appear with their full schemas: sessions, files, media and preview images, outline, check and meters, jobs, paper edits, fillers, captions drafting, ducking, normalizing, tightening and beats, scene inspect and still, and export inspect.
 - **`cutbolt_run`.** One more tool runs every other tool command by name with its usual arguments: `{"command": "media.shots", "arguments": {...}}`. Its description lists those commands, and `cutbolt_schema` returns each one's arguments.
 
-Every command stays reachable, and results, inline images and progress are unchanged. The compact catalog is about 63 KB against 214 KB for the full one (66 KB and 220 KB with a workspace), and a unit test keeps it under 96 KiB. `--tools full`, the default, lists every tool.
+Every command stays reachable, and results, inline images and progress are unchanged. The compact catalog is about 65 KB against 217 KB for the full one (68 KB and 223 KB with a workspace), and a unit test keeps it under 96 KiB. `--tools full`, the default, lists every tool.
 
 An example for clients accepting the common `mcpServers` configuration shape:
 
@@ -140,6 +140,17 @@ In a workspace, a large document can move between calls as a file instead of thr
 
 The document-producing tools, the proposals (`audio.duck`, `audio.normalize`, `audio.tighten`, `transcript.fillers`, `transcript.assemble`, `transcript.plan`) and `job.wait` list `save_as` in their schemas, but every command accepts it. Save a proposal, then give `session.apply` `"operations": {"file": "plan.json", "select": "operations"}`. Its operations then reach the session without passing through the agent's context or being copied by hand. Both forms need a workspace. Files are limited to 16 MiB, and paths follow the workspace rules.
 
+### Compact results
+
+Agents read every byte a tool returns, so MCP results are summaries by default. A summary keeps what an agent acts on: `ok`, errors, frames, work, outputs and their identities. Bulky parts an agent rarely reads become one-line summaries or counts:
+- **Scenes.** `scene.inspect` and `scene.render` receipts replace `timing` (per-layer selected frames and sampled-parameter runs) with `layers`, one line per layer. A line gives the frames the layer shows, its source frames, how each sampled parameter changes, and its blend, mask, graphics (with clipped pixels) and tilemap. For example: `"title: frames 12-95, source frame 0, opacity 0→255 (13 values), position [960,312]"`. `sources` becomes a count; the per-sample arrays of `expressions`, `temporal` and `geometry` become counts, without their echoed specifications; `frame_matte` keeps `matted_pairs`; tool versions are left out. `graphics.instantiate` and `captions.scene` summarize their `inspection` the same way and return the scene whole.
+- **Jobs.** `job.wait` and `job.status` summarize a job's receipt as its command's own result would be.
+- **Lists.** `resolved_identities` on any command, `audio.beats` onset times and `export.run` sources become counts; `preview.cuts` leaves out the cell rectangles, since each cut lists its cells and times.
+
+A summarized result says so in `detail`, naming each shortened field, for example `"summary; detail \"full\" returns timing, sources"`. Any call takes `"detail": "full"` for the whole result; the listings of the commands above name the argument. Errors are never shortened. With `save_as`, the file gets the full result unless `detail` asks for a summary. The CLI returns full results unless a request gives `"detail": "summary"`, so scripts and fixtures read what they always have, and the job store always keeps full receipts.
+
+Replaying the progress demo's scene traffic shows the effect. Its 22 `scene.inspect` calls return 36 KB instead of 359 KB. Its 15 caption-scene renders, waited on one at a time, returned 470 KB; one `job.wait` with their `job_ids` returns 34 KB.
+
 ### File identities
 
 Scene images and fonts, caption sources, conform and HDR sources, LUTs and mix clips name their files as `{path, sha256, bytes}` identities. Give an identity as `{"path": ...}` alone, or without one of the two values, and the engine hashes the file under the request's `input_root` before the request runs. The result then lists what it used in `resolved_identities`. Giving both values still pins exact content, and a mismatch fails with `MEDIA_CHANGED`, naming the file with its expected and actual values. `files.list` lists what is under `input_root` (the workspace by default), optionally recursively and by extension, with sizes and relative paths, so an agent can find its media without a shell. `media.inspect` returns a source's identity with its path relative to `input_root`, and compiled assets from `scene.render`, `media.conform` and similar commands carry theirs.
@@ -173,7 +184,7 @@ The scene schema also includes ordered [grading effects](GRADING.md). Scene insp
 Three useful tool sequences:
 
 1. **Saved edit:** session get, preview, then apply with the inspected revision and a saved unique request ID. On a lost result, repeat the exact apply arguments.
-2. **Export:** render plan, then render start with `{"project_id": ..., "revision": N}` as the project. Poll job status until terminal, and read the completion manifest before consuming output.
+2. **Export:** render plan, then render start with `{"project_id": ..., "revision": N}` as the project. Wait with job wait (several jobs with `job_ids`) until terminal, and read the completion manifest before consuming output.
 3. **Stop/recover:** job cancel, then poll status. After a crash, inspect status, resume queued work, and explicitly resubmit interrupted work to a new output when needed.
 
 The existing media-conform inspection schema also supports [explicit SDR normalization](COLOR.md). Supply `source.sdr` instead of legacy `source.color` and declare `working_transfer`; inspection reports color assumptions and time mapping before the blocking converter writes a new tagged editing asset.
@@ -187,7 +198,7 @@ Tool calls run concurrently, up to eight at a time; a further call starts when o
 A `job.wait` request whose `_meta` carries a `progressToken` receives `notifications/progress` once a second while it waits:
 
 - `progress` counts the seconds waited.
-- `message` gives the job's phase, plus its frame counts when the job reports them.
+- `message` gives the job's phase, plus its frame counts when the job reports them. A wait for several jobs reports how many have finished.
 
 This lets a client show the phase, and lets clients that reset timeouts on progress keep long waits alive. The final result is the same as without a token.
 

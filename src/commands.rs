@@ -2,6 +2,7 @@ use crate::{
     Result, audio, conform, jobs, media,
     model::{Operation, Project},
     preview, proxy, registry, render, scene, store,
+    summary::Detail,
     time::Time,
 };
 use serde::Deserialize;
@@ -1051,8 +1052,15 @@ pub enum Request {
     JobWait {
         /// Job queue directory used with render.start or job.start.
         job_root: PathBuf,
-        /// Job ID from the ticket.
-        job_id: String,
+        /// Job ID from the ticket; or give job_ids.
+        #[serde(default)]
+        job_id: Option<String>,
+        /// Several job IDs, up to 64, to wait for in one call. The result lists each job's status with its receipt, error or progress.
+        #[serde(default)]
+        job_ids: Option<Vec<String>>,
+        /// With job_ids: return once all of them have finished (default) or as soon as any has.
+        #[serde(default)]
+        until: Option<jobs::Until>,
         /// Longest wait in seconds, 1 to 120; default 30. The status is returned either way, with `finished`.
         #[serde(default)]
         timeout_seconds: Option<u32>,
@@ -1173,13 +1181,25 @@ fn history_limit() -> u16 {
     50
 }
 
-/// Handle one JSON request as the CLI and MCP adapter receive it. Saved-project references are
-/// loaded first; with a workspace, omitted roots default inside it, relative paths resolve
-/// against it, and engine-produced paths in the result are reported relative to it.
+/// Handle one JSON request as the CLI receives it: full results unless it asks for
+/// `detail: "summary"`.
 pub fn handle_json(
-    mut request: Value,
+    request: Value,
     workspace: Option<&crate::workspace::Workspace>,
 ) -> Result<Value> {
+    handle_json_as(request, workspace, Detail::Full)
+}
+
+/// Handle one JSON request. Saved-project references are loaded first; with a workspace, omitted
+/// roots default inside it, relative paths resolve against it, and engine-produced paths in the
+/// result are reported relative to it. A result is summarized unless `detail` (or, without it,
+/// `default`) asks for it in full; `save_as` files get full results unless `detail` says otherwise.
+pub fn handle_json_as(
+    mut request: Value,
+    workspace: Option<&crate::workspace::Workspace>,
+    default: Detail,
+) -> Result<Value> {
+    let detail = Detail::take(&mut request)?;
     let save_as = match request.as_object_mut().and_then(|o| o.remove("save_as")) {
         None => None,
         Some(Value::String(file)) if workspace.is_some() => Some(file),
@@ -1219,6 +1239,12 @@ pub fn handle_json(
         queued.as_object_mut().unwrap().remove("command");
         request["arguments"] = queued;
     }
+    let detail = detail.unwrap_or(if save_as.is_some() {
+        Detail::Full
+    } else {
+        default
+    });
+    let command = request["command"].as_str().unwrap_or_default().to_owned();
     let request = parse(request)?;
     let schema = matches!(request, Request::Schema { .. });
     let capabilities = matches!(&request, Request::Capabilities { section } if section.as_deref().is_none_or(|s| s == "all"));
@@ -1240,6 +1266,9 @@ pub fn handle_json(
         }
     } else if capabilities {
         result["workspace"] = Value::Null;
+    }
+    if detail == Detail::Summary {
+        crate::summary::summarize(&command, &mut result);
     }
     if let (Some(file), Some(workspace)) = (save_as, workspace) {
         result = crate::documents::save(&result, &file, workspace)?;
@@ -1838,8 +1867,30 @@ pub fn handle(request: Request) -> Result<Value> {
         Request::JobWait {
             job_root,
             job_id,
+            job_ids,
+            until,
             timeout_seconds,
-        } => jobs::wait(&job_root, &job_id, timeout_seconds.unwrap_or(30)),
+        } => {
+            let seconds = timeout_seconds.unwrap_or(30);
+            match (job_id, job_ids, until) {
+                (Some(id), None, None) => jobs::wait(&job_root, &id, seconds),
+                (None, Some(ids), until) => {
+                    jobs::wait_many(&job_root, &ids, until.unwrap_or(jobs::Until::All), seconds)
+                }
+                (Some(_), None, Some(_)) => Err(crate::error(
+                    "INVALID_ARGUMENT",
+                    "until applies to job_ids; a single job_id waits for that job",
+                )),
+                (Some(_), Some(_), _) => Err(crate::error(
+                    "INVALID_ARGUMENT",
+                    "Give job_id or job_ids, not both",
+                )),
+                (None, None, _) => Err(crate::error(
+                    "INVALID_ARGUMENT",
+                    "job.wait needs job_id, or job_ids for several jobs",
+                )),
+            }
+        }
         Request::TimelineMeters {
             project,
             input_root,
@@ -2117,7 +2168,7 @@ fn all_capabilities() -> Value {
     "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","transcript.fillers","transcript.assemble","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.still","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","timeline.check","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","color.match","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
-    "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
+    "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"],"results":"summary_unless_detail_full"},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"maximum_jobs_per_wait":jobs::MAX_WAIT_JOBS,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
     "transcripts":crate::transcript::capabilities(),
     "audio_repair":crate::audio_repair::capabilities(),
     "audio_recording":{"platform":"windows","sample_rate":48000,"channels":2,"sample_format":"s16le","maximum_seconds":7200,"input_selection":"explicit_endpoint_or_process","recording":"blocking_cli_library","placement":"existing_native_audio_tracks","latency_compensation":"explicit_exact_shift","source_preservation":true},

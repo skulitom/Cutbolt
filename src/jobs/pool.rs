@@ -239,6 +239,30 @@ impl Signal {
         unsafe { windows_sys::Win32::System::Threading::WaitForSingleObject(self.0, milliseconds) };
     }
 }
+/// Wait until any of the events is set or `timeout` passes. One wait takes at most 64 events; any
+/// beyond them are noticed when `timeout` passes.
+#[cfg(windows)]
+pub(super) fn wait_any(signals: &[&Signal], timeout: Duration) {
+    let handles: Vec<_> = signals.iter().take(64).map(|s| s.0).collect();
+    if handles.is_empty() {
+        thread::sleep(timeout);
+        return;
+    }
+    let milliseconds = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
+    // SAFETY: up to 64 valid handles, borrowed for the duration of the call.
+    unsafe {
+        windows_sys::Win32::System::Threading::WaitForMultipleObjects(
+            handles.len() as u32,
+            handles.as_ptr(),
+            0,
+            milliseconds,
+        )
+    };
+}
+#[cfg(not(windows))]
+pub(super) fn wait_any(_signals: &[&Signal], timeout: Duration) {
+    thread::sleep(timeout);
+}
 #[cfg(windows)]
 impl Drop for Signal {
     fn drop(&mut self) {

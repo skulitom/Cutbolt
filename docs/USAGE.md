@@ -214,7 +214,7 @@ Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool exec
 
 ### Background jobs
 
-`job.start` queues a long-running command and `render.start` a reference render. Both return a ticket at once, and `job.wait` returns when the job finishes. One hidden worker per job root runs independent jobs at the same time, so queue every scene render or prepare before waiting on any:
+`job.start` queues a long-running command and `render.start` a reference render. Both return a ticket at once, and `job.wait` returns when the job finishes. One hidden worker per job root runs independent jobs at the same time, so queue every scene render or prepare, then wait for all of them at once: `job.wait` with `job_ids` (up to 64) returns when all have finished, or with `until: "any"` as soon as one has. Its result counts the jobs by status and lists each one's receipt, error or progress, in the order given. These rules decide what runs when:
 
 - **Pool size.** At most `CUTBOLT_JOB_WORKERS` jobs run at once, 1 to 32. The default is a quarter of the logical processors, from 1 to 8: eight on a 32-thread machine, where one 1080p scene render keeps about three cores busy. The worker reads the setting when it starts, from the environment of the CLI or MCP server that queued the job; values out of range are ignored.
 - **Heavy jobs.** `export.run`, `export.review`, `captions.render`, `media.prepare`, `media.conform`, `hdr.conform`, `proxy.generate`, `image.sequence.compile`, `preview.range`, `cache.run` and `render.start` already run multi-threaded FFmpeg or Rust compositing. Each holds half the pool, rounded up, so at most two run at once. Light jobs (`scene.render`, `audio.render`, `audio.repair.render` and the speech commands) hold one place each.
@@ -222,6 +222,8 @@ Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool exec
 - **Order.** Jobs start in submission order as room allows. A job waiting for room holds back the jobs behind it, so a stream of light jobs never starves a heavy one.
 - **Shared outputs.** Jobs that write the same path run one at a time, in submission order, while independent jobs behind them still start. That covers the same file in another spelling or letter case, a path inside another job's output folder, and the same cache database. A `media.prepare` without `output` claims the `<id>-prepared.mkv` names it would write. Queued commands read saved projects as snapshots pinned at submission and never write a session, so session edits neither wait for jobs nor race with them.
 - **Latency.** The worker and `job.wait` wake on named events instead of polling. A job starts as soon as there is room, and `job.wait` returns within milliseconds of the job finishing. Each process hashes FFmpeg and ffprobe once, not once per submission.
+
+The job store keeps every receipt in full. Over MCP, `job.wait` and `job.status` return them as summaries (see [compact results](AGENT_INTERFACE.md#compact-results)); the CLI returns them in full unless a request asks for `"detail": "summary"`.
 
 Replaying a `request_id` returns the original ticket, and `job.wait` on it returns the original result. If the worker dies, every job it was running is interrupted; `job.status`, `job.resume` or the next worker reconcile each of them, and opted-in retries requeue. Cancellation, the stall watchdog and the 12-hour deadline apply to each job separately. See [the job contract](AGENT_INTERFACE.md#local-background-renders).
 

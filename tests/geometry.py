@@ -334,7 +334,7 @@ def run(root):
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
         tool=next(t for t in catalog if t['name']=='cutbolt_scene_inspect')
         Draft202012Validator(tool['inputSchema']).validate({'scene':scene,'input_root':str(sources)})
-        inspected=client.call('scene.inspect',scene=scene,input_root=str(sources));assert inspected['geometry']==receipt['geometry']
+        inspected=client.call('scene.inspect',scene=scene,input_root=str(sources),detail='full');assert inspected['geometry']==receipt['geometry']
         p=client.call('project.create',id='planes-edit',width=64,height=48,frame_rate=time(25));common={'store_root':str(store),'project_id':p['id']}
         client.call('session.create',store_root=str(store),project=p,request_id='create')
         ops=[{'op':'media.add','asset':receipt['asset']},{'op':'clip.append','clip':{'id':'second','asset_id':receipt['asset']['id'],'source_in':time(3,25),'duration':time(3,25)}},

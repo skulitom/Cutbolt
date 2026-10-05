@@ -314,7 +314,7 @@ def run(root):
     client=Client(exe)
     try:
         client.initialize()
-        assert client.call("scene.inspect",scene=moving,input_root=str(sources))==move_info
+        assert client.call("scene.inspect",scene=moving,input_root=str(sources),detail="full")==move_info
         project=request({"command":"project.create","id":"graphics-edit","width":192,"height":128,"frame_rate":time(25)})
         store=root/"store";store.mkdir()
         client.call("session.create",store_root=str(store),project=project,request_id="create")

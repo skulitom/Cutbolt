@@ -228,7 +228,7 @@ def run(root):
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
-        schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_scene_inspect');fields={'scene':animate[0],'input_root':str(sources)};Draft202012Validator(schema).validate(fields);assert client.call('scene.inspect',**fields)==animate[1]
+        schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_scene_inspect');fields={'scene':animate[0],'input_root':str(sources)};Draft202012Validator(schema).validate(fields);assert client.call('scene.inspect',detail='full',**fields)==animate[1]
         copied=client.call('graphics.instantiate',template={'schema_version':1,'id':'spatial-template','scene':animate[0],'parameters':[]},values={},instance_id='spatial-copy',input_root=str(sources))
         assert copied['scene']['layers'][0]['transform']['spatial']==animate[0]['layers'][0]['transform']['spatial']
         project=call({'command':'project.create','id':'spatial-edit','width':40,'height':30,'frame_rate':time(25)})

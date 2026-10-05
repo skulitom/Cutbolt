@@ -135,7 +135,7 @@ def run(root):
     client=Client(exe)
     try:
         client.initialize()
-        assert client.call("scene.inspect",scene=scene,input_root=str(sources))["timing"]==info["timing"]
+        assert client.call("scene.inspect",scene=scene,input_root=str(sources),detail="full")["timing"]==info["timing"]
     finally:
         client.close()
     passed.append("animation.mcp_inspection")

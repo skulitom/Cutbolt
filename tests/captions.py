@@ -241,7 +241,7 @@ def run(root):
         client.initialize();catalog=client.rpc('tools/list')['result']['tools']
         tool=next(x for x in catalog if x['name']=='cutbolt_captions_scene')
         args=scene_request(name='zero');args.pop('command');Draft202012Validator(tool['inputSchema']).validate(args)
-        assert tool['annotations']['readOnlyHint'] and client.call('captions.scene',**args)==scene_cases[0][1]
+        assert tool['annotations']['readOnlyHint'] and client.call('captions.scene',detail='full',**args)==scene_cases[0][1]
         assert client.call('captions.inspect',document=simple)==inspect(simple)
         assert client.call('captions.import',id='captions',format='srt',source=identity(sources/'original.srt',sources),input_root=str(sources),overlap='allow')['document']==simple
         assert client.call('captions.apply',document=simple,expected_revision=0,operations=ops)==edit

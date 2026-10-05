@@ -234,7 +234,7 @@ def run(root):
     client=Client(exe)
     try:
         client.initialize(); catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
-        inspected=client.call('scene.inspect',scene=changes,input_root=str(sources))
+        inspected=client.call('scene.inspect',scene=changes,input_root=str(sources),detail='full')
         assert inspected['temporal']==receipt['temporal']
         project=client.call('project.create',id='temporal-edit',width=64,height=12,frame_rate=time(25))
         common={'store_root':str(store),'project_id':project['id']}

@@ -287,7 +287,7 @@ def run(root):
     try:
         client.initialize();tool=next(t for t in client.rpc('tools/list')['result']['tools'] if t['name']=='cutbolt_scene_inspect')
         args={'scene':m[0],'input_root':str(sources)};Draft202012Validator(tool['inputSchema']).validate(args)
-        assert client.call('scene.inspect',**args)==m[1]
+        assert client.call('scene.inspect',detail='full',**args)==m[1]
         template={'schema_version':1,'id':'selection-template','scene':m[0],'parameters':[]}
         assert client.call('graphics.instantiate',template=template,instance_id='selection-copy',values={},input_root=str(sources))['scene']['layers'][0]['effects']==m[0]['layers'][0]['effects']
         project=request({'command':'project.create','id':'selection-edit','width':128,'height':64,'frame_rate':time(25)})

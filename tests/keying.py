@@ -277,7 +277,7 @@ def run(root):
             assert client.call('effects.preset',**args)['effects'][0]['key_rgb'][0]==0
         schema=next(t for t in listing if t['name']=='cutbolt_scene_inspect')['inputSchema']
         Draft202012Validator(schema).validate({'scene':m[0],'input_root':str(sources)})
-        assert client.call('scene.inspect',scene=m[0],input_root=str(sources))==m[1]
+        assert client.call('scene.inspect',scene=m[0],input_root=str(sources),detail='full')==m[1]
         template={'schema_version':1,'id':'key-template','scene':m[0],'parameters':[]}
         assert client.call('graphics.instantiate',template=template,instance_id='key-copy',values={},input_root=str(sources))['scene']['layers'][0]['effects']==m[0]['layers'][0]['effects']
         project=request({'command':'project.create','id':'key-edit','width':128,'height':64,'frame_rate':time(25)})

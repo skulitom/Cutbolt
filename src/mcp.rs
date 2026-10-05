@@ -232,10 +232,10 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Independent jobs run at once, so queue several before waiting; job.cancel stops one."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Independent jobs run at once, so queue several, then wait for them all with one job.wait job_ids; job.cancel stops one."
         }
         "job.wait" => {
-            "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
+            "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false. With job_ids, wait for several jobs in one call, until all (default) or any have finished: the result counts jobs by status and lists each job's receipt, error or progress. Receipts are summaries unless detail is full."
         }
         "schema" => {
             "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template, audio_routing, transcript or captions. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
@@ -367,6 +367,18 @@ const DOCUMENTS: [&str; 22] = [
     "transcript.correct",
 ];
 
+/// Commands whose results MCP summarizes by default; their listings name `detail`, which every
+/// command accepts.
+const SUMMARIZED: [&str; 7] = [
+    "scene.inspect",
+    "graphics.instantiate",
+    "captions.scene",
+    "job.wait",
+    "job.status",
+    "preview.cuts",
+    "audio.beats",
+];
+
 /// The everyday tools a compact catalog (`mcp --tools core`) lists in full; `cutbolt_run` runs
 /// every other tool command by name.
 pub(crate) const CORE: [&str; 31] = [
@@ -438,6 +450,9 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
     crate::schema::commands().filter(|c| exposed(c)).map(|command| {
         let mut input = crate::schema::arguments(command, true).expect("command schema");
         crate::schema::listing(&mut input, workspace.is_some());
+        if SUMMARIZED.contains(&command) {
+            input["properties"]["detail"] = json!({"type":"string","enum":["summary","full"],"description":"summary, the default, shortens bulky parts (timing runs to one line per layer, lists to counts) and names them in the result's detail field; full returns everything."});
+        }
         if workspace.is_some() {
             crate::schema::relax_roots(&mut input);
             if DOCUMENTS.contains(&command) {
@@ -490,48 +505,27 @@ struct Call {
 }
 impl Call {
     fn run(self) -> Value {
-        if self.command == "job.wait"
-            && let (Some(token), Some(notify)) = (&self.progress_token, &self.notify)
-            && let Some(seconds) = self.arguments["timeout_seconds"]
-                .as_u64()
-                .filter(|s| (1..=120).contains(s))
-        {
-            // Wait one second at a time and report each second, so the client sees the phase
-            // and can keep a long wait alive. The final result is the same as one long wait.
-            let mut slice = self.arguments.clone();
-            slice["timeout_seconds"] = json!(1);
-            for elapsed in 1..seconds {
-                let state = Self::outcome("job.wait", slice.clone(), self.workspace.as_ref());
-                let Some(job) = state.ok().filter(|job| job["finished"] != true) else {
-                    break;
-                };
-                let progress = &job["progress"];
-                let mut message = progress["phase"].as_str().unwrap_or("waiting").to_string();
-                if let (Some(done), Some(total)) = (
-                    progress["frames"].as_u64(),
-                    progress["total_frames"].as_u64(),
-                ) && total > 0
-                {
-                    message.push_str(&format!(", {done} of {total} frames"));
-                }
-                notify(json!({"jsonrpc":"2.0","method":"notifications/progress",
-                    "params":{"progressToken":token,"progress":elapsed,"message":message}}));
-            }
-            return Call {
-                arguments: slice,
-                notify: None,
-                ..self
-            }
-            .run();
-        }
         let Call {
             id,
             command,
             arguments,
             workspace,
-            ..
+            progress_token,
+            notify,
         } = self;
-        let value = match Self::outcome(&command, arguments, workspace.as_ref()) {
+        let outcome = match (progress_token, notify) {
+            // A job wait reports about once a second, so the client sees the phase and can keep a
+            // long wait alive. The final result is the same as without a token.
+            (Some(token), Some(notify)) => crate::jobs::reporting(
+                move |seconds, message| {
+                    notify(json!({"jsonrpc":"2.0","method":"notifications/progress",
+                        "params":{"progressToken":token,"progress":seconds,"message":message}}));
+                },
+                || Self::outcome(&command, arguments, workspace.as_ref()),
+            ),
+            _ => Self::outcome(&command, arguments, workspace.as_ref()),
+        };
+        let value = match outcome {
             Ok(result) => json!({"ok":true,"result":result}),
             Err(error) => json!({"ok":false,"error":error}),
         };
@@ -568,7 +562,7 @@ impl Call {
             ));
         }
         object.insert("command".into(), Value::String(command.to_string()));
-        commands::handle_json(arguments, workspace)
+        commands::handle_json_as(arguments, workspace, crate::summary::Detail::Summary)
     }
 }
 /// A preview command's PNG as an image content block, downscaled to PREVIEW_EDGE.
@@ -608,7 +602,8 @@ impl Server {
             "Typical cut: session.create with id, width, height and frame_rate (30 or 60 fps footage keeps every frame on a 30 or 60 fps project); ",
             "job.start run media.prepare with each source's path (camera or phone video, or a PCM WAV voice-over or music track for an audio track) and the project, then job.wait, gives an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait; check the delivered file with job.start run export.review. ",
-            "Independent jobs run side by side (jobs writing the same output keep their order), so start every scene render or prepare before waiting on any. ",
+            "Independent jobs run side by side (jobs writing the same output keep their order), so start every scene render or prepare, then wait for all of them with one job.wait job_ids. ",
+            "Results are summaries: scene timing becomes one line per layer and long lists become counts, as a result's detail field says; any call takes detail \"full\" for everything. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, look at it with scene.still, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.draft drafts cues from transcripts, or captions.import reads a file; job.start run captions.render burns a whole track into one overlay; then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech, audio.normalize proposes levels that bring the mix to a loudness target such as -14 LKFS, audio.tighten proposes jump cuts that shorten pauses in speech, and transcript.fillers removes um and uh (lift silences them on the voice track without moving anything); start and end limit both to a window. Recognition leaves many fillers out and splits names: give media.transcribe a vocabulary such as [\"um\", \"uh\", \"PixelForge\"], and check the uncovered sounds transcript.fillers lists. ",

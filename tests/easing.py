@@ -134,7 +134,7 @@ def run(root):
     try:
         client.initialize()
         for scene in (mixed,scene_for("linear"),reloaded,mixed):
-            assert client.call("scene.inspect",scene=scene,input_root=str(sources))["timing"]==inspect(scene)["timing"]
+            assert client.call("scene.inspect",scene=scene,input_root=str(sources),detail="full")["timing"]==inspect(scene)["timing"]
     finally:
         client.close()
     passed.append("easing.deterministic_mcp_replay")

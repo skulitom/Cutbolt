@@ -134,7 +134,7 @@ def run(root):
         assert descriptor["annotations"]["readOnlyHint"] and descriptor["annotations"]["idempotentHint"] and not descriptor["annotations"]["openWorldHint"]
         Draft202012Validator(descriptor["inputSchema"]).validate({"template":instances[0][0],"values":instances[0][1],"instance_id":instances[0][2],"input_root":str(sources)})
         for t,v,name,wanted,_,_ in reversed(instances):
-            actual=client.call("graphics.instantiate",template=t,values=dict(reversed(list(v.items()))),instance_id=name,input_root=str(sources))
+            actual=client.call("graphics.instantiate",template=t,values=dict(reversed(list(v.items()))),instance_id=name,input_root=str(sources),detail="full")
             assert actual==wanted
             path=root/(name+".json");path.write_text(json.dumps(actual["scene"],indent=2)+"\n",encoding="utf-8")
         t,v,name,wanted,_,_=instances[0]
