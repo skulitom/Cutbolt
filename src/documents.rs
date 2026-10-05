@@ -1,5 +1,6 @@
 //! Large documents by file, inside a workspace. An argument given as `{"file": "scenes/title.json"}`
-//! is read from that JSON file, or one top-level field of it with `"select"`; `save_as` writes a
+//! is read from that JSON file, or one part of it with `"select"`: a field, or a dotted path of
+//! fields and array indexes such as `result.operations` or `cues.0`; `save_as` writes a
 //! command's whole result to a new file and returns a short summary. Scenes, caption documents and
 //! projects can then move between calls without passing through an agent's context.
 use crate::{Result, error, workspace::Workspace};
@@ -54,20 +55,28 @@ fn read(workspace: &Workspace, file: &str, select: Option<&str>) -> Result<Value
     }
     let document: Value = serde_json::from_slice(&fs::read(&path)?)
         .map_err(|e| error("INVALID_JSON", format!("Document {file:?}: {e}")))?;
-    match select {
-        None => Ok(document),
-        Some(key) => document.get(key).cloned().ok_or_else(|| {
-            let keys: Vec<&String> = document
-                .as_object()
-                .into_iter()
-                .flat_map(|o| o.keys())
-                .collect();
+    let Some(path) = select else {
+        return Ok(document);
+    };
+    let mut part = &document;
+    for key in path.split('.') {
+        let next = match part {
+            Value::Array(items) => key.parse::<usize>().ok().and_then(|i| items.get(i)),
+            other => other.get(key),
+        };
+        part = next.ok_or_else(|| {
+            let keys: Vec<String> = match part {
+                Value::Object(map) => map.keys().cloned().collect(),
+                Value::Array(items) => vec![format!("0..{}", items.len())],
+                _ => Vec::new(),
+            };
             error(
                 "INVALID_JSON",
-                format!("Document {file:?} has no field {key:?}; it has {keys:?}"),
+                format!("Document {file:?} has no {path:?}: at {key:?} it has {keys:?}"),
             )
-        }),
+        })?;
     }
+    Ok(part.clone())
 }
 
 /// Write a result to a new workspace file and describe it briefly.
@@ -128,6 +137,16 @@ mod tests {
             Some(&workspace),
         );
         assert!(missing.unwrap_err().message.contains("inspection"));
+        // Dotted paths reach nested fields and array items.
+        let mut nested = json!({"layers":{"file":"scenes/title.json","select":"scene.layers"},
+            "id":{"file":"scenes/title.json","select":"scene.id"},"frames":{"file":"scenes/title.json","select":"inspection.frames"}});
+        load(&mut nested, Some(&workspace)).unwrap();
+        assert_eq!(nested, json!({"layers":[],"id":"title","frames":100}));
+        let past = load(
+            &mut json!({"a":{"file":"scenes/title.json","select":"scene.layers.0"}}),
+            Some(&workspace),
+        );
+        assert!(past.unwrap_err().message.contains("0..0"));
         assert_eq!(
             load(&mut json!({"a":{"file":"x.json"}}), None)
                 .unwrap_err()

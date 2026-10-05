@@ -339,7 +339,14 @@ const BLOCKING: [&str; 17] = [
 ];
 
 /// Commands whose results are documents an agent passes on; with a workspace they accept save_as.
-const DOCUMENTS: [&str; 15] = [
+const DOCUMENTS: [&str; 22] = [
+    "audio.duck",
+    "audio.normalize",
+    "audio.tighten",
+    "transcript.fillers",
+    "transcript.assemble",
+    "transcript.plan",
+    "job.wait",
     "captions.import",
     "captions.draft",
     "captions.apply",
@@ -430,7 +437,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
         if workspace.is_some() {
             crate::schema::relax_roots(&mut input);
             if DOCUMENTS.contains(&command) {
-                input["properties"]["save_as"] = json!({"type":"string","description":"Write the whole result to this new .json file in the workspace and return a short summary; later arguments can name it as {\"file\": path, \"select\": field}."});
+                input["properties"]["save_as"] = json!({"type":"string","description":"Write the result to this new .json workspace file and return a summary; later arguments read it as {\"file\": path, \"select\": field or dotted.path}."});
             }
         }
         let read_only=matches!(command,"timeline.check"|"transcript.assemble"|"transcript.fillers"|"audio.beats"|"captions.draft"|"audio.tighten"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
@@ -611,7 +618,7 @@ impl Server {
             text.push_str(" This compact catalog lists the everyday tools; cutbolt_run runs any other command named here, with the same arguments.");
         }
         if let Some(workspace) = &self.workspace {
-            text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any object argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file, and save_as writes a large result to a new .json file instead of returning it.", workspace.root().display()));
+            text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file (select may be a dotted path such as result.operations), and save_as writes a large result to a new .json file instead of returning it. Proposals (audio.duck, audio.normalize, audio.tighten, transcript.fillers, transcript.assemble) take save_as; then pass session.apply operations as {{\"file\": that file, \"select\": \"operations\"}} instead of copying them.", workspace.root().display()));
         }
         text
     }

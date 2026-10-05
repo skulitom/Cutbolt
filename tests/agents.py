@@ -213,6 +213,31 @@ def run(executable, fixture):
         by_env.initialize()
         assert [t["name"] for t in by_env.rpc("tools/list")["result"]["tools"]] == core_names
         assert subprocess.run([str(executable), "mcp", "--tools", "nope"], capture_output=True, timeout=30).returncode == 1
+        # Workspace piping: a proposal saved with save_as reaches session.apply by file, uncopied.
+        space = root / "space";space.mkdir()
+        piped = Client(executable, args=("--workspace", str(space), "mcp"));clients.append(piped)
+        piped.initialize()
+        listing = {t["name"]:t for t in piped.rpc("tools/list")["result"]["tools"]}
+        assert all("save_as" in listing[name]["inputSchema"]["properties"] for name in ("cutbolt_transcript_assemble", "cutbolt_audio_tighten", "cutbolt_job_wait"))
+        from fractions import Fraction
+        seconds = lambda n, d=1:{"num":Fraction(n, d).numerator, "den":Fraction(n, d).denominator}
+        base = normal.call("project.create", id="piped", width=16, height=16, frame_rate=seconds(25))
+        base = normal.call("timeline.apply", project=base, expected_revision=0, operations=[{"op":"media.add", "asset":{"id":"talk", "path":"talk.wav", "duration":seconds(4)}}])
+        piped.call("session.create", project=base, request_id="create")
+        words = [{"id":f"w{i}", "text":f"word{i}", "start":seconds(2*i+1, 4), "end":seconds(2*i+2, 4), "origin":"estimated", "probability_milli":900} for i in range(6)]
+        spoken = {"schema_version":1, "id":"words", "revision":0, "parent_fingerprint":None, "source":{"path":"talk.wav", "identity":{"sha256":"e"*64, "bytes":9}, "duration":seconds(4)},
+                  "range_start":seconds(0), "range_duration":seconds(4), "language":"en",
+                  "recognition":{"profile":"p", "model":{"sha256":"a"*64, "bytes":1}, "worker_sha256":"b"*64, "analysis_sha256":"c"*64, "versions":{"x":"1"}}, "words":words}
+        selections = [{"document_id":"words", "first_word_id":"w3", "last_word_id":"w5"}, {"document_id":"words", "first_word_id":"w0", "last_word_id":"w1"}]
+        saved = piped.call("transcript.assemble", project={"project_id":"piped"}, transcripts=[spoken], selections=selections, save_as="plan.json")
+        assert saved["saved_as"] == "plan.json" and "operations" in saved["field_bytes"]
+        head = piped.call("session.get", project_id="piped")
+        piped.call("session.apply", project_id="piped", expected_revision=head["revision"], request_id="plan", operations={"file":"plan.json", "select":"operations"})
+        plan = json.loads((space / "plan.json").read_text(encoding="utf-8"))
+        assert [{"op":"clip.append", "clip":c} for c in piped.call("session.get", project_id="piped")["clips"]] == plan["operations"] and len(plan["operations"]) == 2
+        assert piped.call("files.list", dir=".", extensions=["json"])["entries"][0]["path"] == "plan.json"
+        first = piped.call("session.get", project_id="piped", save_as="head.json")
+        assert normal.call("timeline.outline", project=json.loads((space / "head.json").read_text(encoding="utf-8")))["clips"] == 2
         (root / "listed").mkdir()
         (root / "listed" / "clip.MKV").write_bytes(b"x" * 3)
         listed = normal.call("files.list", input_root=str(root), recursive=True, extensions=["mkv"])

@@ -1,5 +1,13 @@
 # Progress history
 
+## 5 October 2026: proposals piped by file
+
+Proposals such as `audio.tighten` or `transcript.assemble` return `operations`, which an agent had to copy into `session.apply`. That spends output tokens on large batches and invites copying mistakes. Every command already accepted `save_as` in a workspace, but only document commands advertised it. Now the proposals and `job.wait` do too. A document reference's `select` can be a dotted path of fields and array indexes, such as `result.operations` inside a saved `job.wait` result. The MCP instructions tell agents to pass a saved proposal's `{"file", "select": "operations"}` to `session.apply`.
+
+A documents unit test covers dotted and indexed paths and their errors. The agents fixture runs a workspace MCP session: a paper edit saved with `save_as` is applied by file reference, the saved session's clips equal the saved operations, and a `session.get` saved by file feeds `timeline.outline`.
+
+To keep the workspace catalog within its 256 KiB budget, the shared `Time` description (repeated in 39 tools) and the `save_as` description were shortened. The full catalog is now 251 KB, and 258 KB with a workspace. No scoring changed.
+
 ## 5 October 2026: compact MCP catalog
 
 The MCP catalog had grown to 83 tools and 255 KB of schemas, which a client loads into model context: about 60,000 tokens before any work. Most of that was repetition: every tool carries its own copy of shared definitions such as `Time`. `cutbolt mcp --tools core`, or `CUTBOLT_MCP_TOOLS=core`, now lists 31 everyday tools in full, plus `cutbolt_run`, which runs any other tool command by name with its usual arguments. That is 75 KB, 71% less, with every command still reachable. The full catalog remains the default.

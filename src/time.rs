@@ -244,7 +244,7 @@ impl schemars::JsonSchema for Time {
     /// One compact schema for every accepted form, since most tool listings embed it.
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "Exact nonnegative seconds or rate (such as fps) written 2.5, 3, \"5/2\", \"30000/1001\", \"2.5\", \"3\" or {\"num\":5,\"den\":2}, with reduced terms at most 2^53-1.",
+            "description": "Exact seconds or rate: 2.5, \"30000/1001\" or {\"num\":5,\"den\":2}.",
             "type": ["object", "integer", "number", "string"],
             "minimum": 0,
             "pattern": "^[0-9]+([./][0-9]+)?$",

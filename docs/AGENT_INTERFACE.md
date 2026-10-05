@@ -127,10 +127,10 @@ Wherever a command takes a `project`, it also accepts `{"project_id": "...", "re
 ### Document files
 
 In a workspace, a large document can move between calls as a file instead of through the agent's context:
-- **Reading:** any object argument given as `{"file": "scenes/title.json"}` is read from that JSON file inside the workspace. Add `"select": "scene"` to read just that top-level field.
+- **Reading:** any argument given as `{"file": "scenes/title.json"}` is read from that JSON file inside the workspace. Add `"select": "scene"` to read just that field. `select` may also be a dotted path of fields and array indexes, such as `result.operations` or `cues.0`.
 - **Writing:** `save_as: "scenes/title.json"` on a call writes its whole result to a new file and returns a summary: the path, its size and each top-level field's size. Existing files are never overwritten.
 
-The document-producing tools list `save_as` in their schemas, but every command accepts it. Both forms need a workspace. Files are limited to 16 MiB, and paths follow the workspace rules.
+The document-producing tools, the proposals (`audio.duck`, `audio.normalize`, `audio.tighten`, `transcript.fillers`, `transcript.assemble`, `transcript.plan`) and `job.wait` list `save_as` in their schemas, but every command accepts it. Save a proposal, then give `session.apply` `"operations": {"file": "plan.json", "select": "operations"}`. Its operations then reach the session without passing through the agent's context or being copied by hand. Both forms need a workspace. Files are limited to 16 MiB, and paths follow the workspace rules.
 
 ### File identities
 
