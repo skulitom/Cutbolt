@@ -742,6 +742,24 @@ def run(root):
         assert call({'command':'transcript.fillers', 'project':restored, 'transcripts':[filled]}) == proposal
         cleaned = apply(restored, operations)
         render(cleaned, (expected[0][:30*W*H*3]+expected[0][34*W*H*3:], expected[1][:30*1920*4]+expected[1][34*1920*4:]), 'fillers-removed')
+        # Transcripts follow a conversion: a two-second part of the source starting at 1 s carries the
+        # three words inside it, moved 1 s earlier, so the part needs no recognition of its own.
+        part = {'schema_version':1, 'id':'part', 'source':{'file':{'path':'voice.mkv'}, 'color':'encoded_rgb'}, 'source_in':time(1),
+                'duration':time(2), 'rate':time(1), 'reverse':False, 'freeze':False, 'width':W, 'height':H, 'audio':'resample'}
+        followed = call({'command':'media.conform', 'recipe':part, 'input_root':str(source), 'output_root':str(output),
+                         'output':str(output/'part.mkv'), 'transcripts':[document]})
+        moved = followed['transcripts'][0]
+        assert [w['text'] for w in moved['words']] == ['κύκλος', 'blue', 'circle.'] and moved['words'][0]['start'] == time(5, 25), moved
+        assert moved['source']['path'] == 'part.mkv' and moved['source']['identity'] == followed['asset']['identity'] and moved['revision'] == 1
+        assert (moved['range_start'], moved['range_duration']) == (time(0), time(2))
+        partial = apply(call({'command':'project.create', 'id':'part', 'width':W, 'height':H, 'frame_rate':time(25)}),
+                        [{'op':'media.add', 'asset':followed['asset']}, {'op':'clip.append', 'clip':{'id':'p', 'asset_id':'part', 'source_in':time(0), 'duration':time(2)}}])
+        assert 'blue' in call({'command':'timeline.outline', 'project':partial, 'input_root':str(source), 'transcripts':[moved]})['outline']
+        for fields, code in (({'recipe':{**part, 'rate':time(2), 'duration':time(1)}}, 'INVALID_ARGUMENT'),
+                             ({'transcripts':[{**moved, 'source':{**moved['source']}}]}, 'MEDIA_CHANGED')):
+            call({'command':'media.conform', 'recipe':part, 'input_root':str(source), 'output_root':str(output),
+                  'output':str(output/'part-again.mkv'), 'transcripts':[document], **fields}, code)
+        assert not (output/'part-again.mkv').exists()
         # Lift: the filler falls silent on the voice track only; picture and timing are unchanged.
         unlinked = apply(restored, [edit('unlink', id=l['id']) for l in restored['tracks']['links']])
         lifted = call({'command':'transcript.fillers', 'project':unlinked, 'transcripts':[filled], 'track_ids':['a'], 'lift':True})

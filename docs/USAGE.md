@@ -205,6 +205,7 @@ Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool exec
 - A file that is already a timeline source and fits the project's frame rate and size, or any ready file when no project is given, comes back unchanged as `{"converted": false, "asset": ...}`.
 - Anything else is converted with the [`media.inspect` readiness recipe](#local-media-and-rendering) through [`media.conform`](CONFORM.md). With a project, it uses the project's frame rate and size. Without one, it keeps the source's own size and rate when that is a timeline rate, and uses 25 fps otherwise. The output defaults to `<name>-prepared.mkv` in `output_root`.
 - The result holds the `asset` for `media.add`, the `recipe` it ran, `frames` and `frame_rate`.
+- **Transcripts.** Optional `transcripts` of the files being prepared come back moved onto their assets, as the next revision of each document, so the prepared asset needs no recognition of its own. With `paths`, each file takes the documents of its own source, and the result lists them all.
 - With `paths` instead of `path`, one job prepares up to 200 files, absolute or relative to `input_root`.
   - **IDs and outputs.** Asset IDs come from the file names, made unique within the batch and against the project's assets (`clip`, `clip-2`, and so on). A conversion is written to `<id>-prepared.mkv`.
   - **Failures.** A file that fails is listed with its error code and message, and the others continue.

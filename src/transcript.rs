@@ -321,6 +321,73 @@ impl Document {
         Ok(path)
     }
 }
+/// The document on a new source that plays this source's audio unchanged from `offset` on, such
+/// as a unit-speed media.conform or media.prepare output. Words and their acoustic evidence move by
+/// `-offset`; the analysed range is clipped to the new source, and words outside it are dropped
+/// (evidence reaching past the clipped range is dropped from its word). The result is the next
+/// revision, its parent the original's fingerprint; recognition provenance is unchanged.
+pub(crate) fn rebind(document: &Document, source: Source, offset: Time) -> Result<Document> {
+    let parent = document.fingerprint()?;
+    let later =
+        |a: Time, b: Time| -> Result<Time> { Ok(if a.compare(b)?.is_lt() { b } else { a }) };
+    let earlier =
+        |a: Time, b: Time| -> Result<Time> { Ok(if a.compare(b)?.is_lt() { a } else { b }) };
+    let end = document.range_start.plus(document.range_duration)?;
+    if !offset.compare(end)?.is_lt() {
+        return Err(invalid(
+            "The transcript's analysed range ends before the new source begins",
+        ));
+    }
+    let start = later(document.range_start, offset)?.minus(offset)?;
+    let stop = earlier(end.minus(offset)?, source.duration)?;
+    if !start.compare(stop)?.is_lt() {
+        return Err(invalid(
+            "The transcript's analysed range lies outside the new source",
+        ));
+    }
+    let inside = |a: Time, b: Time| -> Result<bool> {
+        Ok(!a.compare(offset)?.is_lt()
+            && !a.minus(offset)?.compare(start)?.is_lt()
+            && !b.minus(offset)?.compare(stop)?.is_gt())
+    };
+    let mut next = document.clone();
+    next.words = Vec::new();
+    for word in &document.words {
+        if !inside(word.start, word.end)? {
+            continue;
+        }
+        let mut moved = word.clone();
+        moved.text = word.said().to_owned();
+        moved.start = word.start.minus(offset)?;
+        moved.end = word.end.minus(offset)?;
+        moved.alignment = match &word.alignment {
+            Some(a)
+                if inside(a.ctc_start, a.ctc_end)? && inside(a.acoustic_start, a.acoustic_end)? =>
+            {
+                Some(WordAlignment {
+                    ctc_start: a.ctc_start.minus(offset)?,
+                    ctc_end: a.ctc_end.minus(offset)?,
+                    acoustic_start: a.acoustic_start.minus(offset)?,
+                    acoustic_end: a.acoustic_end.minus(offset)?,
+                    score_milli: a.score_milli,
+                })
+            }
+            _ => None,
+        };
+        next.words.push(moved);
+    }
+    next.source = source;
+    next.range_start = start;
+    next.range_duration = stop.minus(start)?;
+    next.revision = next
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| invalid("Transcript revision exhausted"))?;
+    next.parent_fingerprint = Some(parent);
+    next.validate()?;
+    Ok(next)
+}
+
 pub fn inspect(document: &Document, input_root: &Path) -> Result<Value> {
     document.verify_source(input_root)?;
     Ok(
@@ -471,6 +538,38 @@ pub fn correct(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[test]
+    fn rebinding_moves_words_onto_a_trimmed_copy() {
+        let original = fixture();
+        let offset = original.words[1].start;
+        let source = Source {
+            path: "media/copy.mkv".into(),
+            identity: Identity {
+                sha256: "e".repeat(64),
+                bytes: 10,
+            },
+            duration: original.source.duration.minus(offset).unwrap(),
+        };
+        let moved = rebind(&original, source.clone(), offset).unwrap();
+        assert_eq!(moved.source, source);
+        assert_eq!(moved.revision, original.revision + 1);
+        assert_eq!(
+            moved.parent_fingerprint,
+            Some(original.fingerprint().unwrap())
+        );
+        assert_eq!(moved.words.len(), original.words.len() - 1);
+        assert_eq!(moved.words[0].start, Time::ZERO);
+        assert_eq!(moved.words[0].text, original.words[1].said());
+        assert_eq!(
+            moved.words[0].end,
+            original.words[1].end.minus(offset).unwrap()
+        );
+        assert_eq!(moved.recognition, original.recognition);
+        // A source that starts after the analysed range has nothing to carry.
+        let end = original.range_start.plus(original.range_duration).unwrap();
+        assert!(rebind(&original, source, end).is_err());
+    }
+
     pub(crate) fn fixture() -> Document {
         let t = |n, d| Time::new(n, d).unwrap();
         Document {

@@ -149,6 +149,7 @@ pub fn prepare(
     output_root: &Path,
     output: Option<&Path>,
     project: Option<&crate::model::Project>,
+    transcripts: &[crate::transcript::Document],
 ) -> crate::Result<Value> {
     use crate::error;
     let path = media::allowed_file(path, input_root)?;
@@ -157,6 +158,18 @@ pub fn prepare(
         .as_str()
         .expect("identity path")
         .to_string();
+    // Only this file's transcripts travel with it.
+    let transcripts: Vec<crate::transcript::Document> = transcripts
+        .iter()
+        .filter(|d| {
+            identity["sha256"] == d.source.identity.sha256.as_str()
+                && identity["bytes"] == d.source.identity.bytes
+        })
+        .cloned()
+        .collect();
+    let moved = |recipe: &crate::conform::Recipe, receipt: &Value| -> crate::Result<Value> {
+        Ok(json!(follow(&transcripts, recipe, receipt, output_root)?))
+    };
     let metadata = media::probe(&path)?;
     let readiness = timeline(&path, &relative, &metadata);
     let fits = |r: &Value| match project {
@@ -169,7 +182,9 @@ pub fn prepare(
         }
     };
     if readiness["ready"] == true && fits(&readiness) {
-        return Ok(json!({"converted":false,"asset":readiness["asset"],"readiness":readiness}));
+        return Ok(
+            json!({"converted":false,"asset":readiness["asset"],"readiness":readiness,"transcripts":transcripts}),
+        );
     }
     let streams = metadata["streams"]
         .as_array()
@@ -203,6 +218,7 @@ pub fn prepare(
         return Ok(
             json!({"converted":true,"asset":receipt["asset"],"recipe":recipe,"output":receipt["output"],
             "frames":receipt["frames"],"frame_rate":p.frame_rate,"reasons":readiness["reasons"],
+            "transcripts":moved(&recipe, &receipt)?,
             "note":"audio-only source: the asset has a silent black picture; place it on an audio track"}),
         );
     }
@@ -237,7 +253,7 @@ pub fn prepare(
     Ok(
         json!({"converted":true,"asset":receipt["asset"],"recipe":recipe,"output":receipt["output"],
         "frames":receipt["frames"],"frame_rate":recipe.frame_rate.unwrap_or(Time { num: 25, den: 1 }),
-        "reasons":readiness["reasons"]}),
+        "reasons":readiness["reasons"],"transcripts":moved(&recipe, &receipt)?}),
     )
 }
 
@@ -250,6 +266,7 @@ pub fn prepare_many(
     input_root: &Path,
     output_root: &Path,
     project: Option<&crate::model::Project>,
+    transcripts: &[crate::transcript::Document],
 ) -> crate::Result<Value> {
     use crate::error;
     if paths.is_empty() || paths.len() > 200 {
@@ -279,7 +296,14 @@ pub fn prepare_many(
             n += 1;
         }
         let output = output_root.join(format!("{id}-prepared.mkv"));
-        match prepare(&path, input_root, output_root, Some(&output), project) {
+        match prepare(
+            &path,
+            input_root,
+            output_root,
+            Some(&output),
+            project,
+            transcripts,
+        ) {
             Ok(mut result) => {
                 result["asset"]["id"] = json!(id);
                 if result["converted"] == true {
@@ -296,9 +320,19 @@ pub fn prepare_many(
         }
     }
     let failed = results.len() - converted - ready;
+    // Every moved transcript in one list, for timeline.outline, captions.draft and the rest.
+    let moved: Vec<Value> = results
+        .iter()
+        .flat_map(|r| {
+            r["result"]["transcripts"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect();
     Ok(
         json!({"prepared":results,"converted":converted,"ready":ready,"failed":failed,"operations":operations,
-        "next":"apply operations with session.apply to add the prepared assets"}),
+        "transcripts":moved,"next":"apply operations with session.apply to add the prepared assets"}),
     )
 }
 
@@ -369,6 +403,102 @@ fn sample_step(rate: Time) -> u64 {
         (a, b) = (b, a % b);
     }
     rate.num / a
+}
+
+/// Transcripts of a conform's source, moved onto its output so they need not be recognized again.
+/// Only a forward, unit-speed conversion keeps audio time unchanged, so others are refused. A
+/// document of another source is refused too. The new source path is the output's, relative to
+/// `output_root`.
+pub fn follow(
+    transcripts: &[crate::transcript::Document],
+    recipe: &crate::conform::Recipe,
+    receipt: &Value,
+    output_root: &Path,
+) -> crate::Result<Vec<crate::transcript::Document>> {
+    if transcripts.is_empty() {
+        return Ok(Vec::new());
+    }
+    can_follow(transcripts, recipe)?;
+    moved_onto(transcripts, recipe, receipt, output_root)
+}
+
+/// Whether `transcripts` can follow `recipe`'s conversion; checked before converting, so a refusal
+/// publishes nothing.
+pub fn can_follow(
+    transcripts: &[crate::transcript::Document],
+    recipe: &crate::conform::Recipe,
+) -> crate::Result<()> {
+    use crate::error;
+    if transcripts.is_empty() {
+        return Ok(());
+    }
+    if recipe.rate != (Time { num: 1, den: 1 })
+        || recipe.reverse
+        || recipe.freeze
+        || recipe.remap.is_some()
+        || !matches!(recipe.audio, crate::conform::Audio::Resample)
+    {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            "transcripts can follow only a forward, unit-speed conversion that keeps its audio",
+        ));
+    }
+    for document in transcripts {
+        if document.source.identity.sha256 != recipe.source.file.sha256
+            || document.source.identity.bytes != recipe.source.file.bytes
+        {
+            return Err(error(
+                "MEDIA_CHANGED",
+                format!(
+                    "transcript {} is of another file than this conversion's source {}",
+                    document.id,
+                    recipe.source.file.path.display()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Transcripts moved onto a finished conversion's output.
+fn moved_onto(
+    transcripts: &[crate::transcript::Document],
+    recipe: &crate::conform::Recipe,
+    receipt: &Value,
+    output_root: &Path,
+) -> crate::Result<Vec<crate::transcript::Document>> {
+    let asset = &receipt["asset"];
+    let identity = crate::registry::Identity {
+        sha256: asset["identity"]["sha256"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        bytes: asset["identity"]["bytes"].as_u64().unwrap_or(0),
+    };
+    // Both sides resolved, so a verbatim (\\?\) output path still strips its root.
+    let output = std::fs::canonicalize(asset["path"].as_str().unwrap_or_default())?;
+    let root = std::fs::canonicalize(output_root)?;
+    let path = match output.strip_prefix(&root) {
+        Ok(relative) => relative.to_path_buf(),
+        Err(_) => output
+            .file_name()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default(),
+    };
+    transcripts
+        .iter()
+        .map(|document| {
+            crate::transcript::rebind(
+                document,
+                crate::transcript::Source {
+                    path: path.clone(),
+                    identity: identity.clone(),
+                    duration: recipe.duration,
+                },
+                recipe.source_in,
+            )
+        })
+        .collect()
 }
 
 /// A media.conform recipe that turns a whole PCM16 WAV into an asset with a silent black picture

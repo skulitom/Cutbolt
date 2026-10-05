@@ -237,6 +237,9 @@ pub enum Request {
         #[serde(default)]
         #[schemars(with = "Option<crate::reference::ProjectInput>")]
         project: Option<Project>,
+        /// Transcripts of the files being prepared; each comes back moved onto its file's asset, so it need not be recognized again.
+        #[serde(default)]
+        transcripts: Vec<crate::transcript::Document>,
     },
     #[serde(rename = "export.review")]
     ExportReview {
@@ -688,6 +691,9 @@ pub enum Request {
         output_root: PathBuf,
         /// Absolute path of a new .mkv file inside output_root; existing files are never overwritten.
         output: PathBuf,
+        /// Transcripts of the source to move onto the output, so it need not be recognized again; forward, unit-speed recipes only.
+        #[serde(default)]
+        transcripts: Vec<crate::transcript::Document>,
     },
     #[serde(rename = "audio.inspect")]
     AudioInspect {
@@ -1397,6 +1403,7 @@ pub fn handle(request: Request) -> Result<Value> {
             output_root,
             output,
             project,
+            transcripts,
         } => match (path, paths, output) {
             (Some(path), None, output) => crate::readiness::prepare(
                 &path,
@@ -1404,10 +1411,15 @@ pub fn handle(request: Request) -> Result<Value> {
                 &output_root,
                 output.as_deref(),
                 project.as_ref(),
+                &transcripts,
             ),
-            (None, Some(paths), None) => {
-                crate::readiness::prepare_many(&paths, &input_root, &output_root, project.as_ref())
-            }
+            (None, Some(paths), None) => crate::readiness::prepare_many(
+                &paths,
+                &input_root,
+                &output_root,
+                project.as_ref(),
+                &transcripts,
+            ),
             _ => Err(crate::error(
                 "INVALID_ARGUMENT",
                 "Give path (with an optional output) or paths, not both",
@@ -1560,7 +1572,20 @@ pub fn handle(request: Request) -> Result<Value> {
             input_root,
             output_root,
             output,
-        } => conform::run(&recipe, &input_root, &output_root, &output),
+            transcripts,
+        } => {
+            crate::readiness::can_follow(&transcripts, &recipe)?;
+            let mut receipt = conform::run(&recipe, &input_root, &output_root, &output)?;
+            if !transcripts.is_empty() {
+                receipt["transcripts"] = json!(crate::readiness::follow(
+                    &transcripts,
+                    &recipe,
+                    &receipt,
+                    &output_root
+                )?);
+            }
+            Ok(receipt)
+        }
         Request::AudioRepairInspect { recipe, input_root } => {
             crate::audio_repair::inspect(&recipe, &input_root)
         }

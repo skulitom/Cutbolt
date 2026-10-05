@@ -22,6 +22,14 @@ On the demo file the result is now:
 - 328 onsets, all on eighths.
 
 The audio-processing fixture now generates arranged music: that backbeat arrangement at 125 BPM, with intro and outro bars without drums, and four on the floor at 100 BPM after a 0.35 s lead-in. It checks exact beat times, frames, onsets and levels, a range, and a narrowed tempo range. The previous engine fails it at 62.5 BPM. Outside the fixture, a sweep of both arrangements from 72 to 174 BPM kept every beat within a hop of the reported level's true grid, and an hour of looped music took about 6 s in a debug build. No scoring changed.
+## 5 October 2026: transcripts follow conversions
+
+In the demo, every narration line was recognized twice: once as its WAV, and again as the MKV conformed from it (ISSUES.md 8). Transcripts bind to content, so they no longer matched. `media.conform` and `media.prepare` now take the source's `transcripts` and return them moved onto the output. `transcript::rebind` shifts words and acoustic evidence by the recipe's `source_in`, clips the analysed range, drops words outside it and makes the next revision under the original's fingerprint. Only forward, unit-speed recipes qualify, and the check runs before converting, so a refused request publishes nothing.
+
+The MCP server instructions now mention WAV voice-overs and music in `media.prepare`, and the filler lift and windows.
+
+The `transcripts` fixture conforms a two-second part of its source starting at 1 s. It checks the three moved words, their 1 s shift, the new binding and range, and that `timeline.outline` reads the words from the part. It also refuses a double-speed recipe and another file's document without publishing. A unit test covers rebinding and the out-of-range refusal. No scoring changed.
+
 ## 5 October 2026: windowed tightening and lifted fillers
 
 The demo's finished timeline had a music bed and scenes cut on the bar line. `audio.tighten` proposed ripple-deleting 16.4 s across every track, music and picture included, and filler cuts would have done the same (ISSUES.md 25).
