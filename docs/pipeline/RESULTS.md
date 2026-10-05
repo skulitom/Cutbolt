@@ -98,6 +98,7 @@ The agent's part was three tool calls, plus one call to start a timer:
 
 | Run | Film | Result |
 | --- | --- | --- |
+| The proof manifest again, fresh folder, main `fe807a1` (recognition vocabulary), cold kit cache | 44.64 s | Build 239.8 s at 91% CPU load. Narration 57.3 s, voice assets 9.9 s, music prepared in 27.3 s, alignment 26.8 s, scenes 9.3 s, mix 42.6 s, export 107.1 s, review 4.8 s. The speech check now hears 85 of 85 words: the recognizer is prompted with the script's names. |
 | Six-scene pilot manifest ([example](example.production.json)), cold kit cache, same engine | 99.84 s, 8 scenes, every beat type | 454 s under load: narration 103 s, music 25 s, alignment 37 s, mix 80 s (normalize 66 s, 8 measured passes), export 211 s beside the speech check. −14.0 LKFS, 182 of 182 words heard. The review found 9.6 s of silence at the end: the 80.64 s bed is shorter than the film. |
 | Supplied media only (`supplied.production.json`) | 15.36 s | One supplied WAV narration and one supplied scene recipe; no Qwen run. Aligned and placed, −14.0 LKFS, 23 of 23 words heard. |
 | "Squash and stretch" development manifest, engine `d3c9140` | 51.84 s | Cold builds 267-317 s, warm kit 283 s. Then a one-line script change rebuilt only that line's narration, alignment, voice asset and scene, plus timing, captions, mix and delivery. The other five scenes, the art and four takes were reused, and the timing receipt listed the three moved boundaries. The session took one revision touching nine clips. |
