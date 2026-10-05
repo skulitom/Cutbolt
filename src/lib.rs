@@ -69,6 +69,7 @@ pub mod tracking;
 pub mod tracks;
 pub mod transcribe;
 pub mod transcript;
+pub mod transcript_captions;
 pub mod transcript_cut;
 pub mod workspace;
 

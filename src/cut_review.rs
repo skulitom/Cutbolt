@@ -5,10 +5,9 @@
 use crate::{
     Result, error, media,
     model::Project,
-    outline::Clock,
+    outline::{Clock, Said},
     registry::Identity,
     time::Time,
-    tracks::Kind,
     transcribe,
     transcript::{self, Document, Language},
 };
@@ -214,93 +213,12 @@ fn picture(
     Ok(runs)
 }
 
-/// A word on the cut's clock.
-#[derive(Clone)]
-struct Said {
-    start: Time,
-    end: Time,
-    text: String,
-}
-impl Said {
-    fn middle(&self) -> Result<Time> {
-        self.start.plus(self.end)?.times(Time::new(1, 2)?)
-    }
-}
-
 /// Lowercase letters and digits only, so punctuation and case do not count as differences.
 fn normalized(text: &str) -> String {
     text.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
-}
-
-/// Words the timeline should say: every whole transcript word inside an audible audio clip,
-/// moved to timeline time. Words a clip edge cuts through are reported instead.
-fn expected(
-    project: &Project,
-    transcripts: &[Document],
-    input_root: &Path,
-) -> Result<(Vec<Said>, Vec<Value>, Vec<Value>)> {
-    let matches = crate::outline::spoken(project, transcripts, Some(input_root))?;
-    // (clip ID, timeline start, source in, duration, asset)
-    let mut clips: Vec<(&str, Time, Time, Time, &str)> = Vec::new();
-    match &project.tracks {
-        Some(arrangement) => {
-            for track in &arrangement.tracks {
-                if !track.enabled || track.kind != Kind::Audio {
-                    continue;
-                }
-                for clip in &track.clips {
-                    let muted = clip.gain_milli == 0 && clip.gain_curve.is_none();
-                    if clip.sequence_id.is_none() && !muted {
-                        clips.push((
-                            &clip.id,
-                            clip.start,
-                            clip.source_in,
-                            clip.duration,
-                            &clip.asset_id,
-                        ));
-                    }
-                }
-            }
-        }
-        None => {
-            let mut at = Time::ZERO;
-            for clip in &project.clips {
-                if let Some(asset) = &clip.asset_id {
-                    clips.push((&clip.id, at, clip.source_in, clip.duration, asset));
-                }
-                at = at.plus(clip.duration)?;
-            }
-        }
-    }
-    let mut said = Vec::new();
-    let mut cut = Vec::new();
-    for (id, start, source_in, duration, asset) in clips {
-        let Some(spoken) = matches.by_asset.get(asset) else {
-            continue;
-        };
-        let source_end = source_in.plus(duration)?;
-        for word in &spoken.words {
-            if !word.start.compare(source_end)?.is_lt() || !source_in.compare(word.end)?.is_lt() {
-                continue;
-            }
-            if word.start.compare(source_in)?.is_lt() {
-                cut.push(json!({"clip_id":id,"edge":"start","word":word.text,"time":start}));
-            } else if word.end.compare(source_end)?.is_gt() {
-                cut.push(json!({"clip_id":id,"edge":"end","word":word.text,"time":start.plus(duration)?}));
-            } else {
-                said.push(Said {
-                    start: start.plus(word.start.minus(source_in)?)?,
-                    end: start.plus(word.end.minus(source_in)?)?,
-                    text: word.text.clone(),
-                });
-            }
-        }
-    }
-    said.sort_by(|a, b| a.start.compare(b.start).expect("valid times"));
-    Ok((said, cut, matches.unused))
 }
 
 /// Words heard in transcripts of the cut itself. Overlapping transcripts split their overlap at
@@ -543,7 +461,13 @@ pub fn review(request: &Request) -> Result<Value> {
     // Matching transcripts is cheap; do it before any decoding so bad input fails fast.
     let script = match request.project {
         Some(project) if !request.transcripts.is_empty() => {
-            Some(expected(project, request.transcripts, request.input_root)?)
+            let words = crate::outline::timeline_words(
+                project,
+                request.transcripts,
+                Some(request.input_root),
+                None,
+            )?;
+            Some((words.said, words.cut, words.unused))
         }
         _ => None,
     };

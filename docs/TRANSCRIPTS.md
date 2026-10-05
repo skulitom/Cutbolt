@@ -61,7 +61,7 @@ The result reports requested and snapped boundaries, expansions, merged cuts, se
 
 ## Reading a cut against its transcripts
 
-`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
+`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). `captions.draft` turns the same words into caption cues for the timeline. After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
 
 ## Saved operations and stale data
 

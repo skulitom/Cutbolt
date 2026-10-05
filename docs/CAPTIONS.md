@@ -1,6 +1,6 @@
 # Timed captions and subtitle files
 
-Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. All six `captions.*` commands are available through CLI/library and MCP stdio. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
+Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. `captions.draft` writes a document from transcripts of a timeline's sources. All seven `captions.*` commands are available through CLI/library and MCP stdio. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
 
 ## Commands
 
@@ -8,6 +8,7 @@ Caption scene layouts also accept optional `text_layout` with the [Unicode text 
 
 | Command | Required fields | Result |
 | --- | --- | --- |
+| `captions.draft` | `project`, `transcripts` | Native `document` drafted from what the timeline says, inspection and word counts |
 | `captions.import` | `source`, `input_root`, `format`, `id`, `overlap` | Native `document`, inspection and source identity |
 | `captions.inspect` | `document` | Validated cue/style usage, end time and maximum simultaneous cues |
 | `captions.apply` | `document`, `expected_revision`, `operations` | New document, inspection and per-cue before/after changes |
@@ -16,6 +17,22 @@ Caption scene layouts also accept optional `text_layout` with the [Unicode text 
 | `captions.scene` | `document`, `scene`, `scene_id`, `offset`, `layouts`, `sampling`, `layer_prefix`, `input_root` | New scene, full inspection and sampled/skipped cue report |
 
 Formats are `srt` and `webvtt`. Import uses a relative `{path, bytes, sha256}` source identity beneath an explicit absolute input root, as in [scene identities](SCENES.md). It verifies the actual bytes and never changes the source. Export requires an absolute destination within an existing output root, with `.srt` or `.vtt` respectively. Existing paths are rejected. A temporary file is synced and read back before publication without overwrite. Successful repeated exports to the same path fail with `OUTPUT_EXISTS`; use the returned digest to reconcile a lost response.
+
+## Drafting captions from transcripts
+
+`captions.draft` is read-only. It takes a `project` and `transcripts` of its source media, as `timeline.outline` does. The caption text is the whole words inside audio clips on enabled audio tracks, at their timeline times; muted clips and child sequences are skipped, and `track_ids` narrows placed timelines to chosen tracks. A word a clip edge cuts through is left out and counted in `cut_words`. `start` and `end` caption only the words that start in that range.
+
+Words join the current cue in time order, unless one of four things starts a new cue:
+- the silence before the word is at least `pause` (default 0.5 s);
+- the previous word ends a sentence: its last character, after closing quotes and brackets, is `.`, `?`, `!` or `…`;
+- the cue would last longer than `max_duration` (default 6 s) from its first word's start to the word's end;
+- its words would need more than `lines` (default 2) lines of `line_chars` (default 42) characters, filling each line in turn. A single longer word gets a line to itself.
+
+Each cue keeps that greedy line count. Among the ways to break its words into that many lines, it takes the one whose longest line is shortest; ties go to the shortest first line, then the shortest second.
+
+A cue starts at its first word's start, rounded down to the millisecond. It lasts at least `min_duration` (default 1 s), but never past the next cue's start, and ends no earlier than its last word, rounded up to the millisecond. Times are then exact milliseconds, so the draft exports to SRT or WebVTT unchanged. Every cue uses the one style `default` (`color`, default white) and `align` (default `center`). The document's overlap policy is `reject` unless overlapping speech made two cues overlap.
+
+Correct the text with `captions.apply`, export a sidecar for upload with `captions.export`, or burn the captions in with `captions.scene`.
 
 ## Native document and editing
 

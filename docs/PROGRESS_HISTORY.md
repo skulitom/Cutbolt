@@ -1,5 +1,19 @@
 # Progress history
 
+## 5 October 2026: captions drafted from transcripts
+
+Captions for an edited timeline had to be written by hand, cue by cue, even when transcripts of every source existed. The read-only `captions.draft` takes the whole transcript words inside audible audio clips, at their timeline times, and groups them into cues. A new cue starts at a pause, after a sentence end, at a maximum duration, or when the line budget is full. Lines are balanced, and cue times are exact milliseconds, so the draft exports to SRT or WebVTT unchanged. Clip-edge words are left out and counted.
+
+`export.review` and `captions.draft` now share one implementation of that word projection. Building this exposed an MCP trap: tool names map back to commands by turning underscores into dots, so a command name with an underscore cannot be called. A unit test now rejects such names.
+
+The transcripts fixture recomputes every cue from the documented rules. It covers:
+- a 29.97 fps sequential timeline with sentence ends, quotes, a pause, an overlong word and Greek text;
+- tight and loose rule sets, a range, chosen tracks and a placed word-cut timeline;
+- SRT export and re-import;
+- the rejections.
+
+No scoring changed.
+
 ## 5 October 2026: loudness normalization
 
 Bringing a timeline to a delivery loudness took an agent several rounds of metering and editing gains by hand. The read-only `audio.normalize` now proposes `clip_audio` operations that scale every audio-track clip's level, and every gain-curve key, by one factor. The factor is the smallest of three: the one that reaches the target (default -14 LKFS), the one that keeps the sample peak under a ceiling (default -1 dBFS), and the one allowed by the clip gain range.

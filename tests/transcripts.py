@@ -204,6 +204,75 @@ def review_compare(expected, heard, tolerance):
             'tolerance':time(tolerance), 'differences':{'count':len(differences), 'listed':differences[:50]}}
 
 
+def timeline_said(p, by_asset, track_ids=None):
+    """Whole words inside audible clips on the timeline clock, from transcripts keyed by asset."""
+    clips = []
+    if p.get('tracks'):
+        for t in p['tracks']['tracks']:
+            if t['kind'] != 'audio' or not t['enabled'] or (track_ids and t['id'] not in track_ids):continue
+            for c in t['clips']:
+                if c.get('gain_milli', 1000) == 0 and not c.get('gain_curve'):continue
+                if not c.get('sequence_id'):clips.append((seconds(c['start']), seconds(c['source_in']), seconds(c['duration']), c['asset_id']))
+    else:
+        at = F(0)
+        for c in p['clips']:
+            if c.get('asset_id'):clips.append((at, seconds(c['source_in']), seconds(c['duration']), c['asset_id']))
+            at += seconds(c['duration'])
+    said = []
+    for st, si, dur, asset in clips:
+        for w in sorted((w for d in by_asset.get(asset, []) for w in d['words']), key=lambda w:seconds(w['start'])):
+            ws, we = seconds(w['start']), seconds(w['end'])
+            if si <= ws and we <= si+dur:said.append((st+ws-si, st+we-si, w['text']))
+    return sorted(said, key=lambda w:w[0])
+
+
+def caption_document(said, ident='captions', line_chars=42, lines=2, max_duration=F(6), min_duration=F(1), pause=F(1, 2),
+                     color=(255, 255, 255), align='center'):
+    """Independent reading of the documented cue rules."""
+    import itertools
+    sentence = lambda t:t.rstrip('"\'”’)]»').endswith(('.', '?', '!', '…'))
+    def greedy(words):
+        count, length = 1, 0
+        for w in words:
+            if length == 0:length = len(w)
+            elif length+1+len(w) <= line_chars:length += 1+len(w)
+            else:count += 1;length = len(w)
+        return count
+    groups = []
+    for w in said:
+        if groups:
+            cur = groups[-1];last = cur[-1]
+            if w[0]-last[1] < pause and not sentence(last[2]) and w[1]-cur[0][0] <= max_duration and greedy([x[2] for x in cur]+[w[2]]) <= lines:
+                cur.append(w);continue
+        groups.append([w])
+    def layout(words):
+        best = None
+        for breaks in itertools.combinations(range(1, len(words)), min(greedy(words), len(words))-1):
+            bounds = [0, *breaks, len(words)]
+            parts = [words[a:b] for a, b in zip(bounds, bounds[1:])]
+            lengths = [sum(map(len, part))+len(part)-1 for part in parts]
+            if all(l <= line_chars or len(part) == 1 for l, part in zip(lengths, parts)):
+                if best is None or (max(lengths), lengths) < best[0]:best = ((max(lengths), lengths), parts)
+        return '\n'.join(' '.join(part) for part in best[1])
+    floor_ms = lambda t:F(math.floor(t*1000), 1000)
+    ceil_ms = lambda t:F(math.ceil(t*1000), 1000)
+    cues, overlap = [], False
+    for i, g in enumerate(groups):
+        first, last = g[0][0], g[-1][1]
+        nxt = groups[i+1][0][0] if i+1 < len(groups) else None
+        held = first+min_duration
+        end = max(last, nxt if nxt is not None and nxt < held else held)
+        s, e = floor_ms(first), ceil_ms(end)
+        if nxt is not None:
+            n = floor_ms(nxt)
+            if end <= nxt and e > n:e = n
+            if e > n:overlap = True
+        if e <= s:e = s+F(1, 1000)
+        cues.append({'id':f'c{i+1}', 'start':time(s), 'end':time(e), 'text':layout([x[2] for x in g]), 'style':'default', 'align':align, 'speaker':None})
+    return {'schema_version':1, 'id':ident, 'revision':0, 'overlap':'allow' if overlap else 'reject',
+            'styles':{'default':{'color':list(color)}}, 'cues':cues}, sum(map(len, groups))
+
+
 def run(root):
     root = root.resolve()
     assert root != ROOT and ROOT not in root.parents
@@ -537,6 +606,46 @@ def run(root):
             call(request, code)
             assert not (output/'review-rejected').exists(), fields
         passed.append('transcript.export_review_matches_independent_checks')
+        # Captions drafted from transcripts: every cue is recomputed here from the documented rules.
+        def drafted(p, by_asset, docs, rules={}, **options):
+            fields = {'project':p, 'transcripts':docs, **rules, **options}
+            said = timeline_said(p, by_asset, options.get('track_ids'))
+            if 'start' in options:said = [w for w in said if w[0] >= seconds(options['start'])]
+            if 'end' in options:said = [w for w in said if w[0] < seconds(options['end'])]
+            oracle_rules = {k:(seconds(v) if isinstance(v, dict) else v) for k, v in rules.items()}
+            document_, used = caption_document(said, ident=options.get('id', 'captions'), color=tuple(options.get('color', (255, 255, 255))),
+                                               align=options.get('align', 'center'), **oracle_rules)
+            got = client.call('captions.draft', **fields)
+            assert got['document'] == document_ and got['words'] == used, (got['document'], document_)
+            assert call({'command':'captions.draft', **fields}) == got
+            assert got['inspection'] == call({'command':'captions.inspect', 'document':document_})
+            return got
+        spoken = copy.deepcopy([early, late])
+        for i, text in ((3, 'well.'), (7, 'right?'), (12, 'supercalifragilisticexpialidocious-and-then-some'), (20, 'κύκλος!'), (30, '"quoted."')):
+            spoken[0]['words'][i]['text'] = text
+        spoken[0]['words'] = [w for i, w in enumerate(spoken[0]['words']) if i not in (15, 16, 17)]
+        captioned = drafted(talk, {'talk':spoken}, spoken)
+        assert captioned['document']['cues'] and captioned['cut_words']['count'] > 0 and captioned['unused_transcripts'] == []
+        assert any('\n' in c['text'] for c in captioned['document']['cues'])
+        drafted(talk, {'talk':spoken}, spoken, {'line_chars':12, 'lines':1, 'max_duration':time(2), 'min_duration':time(0), 'pause':time(1, 10)})
+        drafted(talk, {'talk':spoken}, spoken, {'lines':3, 'line_chars':80, 'max_duration':time(10), 'min_duration':time(5)}, id='long', color=[255, 220, 0], align='left')
+        drafted(talk, {'talk':spoken}, spoken, start=time(4), end=time(12))
+        drafted(dressed, {'voice':[doc]}, [doc], track_ids=['a'])
+        drafted(restored, {'voice':[doc]}, [doc])
+        # The draft exports to SRT and reads back unchanged.
+        srt = output/'drafted.srt'
+        call({'command':'captions.export', 'document':captioned['document'], 'format':'srt', 'loss_policy':'allow_reported', 'output_root':str(output), 'output':str(srt)})
+        reread = call({'command':'captions.import', 'source':{'path':'output/drafted.srt', 'bytes':srt.stat().st_size, 'sha256':digest(srt)},
+                       'input_root':str(root), 'format':'srt', 'id':'captions', 'overlap':'reject'})['document']
+        assert [(c['start'], c['end'], c['text']) for c in reread['cues']] == [(c['start'], c['end'], c['text']) for c in captioned['document']['cues']]
+        tool = next(t for t in catalog if t['name'] == 'cutbolt_captions_draft')
+        assert tool['annotations']['readOnlyHint']
+        for p_, fields, code in ((dressed, {'track_ids':['nope']}, 'MISSING_TRACK'), (talk, {'track_ids':['a']}, 'INVALID_ARGUMENT'),
+                                 (talk, {'line_chars':9}, 'INVALID_ARGUMENT'), (talk, {'lines':4}, 'INVALID_ARGUMENT'),
+                                 (talk, {'pause':time(1, 20)}, 'INVALID_ARGUMENT'), (talk, {'max_duration':time(11)}, 'INVALID_ARGUMENT'),
+                                 (talk, {'id':'not valid'}, 'INVALID_CAPTIONS')):
+            client.call('captions.draft', code, project=p_, transcripts=spoken, **fields)
+        passed.append('transcript.captions_draft_follows_the_rules')
     finally:
         client.close()
 

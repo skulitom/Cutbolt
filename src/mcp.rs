@@ -102,6 +102,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         "captions.export" => {
             "Write a new bounded SRT or WebVTT file under an explicit output root. Rejects existing output and lossy conversion unless allow_reported was explicitly selected after inspecting captions.encode."
         }
+        "captions.draft" => {
+            "Draft captions for a timeline from transcripts of its sources: the whole words inside audible audio clips, at their timeline times, grouped into cues that break at pauses, sentence ends, a maximum duration and the line budget, with balanced lines and millisecond times ready for captions.export (SRT/WebVTT) or captions.scene. Read-only."
+        }
         "captions.scene" => {
             "Append caption layers to a supplied scene using explicit per-style fonts/boxes and exact frame-start sampling. Reports unsampled and out-of-window cues. Returns an editable scene and inspection; does not render or save it."
         }
@@ -310,8 +313,9 @@ const BLOCKING: [&str; 15] = [
 ];
 
 /// Commands whose results are documents an agent passes on; with a workspace they accept save_as.
-const DOCUMENTS: [&str; 14] = [
+const DOCUMENTS: [&str; 15] = [
     "captions.import",
+    "captions.draft",
     "captions.apply",
     "captions.scene",
     "graphics.instantiate",
@@ -342,7 +346,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 input["properties"]["save_as"] = json!({"type":"string","description":"Write the whole result to this new .json file in the workspace and return a short summary; later arguments can name it as {\"file\": path, \"select\": field}."});
             }
         }
-        let read_only=matches!(command,"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
+        let read_only=matches!(command,"captions.draft"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         let text = match workspace {
             Some(_) => crate::schema::workspace_wording(description(command)),
             None => description(command).to_owned(),
@@ -499,7 +503,7 @@ impl Server {
             "job.start run media.prepare with each source's path and the project, then job.wait, gives an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait; check the delivered file with job.start run export.review. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
-            "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
+            "and media.add the returned asset. Captions: captions.draft drafts cues from transcripts, or captions.import reads a file; then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech, and audio.normalize proposes levels that bring the mix to a loudness target such as -14 LKFS. ",
             "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
             "Review your work: timeline.outline reads the whole cut as text, one line per clip, with what is said in it when given transcripts; preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
@@ -752,6 +756,15 @@ mod tests {
             }
             Value::Array(items) => items.iter().map(undescribed).sum(),
             _ => 0,
+        }
+    }
+
+    /// Tool names replace dots with underscores, and calls map them back, so a command name with
+    /// an underscore would be unreachable over MCP.
+    #[test]
+    fn command_names_survive_the_tool_name_round_trip() {
+        for command in crate::schema::commands() {
+            assert!(!command.contains('_'), "{command} contains an underscore");
         }
     }
 

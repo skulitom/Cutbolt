@@ -582,3 +582,130 @@ pub fn outline(request: &Request) -> Result<Value> {
     text.push('\n');
     Ok(json!({"outline":text,"clips":listed,"lines":header.len(),"unused_transcripts":unused}))
 }
+
+/// A word on the timeline's (or a rendered cut's) clock.
+#[derive(Clone)]
+pub(crate) struct Said {
+    pub(crate) start: Time,
+    pub(crate) end: Time,
+    pub(crate) text: String,
+}
+impl Said {
+    pub(crate) fn middle(&self) -> Result<Time> {
+        self.start.plus(self.end)?.times(Time::new(1, 2)?)
+    }
+}
+
+/// What a timeline says, from transcripts of its sources.
+pub(crate) struct TimelineWords {
+    /// Whole words inside audible audio clips, on the timeline clock, in time order.
+    pub(crate) said: Vec<Said>,
+    /// Words a clip edge cuts through: clip ID, edge, word and timeline time.
+    pub(crate) cut: Vec<Value>,
+    /// Transcripts that matched no asset, with the reason.
+    pub(crate) unused: Vec<Value>,
+}
+
+/// Words the timeline says: every whole transcript word inside an audible audio clip (on an
+/// enabled audio track, not muted, not a child sequence), moved to timeline time. `tracks`
+/// restricts placed timelines to those audio tracks. Words a clip edge cuts through are reported
+/// instead.
+pub(crate) fn timeline_words(
+    project: &Project,
+    transcripts: &[Document],
+    input_root: Option<&Path>,
+    tracks: Option<&[String]>,
+) -> Result<TimelineWords> {
+    let matches = spoken(project, transcripts, input_root)?;
+    // (clip ID, timeline start, source in, duration, asset)
+    let mut clips: Vec<(&str, Time, Time, Time, &str)> = Vec::new();
+    match &project.tracks {
+        Some(arrangement) => {
+            if let Some(ids) = tracks {
+                for id in ids {
+                    if !arrangement
+                        .tracks
+                        .iter()
+                        .any(|t| t.id == *id && t.kind == Kind::Audio)
+                    {
+                        return Err(crate::missing(
+                            "MISSING_TRACK",
+                            "audio track",
+                            id,
+                            arrangement
+                                .tracks
+                                .iter()
+                                .filter(|t| t.kind == Kind::Audio)
+                                .map(|t| t.id.as_str()),
+                        ));
+                    }
+                }
+            }
+            for track in &arrangement.tracks {
+                if !track.enabled
+                    || track.kind != Kind::Audio
+                    || tracks.is_some_and(|ids| !ids.contains(&track.id))
+                {
+                    continue;
+                }
+                for clip in &track.clips {
+                    let muted = clip.gain_milli == 0 && clip.gain_curve.is_none();
+                    if clip.sequence_id.is_none() && !muted {
+                        clips.push((
+                            &clip.id,
+                            clip.start,
+                            clip.source_in,
+                            clip.duration,
+                            &clip.asset_id,
+                        ));
+                    }
+                }
+            }
+        }
+        None => {
+            if tracks.is_some() {
+                return Err(error(
+                    "INVALID_ARGUMENT",
+                    "A sequential timeline has no tracks to choose; omit track_ids",
+                ));
+            }
+            let mut at = Time::ZERO;
+            for clip in &project.clips {
+                if let Some(asset) = &clip.asset_id {
+                    clips.push((&clip.id, at, clip.source_in, clip.duration, asset));
+                }
+                at = at.plus(clip.duration)?;
+            }
+        }
+    }
+    let mut said = Vec::new();
+    let mut cut = Vec::new();
+    for (id, start, source_in, duration, asset) in clips {
+        let Some(spoken) = matches.by_asset.get(asset) else {
+            continue;
+        };
+        let source_end = source_in.plus(duration)?;
+        for word in &spoken.words {
+            if !word.start.compare(source_end)?.is_lt() || !source_in.compare(word.end)?.is_lt() {
+                continue;
+            }
+            if word.start.compare(source_in)?.is_lt() {
+                cut.push(json!({"clip_id":id,"edge":"start","word":word.text,"time":start}));
+            } else if word.end.compare(source_end)?.is_gt() {
+                cut.push(json!({"clip_id":id,"edge":"end","word":word.text,"time":start.plus(duration)?}));
+            } else {
+                said.push(Said {
+                    start: start.plus(word.start.minus(source_in)?)?,
+                    end: start.plus(word.end.minus(source_in)?)?,
+                    text: word.text.clone(),
+                });
+            }
+        }
+    }
+    said.sort_by(|a, b| a.start.compare(b.start).expect("valid times"));
+    Ok(TimelineWords {
+        said,
+        cut,
+        unused: matches.unused,
+    })
+}
