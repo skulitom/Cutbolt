@@ -101,6 +101,22 @@ impl Workspace {
                     }
                 }
             }
+            // Relinks take absolute paths, so the relative ones registry.relink and proxy.relink
+            // report are resolved before they are applied.
+            if accepted.iter().any(|p| p == "operations")
+                && let Some(Value::Array(operations)) = object.get_mut("operations")
+            {
+                for (n, operation) in operations.iter_mut().enumerate() {
+                    if let Some("media.relink" | "media.proxy.relink") = operation["op"].as_str()
+                        && let Some(path) = operation["path"].as_str()
+                    {
+                        let resolved = self
+                            .resolve(path)
+                            .at(|| at(&format!("operations.{n}.path")))?;
+                        operation["path"] = json!(resolved);
+                    }
+                }
+            }
             // A saved-project reference may name its store relative to the workspace.
             if let Some(Value::String(path)) =
                 object.get("project").and_then(|p| p.get("store_root"))
@@ -168,26 +184,51 @@ impl Workspace {
         }
     }
 
-    /// Report engine-produced paths without the Windows extended-length prefix, relative to the
-    /// workspace when inside it. Paths the caller supplied, such as asset paths, are unchanged.
+    /// Report engine-produced paths relative to the workspace when inside it, and without the
+    /// Windows extended-length prefix. Only Windows marks the canonical paths the engine produces,
+    /// so any absolute path inside the workspace counts, except in a project's assets: there an
+    /// unmarked path is the caller's own and stays as written.
     pub fn present(&self, value: &mut Value) {
+        self.present_as(value, false);
+    }
+
+    fn present_as(&self, value: &mut Value, written: bool) {
         match value {
             Value::String(text) => {
-                if let Some(rest) = text.strip_prefix(r"\\?\") {
-                    let path = match rest.strip_prefix(r"UNC\") {
-                        Some(share) => PathBuf::from(format!(r"\\{share}")),
-                        None => PathBuf::from(rest),
-                    };
-                    *text = match path.strip_prefix(&self.root) {
-                        Ok(inside) => inside.to_string_lossy().replace('\\', "/"),
-                        Err(_) => path.to_string_lossy().into_owned(),
-                    };
+                if let Some(shown) = self.shown(text, written) {
+                    *text = shown;
                 }
             }
-            Value::Array(items) => items.iter_mut().for_each(|v| self.present(v)),
-            Value::Object(object) => object.values_mut().for_each(|v| self.present(v)),
+            Value::Array(items) => items.iter_mut().for_each(|v| self.present_as(v, written)),
+            Value::Object(object) => {
+                // A project snapshot always carries these, beside its assets.
+                let project = ["schema_version", "frame_rate", "clips"]
+                    .iter()
+                    .all(|key| object.contains_key(*key));
+                for (key, v) in object.iter_mut() {
+                    self.present_as(v, written || (project && key == "assets"));
+                }
+            }
             _ => {}
         }
+    }
+
+    /// One reported string as it reads; `None` keeps it.
+    fn shown(&self, text: &str, written: bool) -> Option<String> {
+        let Some(rest) = text.strip_prefix(r"\\?\") else {
+            if written {
+                return None;
+            }
+            return Path::new(text).strip_prefix(&self.root).ok().map(slashed);
+        };
+        let path = match rest.strip_prefix(r"UNC\") {
+            Some(share) => PathBuf::from(format!(r"\\{share}")),
+            None => PathBuf::from(rest),
+        };
+        Some(match path.strip_prefix(&self.root) {
+            Ok(inside) => slashed(inside),
+            Err(_) => path.to_string_lossy().into_owned(),
+        })
     }
 
     /// The defaults reported by capabilities and folded into schemas.
@@ -201,6 +242,16 @@ impl Workspace {
             .collect();
         json!({"root":self.root,"defaults":defaults,"relative_paths":"resolved against the root; '..' is rejected",
             "explicit_roots":"must lie inside the root","reported_paths":"engine-produced paths inside the root are relative, with '/' separators"})
+    }
+}
+
+/// A path inside the workspace as reported: '/' separators, and "." for the workspace itself.
+fn slashed(inside: &Path) -> String {
+    let parts: Vec<_> = inside.iter().map(|part| part.to_string_lossy()).collect();
+    if parts.is_empty() {
+        ".".into()
+    } else {
+        parts.join("/")
     }
 }
 
@@ -361,12 +412,24 @@ mod tests {
     fn engine_paths_are_reported_relative() {
         let temp = Temp::new();
         let workspace = Workspace::open(&temp.0).unwrap();
-        let inside = format!(r"\\?\{}\renders\a.mkv", workspace.root().display());
-        let mut result = json!({"output":inside,"source":"C:/caller/given.mkv","outside":r"\\?\Z:\elsewhere\b.png"});
+        let root = workspace.root();
+        let marked = |path: PathBuf| format!(r"\\?\{}", path.display());
+        let sibling = format!("{}-other", root.display());
+        // Windows marks canonical paths; elsewhere any absolute path inside counts, except a
+        // project's own asset paths.
+        let project = |assets: Value| json!({"schema_version":1,"frame_rate":{"num":25,"den":1},"clips":[],"assets":assets});
+        let own = json!({"id":"own","path":root.join("own.mkv"),"proxy":{"path":root.join("own-proxy.mkv")}});
+        let mut result = json!({"output":marked(root.join("renders").join("a.mkv")),
+            "source":"C:/caller/given.mkv","outside":r"\\?\Z:\elsewhere\b.png",
+            "asset":{"id":"clip","path":root.join("clip-prepared.mkv")},
+            "receipt":root.join(".cutbolt").join("jobs").join("j"),"root":root,"sibling":sibling,
+            "project":project(json!([own,{"id":"moved","path":marked(root.join("moved.mkv"))}]))});
         workspace.present(&mut result);
         assert_eq!(
             result,
-            json!({"output":"renders/a.mkv","source":"C:/caller/given.mkv","outside":r"Z:\elsewhere\b.png"})
+            json!({"output":"renders/a.mkv","source":"C:/caller/given.mkv","outside":r"Z:\elsewhere\b.png",
+                "asset":{"id":"clip","path":"clip-prepared.mkv"},"receipt":".cutbolt/jobs/j","root":".",
+                "sibling":sibling,"project":project(json!([own,{"id":"moved","path":"moved.mkv"}]))})
         );
         let capabilities =
             handle_json(json!({"command":"capabilities"}), Some(&workspace)).unwrap();
@@ -376,6 +439,90 @@ mod tests {
         );
         assert!(
             handle_json(json!({"command":"capabilities"}), None).unwrap()["workspace"].is_null()
+        );
+    }
+
+    #[test]
+    fn reported_paths_go_back_in() {
+        let temp = Temp::new();
+        let workspace = Workspace::open(&temp.0).unwrap();
+        let ws = Some(&workspace);
+        let run = |request: Value| handle_json(request, ws);
+        std::fs::write(workspace.inside("a.mkv"), b"bound bytes").unwrap();
+        run(
+            json!({"command":"session.create","request_id":"c","id":"p","width":32,"height":24,
+            "frame_rate":{"num":25,"den":1}}),
+        )
+        .unwrap();
+        let asset = json!({"id":"a","path":"a.mkv","duration":{"num":1,"den":1}});
+        run(json!({"command":"session.apply","project_id":"p","request_id":"a","expected_revision":0,
+            "operations":[{"op":"media.add","asset":asset}]}))
+        .unwrap();
+        let bound = run(
+            json!({"command":"registry.bind","project":{"project_id":"p"},
+            "expected_revision":1,"asset_ids":["a"]}),
+        )
+        .unwrap();
+        run(json!({"command":"session.apply","project_id":"p","request_id":"b","expected_revision":1,
+            "operations":bound["operations"]}))
+        .unwrap();
+        // A relink is proposed relative to the workspace and applied as the absolute path it needs.
+        std::fs::create_dir(workspace.inside("moved")).unwrap();
+        std::fs::rename(workspace.inside("a.mkv"), workspace.inside("moved/a.mkv")).unwrap();
+        let relink = run(
+            json!({"command":"registry.relink","project":{"project_id":"p"},
+            "expected_revision":2,"asset_id":"a","candidates":["moved/a.mkv"]}),
+        )
+        .unwrap();
+        assert_eq!(relink["operations"][0]["path"], "moved/a.mkv");
+        let climb = run(json!({"command":"session.apply","project_id":"p","request_id":"up",
+            "expected_revision":2,"operations":[{"op":"media.relink","asset_id":"a","path":"../a.mkv"}]}))
+        .unwrap_err();
+        assert!(
+            climb.message.starts_with("operations.0.path:"),
+            "{}",
+            climb.message
+        );
+        run(json!({"command":"session.apply","project_id":"p","request_id":"r","expected_revision":2,
+            "operations":relink["operations"]}))
+        .unwrap();
+        let head = run(json!({"command":"session.get","project_id":"p"})).unwrap();
+        assert_eq!(
+            head["assets"][0]["path"],
+            json!(workspace.inside("moved/a.mkv"))
+        );
+        // A published file is reported relative to the workspace, and absolute without one.
+        let backup = run(json!({"command":"session.backup","output":"p.sqlite3"})).unwrap();
+        assert_eq!(
+            (
+                backup["output"].as_str(),
+                backup["identity"]["path"].as_str()
+            ),
+            (Some("p.sqlite3"), Some("p.sqlite3"))
+        );
+        std::fs::create_dir(workspace.inside("restored")).unwrap();
+        let recovered = run(
+            json!({"command":"session.recover","source":backup["identity"],
+            "store_root":"restored"}),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                recovered["database"].as_str(),
+                recovered["store_root"].as_str()
+            ),
+            (Some("restored/projects.sqlite3"), Some("restored"))
+        );
+        let bare = handle_json(
+            json!({"command":"session.backup","store_root":workspace.store_root(),
+            "output_root":workspace.root(),"output":workspace.inside("q.sqlite3")}),
+            None,
+        )
+        .unwrap();
+        let output = Path::new(bare["output"].as_str().unwrap());
+        assert!(
+            output.is_absolute() && output.ends_with("q.sqlite3"),
+            "{output:?}"
         );
     }
 }

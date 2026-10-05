@@ -585,6 +585,19 @@ Tests:
 - The `conform` fixture adds a 781 s, 60 fps FFV1 source (46,860 frames). `media.inspect` gives no recipe, `media.prepare` with `path` and with `paths` fails with `UNSUPPORTED_MEDIA`, and no output is written.
 
 This is a correctness fix: no scoring changed. Evidence stays stale until the next thorough run.
+## 5 October 2026: workspace paths come back relative on every platform
+
+With `--workspace`, [AGENT_INTERFACE.md](AGENT_INTERFACE.md#workspace) promises that output files, probed sources and job receipts come back relative to the workspace. On Linux they came back absolute: `media.prepare` with `"path": "clip.mp4"` reported `output` and `asset.path` as `/…/ws/clip-prepared.mkv` (found while writing HYPERFRAMES_STRATEGY.md, roadmap item A7). `Workspace::present` recognized engine paths only by the `\\?\` prefix that canonicalization adds on Windows, so elsewhere it relativized nothing. That covered every publisher, not just `media.prepare`: `media.conform`, `scene.render`, `scene.still`, `export.run`, `preview.range`, `render.run` and `session.backup` outputs, and `media.inspect`'s `path` (its `identity.path` is relative by construction).
+
+The changes:
+- **Any absolute path inside the workspace is reported relative**, with `/` separators and `.` for the workspace itself, on every platform. The Windows prefix is still stripped from paths outside it. The documented exception stays: an unmarked path in a project snapshot's `assets` is the caller's own and comes back as written. Diagnostics that name an asset's file, such as `timeline.check`'s `missing_media` detail, report it relative like other paths. The rule lives in `present`, so it covers every command, including `job.wait` and `job.status`.
+- **Relative relink paths resolve against the workspace.** `media.relink` and `media.proxy.relink` require absolute paths, so `session.apply` would refuse the relative paths that `registry.relink` and `proxy.relink` now propose (and already proposed on Windows). The workspace resolves them as it does relink `candidates`, rejecting `..`.
+
+Tests:
+- The `workspace.rs` reporting test built Windows-only strings and so failed on Linux. It now covers marked and unmarked paths, the workspace itself, a sibling folder sharing its name as a prefix, and project assets. A new test applies a `registry.relink` proposal through `session.apply` and recovers a `session.backup` from its reported identity. It also rejects `..` in a relink path, and checks that a backup without a workspace is still reported absolute.
+- `agent_ergonomics` adds `ergonomics.workspace_paths_relative`. In a workspace, no string reported by `media.inspect`, `media.prepare` (with `path` and with `paths`) or an audio-only `export.run` names the workspace folder. The reported files exist, and a session is built from the reported assets. Where jobs are available (Windows), `job.start` with `media.prepare` and its `job.wait` are checked the same way. Without a workspace, `media.prepare` still reports absolute paths. The check fails on the previous engine.
+
+Not verified here: the `job.start` case, because background jobs need Windows, and `captions.render`, which reports through the same step. `cargo test` on Linux still fails `jobs::pool::tests::jobs_writing_the_same_path_keep_submission_order`, as before this change: a case-insensitive assertion sits outside its Windows guard. The evidence is stale until the next thorough run. No scoring changed.
 
 ## 5 October 2026: independent jobs run at once in one job root
 

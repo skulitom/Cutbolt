@@ -1,9 +1,11 @@
-"""Agent ergonomics: committed-request lookup, field-named errors, scopes on native tracks and audio-only export.
+"""Agent ergonomics: committed-request lookup, field-named errors, scopes on native tracks, audio-only export
+and workspace-relative paths.
 
 Independent checks: stored receipts equal the original responses; unaligned times name the field and value;
 scope populations match an exact reference computed from separately decoded source frames; audio-only
 exports of 1080p sequential and native-track timelines match integer PCM assembled from the known sources,
-finish without rendering pictures and publish no video stream.
+finish without rendering pictures and publish no video stream; in a workspace no reported string names the
+workspace directory, and the reported relative files exist and are accepted back.
 """
 from engine import ENGINE
 import argparse
@@ -29,15 +31,23 @@ WIDE, SMALL = (1920, 1080), (160, 90)
 SECONDS = 30
 
 
-def call(command, error=None, **fields):
-    process = subprocess.run([str(EXE)], input=json.dumps({"command": command, **fields}), text=True, encoding="utf-8",
-                             capture_output=True, timeout=1800)
+def call(command, error=None, workspace=None, **fields):
+    process = subprocess.run([str(EXE)] + (["--workspace", str(workspace)] if workspace else []),
+                             input=json.dumps({"command": command, **fields}), text=True, encoding="utf-8", capture_output=True, timeout=1800)
     result = json.loads(process.stdout)
     if error:
         assert process.returncode == 1 and not result["ok"] and result["error"]["code"] == error, (error, result)
         return result["error"]
     assert process.returncode == 0 and result["ok"], result
     return result["result"]
+
+
+def strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, (list, dict)):
+        for item in value.values() if isinstance(value, dict) else value:
+            yield from strings(item)
 
 
 def tone(seconds, frequencies, amplitude=6000):
@@ -211,6 +221,43 @@ def run(root):
     export("tracks-audio", tracks, "reference", track_pcm, 1000)
     export("tracks-aac", tracks, "h264_aac", track_pcm, 1000)
     passed.append("ergonomics.audio_only_tracks_exact_and_aac")
+
+    # In a workspace, prepared and exported files, probed sources and job receipts are reported
+    # relative to it, and the relative assets go straight back in; without one they stay absolute.
+    space = root / "space"
+    space.mkdir()
+    for name in ("clip.mp4", "take.mp4"):
+        ffmpeg(["-f", "lavfi", "-i", f"testsrc2=s={SMALL[0]}x{SMALL[1]}:r=25:d=1", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:d=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", str(space / name)])
+    inspected = call("media.inspect", workspace=space, path="clip.mp4")
+    single = call("media.prepare", workspace=space, path="clip.mp4")
+    batch = call("media.prepare", workspace=space, paths=["take.mp4"])
+    assert inspected["path"] == "clip.mp4", inspected["path"]
+    assert single["converted"] and single["output"] == single["asset"]["path"] == "clip-prepared.mkv", single
+    prepared = batch["prepared"][0]
+    assert prepared["path"] == "take.mp4" and prepared["result"]["output"] == prepared["result"]["asset"]["path"] == "take-prepared.mkv", batch
+    assert batch["operations"] == [{"op": "media.add", "asset": prepared["result"]["asset"]}], batch
+    call("session.create", workspace=space, request_id="create", id="space", width=SMALL[0], height=SMALL[1], frame_rate=time(25))
+    call("session.apply", workspace=space, project_id="space", request_id="add", expected_revision=0, operations=batch["operations"] + [
+        {"op": "media.add", "asset": single["asset"]},
+        {"op": "clip.append", "clip": {"id": "a", "asset_id": "clip", "source_in": time(0), "duration": time(1)}},
+        {"op": "clip.append", "clip": {"id": "b", "asset_id": "take", "source_in": time(0), "duration": time(1)}}])
+    exported = call("export.run", workspace=space, project={"project_id": "space"}, output="cut.wav", profile="reference", streams="audio")
+    assert exported["output"] == "cut.wav" and (space / "cut.wav").is_file(), exported
+    reports = [inspected, single, batch, exported]
+    if call("capabilities", section="jobs")["jobs"]["available"]:
+        ticket = call("job.start", workspace=space, request_id="prepare", run="media.prepare", arguments={"path": "clip.mp4", "output": "queued.mkv"})
+        waited = {"finished": False}
+        while not waited["finished"]:
+            waited = call("job.wait", workspace=space, job_id=ticket["job_id"], timeout_seconds=120)
+        assert waited["status"] == "completed" and waited["result"]["output"] == waited["result"]["asset"]["path"] == "queued.mkv", waited
+        reports += [ticket, waited]
+    leaked = [s for s in strings(reports) if str(space).lower() in s.lower()]
+    assert not leaked, leaked
+    direct = call("media.prepare", path=str(space / "clip.mp4"), input_root=str(space), output_root=str(space), output=str(space / "direct.mkv"))
+    assert Path(direct["output"]).is_absolute() and Path(direct["asset"]["path"]).is_absolute(), direct
+    shutil.rmtree(space)
+    passed.append("ergonomics.workspace_paths_relative")
 
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()} == originals
     passed.append("ergonomics.sources_preserved")
