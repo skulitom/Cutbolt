@@ -22,6 +22,137 @@ EXE = ENGINE
 W, H, N = 24, 16, 100
 
 
+def outline_text(p, docs=(), words=12, start=None, end=None, sequence=None, root=None):
+    """Independent reading of the timeline.outline text contract."""
+    import math
+    rounded = [False]
+    def at(v):
+        t = seconds(v) if isinstance(v, dict) else F(v)
+        n, d = t.numerator*1000, t.denominator
+        ms = n//d if n % d == 0 else (n + d//2)//d
+        if n % d:rounded[0] = True
+        text = str(ms//1000) + ('.'+f'{ms%1000:03}'.rstrip('0') if ms % 1000 else '')
+        return text + ('~' if n % d else '')
+    def span(a, b):return f'{at(a)}-{at(b)}'
+    def plural(n, noun):return f'{n} {noun}{"" if n == 1 else "s"}'
+    spoken, matched, unused = {}, {}, []
+    for d in docs:
+        src = d['source']['path'].replace('\\', '/');hits = [];reason = 'no asset has its source path'
+        for a in p['assets']:
+            path = a['path']
+            if root is not None and Path(path).is_absolute():
+                try:path = str(Path(path).relative_to(root))
+                except ValueError:path = ''
+            path = path.replace('\\', '/')
+            if a.get('identity') is None:
+                if path == src:hits.append(a['id'])
+            elif a['identity'] == d['source']['identity']:hits.append(a['id'])
+            elif path == src:reason = 'the asset at its source path has a different content identity'
+        if not hits:unused.append((d['id'], reason, src))
+        matched[d['id']] = hits
+        for h in hits:
+            entry = spoken.setdefault(h, ([], []))
+            entry[0].append((seconds(d['range_start']), seconds(d['range_start'])+seconds(d['range_duration'])))
+            entry[1].extend(d['words'])
+    for ranges, ws in spoken.values():
+        ranges.sort();ws.sort(key=lambda w:seconds(w['start']))
+    def snippet(asset, a, b):
+        ranges, ws = spoken[asset]
+        covered = sum((max(F(0), min(e, b)-max(s, a)) for s, e in ranges), F(0))
+        if covered == 0:return ' (not transcribed)'
+        part = ' (partly transcribed)' if covered < b-a else ''
+        inside = [w['text']+('*' if seconds(w['start']) < a or seconds(w['end']) > b else '') for w in ws if seconds(w['start']) < b and a < seconds(w['end'])]
+        n = len(inside)
+        if not inside:return ' (no speech)'+part
+        if words == 0:return f' ({plural(n, "word")}){part}'
+        if n <= words:return ' "'+' '.join(inside)+'"'+part
+        head = (words+1)//2;tail = inside[n-(words-head):]
+        return ' "'+' '.join(inside[:head])+' ...'+(' ' if tail else '')+' '.join(tail)+f'" ({plural(n, "word")}){part}'
+    arrangement = p.get('tracks') if sequence is None else next(s['arrangement'] for s in p['sequences'] if s['id'] == sequence)
+    duration = seconds(arrangement['duration']) if arrangement else sum((seconds(c['duration']) for c in p['clips']), F(0))
+    lo = seconds(start) if start else F(0);hi = min(seconds(end), duration) if end else duration
+    lines = [];listed = 0
+    def holes(spans):
+        found = [];cur = lo
+        for s, e in sorted(spans):
+            if cur < s:found.append((cur, min(s, hi)))
+            cur = max(cur, e)
+            if cur >= hi:return found
+        if cur < hi:found.append((cur, hi))
+        return found
+    def hole_line(name, found):
+        if not found:return f'{name}: none'
+        shown = [span(a, b) for a, b in found[:20]]+([f'+{len(found)-20} more'] if len(found) > 20 else [])
+        return f'{name}: '+', '.join(shown)
+    if arrangement:
+        linked = {m['clip_id']:l['id'] for l in arrangement['links'] for m in l['members']}
+        picture, sound = [], []
+        for t in arrangement['tracks']:
+            clips = []
+            for c in t['clips']:
+                s, e = seconds(c['start']), seconds(c['start'])+seconds(c['duration'])
+                if s < hi and lo < e:clips.append(c)
+                if t['enabled'] and t['kind'] == 'video' and t.get('composite', 'opaque') == 'opaque':picture.append((s, e))
+                if t['enabled'] and t['kind'] == 'audio':sound.append((s, e))
+            clips.sort(key=lambda c:seconds(c['start']))
+            flags = [t['kind']]+(['alpha_over'] if t.get('composite') == 'alpha_over' else [])+([] if t['enabled'] else ['disabled'])+(['locked'] if t['locked'] else [])
+            lines.append(f"track {t['id']} ({', '.join(flags)}): {plural(len(clips), 'clip')}")
+            for c in clips:
+                s = seconds(c['start']);e = s+seconds(c['duration']);si = seconds(c['source_in']);so = si+seconds(c['duration'])
+                source = 'seq:'+c['sequence_id'] if c.get('sequence_id') else c['asset_id']
+                line = f"  {span(s, e)} {c['id']} {source} {span(si, so)}"
+                if c['id'] in linked:line += f" link {linked[c['id']]}"
+                if t['kind'] == 'audio':
+                    if c.get('gain_curve'):line += f" gain curve({len(c['gain_curve']['keys'])} keys)"
+                    elif c.get('gain_milli', 1000) == 0:line += ' muted'
+                    elif c.get('gain_milli', 1000) != 1000:line += f" gain {20*math.log10(c['gain_milli']/1000):+.1f}dB"
+                    if c.get('fade_in') and seconds(c['fade_in']):line += f" fade_in {at(c['fade_in'])}"
+                    if c.get('fade_out') and seconds(c['fade_out']):line += f" fade_out {at(c['fade_out'])}"
+                if c.get('transform'):
+                    tr = c['transform'];line += ' pip'
+                    if tr.get('crop'):line += ' crop '+','.join(map(str, tr['crop']))
+                    if tr.get('divisor', 1) != 1:line += f" /{tr['divisor']}"
+                    if tr.get('opacity', 255) != 255:line += f" opacity {tr['opacity']}"
+                    x, y = tr.get('position', [0, 0]);line += f' at {x},{y}'
+                if t['kind'] == 'audio' and not c.get('sequence_id') and c['asset_id'] in spoken:line += snippet(c['asset_id'], si, so)
+                lines.append(line);listed += 1
+                for x in t.get('transitions', []):
+                    if x['left_id'] == c['id']:
+                        lines.append(f"  {span(e-seconds(x['before']), e+seconds(x['after']))} [{x['id']} {x['kind']} {x['left_id']}>{x['right_id']}]")
+        lines.append(hole_line('black (no opaque video clip)', holes(picture)))
+        lines.append(hole_line('no audio clip', holes(sound)))
+    else:
+        body = [];cur = F(0)
+        for c in p['clips']:
+            e = cur+seconds(c['duration'])
+            if cur < hi and lo < e:
+                line = f"  {span(cur, e)} {c['id']}"
+                if c.get('asset_id'):
+                    si = seconds(c['source_in']);so = si+seconds(c['duration'])
+                    line += f" {c['asset_id']} {span(si, so)}"
+                    if c['asset_id'] in spoken:line += snippet(c['asset_id'], si, so)
+                else:line += ' gap'
+                body.append(line)
+            cur = e
+        lines.append(f"sequential timeline (video with its audio): {plural(len(body), 'clip')}")
+        lines += body;listed = len(body)
+    rate = seconds(p['frame_rate'])
+    whole = lo == 0 and hi == duration
+    header = [f"{'sequence '+sequence+' of project' if sequence else 'project'} {p['id']} rev {p['revision']}: {p['width']}x{p['height']} {rate} fps, "
+              + (f'duration {at(duration)}' if whole else f'range {span(lo, hi)} of {at(duration)}')
+              + (', tracks bottom to top' if arrangement else '')]
+    header.append('assets: '+(', '.join(f"{a['id']}={a['path']} ({at(a['duration'])})" for a in p['assets']) or 'none'))
+    if not sequence and p.get('sequences'):
+        header.append('sequences (outline one with sequence_id): '+', '.join(f"{s['id']}{' multicam' if s.get('multicam') else ''} ({at(s['arrangement']['duration'])})" for s in p['sequences']))
+    legend = ['times in seconds, clip lines: timeline span, id, source, source span']+(['~ rounded to the millisecond'] if rounded[0] else [])+(['* word partly outside the clip'] if docs else [])
+    header.append('legend: '+'; '.join(legend))
+    if docs:
+        used = [f"{d['id']}>{'+'.join(matched[d['id']])}" for d in docs if matched[d['id']]] or ['none']
+        header.append('transcripts: '+', '.join(used)+''.join(f'; unused {i} ({r}: {s})' for i, r, s in unused))
+    text = '\n'.join(header+lines)+'\n'
+    return text, listed, len(header+lines)
+
+
 def run(root):
     root = root.resolve()
     assert root != ROOT and ROOT not in root.parents
@@ -181,6 +312,78 @@ def run(root):
         call({'command':'preview.range','project':restored,'input_root':str(source),'output_root':str(output),'output':str(path),'start':time(23,25),'duration':time(25,25)})
         compare(path,(expected[0][23*W*H*3:48*W*H*3],expected[1][23*1920*4:48*1920*4]),'edited-range')
         passed.append('transcript.saved_mcp_retry_undo_preview')
+
+        # Outline: the cut as text. Every line is recomputed here from the project and transcripts,
+        # through MCP (whose text content is the outline itself) and the CLI.
+        def outlined(p, docs=(), **options):
+            fields = {'project':p, **({'transcripts':list(docs)} if docs else {}), **options}
+            text, listed, count = outline_text(p, docs, **{k:v for k, v in options.items() if k in ('words', 'start', 'end')},
+                sequence=options.get('sequence_id'), root=Path(options['input_root']) if 'input_root' in options else None)
+            got = client.call('timeline.outline', **fields)
+            assert got['outline'] == text and got['clips'] == listed and got['lines'] == count, (got['outline'], text)
+            assert call({'command':'timeline.outline', **fields}) == got
+            return got
+        tool = next(t for t in catalog if t['name'] == 'cutbolt_timeline_outline')
+        assert tool['annotations']['readOnlyHint'] and not tool['annotations']['openWorldHint']
+        pieces = [sorted(t['clips'], key=lambda c:seconds(c['start'])) for t in restored['tracks']['tracks']]
+        dressed = apply(restored, [
+            edit('transition_set', track_id='v', transition={'id':'mix', 'left_id':pieces[0][0]['id'], 'right_id':pieces[0][1]['id'],
+                'before':time(1, 25), 'after':time(2, 25), 'kind':'dissolve'}),
+            edit('clip_audio', clip_ids=[pieces[1][0]['id']], gain_milli=700, fade_in=time(1, 10)),
+            edit('clip_audio', clip_ids=[pieces[1][1]['id']], gain_curve={'keys':[
+                {'time':time(26, 25), 'value':1000, 'interpolation':'linear'}, {'time':time(30, 25), 'value':0, 'interpolation':'hold'}]}),
+            edit('clip_audio', clip_ids=[pieces[1][2]['id']], gain_milli=0),
+            edit('add', track={**track('pip', 'video'), 'composite':'alpha_over'}),
+            edit('place', track_id='pip', clip=placement('inset', 'voice', 2, 10, 0), collision='reject'),
+            edit('clip_transform', clip_ids=['inset'], transform={'crop':[0, 0, 12, 8], 'divisor':2, 'opacity':128, 'position':[3, -2]}),
+            edit('add', track={**track('mute', 'audio'), 'enabled':False, 'locked':True})])
+        text = outlined(dressed, [doc])['outline']
+        assert '"red,"' in text and '"κύκλος"' in text and '"circle."' in text and 'square' not in text and 'blue' not in text, text
+        assert ' [mix dissolve ' in text and ' pip crop 0,0,12,8 /2 opacity 128 at 3,-2' in text and 'gain curve(2 keys)' in text and ' muted' in text, text
+        assert '~ rounded to the millisecond' in text and 'track mute (audio, disabled, locked): 0 clips' in text, text
+        outlined(dressed)
+        outlined(dressed, [doc], words=0)
+        outlined(dressed, [doc], start=time(27, 25), end=time(46, 25))
+        outlined(dressed, [doc], start=time(80, 25))
+        # A sequential timeline at 29.97 fps: long speech is shortened, words cut by a clip end carry
+        # *, and transcripts meet without overlapping. Paths match when the asset is unbound.
+        ntsc = time(30000, 1001)
+        talk = call({'command':'project.create', 'id':'talk', 'width':W, 'height':H, 'frame_rate':ntsc})
+        talk = apply(talk, [{'op':'media.add', 'asset':{'id':'talk', 'path':'talk.wav', 'duration':time(40)}},
+            {'op':'media.add', 'asset':{'id':'abs', 'path':str(source/'abs.wav'), 'duration':time(40)}},
+            {'op':'clip.append', 'clip':{'id':'c1', 'asset_id':'talk', 'source_in':time(0), 'duration':time(100*1001, 30000)}},
+            {'op':'clip.append', 'clip':{'id':'g', 'gap':True, 'source_in':time(0), 'duration':time(30*1001, 30000)}},
+            {'op':'clip.append', 'clip':{'id':'c2', 'asset_id':'talk', 'source_in':time(300*1001, 30000), 'duration':time(700*1001, 30000)}},
+            {'op':'clip.append', 'clip':{'id':'c3', 'asset_id':'abs', 'source_in':time(900*1001, 30000), 'duration':time(30*1001, 30000)}}])
+        def speech(name, path, first, count, offset=0):
+            return {**document, 'id':name, 'source':{'path':path, 'identity':{'sha256':'e'*64, 'bytes':9}, 'duration':time(40)},
+                'range_start':time(first), 'range_duration':time(count),
+                'words':[{'id':f'{name}{i}', 'text':f'{name}{i}', 'start':time(first*4+i+offset, 4), 'end':time(first*20+5*(i+offset)+4, 20),
+                    'origin':'estimated', 'probability_milli':500} for i in range(count*4-1-offset)]}
+        early, late = speech('a', 'talk.wav', 0, 20), speech('b', 'talk.wav', 20, 20)
+        far = speech('z', 'abs.wav', 30, 10)
+        for options in ({}, {'words':1}, {'words':5}, {'words':2048}, {'words':0}, {'start':time(4), 'end':time(12)}):
+            outlined(talk, [early, late, far], **options)
+        text = outlined(talk, [early, late, far])['outline']
+        assert 'a13*' in text and '(no speech)' not in text and '~' in text and 'unused z (no asset has its source path: abs.wav)' in text, text
+        outlined(talk, [far, late], input_root=str(source))
+        outlined(talk, [speech('q', 'talk.wav', 25, 1, 2)])
+        # A child sequence is outlined on its own clock, and the parent lists it.
+        nest = apply(dressed, [{'op':'sequence.create', 'id':'inner', 'duration':time(20, 25)},
+            {'op':'sequence.edit', 'id':'inner', 'edit':{'op':'add', 'track':track('sa', 'audio')}},
+            {'op':'sequence.edit', 'id':'inner', 'edit':{'op':'place', 'track_id':'sa', 'collision':'reject',
+                'clip':placement('said', 'voice', 0, 20*1920, 8*1920, 48000)}}])
+        assert 'sequences (outline one with sequence_id): inner (0.8)' in outlined(nest, [doc])['outline']
+        outlined(nest, [doc], sequence_id='inner')
+        other_identity = copy.deepcopy(doc);other_identity['id'] = 'stranger';other_identity['source']['identity']['bytes'] += 1
+        text = outlined(dressed, [doc, other_identity], input_root=str(source))['outline']
+        assert 'unused stranger (the asset at its source path has a different content identity: voice.mkv)' in text, text
+        for p, fields, code in ((dressed, {'words':2049}, 'INVALID_ARGUMENT'), (dressed, {'start':time(4), 'end':time(4)}, 'INVALID_RANGE'),
+                                (dressed, {'start':time(91, 25)}, 'INVALID_RANGE'), (dressed, {'sequence_id':'none'}, 'MISSING_SEQUENCE'),
+                                (dressed, {'transcripts':[doc, doc]}, 'INVALID_ARGUMENT'),
+                                (talk, {'transcripts':[early, speech('c', 'talk.wav', 19, 2)]}, 'INVALID_ARGUMENT')):
+            client.call('timeline.outline', code, project=p, **fields)
+        passed.append('transcript.timeline_outline_matches_independent_reading')
     finally:
         client.close()
 

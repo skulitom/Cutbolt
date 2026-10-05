@@ -207,6 +207,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         "timeline.meters" => {
             "Measure a timeline range's loudness without exporting: sample peak, RMS and BS.1770 integrated loudness (LKFS) of the mix of enabled audio tracks and, by default, of each enabled audio track alone. Use it to set clip gain_milli against a target such as -14 LKFS. With curve, also loudness per second and the silent and clipped runs, to find dead air, music that buries speech, or distortion. Read-only; at most 600 s per call."
         }
+        "timeline.outline" => {
+            "Read a timeline as compact text, one line per clip: timeline span, clip ID, source and source span, link, levels and picture-in-picture, plus transitions, black stretches and stretches without audio. Give transcripts of the sources to see what is said in each audio clip, ending with a partial word marked *. Use it to understand or check a cut cheaply before previews; start and end page through long timelines. Read-only."
+        }
         "files.list" => {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
@@ -217,7 +220,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
         }
         "schema" => {
-            "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template or audio_routing. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
+            "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template, audio_routing or transcript. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
         }
         "image.sequence.compile" => {
             "Compile a validated numbered PNG recipe into a transparent lossless movie or an explicitly flattened native editing asset at an unused output path. Blocking CLI/library command."
@@ -332,7 +335,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 input["properties"]["save_as"] = json!({"type":"string","description":"Write the whole result to this new .json file in the workspace and return a short summary; later arguments can name it as {\"file\": path, \"select\": field}."});
             }
         }
-        let read_only=matches!(command,"audio.duck"|"timeline.meters"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
+        let read_only=matches!(command,"audio.duck"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         let text = match workspace {
             Some(_) => crate::schema::workspace_wording(description(command)),
             None => description(command).to_owned(),
@@ -421,7 +424,12 @@ impl Call {
             Ok(result) => json!({"ok":true,"result":result}),
             Err(error) => json!({"ok":false,"error":error}),
         };
-        let mut content = vec![json!({"type":"text","text":value.to_string()})];
+        // An outline is text meant to be read; it is the content, and the JSON stays structured.
+        let text = match value["result"]["outline"].as_str() {
+            Some(outline) if command == "timeline.outline" => outline.to_owned(),
+            _ => value.to_string(),
+        };
+        let mut content = vec![json!({"type":"text","text":text})];
         if value["ok"] == true {
             content.extend(preview_image(
                 workspace.as_ref(),
@@ -485,9 +493,9 @@ impl Server {
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech. ",
             "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
-            "Review your work: preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
+            "Review your work: timeline.outline reads the whole cut as text, one line per clip, with what is said in it when given transcripts; preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
-            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template and audio_routing schemas; ",
+            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template, audio_routing and transcript schemas; ",
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
         )
         .to_owned();

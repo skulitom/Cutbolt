@@ -5,12 +5,13 @@ use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, sync::OnceLock};
 
 /// Shared types abbreviated in tool listings, by public lookup name and definition name.
-pub const DEFERRED: [(&str, &str); 5] = [
+pub const DEFERRED: [(&str, &str); 6] = [
     ("project", "Project"),
     ("operation", "Operation"),
     ("scene", "Scene"),
     ("template", "Template"),
     ("audio_routing", "Routing"),
+    ("transcript", "Document"),
 ];
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 

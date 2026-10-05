@@ -10,7 +10,7 @@ The executable accepts one JSON request on stdin, or a request-file path as its 
 
 Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.validate`, `timeline.apply`, `timeline.meters`, `files.list`, `media.inspect`, `media.sheet`, `media.shots`, `preview.cuts`, `render.plan`, `render.run`, `export.inspect`, and `export.run`. Saved editing sessions add `session.create`, `session.get`, `session.apply`, `session.preview`, `session.undo`, `session.restore`, `session.history`, and `session.receipt`. Background commands are `render.start`, `job.start` (any long-running command, such as `export.run`, `media.conform` or `scene.render`), `job.status`, `job.wait`, `job.cancel`, and `job.resume`. `cutbolt mcp` provides a local stdio adapter. There is no listening socket, installed service, or network request in the engine's normal execution path. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md) for jobs and MCP setup.
 
-`{"command":"schema","name":"scene.render"}` returns a command's argument schema, with a description on every field. Large schemas come back as an outline; `select` returns one variant or definition, and `full` returns everything. It also accepts the shared types `project`, `operation`, `scene`, `template` and `audio_routing`.
+`{"command":"schema","name":"scene.render"}` returns a command's argument schema, with a description on every field. Large schemas come back as an outline; `select` returns one variant or definition, and `full` returns everything. It also accepts the shared types `project`, `operation`, `scene`, `template`, `audio_routing` and `transcript`.
 
 `cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
@@ -218,8 +218,18 @@ The result lists the speech runs with exact times, a summary per clip, and `clip
 
 ## Reviewing edits and footage
 
-These commands let an agent check its own work from still images and numbers.
+These commands let an agent check its own work from text, still images and numbers.
 
+- **`timeline.outline`** reads a timeline as compact text without rendering anything:
+  - **Header.** It gives the canvas, frame rate, duration and assets.
+  - **Clip lines.** Each track lists one line per clip, in time order: timeline span, clip ID, asset (or `seq:` and a child sequence), source span, link, and any gain, fades or picture-in-picture transform. A transition gets its own bracketed line after its outgoing clip.
+  - **Gap lines.** Two closing lines list the stretches with no opaque video clip (black) and with no audio clip.
+  - **Times.** Times are in seconds, exact to the millisecond or marked `~` when rounded. Exact values stay in the project JSON.
+  - **Transcripts.** Give `transcripts` (documents from `transcript.transcribe` or `transcript.correct`) and each audio clip shows the words inside its source span. With at most `words` words (default 12; 0 shows only the count) the text is complete; otherwise it shows the first and last words and the count. A word cut by the clip's edge is marked `*`, so a cut in the middle of a word stands out. A clip whose span the transcripts do not cover says so.
+  - **Matching.** A transcript matches the assets of its source by content identity, or by path when the asset is unbound; absolute asset paths need `input_root`. Unmatched transcripts are named with the reason, and two transcripts of one asset may not overlap.
+  - **Clips with words.** On a sequential timeline every clip carries its own audio, so every clip gets words; on placed tracks only audio-track clips do.
+  - **Paging and sequences.** `start` and `end` page through long timelines; `sequence_id` outlines a child sequence.
+  - **Over MCP.** The tool's text content is the outline itself.
 - **`preview.cuts`** pages through every cut of a project, 16 at a time. A cut is a change of the visible clip. Each page is a sheet of the last frame before and the first frame after each cut, two cuts per row, written to a new PNG. It is identical to `preview.sheet` at those times, with cells `tile_width` wide (default 192) and the project's aspect. The result lists each cut's `time` and the `before` and `after` clips with their source times. It marks a `continuous` split of one source as an edit point that is not a visible cut, gives `total_cuts`, and gives `next` to pass as `start` for the following page.
 - **`media.sheet`** reads any file FFmpeg decodes, not only timeline sources. It writes a sheet of frames at the given `times`, or `count` frames (default 16) spread through the file at the middles of equal parts. Use it to look at footage before adding it.
 - **`media.shots`** logs footage. Frames are shrunk to 64x36 gray and compared with the previous frame by mean absolute difference (0-255). A frame starts a new shot when its difference reaches `threshold` (default 20) and is at least twice the difference of each of its two neighbors on either side. Motion and single-frame flashes therefore do not count; gradual dissolves are not detected. Shots shorter than `minimum_frames` (default 6) are merged. The result lists each shot's `start`, `end`, frames and `cut_score`. With `output`, it also writes a sheet of each shot's middle frame for the first 64 shots.

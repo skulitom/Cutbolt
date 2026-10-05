@@ -59,6 +59,10 @@ Overlapping or touching selections form one union. Separated intervals are delet
 
 The result reports requested and snapped boundaries, expansions, merged cuts, selected estimates, collateral word IDs and retained source/time fragments. A word crossing a clip edge has `binding_complete: false`; its intersecting portion is still checked for collateral cuts. Words fully outside the binding are reported separately. The projection describes this bound clip's words, not every occurrence of the source elsewhere in the project.
 
+## Reading a cut against its transcripts
+
+`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage).
+
 ## Saved operations and stale data
 
 The returned operation contains the document and a plan bound to the full project and document fingerprints. Applying it recomputes the native operations. A changed project or supplied document rejects; no partial timeline changes are published. A successful batch increments the project revision once. Saved sessions retain their durable request IDs, retry receipts, diffs, undo and restoration behavior.

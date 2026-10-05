@@ -34,6 +34,7 @@ pub mod meters;
 pub mod model;
 pub mod multicam;
 pub mod native_project;
+pub mod outline;
 mod pcm_stream;
 pub mod pcm_wave;
 pub mod portable;

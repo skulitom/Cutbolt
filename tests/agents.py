@@ -65,7 +65,11 @@ class Client:
         assert "error" not in response, response
         tool = response["result"]
         result = tool["structuredContent"]
-        assert json.loads(tool["content"][0]["text"]) == result
+        # An outline's text content is the outline itself; every other result is its JSON.
+        if command == "timeline.outline" and result["ok"] and "outline" in result["result"]:
+            assert tool["content"][0]["text"] == result["result"]["outline"]
+        else:
+            assert json.loads(tool["content"][0]["text"]) == result
         assert tool["isError"] == (not result["ok"])
         if expected_error:
             assert not result["ok"] and result["error"]["code"] == expected_error, result

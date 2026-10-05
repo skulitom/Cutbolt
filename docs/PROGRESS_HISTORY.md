@@ -1,5 +1,18 @@
 # Progress history
 
+## 5 October 2026: timeline outline
+
+To read a cut, an agent had to scan the full project JSON or render previews. The new read-only `timeline.outline` returns a compact text reading instead. It lists, for each clip, its timeline and source spans, link, levels and transform. It also shows transitions and the stretches without picture or audio. Given transcripts of the sources, audio clips also show the words they contain, with words cut by a clip edge marked. This makes it cheap to check that a cut says what was intended. Over MCP the text is the tool's content.
+
+The transcripts fixture recomputes every line independently from the project and the transcript documents:
+- the word-cut timeline, with a transition, gain, a gain curve, a muted clip, picture-in-picture and a disabled, locked track;
+- ranges and word limits;
+- a 29.97 fps sequential timeline with adjacent transcripts and path matching;
+- a child sequence;
+- the rejections.
+
+Tool listings now abbreviate the transcript document, as they do the project and scene schemas, which brings the catalog from about 262 KB back to 230 KB. `cutbolt_schema transcript` returns it in full. No scoring changed.
+
 ## 5 October 2026: gain automation and ducking on the timeline
 
 Timeline audio clips had one constant gain plus linear fades, so lowering music under speech meant rendering a separate mix. Audio-track clips now take a `gain_curve` in the mix recipe's curve form, with up to 2,000 keys and any interpolation. Its key times are positions on the clip's source clock, which keeps it aligned through splits, trims and range renders.

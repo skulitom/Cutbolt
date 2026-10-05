@@ -548,7 +548,7 @@ pub enum Request {
     },
     #[serde(rename = "schema")]
     Schema {
-        /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template` or `audio_routing`.
+        /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template`, `audio_routing` or `transcript`.
         name: String,
         /// One part to return: a variant tag such as `clip.append`, or a definition name such as `Layer`. Omit for the whole schema, or an outline of it when it is large.
         #[serde(default)]
@@ -757,6 +757,30 @@ pub enum Request {
         /// Add `over_time`: per-second short-term and loudest momentary LKFS, silent runs (-60 dBFS for 0.5 s or more) and clipped runs, with exact times; default false.
         #[serde(default)]
         curve: bool,
+    },
+    #[serde(rename = "timeline.outline")]
+    TimelineOutline {
+        /// Project to outline.
+        #[schemars(with = "crate::reference::ProjectInput")]
+        project: Project,
+        /// Transcripts of source media, as returned by transcript.transcribe or transcript.correct, at most 256. Each is matched to the assets of its source (by content identity when the asset is bound, otherwise by path), and audio clips then show what is said in them.
+        #[serde(default)]
+        transcripts: Vec<crate::transcript::Document>,
+        /// Existing absolute directory; used only to match absolute asset paths to transcript source paths.
+        #[serde(default)]
+        input_root: Option<PathBuf>,
+        /// Outline this child sequence instead of the project's timeline.
+        #[serde(default)]
+        sequence_id: Option<String>,
+        /// List clips that end after this timeline time; default zero.
+        #[serde(default)]
+        start: Option<Time>,
+        /// List clips that start before this timeline time; default the timeline end.
+        #[serde(default)]
+        end: Option<Time>,
+        /// Transcript words shown per clip, 0-2048; default 12. Longer speech shows its first and last words and the word count; 0 shows only the count.
+        #[serde(default)]
+        words: Option<usize>,
     },
     #[serde(rename = "files.list")]
     FilesList {
@@ -1381,6 +1405,23 @@ pub fn handle(request: Request) -> Result<Value> {
             tracks,
             curve,
         } => crate::meters::inspect(&project, &input_root, start, duration, tracks, curve),
+        Request::TimelineOutline {
+            project,
+            transcripts,
+            input_root,
+            sequence_id,
+            start,
+            end,
+            words,
+        } => crate::outline::outline(&crate::outline::Request {
+            project: &project,
+            transcripts: &transcripts,
+            input_root: input_root.as_deref(),
+            sequence_id: sequence_id.as_deref(),
+            start,
+            end,
+            words: words.unwrap_or(crate::outline::DEFAULT_WORDS),
+        }),
         Request::FilesList {
             input_root,
             dir,
@@ -1425,7 +1466,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","preview.cuts","media.sheet","media.shots","media.prepare","audio.duck","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","audio.duck","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
