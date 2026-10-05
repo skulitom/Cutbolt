@@ -8,8 +8,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-/// Longest measured range: ten minutes of 48 kHz stereo PCM16 held in memory per pass.
-const MAX_SECONDS: u64 = 600;
+/// Longest measured range: four hours. The audio streams from a scratch WAV, so memory does not
+/// grow with length; the scratch file needs about 690 MB per hour.
+const MAX_SECONDS: u64 = 4 * 3600;
 
 /// Removes a private scratch directory when measuring ends, successfully or not.
 struct Scratch(PathBuf);
@@ -69,7 +70,7 @@ pub fn inspect(
 }
 
 /// Render the range's audio exactly as an audio-only export would, then meter the PCM.
-fn measure(
+pub(crate) fn measure(
     project: &Project,
     input_root: &Path,
     start: Time,
@@ -95,12 +96,13 @@ fn measure(
     render::run_plan(
         &plan,
         &plan.output,
-        Duration::from_secs(600),
+        Duration::from_secs(MAX_SECONDS),
         false,
         &media::Uncontrolled,
     )?;
-    let decoded = crate::pcm_wave::decode(&fs::read(&plan.output)?)?;
-    if decoded.data.len() as u64 != plan.samples * 2 {
+    let (frames, mut meters, over_time) =
+        crate::audio_processing::measure_wav(&plan.output, curve)?;
+    if frames != plan.samples {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
             "Measured audio does not match the timeline range",
@@ -111,9 +113,8 @@ fn measure(
             return Err(error("MEDIA_CHANGED", "Source changed during measurement"));
         }
     }
-    let mut meters = crate::audio_processing::meters(&decoded.data);
-    if curve {
-        meters["over_time"] = crate::audio_processing::profile(&decoded.data);
+    if let Some(over_time) = over_time {
+        meters["over_time"] = over_time;
     }
     Ok(meters)
 }

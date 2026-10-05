@@ -120,6 +120,8 @@ impl OverlayTransform {
 const UNITY: u32 = 1000;
 /// Keys one clip's gain curve may hold: ducking a long music bed needs four per pause.
 pub(crate) const MAX_GAIN_KEYS: usize = 2000;
+/// Largest clip level in linear milli-units (+12 dB).
+pub(crate) const MAX_GAIN_MILLI: u32 = 4000;
 /// The 48 kHz audio clock.
 const SAMPLES: Time = Time { num: 48000, den: 1 };
 /// Longest fade: 60 s keeps the per-sample gain arithmetic exact in doubles.
@@ -196,9 +198,9 @@ impl TrackClip {
             ));
         }
         if let Some(curve) = &self.gain_curve {
-            curve.prepare_keys(source_duration, 0, 4000, MAX_GAIN_KEYS)?;
+            curve.prepare_keys(source_duration, 0, MAX_GAIN_MILLI as i32, MAX_GAIN_KEYS)?;
         }
-        if self.gain_milli > 4000 {
+        if self.gain_milli > MAX_GAIN_MILLI {
             return Err(invalid("gain_milli must be 0..4000, with 1000 for unity"));
         }
         let e = self.envelope()?;

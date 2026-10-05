@@ -216,6 +216,19 @@ It then proposes a gain curve for every clip on `music_track_id` that overlaps s
 
 The result lists the speech runs with exact times, a summary per clip, and `clip_audio` `operations`. Check them with `session.preview`, apply them with `session.apply`, and listen back with `timeline.meters` `curve` or a preview range.
 
+## Normalizing loudness
+
+`audio.normalize` is read-only. It brings the mix of enabled audio tracks to `target_lkfs` (default -14 LKFS, common for online video) by scaling every audio-track clip's level by one factor. This includes clips on disabled tracks, so the balance between tracks is kept. A clip's `gain_milli`, or every key of its `gain_curve`, is multiplied and rounded to the nearest milli-unit; fades are unchanged. Audio tracks with clips must be unlocked, and a sequential timeline must be promoted to tracks first.
+
+The factor is the smallest of three values:
+- the one that reaches the target;
+- the one that puts the higher channel's sample peak on `peak_ceiling_dbfs` (default -1 dBFS);
+- the one that lifts the highest clip level to the 4,000 maximum (+12 dB).
+
+`limited_by` names the limit that applied, or is null. The engine measures the mix at the proposed levels and refines the factor from that measurement, up to three times, until the levels stop changing. A mix that already clips hides its true peak until it is lowered, which is why the refinement exists. `result` is the measured outcome of the operations, not a prediction.
+
+Clips that share a level share one `clip_audio` operation. Apply them with `session.apply`. There is no true-peak limiter, so material with a high peak-to-loudness ratio may stop at the ceiling below the target.
+
 ## Reviewing edits and footage
 
 These commands let an agent check its own work from text, still images and numbers.

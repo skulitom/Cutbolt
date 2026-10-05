@@ -3,9 +3,7 @@
 //! the timeline intended, by comparing the words expected from the source transcripts with the
 //! words heard in the cut.
 use crate::{
-    Result,
-    audio_processing::{Meter, Profile},
-    error, media,
+    Result, error, media,
     model::Project,
     outline::Clock,
     registry::Identity,
@@ -17,8 +15,7 @@ use crate::{
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    fs::{self, File},
-    io::{BufReader, Read},
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -159,38 +156,8 @@ fn audio(path: &Path, wav: &Path) -> Result<(u64, Value, Value)> {
     ]));
     args.push(wav.to_string_lossy().into_owned());
     ffmpeg(&args)?;
-    let mut input = BufReader::with_capacity(1 << 20, File::open(wav)?);
-    let mut header = [0u8; 12];
-    input.read_exact(&mut header)?;
-    let size = loop {
-        let mut chunk = [0u8; 8];
-        input.read_exact(&mut chunk)?;
-        let size = u32::from_le_bytes(chunk[4..8].try_into().expect("chunk size")) as u64;
-        if &chunk[..4] == b"data" {
-            break size;
-        }
-        std::io::copy(
-            &mut (&mut input).take(size + size % 2),
-            &mut std::io::sink(),
-        )?;
-    };
-    let (mut meter, mut profile) = (Meter::new(), Profile::new());
-    let mut buffer = vec![0u8; 1 << 16];
-    let mut left = size - size % 4;
-    while left > 0 {
-        let part = &mut buffer[..(left as usize).min(1 << 16)];
-        input.read_exact(part)?;
-        for frame in part.as_chunks::<4>().0 {
-            let pair = [
-                i16::from_le_bytes([frame[0], frame[1]]),
-                i16::from_le_bytes([frame[2], frame[3]]),
-            ];
-            meter.push(pair);
-            profile.push(pair);
-        }
-        left -= part.len() as u64;
-    }
-    Ok((size / 4, meter.finish(), profile.finish()))
+    let (frames, meters, over_time) = crate::audio_processing::measure_wav(wav, true)?;
+    Ok((frames, meters, over_time.expect("curve requested")))
 }
 
 /// One decoding pass over the picture: black frames (`blackdetect` defaults: pixels at most 10%

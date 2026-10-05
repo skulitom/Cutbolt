@@ -1,5 +1,21 @@
 # Progress history
 
+## 5 October 2026: loudness normalization
+
+Bringing a timeline to a delivery loudness took an agent several rounds of metering and editing gains by hand. The read-only `audio.normalize` now proposes `clip_audio` operations that scale every audio-track clip's level, and every gain-curve key, by one factor. The factor is the smallest of three: the one that reaches the target (default -14 LKFS), the one that keeps the sample peak under a ceiling (default -1 dBFS), and the one allowed by the clip gain range.
+
+The first version predicted the outcome from one measurement, and the fixture caught the flaw. A mix that already clips reads 0 dBFS, so lowering it to a ceiling revealed a higher true peak. The engine now measures the mix at the proposed levels and refines the factor, up to three times, and reports the measured `result`.
+
+`timeline.meters` now streams the rendered audio from disk, so its range limit rose from 600 s to 4 hours; reviews of delivered files use the same streaming meter.
+
+The transitions fixture recomputes each proposal from meters of the oracle's independent mixes, following the same refinement. It covers:
+- a quieter target;
+- a peak-limited case on a clipping mix;
+- a case limited by the clip gain range, with a disabled track;
+- the rejections.
+
+Each set of applied levels renders exactly, and `timeline.meters` on it equals the reported result. No scoring changed.
+
 ## 5 October 2026: reviewing a delivered cut
 
 After an export, an agent could not easily check what it had made. The new `export.review` job reviews a rendered file into a new folder containing:

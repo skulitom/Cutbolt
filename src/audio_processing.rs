@@ -304,6 +304,8 @@ fn k_weighting() -> (Biquad, Biquad) {
 /// loudest momentary (400 ms, 100 ms hop) loudness ending inside it, K-weighted as in `meters`
 /// and rounded to 0.1 LKFS (null below the -70 LKFS absolute gate). It also lists silent runs (at most -60 dBFS
 /// for 0.5 s or more) and runs of clipped samples (full-scale codes), with exact sample times.
+/// Callers stream through [`Profile`] or [`measure_wav`]; this slice form serves the unit tests.
+#[cfg(test)]
 pub(crate) fn profile(pcm: &[i16]) -> Value {
     let mut profile = Profile::new();
     pcm.as_chunks::<2>()
@@ -519,6 +521,53 @@ impl Meter {
             "unmeasured_tail_samples":if frames < WINDOW {frames} else {(frames-WINDOW)%HOP},
             "true_peak_available":false})
     }
+}
+
+/// Meter a 48 kHz stereo PCM16 WAV file as it streams from disk, so length costs no memory:
+/// its frame count, [`meters`] and, with `curve`, [`profile`].
+pub(crate) fn measure_wav(
+    path: &std::path::Path,
+    curve: bool,
+) -> Result<(u64, Value, Option<Value>)> {
+    use std::io::Read;
+    let mut input = std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path)?);
+    let mut header = [0u8; 12];
+    input.read_exact(&mut header)?;
+    if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" {
+        return Err(error("INVALID_AUDIO", "Expected a RIFF WAVE file"));
+    }
+    let size = loop {
+        let mut chunk = [0u8; 8];
+        input.read_exact(&mut chunk)?;
+        let size = u32::from_le_bytes(chunk[4..8].try_into().expect("chunk size")) as u64;
+        if &chunk[..4] == b"data" {
+            break size;
+        }
+        std::io::copy(
+            &mut (&mut input).take(size + size % 2),
+            &mut std::io::sink(),
+        )?;
+    };
+    let mut meter = Meter::new();
+    let mut profile = curve.then(Profile::new);
+    let mut buffer = vec![0u8; 1 << 16];
+    let mut left = size - size % 4;
+    while left > 0 {
+        let part = &mut buffer[..(left as usize).min(1 << 16)];
+        input.read_exact(part)?;
+        for frame in part.as_chunks::<4>().0 {
+            let pair = [
+                i16::from_le_bytes([frame[0], frame[1]]),
+                i16::from_le_bytes([frame[2], frame[3]]),
+            ];
+            meter.push(pair);
+            if let Some(profile) = &mut profile {
+                profile.push(pair);
+            }
+        }
+        left -= part.len() as u64;
+    }
+    Ok((size / 4, meter.finish(), profile.map(Profile::finish)))
 }
 
 /// Sample peaks/RMS for named multichannel output; loudness stays explicitly unmeasured.

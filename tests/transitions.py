@@ -205,6 +205,74 @@ def run(root):
     call({'command':'audio.duck','project':ducking,'input_root':str(root),'voice_track_id':'a','music_track_id':'a'},'INVALID_ARGUMENT')
     call({'command':'audio.duck','project':ducking,'input_root':str(root),'voice_track_id':'v','music_track_id':'m'},'MISSING_TRACK')
     passed.append('transitions.ducking_proposal_renders_exactly')
+    # Normalizing: one factor scales every audio clip. The factor, its limit and every level are
+    # recomputed here from meters of the oracle's mix; the applied levels render exactly and land
+    # on the target or the limit.
+    import math
+    measured_mixes=[0]
+    def normalized(p,target,ceiling):
+        clips=[c for t in p['tracks']['tracks'] if t['kind']=='audio' for c in t['clips']]
+        scale=lambda v,f:min(4000,math.floor(v*f+0.5))
+        def levels(f):return [[scale(k['value'],f) for k in c['gain_curve']['keys']] if c.get('gain_curve') else [scale(c.get('gain_milli',1000),f)] for c in clips]
+        def scaled(f):
+            q=copy.deepcopy(p)
+            for t in q['tracks']['tracks']:
+                if t['kind']!='audio':continue
+                for c in t['clips']:
+                    if c.get('gain_curve'):c['gain_curve']['keys']=[{**k,'value':scale(k['value'],f)} for k in c['gain_curve']['keys']]
+                    else:c['gain_milli']=scale(c.get('gain_milli',1000),f)
+            return q
+        def measure(f):
+            measured_mixes[0]+=1;m=metered(oracle(scaled(f))[1],f'normalize-{measured_mixes[0]}')
+            return m['integrated_lkfs'],max(v for v in m['sample_peak_dbfs'] if v is not None)
+        largest=max(v for level in levels(1.0) for v in level)
+        by_range=4000/largest if largest else math.inf
+        first=measure(1.0);f,(loud,peak),limited,passes=1.0,first,None,1
+        for _ in range(3):
+            wanted=f*10**((target-loud)/20);by_peak=f*10**((ceiling-peak)/20)
+            nxt=min(wanted,by_peak,by_range)
+            limited=None if wanted<=min(by_peak,by_range) else ('peak_ceiling' if by_peak<=by_range else 'clip_gain_range')
+            if levels(nxt)==levels(f):break
+            f=nxt;loud,peak=measure(f);passes+=1
+        groups,curves={},[]
+        for c,new in zip(clips,levels(f)):
+            if c.get('gain_curve'):
+                if new!=[k['value'] for k in c['gain_curve']['keys']]:
+                    curves.append({'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':[c['id']],'gain_curve':{**c['gain_curve'],'keys':[{**k,'value':v} for k,v in zip(c['gain_curve']['keys'],new)]}}})
+            elif new[0]!=c.get('gain_milli',1000):groups.setdefault(new[0],[]).append(c['id'])
+        operations=[{'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':ids,'gain_milli':level}} for level,ids in sorted(groups.items())]+curves
+        return first,f,limited,operations,(loud,peak),passes
+    def normalize(p,target,ceiling,label):
+        proposal=call({'command':'audio.normalize','project':p,'input_root':str(root),'target_lkfs':target,'peak_ceiling_dbfs':ceiling})
+        first,factor,limited,operations,final,passes=normalized(p,target,ceiling)
+        assert proposal['operations']==operations and proposal['limited_by']==limited,(proposal,operations,limited)
+        assert abs(proposal['measured']['integrated_lkfs']-first[0])<=.006 and abs(proposal['measured']['sample_peak_dbfs']-first[1])<=.006
+        assert abs(proposal['result']['integrated_lkfs']-final[0])<=.006 and abs(proposal['result']['sample_peak_dbfs']-final[1])<=.006
+        assert proposal['result']['measured_passes']==passes and abs(proposal['gain_db']-20*math.log10(factor))<=.006
+        assert proposal['clips']==sum(len(o['edit']['clip_ids']) for o in operations)
+        done=apply(p,operations);render(done,label)
+        after=call({'command':'timeline.meters','project':done,'input_root':str(root),'tracks':False})['mix']
+        assert abs(after['integrated_lkfs']-final[0])<1e-9 and max(after['sample_peak_dbfs'])==final[1]
+        return proposal,after
+    loudness,peak=normalized(ducked,-14,-1)[0]
+    target=round(loudness-6,1)
+    proposal,after=normalize(ducked,target,-1,'normalized-quieter')
+    assert proposal['limited_by'] is None and abs(after['integrated_lkfs']-target)<=.05,(after,target)
+    ceiling=math.floor(peak)-2
+    proposal,after=normalize(ducked,min(-5,round(loudness+3,1)),ceiling,'normalized-peak-limited')
+    assert proposal['limited_by']=='peak_ceiling' and max(after['sample_peak_dbfs'])<=ceiling+.01,(proposal,after)
+    quiet=apply(ducked,[edit('clip_audio',clip_ids=['al'],gain_milli=100),
+                        edit('clip_audio',clip_ids=['bed'],gain_curve={'keys':[{**k,'value':k['value']//10} for k in next(c for t in ducked['tracks']['tracks'] for c in t['clips'] if c['id']=='bed')['gain_curve']['keys']]}),
+                        edit('add',track={**track('spare','audio'),'enabled':False}),edit('place',track_id='spare',clip=placement('extra',2,0,10,0),collision='reject'),
+                        edit('clip_audio',clip_ids=['extra'],gain_milli=3000)])
+    proposal,after=normalize(quiet,-5,0,'normalized-gain-range')
+    assert proposal['limited_by']=='clip_gain_range' and {'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':['extra'],'gain_milli':4000}} in proposal['operations']
+    sequential=call({'command':'project.create','id':'plain','width':W,'height':H,'frame_rate':time(25)})
+    for subject,fields,code in ((sequential,{},'UNSUPPORTED_TIMELINE'),(apply(ducked,[edit('state',track_id='m',locked=True,enabled=True)]),{},'TRACK_LOCKED'),
+                          (apply(ducked,[edit('clip_audio',clip_ids=['al'],gain_milli=0),edit('clip_audio',clip_ids=['bed'],clear_gain_curve=True,gain_milli=0)]),{},'LOUDNESS_UNMEASURED'),
+                          (ducked,{'target_lkfs':-50},'INVALID_ARGUMENT'),(ducked,{'peak_ceiling_dbfs':1},'INVALID_ARGUMENT')):
+        call({'command':'audio.normalize','project':subject,'input_root':str(root),**fields},code)
+    passed.append('transitions.normalize_proposal_reaches_target_or_limit')
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS

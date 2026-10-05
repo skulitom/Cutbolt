@@ -101,6 +101,20 @@ pub enum Request {
         #[serde(default)]
         tile_width: Option<u32>,
     },
+    #[serde(rename = "audio.normalize")]
+    AudioNormalize {
+        /// Project whose mix to normalize; it needs placed tracks, and audio tracks with clips must be unlocked.
+        #[schemars(with = "crate::reference::ProjectInput")]
+        project: Project,
+        /// Existing absolute directory that project media paths resolve against.
+        input_root: PathBuf,
+        /// Integrated loudness to reach, -40 to -5 LKFS; default -14, common for online video.
+        #[serde(default)]
+        target_lkfs: Option<f64>,
+        /// Highest allowed sample peak after the change, -20 to 0 dBFS; default -1. When the target would pass it, the gain stops at the ceiling.
+        #[serde(default)]
+        peak_ceiling_dbfs: Option<f64>,
+    },
     #[serde(rename = "audio.duck")]
     AudioDuck {
         /// Project whose music to lower under speech; it needs placed tracks.
@@ -1498,6 +1512,17 @@ pub fn handle(request: Request) -> Result<Value> {
             end,
             words: words.unwrap_or(crate::outline::DEFAULT_WORDS),
         }),
+        Request::AudioNormalize {
+            project,
+            input_root,
+            target_lkfs,
+            peak_ceiling_dbfs,
+        } => crate::normalize::propose(
+            &project,
+            &input_root,
+            target_lkfs.unwrap_or(-14.0),
+            peak_ceiling_dbfs.unwrap_or(-1.0),
+        ),
         Request::FilesList {
             input_root,
             dir,
@@ -1542,7 +1567,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","audio.duck","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","audio.duck","audio.normalize","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
