@@ -511,7 +511,8 @@ pub(crate) fn exact_time(value: &Value, ticks: &str) -> Result<Time> {
     )?
     .times(tb)
 }
-fn video_hash(path: &Path) -> Result<String> {
+/// SHA-256 of a file's decoded video as packed RGB, `frames` pictures of the project's size.
+fn video_hash(path: &Path, c: &Checked) -> Result<String> {
     let mut args: Vec<String> = [
         "-v",
         "error",
@@ -536,25 +537,15 @@ fn video_hash(path: &Path) -> Result<String> {
             "-pix_fmt",
             "rgb24",
             "-f",
-            "hash",
-            "-hash",
-            "sha256",
+            "rawvideo",
             "-",
         ]
         .map(str::to_owned),
     );
-    let result = String::from_utf8(media::capture(
-        &media::tool("ffmpeg"),
-        &args,
-        Duration::from_secs(600),
-    )?)
-    .map_err(|_| verification("Invalid decoded digest"))?;
-    let hash = result
-        .trim()
-        .strip_prefix("SHA256=")
-        .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or_else(|| verification("Missing decoded video digest"))?;
-    Ok(hash.into())
+    // Hashed by the engine as it streams in: FFmpeg's hash muxer is several times slower. A
+    // decode with fewer or more pictures than the timeline fails here.
+    let bytes = c.reference.frames * u64::from(c.project.width) * u64::from(c.project.height) * 3;
+    crate::digest::raw_sha256(&args, bytes, Duration::from_secs(600))
 }
 fn decode_pcm(input: &Path, output: &Path) -> Result<u64> {
     let mut args: Vec<String> = [
@@ -726,8 +717,8 @@ fn validate_output(
                 return Err(verification("Decoded frame timestamp mismatch"));
             }
         }
-        let hash = video_hash(path)?;
-        if request.profile != Profile::H264Aac && hash != video_hash(reference)? {
+        let hash = video_hash(path, c)?;
+        if request.profile != Profile::H264Aac && hash != video_hash(reference, c)? {
             return Err(verification(
                 "Reference video samples changed during export",
             ));
@@ -816,6 +807,10 @@ fn validate_output(
     Ok(result)
 }
 pub fn run(request: &Export) -> Result<Value> {
+    use media::Control;
+    // Encoders report frames as they go (a queued job shows them as progress).
+    let control = media::Uncontrolled;
+    control.phase("inspecting")?;
     let c = request.check()?;
     let scratch = Scratch::new(c.output.parent().expect("validated output parent"))?;
     let audio_only = request.streams == Streams::Audio;
@@ -827,7 +822,7 @@ pub fn run(request: &Export) -> Result<Value> {
     let render = if audio_only {
         render::run_audio_range
     } else {
-        render::run_range
+        render::run_intermediate_range
     };
     render(
         &c.project,
@@ -844,24 +839,24 @@ pub fn run(request: &Export) -> Result<Value> {
     let two_pass = request.profile == Profile::H264Aac
         && request.streams.video()
         && request.h264.unwrap_or_default().rate_control.two_pass();
+    // Long exports get time in proportion: at least 2 Mpx per second beyond the fixed allowance.
+    let pixels = u64::from(c.project.width) * u64::from(c.project.height);
+    let timeout =
+        Duration::from_secs(600) + Duration::from_millis(c.reference.frames * pixels / 2_000);
+    let encode = |pass: Option<u8>, phase: &str| -> Result<()> {
+        control.phase(phase)?;
+        let mut args = arguments(request, &reference, &encoded, pass, &scratch.0);
+        args.splice(
+            0..0,
+            ["-progress".into(), "pipe:1".into(), "-nostats".into()],
+        );
+        media::capture_controlled(&media::tool("ffmpeg"), &args, timeout, &control).map(|_| ())
+    };
     if two_pass {
-        media::capture(
-            &media::tool("ffmpeg"),
-            &arguments(request, &reference, &encoded, Some(1), &scratch.0),
-            Duration::from_secs(600),
-        )?;
+        encode(Some(1), "encoding pass 1")?;
     }
-    media::capture(
-        &media::tool("ffmpeg"),
-        &arguments(
-            request,
-            &reference,
-            &encoded,
-            two_pass.then_some(2),
-            &scratch.0,
-        ),
-        Duration::from_secs(600),
-    )?;
+    encode(two_pass.then_some(2), "encoding")?;
+    control.phase("verifying")?;
     let verified = validate_output(request, &c, &encoded, &reference, &scratch.0)?;
     for source in &c.reference.sources {
         if media::file_hash(&source.path)? != source.sha256 {

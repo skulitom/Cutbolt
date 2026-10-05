@@ -12,7 +12,7 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `{"command":"schema","name":"scene.render"}` returns a command's argument schema, with a description on every field. Large schemas come back as an outline; `select` returns one variant or definition, and `full` returns everything. It also accepts the shared types `project`, `operation`, `scene`, `template`, `audio_routing` and `transcript`.
 
-`cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
+`cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
 ## Project snapshots
 
@@ -191,6 +191,8 @@ Every chunk but the last lasts a whole number of frames that is also a whole num
 - 48 kHz audio with matching total duration and continuous timestamps (up to 1 ms Matroska timestamp quantization).
 
 The engine inspects decoded frame timestamps and sample counts rather than trusting declared duration/rate metadata. It trims on exact video-frame and audio-sample boundaries, concatenates, and checks the output counts. It records source/output SHA-256 values and backend versions. Sources are checked for changes across inspection/rendering.
+
+A passed source inspection is remembered by content identity: the source's SHA-256 and size, the inspection's parameters (size, frame rate, alpha, decoded or packet timing), the ffprobe executable's SHA-256 and the engine build. Every command still hashes each source it reads, so changed bytes never reuse an entry, but identical bytes skip the frame-by-frame decode (about 23 s for an 80 s 1080p source). Entries live in the process, and in `.cutbolt/cache/inspections` when a workspace is open, or in the absolute directory named by `CUTBOLT_INSPECTION_CACHE`. Renders, scene compiles and caption overlays record their verified outputs the same way, so a fresh asset is not decoded again when a timeline first uses it. Each entry checks itself; a damaged one is ignored and rebuilt, and deleting the folder only costs time.
 
 Rendering is synchronous, with a 10-minute encoding timeout. Probing has separate bounds. `render.run` remains a blocking call; use `render.start` on Windows for background work, polled phase/frame progress and cancellation. Interrupted workers use the declared [attempt and recovery policy](RENDER_RECOVERY.md); retries start a fresh encode and codec-stream resume remains unimplemented. Tool output is bounded. This is not an operating-system sandbox or a guarantee of bounded decoder memory.
 

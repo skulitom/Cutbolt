@@ -197,22 +197,39 @@ fn normalized_project(project: &Project) -> Result<Value> {
     }
     Ok(value)
 }
-fn producer() -> String {
-    let mut h = Sha256::new();
-    h.update(std::env::consts::OS);
-    h.update(std::env::consts::ARCH);
-    h.update(BUILD_CONFIGURATION);
-    for (name, bytes) in ENGINE_SOURCES {
-        h.update((name.len() as u64).to_le_bytes());
-        h.update(name.as_bytes());
-        h.update((bytes.len() as u64).to_le_bytes());
-        h.update(bytes);
-    }
-    format!("{:x}", h.finalize())
+/// This engine build's identity: its sources and build configuration, hashed once per process.
+pub(crate) fn producer() -> &'static str {
+    static PRODUCER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PRODUCER.get_or_init(|| {
+        let mut h = Sha256::new();
+        h.update(std::env::consts::OS);
+        h.update(std::env::consts::ARCH);
+        h.update(BUILD_CONFIGURATION);
+        for (name, bytes) in ENGINE_SOURCES {
+            h.update((name.len() as u64).to_le_bytes());
+            h.update(name.as_bytes());
+            h.update((bytes.len() as u64).to_le_bytes());
+            h.update(bytes);
+        }
+        format!("{:x}", h.finalize())
+    })
 }
 fn tool(name: &str) -> Result<Source> {
-    let selected = media::tool(name);
-    let p = Path::new(&selected);
+    let path = resolve_tool(&media::tool(name))
+        .map_err(|_| error("TOOL_UNAVAILABLE", format!("Cannot resolve {name}")))?;
+    Ok(Source {
+        id: name.into(),
+        identity: Identity {
+            bytes: fs::metadata(&path)?.len(),
+            sha256: media::file_hash(&path)?,
+        },
+        path,
+    })
+}
+/// The executable a tool setting runs: a path as given, or a bare name searched for as Windows
+/// does (engine directory, working directory, system directories, then PATH).
+pub(crate) fn resolve_tool(selected: &str) -> Result<PathBuf> {
+    let p = Path::new(selected);
     let mut candidates = Vec::new();
     if p.is_absolute() || p.components().count() > 1 {
         candidates.push(p.to_path_buf());
@@ -237,22 +254,14 @@ fn tool(name: &str) -> Result<Source> {
             if p.extension().is_none() {
                 candidates.push(dir.join(format!("{selected}.exe")));
             }
-            candidates.push(dir.join(&selected));
+            candidates.push(dir.join(selected));
         }
     }
-    let path = candidates
+    Ok(candidates
         .into_iter()
         .find(|p| p.is_file())
-        .ok_or_else(|| error("TOOL_UNAVAILABLE", format!("Cannot resolve {name}")))?
-        .canonicalize()?;
-    Ok(Source {
-        id: name.into(),
-        identity: Identity {
-            bytes: fs::metadata(&path)?.len(),
-            sha256: media::file_hash(&path)?,
-        },
-        path,
-    })
+        .ok_or_else(|| error("TOOL_UNAVAILABLE", format!("Cannot resolve {selected}")))?
+        .canonicalize()?)
 }
 pub fn inspect(root: &Path) -> Result<Value> {
     Store::open(root, false)?.inspect()
@@ -371,7 +380,7 @@ pub fn run(request: &Request) -> Result<Value> {
             .map(|s| json!({"id":s.id,"identity":s.identity}))
             .collect::<Vec<_>>()
     };
-    let producer = producer();
+    let producer = producer().to_owned();
     let key = digest(&serde_json::to_vec(
         &json!({"schema_version":1,"producer":producer,"kind":kind,"recipe":recipe,
         "sources":identities(&sources),"tools":identities(&tools)}),

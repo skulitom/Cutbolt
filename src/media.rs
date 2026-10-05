@@ -25,7 +25,66 @@ pub(crate) fn ffv1_encoding(width: u32, height: u32) -> (&'static str, &'static 
     }
 }
 
-/// Cancellation/progress hooks are shared by synchronous rendering and persisted jobs.
+/// Progress of the command this process runs for a queued job: a phase name and frames done out
+/// of a total (0 when unknown).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Progress {
+    pub phase: String,
+    pub frames: u64,
+    pub total: u64,
+}
+/// Process-wide cancellation and progress. A command queued with job.start runs in its own
+/// process (`job-command`); the queue worker cancels it through this state, which every
+/// default `Control` polls, so tools started by any command stop. Elsewhere it is never set.
+struct Ambient {
+    cancelled: std::sync::atomic::AtomicBool,
+    progress: std::sync::Mutex<(Progress, bool)>,
+}
+static AMBIENT: Ambient = Ambient {
+    cancelled: std::sync::atomic::AtomicBool::new(false),
+    progress: std::sync::Mutex::new((
+        Progress {
+            phase: String::new(),
+            frames: 0,
+            total: 0,
+        },
+        false,
+    )),
+};
+/// Ask the command running in this process to stop.
+pub fn cancel_ambient() {
+    AMBIENT
+        .cancelled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+pub(crate) fn ambient_cancelled() -> bool {
+    AMBIENT.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+}
+fn ambient_check() -> Result<()> {
+    if ambient_cancelled() {
+        Err(error(
+            "JOB_CANCELLED",
+            "Job cancelled; no output was published",
+        ))
+    } else {
+        Ok(())
+    }
+}
+fn ambient_update(update: impl FnOnce(&mut Progress)) {
+    if let Ok(mut state) = AMBIENT.progress.lock() {
+        let before = state.0.clone();
+        update(&mut state.0);
+        state.1 |= state.0 != before;
+    }
+}
+/// The ambient progress, when it changed since the last call.
+pub fn ambient_progress() -> Option<Progress> {
+    let mut state = AMBIENT.progress.lock().ok()?;
+    std::mem::take(&mut state.1).then(|| state.0.clone())
+}
+
+/// Cancellation/progress hooks are shared by synchronous rendering and persisted jobs. The
+/// defaults follow the process-wide job state above.
 pub trait Control {
     fn command(&self, program: &str, args: &[String]) -> Result<Command> {
         let mut command = Command::new(program);
@@ -36,13 +95,23 @@ pub trait Control {
         tool(name)
     }
     fn check(&self) -> Result<()> {
-        Ok(())
+        ambient_check()
     }
-    fn phase(&self, _phase: &str) -> Result<()> {
+    /// Start a named phase; its frame count restarts at zero.
+    fn phase(&self, phase: &str) -> Result<()> {
+        ambient_update(|p| {
+            p.phase = phase.into();
+            p.frames = 0;
+        });
         self.check()
     }
-    fn frames(&self, _frames: u64) -> Result<()> {
+    fn frames(&self, frames: u64) -> Result<()> {
+        ambient_update(|p| p.frames = frames);
         self.check()
+    }
+    /// Frames the current work will produce.
+    fn total(&self, frames: u64) {
+        ambient_update(|p| p.total = frames);
     }
     fn sources(&self, _sources: &[crate::render::Source]) -> Result<()> {
         self.check()
@@ -183,6 +252,109 @@ pub fn capture_controlled(
     Ok(out)
 }
 
+/// Supervision beyond a streamed tool's timeout.
+#[derive(Clone, Default)]
+pub(crate) struct Watch {
+    /// Set by the owner to stop the tool, for example when a sibling tool in a pipeline failed.
+    pub abort: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+/// Kills a tool when it exceeds its timeout, when the queued job is cancelled, or when its owner
+/// aborts it, and remembers which happened.
+struct Watchdog {
+    finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    timed_out: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    program: String,
+    timeout: Duration,
+}
+impl Watchdog {
+    fn start(
+        child: std::sync::Arc<std::sync::Mutex<ChildGuard>>,
+        program: &str,
+        timeout: Duration,
+        watch: Watch,
+    ) -> Self {
+        use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+        let finished = Arc::new(AtomicBool::new(false));
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::new(AtomicBool::new(false));
+        {
+            let (finished, timed_out, stopped) =
+                (finished.clone(), timed_out.clone(), stopped.clone());
+            thread::spawn(move || {
+                let start = Instant::now();
+                while !finished.load(Ordering::SeqCst) {
+                    let flag = if start.elapsed() > timeout {
+                        &timed_out
+                    } else if ambient_cancelled()
+                        || watch
+                            .abort
+                            .as_ref()
+                            .is_some_and(|a| a.load(Ordering::SeqCst))
+                    {
+                        &stopped
+                    } else {
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    };
+                    flag.store(true, Ordering::SeqCst);
+                    let _ = child.lock().expect("child lock").0.kill();
+                    return;
+                }
+            });
+        }
+        Self {
+            finished,
+            timed_out,
+            stopped,
+            program: program.into(),
+            timeout,
+        }
+    }
+    fn finish(&self) {
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// The reason the watchdog killed the tool, if it did.
+    fn failure(&self) -> Option<crate::Error> {
+        use std::sync::atomic::Ordering;
+        if self.timed_out.load(Ordering::SeqCst) {
+            Some(error(
+                "TOOL_TIMEOUT",
+                format!(
+                    "{} exceeded {} seconds",
+                    self.program,
+                    self.timeout.as_secs()
+                ),
+            ))
+        } else if self.stopped.load(Ordering::SeqCst) {
+            Some(
+                ambient_check().err().unwrap_or_else(|| {
+                    error("TOOL_ABORTED", format!("{} was stopped", self.program))
+                }),
+            )
+        } else {
+            None
+        }
+    }
+}
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn hidden(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// Run a tool whose stdin receives bytes from `produce`, so large raw inputs never touch disk.
 /// A watchdog enforces the timeout even while a write is blocked; diagnostics stay bounded.
 pub(crate) fn feed_stdin(
@@ -191,21 +363,24 @@ pub(crate) fn feed_stdin(
     timeout: Duration,
     produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
 ) -> Result<()> {
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    };
     let mut command = Command::new(program);
+    command.args(args);
+    feed_stdin_with(command, program, timeout, Watch::default(), produce)
+}
+/// `feed_stdin` for a prepared command (for example from `Control::command`), with extra supervision.
+pub(crate) fn feed_stdin_with(
+    mut command: Command,
+    program: &str,
+    timeout: Duration,
+    watch: Watch,
+    produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
+) -> Result<()> {
+    use std::sync::{Arc, Mutex};
     command
-        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
+    hidden(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| error("TOOL_UNAVAILABLE", format!("{program}: {e}")))?;
@@ -215,22 +390,7 @@ pub(crate) fn feed_stdin(
     let out_thread = thread::spawn(move || drain(stdout, 64 * 1024, None));
     let err_thread = thread::spawn(move || drain(stderr, 64 * 1024, None));
     let child = Arc::new(Mutex::new(ChildGuard(child)));
-    let finished = Arc::new(AtomicBool::new(false));
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let watchdog = {
-        let (child, finished, timed_out) = (child.clone(), finished.clone(), timed_out.clone());
-        thread::spawn(move || {
-            let start = Instant::now();
-            while !finished.load(Ordering::SeqCst) {
-                if start.elapsed() > timeout {
-                    timed_out.store(true, Ordering::SeqCst);
-                    let _ = child.lock().expect("child lock").0.kill();
-                    return;
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-        })
-    };
+    let watchdog = Watchdog::start(child.clone(), program, timeout, watch);
     let produced = produce(&mut stdin);
     drop(stdin);
     let status = loop {
@@ -239,17 +399,13 @@ pub(crate) fn feed_stdin(
         }
         thread::sleep(Duration::from_millis(20));
     };
-    finished.store(true, Ordering::SeqCst);
-    let _ = watchdog.join();
+    watchdog.finish();
     let _ = out_thread.join();
     let (err, _) = err_thread
         .join()
         .map_err(|_| error("TOOL_FAILED", "Diagnostic reader failed"))?;
-    if timed_out.load(Ordering::SeqCst) {
-        return Err(error(
-            "TOOL_TIMEOUT",
-            format!("{program} exceeded {} seconds", timeout.as_secs()),
-        ));
+    if let Some(failure) = watchdog.failure() {
+        return Err(failure);
     }
     if !status.success() {
         return Err(error(
@@ -267,25 +423,28 @@ pub(crate) struct StreamReader {
     child: std::sync::Arc<std::sync::Mutex<ChildGuard>>,
     stdout: std::io::BufReader<std::process::ChildStdout>,
     errors: Option<thread::JoinHandle<(Vec<u8>, bool)>>,
-    finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    timed_out: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    watchdog: Watchdog,
     program: String,
-    timeout: Duration,
 }
 impl StreamReader {
     pub(crate) fn spawn(program: &str, args: &[String], timeout: Duration) -> Result<Self> {
-        use std::sync::{Arc, Mutex, atomic::AtomicBool, atomic::Ordering};
         let mut command = Command::new(program);
+        command.args(args);
+        Self::spawn_with(command, program, timeout, Watch::default())
+    }
+    /// `spawn` for a prepared command (for example from `Control::command`), with extra supervision.
+    pub(crate) fn spawn_with(
+        mut command: Command,
+        program: &str,
+        timeout: Duration,
+        watch: Watch,
+    ) -> Result<Self> {
+        use std::sync::{Arc, Mutex};
         command
-            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
+        hidden(&mut command);
         let mut child = command
             .spawn()
             .map_err(|e| error("TOOL_UNAVAILABLE", format!("{program}: {e}")))?;
@@ -296,37 +455,19 @@ impl StreamReader {
         let stderr = child.stderr.take().expect("piped stderr");
         let errors = thread::spawn(move || drain(stderr, 64 * 1024, None));
         let child = Arc::new(Mutex::new(ChildGuard(child)));
-        let finished = Arc::new(AtomicBool::new(false));
-        let timed_out = Arc::new(AtomicBool::new(false));
-        {
-            let (child, finished, timed_out) = (child.clone(), finished.clone(), timed_out.clone());
-            thread::spawn(move || {
-                let start = Instant::now();
-                while !finished.load(Ordering::SeqCst) {
-                    if start.elapsed() > timeout {
-                        timed_out.store(true, Ordering::SeqCst);
-                        let _ = child.lock().expect("child lock").0.kill();
-                        return;
-                    }
-                    thread::sleep(Duration::from_millis(50));
-                }
-            });
-        }
+        let watchdog = Watchdog::start(child.clone(), program, timeout, watch);
         Ok(Self {
             child,
             stdout,
             errors: Some(errors),
-            finished,
-            timed_out,
+            watchdog,
             program: program.into(),
-            timeout,
         })
     }
-    /// Fill `buffer` exactly. A short stream reports the tool's timeout or failed exit when it has
-    /// one, and otherwise a validation failure.
+    /// Fill `buffer` exactly. A short stream reports the tool's timeout, cancellation or failed
+    /// exit when it has one, and otherwise a validation failure.
     pub(crate) fn read_exact(&mut self, buffer: &mut [u8]) -> Result<()> {
         use std::io::Read;
-        use std::sync::atomic::Ordering;
         if self.stdout.read_exact(buffer).is_ok() {
             return Ok(());
         }
@@ -339,16 +480,9 @@ impl StreamReader {
             }
             thread::sleep(Duration::from_millis(20));
         };
-        self.finished.store(true, Ordering::SeqCst);
-        if self.timed_out.load(Ordering::SeqCst) {
-            return Err(error(
-                "TOOL_TIMEOUT",
-                format!(
-                    "{} exceeded {} seconds",
-                    self.program,
-                    self.timeout.as_secs()
-                ),
-            ));
+        self.watchdog.finish();
+        if let Some(failure) = self.watchdog.failure() {
+            return Err(failure);
         }
         if let Some(status) = status
             && !status.success()
@@ -377,23 +511,15 @@ impl StreamReader {
             }
             thread::sleep(Duration::from_millis(20));
         };
-        self.finished
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.watchdog.finish();
         let (err, _) = self
             .errors
             .take()
             .expect("diagnostic reader")
             .join()
             .map_err(|_| error("TOOL_FAILED", "Diagnostic reader failed"))?;
-        if self.timed_out.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(error(
-                "TOOL_TIMEOUT",
-                format!(
-                    "{} exceeded {} seconds",
-                    self.program,
-                    self.timeout.as_secs()
-                ),
-            ));
+        if let Some(failure) = self.watchdog.failure() {
+            return Err(failure);
         }
         if !status.success() {
             return Err(error(
@@ -408,12 +534,6 @@ impl StreamReader {
             ));
         }
         Ok(())
-    }
-}
-impl Drop for StreamReader {
-    fn drop(&mut self) {
-        self.finished
-            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

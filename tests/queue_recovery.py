@@ -61,6 +61,16 @@ fn main(){
  if args.iter().any(|s|s=="-progress") {
   let root=fs::canonicalize(env::var("CUTBOLT_QUEUE_FIXTURE").unwrap()).unwrap();
   let mode=env::var("CUTBOLT_QUEUE_MODE").unwrap();
+  if mode=="stall" {
+   // A tool that hangs without using CPU or writing progress, as the demo's deadlocked FFmpeg did.
+   fs::write(root.join("held.txt"),std::process::id().to_string()).unwrap();
+   for _ in 0..1200 {if root.join("release").exists(){break;}thread::sleep(Duration::from_millis(100));}
+   exit(75);
+  }
+  if mode=="pass" {
+   let status=Command::new(env::var("CUTBOLT_QUEUE_REAL_TOOL").unwrap()).args(&args).status().unwrap();
+   exit(status.code().unwrap_or(1));
+  }
   let count=root.join("attempt-count.txt");
   let n=fs::read_to_string(&count).ok().map(|s|s.parse::<u32>().unwrap()).unwrap_or(0)+1;
   fs::write(count,n.to_string()).unwrap();
@@ -181,6 +191,41 @@ fn main(){
         assert result['status']=='cancelled' and result['attempts']['current']==1
         assert not list(output.glob('bounded-*.mkv'))
         passed.append('recovery.all_32_slots_single_worker_and_cancel_no_retry')
+
+        # Queued commands (job.start) run in their own contained process: frame progress is relayed,
+        # cancelling a running one stops its tools, and a watchdog stops one that hangs.
+        def export(queue, environment, key):
+            arguments = {'project': project, 'input_root': str(sources), 'output_root': str(output),
+                         'output': str(output/f'{queue.name}-{key}.mkv'), 'profile': 'reference', 'streams': 'audio_video'}
+            ticket = call('job.start', env=environment, job_root=str(queue), request_id=key, run='export.run', arguments=arguments)
+            jobs.append((queue, ticket['job_id']))
+            return ticket, Path(arguments['output'])
+        retained = set(output.glob('.cutbolt-*'))  # the interrupted render's crash partial
+        queue, env = setup('command-progress', 'pass'); ticket, target = export(queue, env, 'export')
+        result = terminal(queue, ticket)
+        assert result['status'] == 'completed' and result['progress'] == {'phase': 'completed', 'frames': 16, 'total_frames': 16}, result
+        assert ff(['-i', str(target), '-map', '0:v:0', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']) == rgb[3*w*h*3:19*w*h*3]
+        compared += 16
+        queue, env = setup('command-cancel', 'stall'); ticket, target = export(queue, env, 'export')
+        until(lambda: (queue/'held.txt').exists(), bool)
+        tool = ProcessHandle(int((queue/'held.txt').read_text())); handles.append(tool)
+        live = until(lambda: status(queue, ticket), lambda v: v['progress']['phase'] == 'rendering', seconds=10)
+        assert live['status'] == 'running' and live['progress']['total_frames'] == 16, live
+        cancelled = call('job.cancel', job_root=str(queue), job_id=ticket['job_id'])
+        assert cancelled['cancel_requested'] and cancelled['status'] == 'running'
+        result = until(lambda: status(queue, ticket), lambda v: v['status'] != 'running', seconds=30)
+        assert result['status'] == 'cancelled' and result['error']['code'] == 'JOB_CANCELLED', result
+        until(tool.exited, bool, seconds=5)
+        assert not target.exists() and set(output.glob('.cutbolt-*')) == retained, list(output.glob('.cutbolt-*'))
+        queue, env = setup('command-stall', 'stall'); env['CUTBOLT_JOB_STALL_SECONDS'] = '4'
+        ticket, target = export(queue, env, 'export')
+        until(lambda: (queue/'held.txt').exists(), bool)
+        tool = ProcessHandle(int((queue/'held.txt').read_text())); handles.append(tool)
+        result = until(lambda: status(queue, ticket), lambda v: v['status'] != 'running', seconds=60)
+        assert result['status'] == 'failed' and result['error']['code'] == 'JOB_STALLED' and not result['cancel_requested'], result
+        until(tool.exited, bool, seconds=5)
+        assert not target.exists() and set(output.glob('.cutbolt-*')) == retained, list(output.glob('.cutbolt-*'))
+        passed.append('recovery.command_progress_cancellation_and_stall_watchdog')
         assert original=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
         report={'passed':passed,'frames_compared':compared,'stereo_sample_frames_compared':samples,'rejections':rejected,'reference':'Original generated RGB/PCM slices; real encoded output, transient failures, killed worker/process tree, pinned source mutation and all 32 queue slots. Publication crash points have separate Rust child-process evidence.'}
         (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')

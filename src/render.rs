@@ -43,6 +43,10 @@ pub struct Plan {
     /// Gain streams this graph reads, written when it runs.
     #[serde(skip)]
     pub(crate) generated: Vec<Generated>,
+    /// When top-level `alpha_over` clips show: the engine compositor whose frames `arguments`
+    /// (the encoder) reads on stdin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) compositor: Option<crate::track_composite::Compositor>,
 }
 /// A per-sample gain stream a track graph reads as an input: a clip's gain curve sampled on its
 /// source clock from `start`, `samples` long, as 16-bit mono PCM (gains are at most 4000, so
@@ -212,6 +216,7 @@ fn chunked(
         sources,
         chunks,
         generated: Vec::new(),
+        compositor: None,
     }))
 }
 
@@ -261,25 +266,37 @@ pub(crate) fn run_plan(
     control: &dyn media::Control,
 ) -> Result<()> {
     let tool = control.tool("ffmpeg");
-    let output = |arguments: &[String], target: &Path| {
-        let mut arguments = arguments.to_vec();
+    // One graph into `target`; `done` frames precede it in the whole render.
+    let single = |plan: &Plan, target: &Path, done: u64| -> Result<()> {
+        let _inputs = plan
+            .generated
+            .iter()
+            .map(Generated::write)
+            .collect::<Result<Vec<_>>>()?;
+        let mut arguments = plan.arguments.to_vec();
         *arguments.last_mut().expect("output argument") = target.to_string_lossy().into_owned();
+        if let Some(compositor) = &plan.compositor {
+            // Allow composition beside the graph's own allowance: at least 20 Mpx per second.
+            let pixels = u64::from(compositor.width) * u64::from(compositor.height);
+            let extra = Duration::from_millis(compositor.frames * pixels / 20_000);
+            return crate::track_composite::encode(
+                compositor,
+                &arguments,
+                timeout + extra,
+                done,
+                control,
+            );
+        }
         if progress {
             arguments.splice(
                 0..0,
                 ["-progress".into(), "pipe:1".into(), "-nostats".into()],
             );
         }
-        arguments
+        media::capture_controlled(&tool, &arguments, timeout, control).map(|_| ())
     };
     if plan.chunks.is_empty() {
-        let _inputs = plan
-            .generated
-            .iter()
-            .map(Generated::write)
-            .collect::<Result<Vec<_>>>()?;
-        media::capture_controlled(&tool, &output(&plan.arguments, temp), timeout, control)?;
-        return Ok(());
+        return single(plan, temp, 0);
     }
     let extension = temp
         .extension()
@@ -293,12 +310,7 @@ pub(crate) fn run_plan(
         if part.0.try_exists()? {
             return Err(error("OUTPUT_EXISTS", "Temporary chunk collision"));
         }
-        let _inputs = chunk
-            .generated
-            .iter()
-            .map(Generated::write)
-            .collect::<Result<Vec<_>>>()?;
-        media::capture_controlled(&tool, &output(&chunk.arguments, &part.0), timeout, control)?;
+        single(chunk, &part.0, done)?;
         done += chunk.frames;
         control.frames(done)?;
         parts.push(part);
@@ -418,13 +430,9 @@ pub(crate) fn inspect_overlay(
     rate: Time,
     control: &dyn media::Control,
 ) -> Result<(Source, bool)> {
-    let (source, metadata) =
+    let (source, pix_fmt) =
         inspect_source_with(path, width, height, rate, control, true, Timing::Decoded)?;
-    let alpha = metadata["streams"]
-        .as_array()
-        .and_then(|s| s.iter().find(|s| s["codec_type"] == "video"))
-        .is_some_and(|v| v["pix_fmt"] == "bgra");
-    Ok((source, alpha))
+    Ok((source, pix_fmt == "bgra"))
 }
 fn inspect_source_at(
     path: &Path,
@@ -439,7 +447,10 @@ fn inspect_source_at(
 }
 /// One packet listing supplies the metadata, FFV1 video timing and exact PCM16 sample counts without
 /// decoding; strict (`Decoded`) inspection then also decodes every video frame. Metadata is validated
-/// before any decoding, so unsupported media is rejected exactly as by a plain probe.
+/// before any decoding, so unsupported media is rejected exactly as by a plain probe. A passed
+/// inspection is remembered by content identity (see `inspection_cache`): the file is still
+/// hashed, and identical bytes with identical parameters, ffprobe and engine skip the probe.
+/// Returns the video pixel format with the source.
 fn inspect_source_with(
     path: &Path,
     width: u32,
@@ -448,9 +459,30 @@ fn inspect_source_with(
     control: &dyn media::Control,
     allow_alpha: bool,
     timing: Timing,
-) -> Result<(Source, serde_json::Value)> {
+) -> Result<(Source, String)> {
     let rate = clock::rate(rate)?;
+    let bytes = fs::metadata(path)?.len();
     let before = media::file_hash_controlled(path, control)?;
+    let parameters = format!(
+        "reference-source:{width}x{height}:{}/{}:alpha={allow_alpha}:{}",
+        rate.num,
+        rate.den,
+        if timing == Timing::Decoded {
+            "decoded"
+        } else {
+            "packets"
+        }
+    );
+    let key = crate::inspection_cache::key(&before, bytes, &parameters, &control.tool("ffprobe"));
+    if let Some(verified) = key.as_deref().and_then(crate::inspection_cache::get) {
+        let source = Source {
+            path: path.into(),
+            sha256: before,
+            frames: verified.frames,
+            samples: verified.samples,
+        };
+        return Ok((source, verified.pix_fmt));
+    }
     let inspection = media::packet_inspection_controlled(path, control)?;
     let metadata = &inspection.metadata;
     let streams = metadata["streams"]
@@ -550,13 +582,21 @@ fn inspect_source_with(
     if media::file_hash_controlled(path, control)? != before {
         return Err(error("MEDIA_CHANGED", "Source changed during inspection"));
     }
+    let verified = crate::inspection_cache::Verified {
+        frames: frames.len() as u64,
+        samples,
+        pix_fmt: video["pix_fmt"].as_str().unwrap_or_default().to_owned(),
+    };
+    if let Some(key) = &key {
+        crate::inspection_cache::put(key, &verified);
+    }
     let source = Source {
         path: path.into(),
         sha256: before,
-        frames: frames.len() as u64,
+        frames: verified.frames,
         samples,
     };
-    Ok((source, inspection.metadata))
+    Ok((source, verified.pix_fmt))
 }
 
 pub(crate) fn destination(output: &Path, root: &Path) -> Result<PathBuf> {
@@ -808,6 +848,7 @@ fn plan_controlled(
         arguments: args,
         chunks: Vec::new(),
         generated: Vec::new(),
+        compositor: None,
     })
 }
 
@@ -858,7 +899,7 @@ pub(crate) fn run_controlled(
     control: &dyn media::Control,
 ) -> Result<Value> {
     let plan = plan_controlled(project, input_root, output_root, output, control)?;
-    execute(project, plan, temp_path, control)
+    execute(project, plan, temp_path, Timing::Decoded, control)
 }
 
 pub(crate) fn plan_range(
@@ -1068,6 +1109,7 @@ pub(crate) fn plan_audio_range(
         arguments: args,
         chunks: Vec::new(),
         generated: Vec::new(),
+        compositor: None,
     })
 }
 
@@ -1126,12 +1168,27 @@ pub(crate) fn run_range(
     duration: Time,
 ) -> Result<Value> {
     let plan = plan_range(project, input_root, output_root, output, start, duration)?;
-    execute(project, plan, None, &media::Uncontrolled)
+    execute(project, plan, None, Timing::Decoded, &media::Uncontrolled)
+}
+/// `run_range` for an export's lossless intermediate. Its output is checked from packets rather
+/// than by decoding every picture: the export decodes it in full anyway, and then decodes and
+/// verifies the delivered file frame by frame.
+pub(crate) fn run_intermediate_range(
+    project: &Project,
+    input_root: &Path,
+    output_root: &Path,
+    output: &Path,
+    start: Time,
+    duration: Time,
+) -> Result<Value> {
+    let plan = plan_range(project, input_root, output_root, output, start, duration)?;
+    execute(project, plan, None, Timing::Packets, &media::Uncontrolled)
 }
 fn execute(
     project: &Project,
     plan: Plan,
     temp_path: Option<&Path>,
+    timing: Timing,
     control: &dyn media::Control,
 ) -> Result<Value> {
     control.sources(&plan.sources)?;
@@ -1151,6 +1208,7 @@ fn execute(
     }
     let temp = TempFile(temp);
     control.phase("rendering")?;
+    control.total(plan.frames);
     run_plan(
         &plan,
         &temp.0,
@@ -1166,12 +1224,14 @@ fn execute(
     )?;
     control.frames(plan.frames)?;
     control.phase("verifying")?;
-    let rendered = inspect_reference_at(
+    let rendered = inspect_source_at(
         &temp.0,
         project.width,
         project.height,
         project.frame_rate,
         control,
+        false,
+        timing,
     )?;
     if rendered.frames != plan.frames || rendered.samples != plan.samples {
         return Err(error(

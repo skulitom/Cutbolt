@@ -162,7 +162,7 @@ pub(super) fn run(
         files.push(json!({"number":number,"path":relative,"bytes":fs::metadata(&path)?.len(),"sha256":media::file_hash(&path)?}));
     }
     let digest = format!("{:x}", decoded.finalize());
-    if digest != video_hash(reference)? {
+    if digest != video_hash(reference, c)? {
         return Err(verification(
             "Numbered PNG pixels differ from the selected timeline",
         ));

@@ -74,6 +74,13 @@ fn main() {
             }
         }
     }
+    if args.len() == 1 && args[0] == "job-command" {
+        if let Err(e) = cutbolt::jobs::command_process() {
+            eprintln!("{}: {}", e.code, e.message);
+            exit(1);
+        }
+        exit(0);
+    }
     if args.len() == 2 && args[0] == "job-worker" {
         if let Err(e) = cutbolt::jobs::worker(std::path::Path::new(&args[1])) {
             eprintln!("{}: {}", e.code, e.message);
@@ -82,6 +89,19 @@ fn main() {
         return;
     }
     let outcome = workspace(&mut args).and_then(|workspace| {
+        // A workspace keeps verified source inspections beside its other engine state, unless the
+        // environment names a cache already. Queue workers inherit the setting.
+        if let Some(workspace) = &workspace
+            && std::env::var_os(cutbolt::inspection_cache::DIRECTORY_VARIABLE).is_none()
+        {
+            // SAFETY: still single-threaded; nothing else reads or writes the environment yet.
+            unsafe {
+                std::env::set_var(
+                    cutbolt::inspection_cache::DIRECTORY_VARIABLE,
+                    workspace.inside(".cutbolt/cache/inspections"),
+                )
+            };
+        }
         if args.first().is_some_and(|a| a == "mcp") {
             // `--tools core` (or CUTBOLT_MCP_TOOLS=core) lists the everyday tools and cutbolt_run.
             let choice = match args.len() {

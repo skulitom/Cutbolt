@@ -25,7 +25,7 @@ Audit of the edit → build → test → verify loop, 4 October 2026. Every numb
 - **Phase 1a is done.** One packet listing replaces three `ffprobe` runs per source inspection (−24% engine launches on `tracks`).
 - **Next:**
   - Rebuild the impact map regularly. It is diffed from its own commit, so selection widens as main moves.
-  - Phase 1b/1c: remove the strict per-command video decode once a decode-once, content-addressed probe cache exists. Its location needs a decision, because the engine keeps no state outside explicit roots or workspaces.
+  - Phase 1b/1c: packet timing where pictures are not read (item 4). The content-addressed inspection cache (item 3) exists: a passed inspection is keyed by the source's SHA-256 and size, its parameters, the ffprobe executable's SHA-256 and the engine build. Entries live in the process and, with a workspace, in `.cutbolt/cache/inspections` (or the directory `CUTBOLT_INSPECTION_CACHE` names), so the strict decode runs once per file rather than once per command. Every command still hashes its sources.
   - Phases 2–3.
 
 ## 1. Summary

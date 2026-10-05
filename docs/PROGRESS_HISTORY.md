@@ -1,5 +1,54 @@
 # Progress history
 
+## 5 October 2026: fast overlay exports, stoppable queued commands, cached source checks
+
+The progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md items 18-21) could not export its 80.64 s 1080p25 timeline, which has a full-length caption overlay and one picture-in-picture clip:
+- The export wrote nothing in 15 minutes. FFmpeg held 6 GB and then sat at 0 % CPU.
+- `job.cancel` could not stop it, no timeout fired, and progress read 0 of 0 frames throughout.
+- The cause: overlays were composited inside the FFmpeg graph with per-pixel `geq` expressions on one filter thread, and the caption input was re-trimmed once per picture segment, which forced FFmpeg to buffer it.
+
+The changes:
+- **Overlays are composited by the engine.** FFmpeg decodes the opaque base picture and each shown overlay clip (cropped) to raw planar RGB. The base is cut only where the visible opaque content changes, and every source is read once, in order. The engine applies each clip's shrink, opacity, placement and the exact straight-alpha over in parallel row bands, and streams frames to the encoder while the decoders run (`track_composite.rs`).
+  - The equation, rounding and visibility rules are unchanged. Unit tests compare against an independent reference for every alpha class, and the overlays fixture's zero-tolerance checks pass.
+  - Overlay tracks inside nested sequences still composite in the graph.
+- **Queued commands can be stopped.** A `job.start` command now runs in its own process inside a Windows job object (`cutbolt job-command`).
+  - `job.cancel` stops a running command within seconds: its tools are killed and its partial files removed. Anything still alive 20 s later is terminated.
+  - A watchdog stops a command whose processes together use less than 1 s of CPU in 180 s without progress (`JOB_STALLED`), or one that runs longer than 12 hours (`JOB_TIMEOUT`).
+  - Streamed tools (frame decoders, encoders fed on stdin) also stop on cancellation now.
+- **Progress.** Commands report their phase and frames to the queue. `export.run` reports `inspecting`, `rendering`, `verifying`, `encoding` and `verifying`, with `total_frames` set, so a slow export can be told from a hung one.
+- **Cached source checks.**
+  - A passed source inspection is remembered by the source's SHA-256 and size, the inspection's parameters, the ffprobe build and the engine build. Every command still hashes its sources, but identical bytes skip the frame-by-frame decode (about 23 s for an 80 s 1080p source).
+  - With a workspace, entries persist in `.cutbolt/cache/inspections`. Renders, scene compiles and caption overlays record their verified outputs there, so a new asset is not decoded again when a timeline first reads it.
+- **Leaner export verification.**
+  - An export's lossless intermediate is checked from packets: the encoder decodes it in full anyway, and the delivered file is still decoded and verified frame by frame.
+  - The decoded-video digest is hashed by the engine (`digest::raw_sha256`) instead of FFmpeg's hash muxer.
+  - Encoders get time in proportion to the export's length.
+
+Measured on the demo timeline with release builds (`ffc2ec9` before), on the same machine while other sessions were working. "Cold" means no cached inspections; "warm" means the sources were inspected before.
+
+| Case | Before | After |
+| --- | ---: | ---: |
+| Whole 80.64 s H.264 export with both overlays | did not finish (about 2 h projected) | 216.8 s cold, 106.1 s warm |
+| Whole export without overlays | 243-264 s in the demo, 335.1 s here | 113.9 s warm |
+| 3.84 s range with the caption overlay | 338.2 s | 55.0 s cold, 9.0 s warm |
+| 3.84 s range without overlays | 46.5 s | 8.7 s warm |
+| `preview.frame` with both overlays | 32.0 s | 8.1 s cold |
+| `preview.frame` without overlays | 1.9 s | 0.5 s |
+| `preview.cuts`, 13 cuts | 58.7 s | 40.8 s cold, 10.1 s warm |
+
+A queued overlay export reported its frames throughout: 2016 frames composited in 61 s, encoded in 37 s, and completed after 112.8 s. A `job.cancel` sent 12 s into another one stopped it 0.6 s later, with no output or partial files left.
+
+`queue_recovery` now also checks:
+- a queued export's relayed progress;
+- cancelling a running export whose tool hangs;
+- the stall watchdog failing a hung export.
+
+Each case leaves no output and no leftover files. No scoring changed. The quick suite passed 54 fixtures, with 7 skipped for runtimes that are not configured here. Evidence stays stale until the next thorough run.
+
+Follow-ups:
+- `captions.render` and `media.transcribe` still report no frames.
+- Overlays inside nested sequences still use the slow in-graph path.
+
 ## 5 October 2026: beats on arranged music
 
 The demo's own music bed is exactly 125 BPM: a kick on beats 1 and 3, a snare on 2 and 4, hats on eighths, a sixteenth-note arpeggio, and two bars without drums before them. `audio.beats` read it as 62.82 BPM, half tempo with a 0.5 % period error. Its grid started 0.14 s early and drifted up to 0.24 s off, so beats missed the onsets they should have snapped to. There were three causes:

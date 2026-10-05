@@ -23,7 +23,13 @@ Create an existing absolute local `job_root` outside the repository. It contains
 
 `job.start` queues the long-running commands that are not direct MCP tools: `export.run`, `media.prepare`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe`. Its `arguments` are prepared and validated at submission exactly like a direct call. That includes workspace defaults, saved-project references and path-only identities, and an invalid argument fails immediately, named `arguments.<field>`. The job's result is the command's own receipt.
 
-These jobs share the queue's request IDs, ticket replay, output reservation and 32-job limit. A queued job can be cancelled; a running one finishes, because these commands publish their own outputs atomically and have no cancellation points. An interrupted run is reported, not retried. Reference renders keep `render.start` with its retry and publication recovery.
+These jobs share the queue's request IDs, ticket replay, output reservation and 32-job limit. Each runs in its own process inside a Windows job object, so it can be stopped as a whole:
+
+- **Cancellation.** `job.cancel` stops a queued job at once and a running one within seconds. The command is told to stop: its tools are killed and its partial files removed. Anything still running 20 s later is terminated. The job ends `cancelled` with `JOB_CANCELLED`, unless its output was already published.
+- **Watchdog.** A command whose processes together use less than 1 s of CPU in 180 s, without reporting progress, is stuck (a deadlocked tool sits at 0 %); it is stopped the same way and fails with `JOB_STALLED`. A command running longer than 12 hours fails with `JOB_TIMEOUT`. Neither publishes output.
+- **Progress.** `progress` shows the command's phase and frames as it runs. `export.run` reports `inspecting`, `rendering` (frames of the lossless reference), `verifying`, then `encoding` (frames encoded) and `verifying` for H.264, PNG MOV and similar profiles, with `total_frames` set to the exported frames. Commands that count no frames keep `frames` at 0.
+
+An interrupted run is reported, not retried. Reference renders keep `render.start` with its retry and publication recovery.
 
 A runnable example using a retained demo from `tests/integration.py`:
 
