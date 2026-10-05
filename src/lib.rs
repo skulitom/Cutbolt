@@ -11,6 +11,7 @@ pub mod color;
 pub mod commands;
 pub mod composite;
 pub mod conform;
+pub mod cut_review;
 pub mod delivery;
 pub mod documents;
 pub mod duck;

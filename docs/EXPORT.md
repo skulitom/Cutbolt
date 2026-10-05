@@ -78,6 +78,10 @@ Receipts distinguish `audio_samples` (the exact intended presentation length), `
 
 The one-frame fixture is 1,920 presentation sample frames and decodes to 2,048; an eight-frame fixture is exactly 15,360 and needs no trailing padding. Audio remains lossy inside that interval. The 320 kb/s setting was selected after the initial 192 kb/s candidate failed the short-clip quality threshold; the threshold was retained.
 
+## Reviewing the output
+
+`export.review`, queued with `job.start`, checks a delivered file against its project. It produces a contact sheet, a small preview copy, black runs, loudness over time, frame and sample counts, and the words heard against the words intended. See [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
+
 ## Verification and publication
 
 Inspection reports the selected range, dimensions, stream policy, source identities, full-quality selection and profile settings. It does not create an intermediate or output file.

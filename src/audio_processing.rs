@@ -288,161 +288,237 @@ const SILENT_SAMPLES: usize = 24_000;
 /// Runs listed per kind; counts stay exact.
 const MAX_RUNS: usize = 50;
 
+/// K-weighting filters: public 48 kHz coefficients, BS.1770-5 Annex 1, Tables 1 and 2.
+fn k_weighting() -> (Biquad, Biquad) {
+    (
+        Biquad::new(
+            [1.53512485958697, -2.69169618940638, 1.19839281085285],
+            [1.0, -1.69065929318241, 0.73248077421585],
+        ),
+        Biquad::new([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621]),
+    )
+}
+
 /// Loudness over time and level events of final stereo 48 kHz PCM, for reviewing a timeline.
 /// For each whole second it gives the short-term loudness of the 3 s ending there and the
 /// loudest momentary (400 ms, 100 ms hop) loudness ending inside it, K-weighted as in `meters`
 /// and rounded to 0.1 LKFS (null below the -70 LKFS absolute gate). It also lists silent runs (at most -60 dBFS
 /// for 0.5 s or more) and runs of clipped samples (full-scale codes), with exact sample times.
 pub(crate) fn profile(pcm: &[i16]) -> Value {
+    let mut profile = Profile::new();
+    pcm.as_chunks::<2>()
+        .0
+        .iter()
+        .for_each(|pair| profile.push(*pair));
+    profile.finish()
+}
+
+/// Streaming form of [`profile`]: push stereo frames in order, then finish.
+pub(crate) struct Profile {
+    shelf: Biquad,
+    highpass: Biquad,
+    blocks: Vec<f64>,
+    energy: f64,
+    silent_from: Option<usize>,
+    silent: Vec<(usize, usize)>,
+    clipped_from: Option<usize>,
+    clipped: Vec<(usize, usize)>,
+    clipped_samples: usize,
+    frames: usize,
+}
+impl Profile {
     const BLOCK: usize = 4800;
-    let mut shelf = Biquad::new(
-        [1.53512485958697, -2.69169618940638, 1.19839281085285],
-        [1.0, -1.69065929318241, 0.73248077421585],
-    );
-    let mut highpass = Biquad::new([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621]);
-    let frames = pcm.len() / 2;
-    let mut blocks = Vec::with_capacity(frames / BLOCK);
-    let mut energy = 0.0;
-    let (mut silent_from, mut silent) = (None, Vec::new());
-    let (mut clipped_from, mut clipped, mut clipped_samples) = (None, Vec::new(), 0usize);
-    // Exact sample times, reduced like every other engine time.
-    let time = |n: usize| json!(crate::time::Time::new(n as u64, 48_000).expect("sample time"));
-    for (n, pair) in pcm.as_chunks::<2>().0.iter().enumerate() {
+    pub(crate) fn new() -> Self {
+        let (shelf, highpass) = k_weighting();
+        Self {
+            shelf,
+            highpass,
+            blocks: Vec::new(),
+            energy: 0.0,
+            silent_from: None,
+            silent: Vec::new(),
+            clipped_from: None,
+            clipped: Vec::new(),
+            clipped_samples: 0,
+            frames: 0,
+        }
+    }
+    pub(crate) fn push(&mut self, pair: [i16; 2]) {
+        let n = self.frames;
+        self.frames += 1;
         for (ch, &sample) in pair.iter().enumerate() {
             let x = sample as f64 / 32768.0;
-            let weighted = highpass.sample(shelf.sample(x, ch), ch);
-            energy += weighted * weighted;
+            let weighted = self.highpass.sample(self.shelf.sample(x, ch), ch);
+            self.energy += weighted * weighted;
         }
-        if (n + 1) % BLOCK == 0 {
-            blocks.push(energy);
-            energy = 0.0;
+        if (n + 1).is_multiple_of(Self::BLOCK) {
+            self.blocks.push(self.energy);
+            self.energy = 0.0;
         }
         let quiet = pair.iter().all(|&s| i32::from(s).abs() <= SILENT_CODE);
-        match (quiet, silent_from) {
-            (true, None) => silent_from = Some(n),
+        match (quiet, self.silent_from) {
+            (true, None) => self.silent_from = Some(n),
             (false, Some(from)) => {
                 if n - from >= SILENT_SAMPLES {
-                    silent.push((from, n));
+                    self.silent.push((from, n));
                 }
-                silent_from = None;
+                self.silent_from = None;
             }
             _ => {}
         }
         let clip = pair.iter().any(|&s| s == i16::MAX || s == i16::MIN);
-        clipped_samples += pair
+        self.clipped_samples += pair
             .iter()
             .filter(|&&s| s == i16::MAX || s == i16::MIN)
             .count();
-        match (clip, clipped_from) {
-            (true, None) => clipped_from = Some(n),
+        match (clip, self.clipped_from) {
+            (true, None) => self.clipped_from = Some(n),
             (false, Some(from)) => {
-                clipped.push((from, n));
-                clipped_from = None;
+                self.clipped.push((from, n));
+                self.clipped_from = None;
             }
             _ => {}
         }
     }
-    if let Some(from) = silent_from.filter(|from| frames - from >= SILENT_SAMPLES) {
-        silent.push((from, frames));
+    pub(crate) fn finish(mut self) -> Value {
+        const BLOCK: usize = Profile::BLOCK;
+        let frames = self.frames;
+        // Exact sample times, reduced like every other engine time.
+        let time = |n: usize| json!(crate::time::Time::new(n as u64, 48_000).expect("sample time"));
+        if let Some(from) = self
+            .silent_from
+            .filter(|from| frames - from >= SILENT_SAMPLES)
+        {
+            self.silent.push((from, frames));
+        }
+        if let Some(from) = self.clipped_from {
+            self.clipped.push((from, frames));
+        }
+        let blocks = &self.blocks;
+        // Below the -70 LKFS absolute gate, as in integrated loudness, reads as silence (null).
+        let loudness = |sum: f64, count: usize| {
+            decibels(sum / (count * BLOCK) as f64)
+                .map(|x| x - 0.691)
+                .filter(|x| *x >= -70.0)
+                .map(|x| (x * 10.0).round() / 10.0)
+        };
+        let seconds = blocks.len() / 10;
+        let mut short_term = Vec::with_capacity(seconds);
+        let mut momentary = Vec::with_capacity(seconds);
+        for second in 0..seconds {
+            let end = (second + 1) * 10;
+            let first = end.saturating_sub(30);
+            short_term.push(loudness(blocks[first..end].iter().sum(), end - first));
+            let loudest = (end - 9..=end)
+                .filter(|&e| e >= 4)
+                .filter_map(|e| loudness(blocks[e - 4..e].iter().sum(), 4))
+                .fold(None, |best: Option<f64>, x| {
+                    Some(best.map_or(x, |b| b.max(x)))
+                });
+            momentary.push(loudest);
+        }
+        let runs = |runs: &[(usize, usize)]| {
+            runs.iter()
+                .take(MAX_RUNS)
+                .map(|&(from, to)| json!({"start":time(from),"end":time(to)}))
+                .collect::<Vec<_>>()
+        };
+        json!({"step_seconds":1,"short_term_lkfs":short_term,"momentary_max_lkfs":momentary,
+            "silence":{"threshold_dbfs":-60,"minimum_seconds":0.5,"count":self.silent.len(),"runs":runs(&self.silent)},
+            "clipping":{"clipped_samples":self.clipped_samples,"count":self.clipped.len(),"runs":runs(&self.clipped)}})
     }
-    if let Some(from) = clipped_from {
-        clipped.push((from, frames));
-    }
-    // Below the -70 LKFS absolute gate, as in integrated loudness, reads as silence (null).
-    let loudness = |sum: f64, count: usize| {
-        decibels(sum / (count * BLOCK) as f64)
-            .map(|x| x - 0.691)
-            .filter(|x| *x >= -70.0)
-            .map(|x| (x * 10.0).round() / 10.0)
-    };
-    let seconds = blocks.len() / 10;
-    let mut short_term = Vec::with_capacity(seconds);
-    let mut momentary = Vec::with_capacity(seconds);
-    for second in 0..seconds {
-        let end = (second + 1) * 10;
-        let first = end.saturating_sub(30);
-        short_term.push(loudness(blocks[first..end].iter().sum(), end - first));
-        let loudest = (end - 9..=end)
-            .filter(|&e| e >= 4)
-            .filter_map(|e| loudness(blocks[e - 4..e].iter().sum(), 4))
-            .fold(None, |best: Option<f64>, x| {
-                Some(best.map_or(x, |b| b.max(x)))
-            });
-        momentary.push(loudest);
-    }
-    let runs = |runs: &[(usize, usize)]| {
-        runs.iter()
-            .take(MAX_RUNS)
-            .map(|&(from, to)| json!({"start":time(from),"end":time(to)}))
-            .collect::<Vec<_>>()
-    };
-    json!({"step_seconds":1,"short_term_lkfs":short_term,"momentary_max_lkfs":momentary,
-        "silence":{"threshold_dbfs":-60,"minimum_seconds":0.5,"count":silent.len(),"runs":runs(&silent)},
-        "clipping":{"clipped_samples":clipped_samples,"count":clipped.len(),"runs":runs(&clipped)}})
 }
 
 /// Final PCM measurement: stereo only, 48 kHz block counts, no true-peak claim.
 pub(crate) fn meters(pcm: &[i16]) -> Value {
-    // Public 48 kHz coefficients: BS.1770-5 Annex 1, Tables 1 and 2.
-    let mut shelf = Biquad::new(
-        [1.53512485958697, -2.69169618940638, 1.19839281085285],
-        [1.0, -1.69065929318241, 0.73248077421585],
-    );
-    let mut highpass = Biquad::new([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621]);
+    let mut meter = Meter::new();
+    pcm.as_chunks::<2>()
+        .0
+        .iter()
+        .for_each(|pair| meter.push(*pair));
+    meter.finish()
+}
+
+/// Streaming form of [`meters`]: push stereo frames in order, then finish.
+pub(crate) struct Meter {
+    shelf: Biquad,
+    highpass: Biquad,
+    window: Vec<f64>,
+    sum: f64,
+    blocks: Vec<f64>,
+    squares: [f64; 2],
+    peaks: [f64; 2],
+    frames: usize,
+}
+impl Meter {
     const WINDOW: usize = 19200;
     const HOP: usize = 4800;
-    let frames = pcm.len() / 2;
-    let mut window = vec![0.0; WINDOW];
-    let mut sum = 0.0;
-    let mut blocks = Vec::new();
-    let mut squares = [0.0; 2];
-    let mut peaks = [0.0_f64; 2];
-    for (n, pair) in pcm.as_chunks::<2>().0.iter().enumerate() {
-        let mut energy = 0.0;
-        for ch in 0..2 {
-            let x = pair[ch] as f64 / 32768.0;
-            peaks[ch] = peaks[ch].max(x.abs());
-            squares[ch] += x * x;
-            let weighted = highpass.sample(shelf.sample(x, ch), ch);
-            energy += weighted * weighted;
-        }
-        let slot = n % WINDOW;
-        sum += energy - window[slot];
-        window[slot] = energy;
-        if n + 1 >= WINDOW && (n + 1 - WINDOW).is_multiple_of(HOP) {
-            blocks.push(sum.max(0.0) / WINDOW as f64);
+    pub(crate) fn new() -> Self {
+        let (shelf, highpass) = k_weighting();
+        Self {
+            shelf,
+            highpass,
+            window: vec![0.0; Self::WINDOW],
+            sum: 0.0,
+            blocks: Vec::new(),
+            squares: [0.0; 2],
+            peaks: [0.0; 2],
+            frames: 0,
         }
     }
-    let absolute = 10.0_f64.powf((-70.0 + 0.691) / 10.0);
-    let above: Vec<_> = blocks.iter().copied().filter(|x| *x > absolute).collect();
-    let relative = if above.is_empty() {
-        None
-    } else {
-        Some(above.iter().sum::<f64>() / above.len() as f64 * 0.1)
-    };
-    let gated: Vec<_> = above
-        .iter()
-        .copied()
-        .filter(|x| *x > relative.unwrap_or(f64::INFINITY))
-        .collect();
-    let loudness = if gated.is_empty() {
-        None
-    } else {
-        decibels(gated.iter().sum::<f64>() / gated.len() as f64).map(|x| x - 0.691)
-    };
-    let status = if frames < WINDOW {
-        "insufficient_duration"
-    } else if loudness.is_none() {
-        "below_gate"
-    } else {
-        "measured"
-    };
-    json!({"profile":"stereo-48k-meters-v1", "measured_signal":"final_pcm16", "sample_peak_dbfs":peaks.map(|x| decibels(x*x)),
-        "rms_dbfs":squares.map(|x| decibels(x / frames as f64)), "integrated_lkfs":loudness,
-        "loudness_status":status,"relative_gate_lkfs":relative.and_then(decibels).map(|x| x-0.691),
-        "gating_blocks":blocks.len(),"absolute_gated_blocks":above.len(),"relative_gated_blocks":gated.len(),
-        "unmeasured_tail_samples":if frames < WINDOW {frames} else {(frames-WINDOW)%HOP},
-        "true_peak_available":false})
+    pub(crate) fn push(&mut self, pair: [i16; 2]) {
+        let n = self.frames;
+        self.frames += 1;
+        let mut energy = 0.0;
+        for (ch, &sample) in pair.iter().enumerate() {
+            let x = sample as f64 / 32768.0;
+            self.peaks[ch] = self.peaks[ch].max(x.abs());
+            self.squares[ch] += x * x;
+            let weighted = self.highpass.sample(self.shelf.sample(x, ch), ch);
+            energy += weighted * weighted;
+        }
+        let slot = n % Self::WINDOW;
+        self.sum += energy - self.window[slot];
+        self.window[slot] = energy;
+        if n + 1 >= Self::WINDOW && (n + 1 - Self::WINDOW).is_multiple_of(Self::HOP) {
+            self.blocks.push(self.sum.max(0.0) / Self::WINDOW as f64);
+        }
+    }
+    pub(crate) fn finish(self) -> Value {
+        const WINDOW: usize = Meter::WINDOW;
+        const HOP: usize = Meter::HOP;
+        let (frames, blocks, squares, peaks) = (self.frames, self.blocks, self.squares, self.peaks);
+        let absolute = 10.0_f64.powf((-70.0 + 0.691) / 10.0);
+        let above: Vec<_> = blocks.iter().copied().filter(|x| *x > absolute).collect();
+        let relative = if above.is_empty() {
+            None
+        } else {
+            Some(above.iter().sum::<f64>() / above.len() as f64 * 0.1)
+        };
+        let gated: Vec<_> = above
+            .iter()
+            .copied()
+            .filter(|x| *x > relative.unwrap_or(f64::INFINITY))
+            .collect();
+        let loudness = if gated.is_empty() {
+            None
+        } else {
+            decibels(gated.iter().sum::<f64>() / gated.len() as f64).map(|x| x - 0.691)
+        };
+        let status = if frames < WINDOW {
+            "insufficient_duration"
+        } else if loudness.is_none() {
+            "below_gate"
+        } else {
+            "measured"
+        };
+        json!({"profile":"stereo-48k-meters-v1", "measured_signal":"final_pcm16", "sample_peak_dbfs":peaks.map(|x| decibels(x*x)),
+            "rms_dbfs":squares.map(|x| decibels(x / frames as f64)), "integrated_lkfs":loudness,
+            "loudness_status":status,"relative_gate_lkfs":relative.and_then(decibels).map(|x| x-0.691),
+            "gating_blocks":blocks.len(),"absolute_gated_blocks":above.len(),"relative_gated_blocks":gated.len(),
+            "unmeasured_tail_samples":if frames < WINDOW {frames} else {(frames-WINDOW)%HOP},
+            "true_peak_available":false})
+    }
 }
 
 /// Sample peaks/RMS for named multichannel output; loudness stays explicitly unmeasured.

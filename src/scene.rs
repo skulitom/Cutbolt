@@ -1616,6 +1616,7 @@ impl Drop for Scratch {
             "output.mkv",
             "output.wav",
             "frame.png",
+            "sheet.png",
             "source.rgb",
             "source.pcm",
             "captions.txt",

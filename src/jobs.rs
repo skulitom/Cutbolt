@@ -68,8 +68,9 @@ struct SavedCommand {
 }
 
 /// Commands that job.start can queue: each writes new files and can take minutes.
-pub const QUEUED_COMMANDS: [&str; 12] = [
+pub const QUEUED_COMMANDS: [&str; 13] = [
     "export.run",
+    "export.review",
     "media.prepare",
     "media.conform",
     "scene.render",

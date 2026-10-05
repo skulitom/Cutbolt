@@ -332,7 +332,7 @@ pub fn source_sheet(
 }
 
 /// Presentation times of every video frame, from packet timestamps without decoding.
-fn frame_times(path: &Path) -> Result<Vec<Time>> {
+pub(crate) fn frame_times(path: &Path) -> Result<Vec<Time>> {
     let arguments: Vec<String> = [
         "-v",
         "error",

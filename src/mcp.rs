@@ -214,7 +214,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
         }
         "job.wait" => {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
@@ -233,6 +233,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         }
         "audio.duck" => {
             "Lower music under speech: analyze the voice track alone in 10 ms windows and propose gain curves for the music track's clips (ramp down before speech, hold, ramp back up after), as clip_audio operations to apply with session.apply. Read-only; nothing is changed until the operations are applied."
+        }
+        "export.review" => {
+            "Review a rendered cut into a new folder: a contact sheet, a small H.264 copy to watch, loudness over time with silence and clipping, black frames, the duration against the project, and the words the timeline should say (from source transcripts) against the words heard in the cut (from a speech runtime or given transcripts). Run it with job.start; the result's summary is a short text report."
         }
         "media.prepare" => {
             "Turn any decodable video file, such as a phone or camera MP4, into a timeline asset in one step: a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. Run it with job.start; the result's asset goes to media.add."
@@ -285,8 +288,9 @@ pub(crate) fn description(command: &str) -> &'static str {
 pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
 /// Long renders belong in persisted jobs so the MCP connection stays usable.
-const BLOCKING: [&str; 14] = [
+const BLOCKING: [&str; 15] = [
     "media.prepare",
+    "export.review",
     "image.sequence.compile",
     "cache.run",
     "transcript.transcribe",
@@ -462,13 +466,15 @@ impl Call {
 }
 /// A preview command's PNG as an image content block, downscaled to PREVIEW_EDGE.
 fn preview_image(workspace: Option<&Workspace>, command: &str, result: &Value) -> Option<Value> {
-    if !matches!(
-        command,
-        "preview.frame" | "preview.sheet" | "preview.cuts" | "media.sheet" | "media.shots"
-    ) {
-        return None;
-    }
-    let output = std::path::Path::new(result["output"].as_str()?);
+    let output = match command {
+        "preview.frame" | "preview.sheet" | "preview.cuts" | "media.sheet" | "media.shots" => {
+            result["output"].as_str()?
+        }
+        // A finished export.review job shows its contact sheet.
+        "job.wait" | "job.status" => result["result"]["picture"]["sheet"]["output"].as_str()?,
+        _ => return None,
+    };
+    let output = std::path::Path::new(output);
     let path = match workspace {
         Some(workspace) if output.is_relative() => workspace.root().join(output),
         _ => output.to_path_buf(),
@@ -488,7 +494,7 @@ impl Server {
             "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
             "Typical cut: session.create with id, width, height and frame_rate (30 or 60 fps footage keeps every frame on a 30 or 60 fps project); ",
             "job.start run media.prepare with each source's path and the project, then job.wait, gives an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
-            "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait. ",
+            "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait; check the delivered file with job.start run export.review. ",
             "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.import, then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech. ",

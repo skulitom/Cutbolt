@@ -237,6 +237,22 @@ These commands let an agent check its own work from text, still images and numbe
 
 Over MCP, the sheets come back as inline images.
 
+## Reviewing a delivered cut
+
+`export.review` checks a rendered file, normally the output of `export.run` or `render.start`. Queue it with `job.start`. It writes a new folder at `output` inside `output_root` and never overwrites one. A review that fails removes its folder.
+
+- **Picture.** `sheet.png` holds `frames` frames (default 16) spread evenly through the file, identical to `media.sheet`. Black runs come from FFmpeg's `blackdetect` with its default thresholds (pixels at most 10% luma over 98% of the picture) and are snapped to frame boundaries. `preview.mp4` is a small H.264/AAC copy for a person to watch, `rendition_height` pixels tall (default 360, never above the source; 0 skips it).
+- **Sound.** The first audio stream is decoded to 48 kHz stereo PCM16 and measured as it streams, so length is not limited. It gets the same measurements as `timeline.meters`: integrated loudness, sample peaks, short-term loudness per second, and silent and clipped runs.
+- **Timing.** Given the `project` the file was rendered from, video frames and frame rate must match exactly. Audio may differ by at most 2,048 samples (two AAC blocks of decoder padding).
+- **Expected speech.** With the `project` and `transcripts` of its sources (as for `timeline.outline`), the review lists what the cut should say. These are the whole words inside audio clips on enabled tracks, moved to timeline time; muted clips and child sequences are skipped. Words a clip edge cuts through are listed separately as `cut_words`.
+- **Heard speech.** What the cut actually says comes from one of two sources:
+  - `heard`: transcripts of the reviewed file itself, whose source identity must be the file's.
+  - `runtime` and `language`: the local speech runtime transcribes the cut's audio in 120 s windows that overlap by 5 s. `audio.wav` and `transcripts.json` stay in the folder, so the documents remain bound to an existing file.
+
+  Overlapping transcripts split their overlap at its middle.
+- **Comparison.** The two lists are matched in time order. A heard word matches the next expected word when both have the same letters and digits, ignoring case and punctuation, and their middles are at most `tolerance` apart (default 0.5 s). Unmatched words between two matches form one difference, reported as missing, extra or changed words with their times. The result gives the match ratio and the first 50 differences.
+- **Result.** `summary` is a short text report, and the JSON gives each section. `review.json` in the folder holds everything, including per-second loudness and full meters. Over MCP, `job.wait` shows the sheet as an inline image once the job finishes.
+
 ## Range, stream and delivery exports
 
 `export.inspect` and `export.run` accept a reference `project`, explicit input/output roots, unused output path, `profile` and `streams`. Optional `range` selects exact rational start/duration; every profile uses the timeline's native clock, for sequential timelines and placed tracks. Omitting it selects the whole timeline. `streams` chooses `audio_video`, `video` or `audio`. The `reference` profile produces FFV1/PCM MKV, FFV1-only MKV or PCM WAV. The `h264_aac` profile produces MP4 or audio-only M4A, with `input_transfer: "srgb" | "bt709"` required for video unless the project declares its `transfer` once with the `project.transfer` operation. Optional `h264` and `aac_bitrate` fields select [bounded quality, two-pass bitrate and compatibility settings](DELIVERY_CONTROLS.md); omission preserves the original fixed preset.

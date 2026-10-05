@@ -144,6 +144,42 @@ pub enum Request {
         #[schemars(with = "Option<crate::reference::ProjectInput>")]
         project: Option<Project>,
     },
+    #[serde(rename = "export.review")]
+    ExportReview {
+        /// Rendered cut to review: any file FFmpeg decodes, such as an export.run or render.start output.
+        path: PathBuf,
+        /// Existing absolute directory that must contain `path`; project media paths also resolve against it.
+        input_root: PathBuf,
+        /// Existing absolute directory; the review folder is created inside it.
+        output_root: PathBuf,
+        /// Absolute path of the new review folder inside output_root; it must not exist.
+        output: PathBuf,
+        /// Project the cut was rendered from: enables the duration check and, with `transcripts`, the speech check.
+        #[serde(default)]
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
+        /// Transcripts of the project's source media, as for timeline.outline; the words inside audible audio clips are what the cut should say.
+        #[serde(default)]
+        transcripts: Vec<crate::transcript::Document>,
+        /// Transcripts of the reviewed file itself, for example from an earlier review; their source identity must be the file's. Give these or `runtime`.
+        #[serde(default)]
+        heard: Vec<crate::transcript::Document>,
+        /// Local speech runtime, as for transcript.transcribe without `alignment_root` changes: the cut's audio is transcribed in overlapping 120 s windows and saved with the documents in the review folder.
+        #[serde(default)]
+        runtime: Option<crate::transcribe::Runtime>,
+        /// Spoken language for `runtime`; required with it.
+        #[serde(default)]
+        language: Option<crate::transcript::Language>,
+        /// Frames on the contact sheet, 1-64; default 16, spread evenly through the cut.
+        #[serde(default)]
+        frames: Option<u32>,
+        /// Height of the small H.264/AAC copy, 120-1080 pixels and never above the source; default 360. 0 skips it.
+        #[serde(default)]
+        rendition_height: Option<u32>,
+        /// Largest time between an expected and a heard word that still match, in rational seconds; default 1/2, at most 5.
+        #[serde(default)]
+        tolerance: Option<Time>,
+    },
     #[serde(rename = "media.sheet")]
     MediaSheet {
         /// Video file to sample; any format FFmpeg decodes, not only timeline sources.
@@ -723,7 +759,7 @@ pub enum Request {
         job_root: PathBuf,
         /// Caller-chosen ID unique within job_root, 1-128 bytes. An identical resubmission returns the original ticket.
         request_id: String,
-        /// Command to run in the background: export.run, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
+        /// Command to run in the background: export.run, export.review, media.prepare, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
         run: String,
         /// That command's arguments exactly as for a direct call, without `command`; cutbolt_schema with its name gives the schema.
         arguments: serde_json::Map<String, Value>,
@@ -1007,6 +1043,46 @@ pub fn handle(request: Request) -> Result<Value> {
                 bridge: bridge.unwrap_or(Time { num: 1, den: 1 }),
             },
         ),
+        Request::ExportReview {
+            path,
+            input_root,
+            output_root,
+            output,
+            project,
+            transcripts,
+            heard,
+            runtime,
+            language,
+            frames,
+            rendition_height,
+            tolerance,
+        } => {
+            let recognize = match (runtime, language) {
+                (Some(runtime), Some(language)) => {
+                    Some(crate::cut_review::Recognize { runtime, language })
+                }
+                (None, None) => None,
+                _ => {
+                    return Err(crate::error(
+                        "INVALID_ARGUMENT",
+                        "runtime and language go together",
+                    ));
+                }
+            };
+            crate::cut_review::review(&crate::cut_review::Request {
+                path: &path,
+                input_root: &input_root,
+                output_root: &output_root,
+                output: &output,
+                project: project.as_ref(),
+                transcripts: &transcripts,
+                heard: &heard,
+                recognize: recognize.as_ref(),
+                frames: frames.unwrap_or(16),
+                rendition_height: rendition_height.unwrap_or(360),
+                tolerance: tolerance.unwrap_or(Time::new(1, 2)?),
+            })
+        }
         Request::MediaPrepare {
             path,
             input_root,
@@ -1466,7 +1542,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","audio.duck","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","audio.duck","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},

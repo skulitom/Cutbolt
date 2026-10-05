@@ -1,5 +1,32 @@
 # Progress history
 
+## 5 October 2026: reviewing a delivered cut
+
+After an export, an agent could not easily check what it had made. The new `export.review` job reviews a rendered file into a new folder containing:
+- a contact sheet and a small H.264 copy to watch;
+- black runs;
+- loudness over time, with silence and clipping;
+- frame and sample counts against the project;
+- the words the timeline should say, compared with the words heard in the file.
+
+Heard words come from the local speech runtime, in overlapping windows, or from transcripts the caller supplies. The reply is a short text summary plus compact sections; `review.json` keeps the full detail.
+
+Supporting changes:
+- The loudness meters now stream, so reviews of long files do not hold the audio in memory.
+- `job.wait` shows a finished review's sheet inline.
+- A bug from the cut-review sheets is fixed: `preview.cuts`, `media.sheet` and `media.shots` left a hidden `.cutbolt-scene-*` folder, holding a second link to the sheet, beside each output. The scratch cleanup now removes it.
+
+The transcripts fixture exports the word-cut timeline as H.264 and reviews it:
+- expected words, cut words and differences are recomputed independently, including tolerance and muting;
+- black runs match the timeline's video gaps exactly;
+- integrated loudness is within 0.11 LU of FFmpeg's ebur128;
+- peaks and silent and clipped runs are recomputed from the decoded PCM;
+- the sheet is identical to `media.sheet`'s sheet of the same file;
+- the same review runs as a queued job over MCP;
+- rejections, including a recognition failure after decoding has started, leave no folder.
+
+Speech recognition itself was not exercised, because no runtime is installed on this machine. No scoring changed.
+
 ## 5 October 2026: timeline outline
 
 To read a cut, an agent had to scan the full project JSON or render previews. The new read-only `timeline.outline` returns a compact text reading instead. It lists, for each clip, its timeline and source spans, link, levels and transform. It also shows transitions and the stretches without picture or audio. Given transcripts of the sources, audio clips also show the words they contain, with words cut by a clip edge marked. This makes it cheap to check that a cut says what was intended. Over MCP the text is the tool's content.

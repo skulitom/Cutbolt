@@ -10,6 +10,8 @@ import copy
 from fractions import Fraction as F
 import hashlib
 import json
+import math
+import re
 from pathlib import Path
 import subprocess
 from PIL import Image
@@ -151,6 +153,55 @@ def outline_text(p, docs=(), words=12, start=None, end=None, sequence=None, root
         header.append('transcripts: '+', '.join(used)+''.join(f'; unused {i} ({r}: {s})' for i, r, s in unused))
     text = '\n'.join(header+lines)+'\n'
     return text, listed, len(header+lines)
+
+
+def review_words(p, docs):
+    """Words a cut should say: whole transcript words inside audible audio clips, on the timeline."""
+    words = sorted((w for d in docs for w in d['words']), key=lambda w:seconds(w['start']))
+    said, cut = [], []
+    for t in p['tracks']['tracks']:
+        if t['kind'] != 'audio' or not t['enabled']:continue
+        for c in t['clips']:
+            if c.get('gain_milli', 1000) == 0 and not c.get('gain_curve'):continue
+            si = seconds(c['source_in']);so = si+seconds(c['duration']);st = seconds(c['start'])
+            for w in words:
+                ws, we = seconds(w['start']), seconds(w['end'])
+                if ws >= so or we <= si:continue
+                if ws < si:cut.append({'clip_id':c['id'], 'edge':'start', 'word':w['text'], 'time':time(st)})
+                elif we > so:cut.append({'clip_id':c['id'], 'edge':'end', 'word':w['text'], 'time':time(st+so-si)})
+                else:said.append((st+ws-si, st+we-si, w['text']))
+    said.sort(key=lambda w:w[0])
+    return said, cut
+
+
+def review_compare(expected, heard, tolerance):
+    """Independent reading of the documented in-order matching rule."""
+    import math
+    norm = lambda t:''.join(c for c in t if c.isalnum()).lower()
+    heard = sorted(heard, key=lambda w:w[0])
+    me, mh, nxt, matched = [False]*len(expected), [False]*len(heard), 0, 0
+    for i, (s, e, t) in enumerate(expected):
+        mid = (s+e)/2
+        for k in range(nxt, len(heard)):
+            hm = (heard[k][0]+heard[k][1])/2
+            if hm > mid+tolerance:break
+            if mid <= hm+tolerance and norm(heard[k][2]) == norm(t):
+                me[i] = mh[k] = True;matched += 1;nxt = k+1;break
+    groups = {}
+    for words, flags, side in ((expected, me, 0), (heard, mh, 1)):
+        seen = 0
+        for w, ok in zip(words, flags):
+            if ok:seen += 1
+            else:groups.setdefault(seen, ([], []))[side].append(w)
+    differences = []
+    for g in sorted(groups):
+        a, b = groups[g];both = a+b
+        differences.append({'start':time(min(w[0] for w in both)), 'end':time(max(w[1] for w in both)),
+                            'expected':' '.join(w[2] for w in a), 'heard':' '.join(w[2] for w in b)})
+    differences.sort(key=lambda d:seconds(d['start']))
+    ratio = math.floor(matched/len(expected)*1000+0.5)/1000 if expected else None
+    return {'expected_words':len(expected), 'heard_words':len(heard), 'matched':matched, 'match_ratio':ratio,
+            'tolerance':time(tolerance), 'differences':{'count':len(differences), 'listed':differences[:50]}}
 
 
 def run(root):
@@ -384,6 +435,108 @@ def run(root):
                                 (talk, {'transcripts':[early, speech('c', 'talk.wav', 19, 2)]}, 'INVALID_ARGUMENT')):
             client.call('timeline.outline', code, project=p, **fields)
         passed.append('transcript.timeline_outline_matches_independent_reading')
+
+        # Review: deliver the word-cut timeline as H.264, then review the file against the project.
+        # Words, black runs, levels, timing and the sheet are recomputed here independently.
+        delivered = output/'reviewed.mp4'
+        call({'command':'export.run', 'project':restored, 'input_root':str(source), 'output_root':str(output), 'output':str(delivered),
+              'profile':'h264_aac', 'streams':'audio_video', 'input_transfer':'srgb'})
+        delivered_identity = {'sha256':digest(delivered), 'bytes':delivered.stat().st_size}
+        said, cut_words = review_words(restored, [doc])
+        assert [w[2] for w in said] == ['red,', 'κύκλος', 'circle.'] and cut_words == [], said
+        shift = F(1, 25)
+        heard_words = [(said[0][0]+shift, said[0][1]+shift, 'Red'), (F(11, 10), F(23, 20), 'um'), (said[1][0], said[1][1], 'kyklos'),
+                       (said[2][0]-shift, said[2][1]-shift, 'circle'), (F(17, 5), F(7, 2), 'thanks')]
+        heard_doc = {**document, 'id':'heard', 'source':{'path':'output/reviewed.mp4', 'identity':delivered_identity, 'duration':time(91, 25)},
+                     'range_start':time(0), 'range_duration':time(91, 25),
+                     'words':[{'id':f'h{i}', 'text':t, 'start':time(a), 'end':time(b), 'origin':'estimated', 'probability_milli':700}
+                              for i, (a, b, t) in enumerate(heard_words)]}
+        reviewing = {'command':'export.review', 'path':str(delivered), 'input_root':str(root), 'output_root':str(output),
+                     'project':restored, 'transcripts':[doc], 'heard':[heard_doc], 'rendition_height':120}
+        reviewed = call({**reviewing, 'output':str(output/'review')})
+        folder = output/'review'
+        assert sorted(p.name for p in folder.iterdir()) == ['preview.mp4', 'review.json', 'sheet.png'] == sorted(reviewed['files'])
+        assert not [p for p in output.iterdir() if p.name.startswith('.cutbolt')]
+        speech = reviewed['speech']
+        assert speech['comparison'] == review_compare(said, heard_words, F(1, 2)), speech['comparison']
+        assert speech['cut_words'] == {'count':0, 'listed':[]} and speech['unused_transcripts'] == []
+        assert [(d['expected'], d['heard']) for d in speech['comparison']['differences']['listed']] == [('κύκλος', 'um kyklos'), ('', 'thanks')]
+        strict = call({**reviewing, 'output':str(output/'review-strict'), 'tolerance':time(1, 50), 'rendition_height':0, 'frames':4})
+        assert strict['speech']['comparison'] == review_compare(said, heard_words, F(1, 50))
+        assert sorted(p.name for p in (output/'review-strict').iterdir()) == ['review.json', 'sheet.png']
+        muted = apply(restored, [edit('clip_audio', clip_ids=[pieces[1][2]['id']], gain_milli=0)])
+        quiet = call({**reviewing, 'output':str(output/'review-muted'), 'project':muted, 'rendition_height':0})
+        assert quiet['speech']['comparison'] == review_compare(review_words(muted, [doc])[0], heard_words, F(1, 2))
+        # Black where the timeline has no video clip: frames 0-10 and 76-91.
+        assert reviewed['picture']['black'] == {'count':2, 'runs':[{'start':time(0), 'end':time(10, 25)}, {'start':time(76, 25), 'end':time(91, 25)}]}
+        assert reviewed['file']['video']['frames'] == 91 and reviewed['timing']['video'] == {'frames':91, 'expected_frames':91, 'frame_rate_matches':True, 'ok':True}
+        pcm = array('h', ff(['-i', str(delivered), '-map', '0:a:0', '-ac', '2', '-ar', '48000', '-f', 's16le', '-']))
+        frames_ = len(pcm)//2
+        assert reviewed['file']['audio']['samples'] == frames_ and reviewed['timing']['audio']['expected_samples'] == 91*1920
+        assert reviewed['timing']['audio']['ok'] == (abs(frames_-91*1920) <= 2048)
+        sound = reviewed['sound']
+        for ch in range(2):
+            peak = max(abs(v) for v in pcm[ch::2])/32768
+            assert abs(sound['sample_peak_dbfs'][ch]-20*math.log10(peak)) < 1e-9
+        reference = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', str(delivered), '-af', 'ebur128=peak=sample', '-f', 'null', '-'],
+                                   capture_output=True, text=True, check=True, timeout=60)
+        assert abs(sound['integrated_lkfs']-float(re.findall(r'I:\s+(-?[0-9.]+) LUFS', reference.stderr)[-1])) <= .11, sound
+        def runs(test, minimum):
+            found, start = [], None
+            for n in range(frames_):
+                if test(pcm[2*n], pcm[2*n+1]):
+                    if start is None:start = n
+                elif start is not None:
+                    if n-start >= minimum:found.append({'start':time(start, 48000), 'end':time(n, 48000)})
+                    start = None
+            if start is not None and frames_-start >= minimum:found.append({'start':time(start, 48000), 'end':time(frames_, 48000)})
+            return found
+        silent = runs(lambda l, r:abs(l) <= 32 and abs(r) <= 32, 24000)
+        assert sound['silence']['runs'] == silent[:50] and sound['silence']['count'] == len(silent)
+        full = lambda v:v in (32767, -32768)
+        assert sound['clipping']['clipped_samples'] == sum(1 for v in pcm if full(v))
+        assert sound['clipping']['runs'] == runs(lambda l, r:full(l) or full(r), 1)[:50]
+        details = json.loads((folder/'review.json').read_text(encoding='utf-8'))
+        assert details['summary'] == reviewed['summary'] and len(details['sound']['over_time']['short_term_lkfs']) == frames_//48000
+        assert details['sound']['meters']['integrated_lkfs'] == sound['integrated_lkfs'] and reviewed['details'] == 'review.json'
+        # The sheet is media.sheet's sheet of the same file; the small copy is H.264/AAC at the source size.
+        sheet = call({'command':'media.sheet', 'path':str(delivered), 'input_root':str(root), 'output_root':str(output), 'output':str(output/'review-check.png')})
+        assert (folder/'sheet.png').read_bytes() == (output/'review-check.png').read_bytes()
+        assert reviewed['picture']['sheet']['cells'] == sheet['cells']
+        copy_probe = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(folder/'preview.mp4')],
+                                               capture_output=True, check=True).stdout)['streams']
+        assert [(s['codec_name'], s.get('width'), s.get('height')) for s in copy_probe] == [('h264', W, H), ('aac', None, None)]
+        assert reviewed['picture']['rendition']['width'] == W and reviewed['picture']['rendition']['height'] == H
+        summary = reviewed['summary'].splitlines()
+        assert summary[0] == f'review of reviewed.mp4: {W}x{H} 25 fps h264, 91 frames (3.64 s)' and summary[1] == 'black: 2 runs: 0-0.4, 3.04-3.64', summary
+        assert f"timing: matches project text-edits rev {restored['revision']} (3.64 s)" in summary
+        assert 'speech: 2 of 3 expected words heard (66.7%), 5 heard in all; 2 differences:' in summary, summary
+        assert '  1.1-1.36 expected "κύκλος" heard "um kyklos"' in summary and '  3.4-3.5 extra "thanks"' in summary, summary
+        assert 'files in review: sheet.png, preview.mp4, review.json' in summary, summary
+        # The same review queued over MCP, with its sheet shown inline by job.wait.
+        jobs = root/'jobs';jobs.mkdir()
+        ticket = client.call('job.start', job_root=str(jobs), request_id='review', run='export.review',
+                             arguments={k:v for k, v in {**reviewing, 'output':str(output/'review-job')}.items() if k != 'command'})
+        waited = client.rpc('tools/call', {'name':'cutbolt_job_wait', 'arguments':{'job_root':str(jobs), 'job_id':ticket['job_id'], 'timeout_seconds':120}})['result']
+        status = waited['structuredContent']['result']
+        assert status['finished'] and status['status'] == 'completed', status
+        assert status['result']['speech'] == reviewed['speech'] and status['result']['picture']['black'] == reviewed['picture']['black']
+        assert [c['type'] for c in waited['content']] == ['text', 'image'] and waited['content'][1]['mimeType'] == 'image/png'
+        assert not any(t['name'] == 'cutbolt_export_review' for t in catalog)
+        # Rejections leave no folder behind, including a failure after decoding has started.
+        call({**reviewing, 'output':str(output/'review')}, 'OUTPUT_EXISTS')
+        stranger = copy.deepcopy(heard_doc);stranger['source']['identity']['bytes'] += 1
+        for fields, code in (({'heard':[stranger]}, 'INVALID_ARGUMENT'), ({'project':None}, 'INVALID_ARGUMENT'), ({'frames':0}, 'INVALID_ARGUMENT'),
+                             ({'rendition_height':100}, 'INVALID_ARGUMENT'), ({'tolerance':time(6)}, 'INVALID_ARGUMENT'),
+                             ({'heard':[], 'runtime':{'distribution':'Ubuntu', 'python':'/usr/bin/python3', 'python_paths':['/opt/speech'],
+                               'model':str(root/'missing.pt'), 'alignment_root':str(root), 'threads':1}}, 'INVALID_ARGUMENT'),
+                             ({'heard':[], 'language':'en', 'runtime':{'distribution':'Ubuntu', 'python':'/usr/bin/python3', 'python_paths':['/opt/speech'],
+                               'model':str(root/'missing.pt'), 'alignment_root':str(root), 'threads':1}}, 'MODEL_UNAVAILABLE')):
+            request = {**reviewing, 'output':str(output/'review-rejected'), **fields}
+            if request.get('project') is None:request.pop('project')
+            call(request, code)
+            assert not (output/'review-rejected').exists(), fields
+        passed.append('transcript.export_review_matches_independent_checks')
     finally:
         client.close()
 

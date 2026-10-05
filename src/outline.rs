@@ -29,11 +29,14 @@ pub struct Request<'a> {
 
 /// Seconds for reading: exact decimals up to milliseconds, otherwise rounded to the millisecond
 /// and marked with `~`.
-struct Clock {
-    rounded: bool,
+pub(crate) struct Clock {
+    pub(crate) rounded: bool,
 }
 impl Clock {
-    fn at(&mut self, time: Time) -> String {
+    pub(crate) fn new() -> Self {
+        Self { rounded: false }
+    }
+    pub(crate) fn at(&mut self, time: Time) -> String {
         let scaled = time.num as u128 * 1000;
         let den = time.den as u128;
         let millis = if scaled.is_multiple_of(den) {
@@ -54,7 +57,7 @@ impl Clock {
         }
         text
     }
-    fn span(&mut self, start: Time, end: Time) -> String {
+    pub(crate) fn span(&mut self, start: Time, end: Time) -> String {
         format!("{}-{}", self.at(start), self.at(end))
     }
 }
@@ -70,9 +73,9 @@ fn min(a: Time, b: Time) -> Result<Time> {
 }
 
 /// Transcript words of one source, from every document bound to it.
-struct Spoken<'a> {
-    ranges: Vec<(Time, Time)>,
-    words: Vec<&'a Word>,
+pub(crate) struct Spoken<'a> {
+    pub(crate) ranges: Vec<(Time, Time)>,
+    pub(crate) words: Vec<&'a Word>,
 }
 
 fn normalized(path: &str) -> String {
@@ -81,14 +84,14 @@ fn normalized(path: &str) -> String {
 
 /// Match each document to the assets of its source: by content identity when the asset is bound,
 /// otherwise by path relative to `input_root`.
-struct Matches<'a> {
+pub(crate) struct Matches<'a> {
     /// Asset IDs each document matched, by document ID.
-    by_document: HashMap<&'a str, Vec<String>>,
-    by_asset: HashMap<String, Spoken<'a>>,
-    unused: Vec<Value>,
+    pub(crate) by_document: HashMap<&'a str, Vec<String>>,
+    pub(crate) by_asset: HashMap<String, Spoken<'a>>,
+    pub(crate) unused: Vec<Value>,
 }
 
-fn spoken<'a>(
+pub(crate) fn spoken<'a>(
     project: &Project,
     transcripts: &'a [Document],
     input_root: Option<&Path>,
@@ -438,7 +441,7 @@ pub fn outline(request: &Request) -> Result<Value> {
             "The outline range must start before its end and the timeline end",
         ));
     }
-    let mut clock = Clock { rounded: false };
+    let mut clock = Clock::new();
     let mut lines = Vec::new();
     let listed = match arrangement {
         Some(arrangement) => arrangement_lines(
