@@ -45,3 +45,92 @@ P1/P2 do not require closing every broader Y case. The fixture proves the specif
 The unchanged 100-point checklist gains **V01 basic** (position, integer scale, quarter-turn rotation and crop of PNG animation clips), **V02 basic** (layered PNG clips with opacity) and **E03 basic** (timeline frame/still previews). General video transforms, animated parameters, blend modes, premultiplied alpha, preview caches/contact sheets and other extended criteria stay open. Audio conversion alone does not satisfy A01 extended; the PixelForge adapter itself earns no editing point. Coverage increases 11/100 to 14/100 only with a passing fresh `tools/verify.py` report.
 
 The next useful slices are durable scene compilation with production-sized limits, a reviewed local speech take, explicit dependency/review invalidation, and a verified delivery encoder. Keep each step independently usable through local files/commands and retain the complete editing scope.
+
+## Production coordinator, 5 October 2026
+
+[`tools/production.py`](../PRODUCTION.md) runs a whole narrated explainer from one manifest. Evidence is retained outside Git in `C:\DEV\CutboltData\production-20261005`: manifests, production folders with every stage receipt, call log and revision record, exports, reviews and the fixture runs.
+
+The baseline is the 5 October progress demo (`C:\DEV\CutboltData\demo-progress-20261005`), an 80.64 s video that took about 2 h 12 min:
+- about 75 of the first 97 minutes were agent authoring;
+- about 170 MCP calls;
+- an art generator, a scene builder and ten step scripts written by hand.
+
+### The proof: a new video from a manifest
+
+A new script, "Anticipation", in the demo's style:
+- six scenes: a title, four narrated beats (switch, cards, compare with a custom motion, recolour) and a narrated end card;
+- music, fonts and the speaker reused from the demo;
+- engine: a release build of main `c0fe223` (the job pool, faster scene compositing and timeline limiters) plus this change's one-sentence MCP instruction; PixelForge 0.7.1 at `a5473c6`; Qwen3-TTS 0.6B CustomVoice `85e237c1` in WSL; the RTX 4090.
+
+The agent's part was three tool calls, plus one call to start a timer:
+1. write the manifest (2.9 KB);
+2. run `build`;
+3. look at the review sheet.
+
+| | Run 1 | Run 2 (same manifest, fresh folder, after reordering alignment) |
+| --- | ---: | ---: |
+| Timer start to reviewed delivery | **252.5 s** | (build only) |
+| Build | 236.4 s | 221.8 s |
+| Narration: 5 lines, 33 s of speech, one model load | 49.4 s (load 16.1, generation 31.4) | 53.2 s (load 13.5, generation 37.3) |
+| Alignment, one job | 27.5 s | 32.4 s |
+| Voice assets, one job per take | 7.6 s | 14.8 s |
+| Scenes, 6 at once | 8.8 s | 11.7 s |
+| Mix: meters, duck, normalize with the master limiter | 40.9 s | 44.7 s (beside alignment, captions and scenes) |
+| Cut ready (one session revision) | at 126.5 s | at 115.7 s |
+| H.264 export of 44.64 s | 99.2 s | 96.3 s |
+| Speech check on the audio-only mix (beside the export) | 61.4 s | 53.8 s |
+| Final review (sheet, loudness, black, silence, clipping, timing) | 10.7 s | 9.7 s |
+| Engine requests made by the coordinator | 60 | 61 |
+
+- **The delivery.** `proof-1/exports/anticipation-r0-846143d8-1.mp4` is 44.64 s of 1920x1080 25 fps H.264/AAC at −14.0 LKFS and −0.9 dBFS sample peak, with no black, silence or clipping, and timing matching the project. SRT and WebVTT sidecars sit beside it.
+- **The speech check** heard 83 of 85 words. The two differences are the recognizer's spelling of the product names ("Pixel Forge", "Cutbull"), not narration errors.
+- **Reproducibility.** Both runs produced byte-identical takes (same seed, batch layout and GPU). Their caption timings differ by tens of milliseconds, because run 2 aligns the 48 kHz prepared assets instead of the 24 kHz takes.
+- **Load.** Both runs shared the machine with other sessions' background verification and benchmarks: two transcription fixtures, native scenes, remapping, large imports and export benchmarks. CPU load was 43-97%, and other processes held 8.6-9.9 GB of GPU memory. On a quieter machine earlier the same day, five lines generated in 30 s, alignment took 16 s, and a 51.84 s export took 79 s.
+- **Authoring time.** The 16 s between the timer starting and the build starting understates a fresh agent's authoring: this manifest was composed while the previous run finished. A fresh agent would also read [PRODUCTION.md](../PRODUCTION.md) first, for about five calls in all.
+
+**Target not met.** The under-3-minute target is not met under this load: 4 min 12 s end to end. What remains is mostly engine and model time:
+- the H.264 export takes about 2.2 times real time (another session is working on export speed);
+- the narration's model load and generation;
+- alignment's start-up;
+- normalization's limiter passes, which reached their target exactly.
+
+### Other runs
+
+| Run | Film | Result |
+| --- | --- | --- |
+| Six-scene pilot manifest ([example](example.production.json)), cold kit cache, same engine | 99.84 s, 8 scenes, every beat type | 454 s under load: narration 103 s, music 25 s, alignment 37 s, mix 80 s (normalize 66 s, 8 measured passes), export 211 s beside the speech check. −14.0 LKFS, 182 of 182 words heard. The review found 9.6 s of silence at the end: the 80.64 s bed is shorter than the film. |
+| Supplied media only (`supplied.production.json`) | 15.36 s | One supplied WAV narration and one supplied scene recipe; no Qwen run. Aligned and placed, −14.0 LKFS, 23 of 23 words heard. |
+| "Squash and stretch" development manifest, engine `d3c9140` | 51.84 s | Cold builds 267-317 s, warm kit 283 s. Then a one-line script change rebuilt only that line's narration, alignment, voice asset and scene, plus timing, captions, mix and delivery. The other five scenes, the art and four takes were reused, and the timing receipt listed the three moved boundaries. The session took one revision touching nine clips. |
+| Kill during the export, then `build` again | same | The stale lock was cleared and logged. The export stage resumed as the same attempt and collected the job already running: the engine queue holds one job for that request ID, run once. |
+| `tests/production.py` with the companions, final code, engine `c0fe223` | 21.12 s, 4 scenes | All 11 checks pass. First build 118.3 s with the warm kit cache. Repeat build 0.47 s with nothing rebuilt. A one-line script change 122.2 s, rebuilding 13 stages. A scarf palette change 58.2 s, rebuilding Pip's art, the scenes and delivery but no take. (On `d3c9140` before the reordering: 187.6, 0.7, 140.4 and 72.5 s.) |
+| The pre-save check during development | | Twice it refused to save a rebuilt cut and saved nothing. First, array order and unused assets made the comparison too strict. Second, a music clip's `gain_milli` was left stale beside the gain curve that overrides it. Reconciliation now sets both, and the comparison is by what plays. |
+
+The offline part of `tests/production.py` runs in about 3 s without the companions:
+- 17 manifest rejections;
+- art invalidation by palette and label;
+- all eight beat types compiled against stand-in PNGs and accepted by `scene.inspect`, with cue layers on the frame of their word;
+- the timing plan against hand-computed boundaries;
+- `reconcile()` operations applied by the engine and compared with the target, limiters included;
+- review gates going stale when their subject changes;
+- the TTS worker refusing a missing model.
+
+### Acceptance cases this adds to
+
+The table at the top stays authoritative for P1/P2. This work changes:
+
+| Case | Status | Evidence and limits |
+| --- | --- | --- |
+| Y01 | partial (production inputs added) | Inputs must be absolute local paths. Network, relative and alternate-stream paths are refused. Inputs are copied by content and re-hashed on every build; a changed copy fails with `SOURCE_CHANGED`. |
+| Y06 | partial | The pinned CustomVoice checkpoint runs with the offline flags, from a verified copy on WSL's disk. A missing model fails before any model code loads. Still no permitted reference voice with the Base model, and no recorded human listening review. |
+| Y07 | partial | Known-text alignment by the engine's aligner; captions drafted from it. An independent recognizer heard 182/182, 93/93 and 83/85 words in the cuts. A new take changes its alignment's key, so its captions are redrafted. No manually annotated anchors were measured. |
+| Y08 | partial | A palette change re-rendered art and scenes with no TTS call and no timing change; takes were reused byte for byte. A recolour confined to one scene was not run separately. |
+| Y09 | passed for the coordinator | New text regenerated only that line's speech, alignment, voice asset, captions and scene. The longer take rippled later scenes, with every moved boundary in the timing receipt; nothing was trimmed or stretched. A fixed `duration` that cannot hold its take fails with `NARRATION_OVERFLOW`. |
+| Y10 | partial | Decisions bind to subject identities and go stale when they change. An agent's decision on a human-required gate is kept as advice. History is append-only. No human has reviewed a production. |
+| Y11 | partial | A coordinator killed mid-export resumed without a second job. Takes finished while unwatched are adopted from the worker's receipt. Repeated builds make no new session revision. Killing at the other named points (before output, between output and receipt) was not exercised. |
+| Y12 | partial | 1920x1080 25 fps H.264/AAC, 48 kHz stereo; frame count and duration checked by `export.review`. No full human playback review. |
+| Y13 | passed for the coordinator | A supplied WAV and a supplied scene recipe entered through the same stages with no Qwen run. |
+| Y14 | partial | Missing model, missing input, unsupported manifest values and engine errors return structured codes; a failed stage keeps its receipt and the previous delivery. Timeouts and worker crashes mid-take were not exercised. |
+
+### Progress accounting
+
+None of this changes the 100-point checklist. The coordinator is agent workflow built on existing editing capabilities, and [ACCEPTANCE.md](ACCEPTANCE.md#progress-accounting) keeps Y cases separate from capability points.

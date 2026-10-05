@@ -63,12 +63,18 @@ def scripts(stage):
 
 
 def python_closure(stage):
-    """The stage's fixture scripts, the local test modules they import, and other tests/ files they name."""
-    seen, pending = set(), list(scripts(stage))
+    """The stage's fixture scripts, the local test modules they import, the tools/ modules or packages they import,
+    and other tests/ and tools/ files they name."""
+    seen, pending, tools = set(), list(scripts(stage)), set()
     while pending:
         name = pending.pop()
         path = ROOT / "tests" / f"{name}.py"
         if name in seen or not path.is_file():
+            package, module = ROOT / "tools" / name, ROOT / "tools" / f"{name}.py"
+            if package.is_dir() and (package / "__init__.py").is_file():
+                tools |= {f"tools/{name}/{p.name}" for p in package.glob("*.py")}
+            elif module.is_file():
+                tools.add(f"tools/{name}.py")
             continue
         seen.add(name)
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -81,6 +87,10 @@ def python_closure(stage):
     for other in (ROOT / "tests").iterdir():
         if other.suffix != ".py" and other.is_file() and other.name in text:
             files.add(f"tests/{other.name}")
+    for other in (ROOT / "tools").glob("*.py"):
+        if f'"{other.name}"' in text:
+            tools.add(f"tools/{other.name}")
+    files |= tools
     for other in (ROOT / "examples").glob("*"):
         if other.is_file() and (other.stem in text or other.name in text):
             files.add(f"examples/{other.name}")
@@ -234,7 +244,7 @@ def impacted(stage_names, base=None):
                         add(stages, f"{path}:{start}-{end}")
                 else:
                     add(covered_by.get(path, ()), f"{path}:{start}-{end} outside recorded functions")
-        elif path.startswith(("tests/", "examples/")):
+        elif path.startswith(("tests/", "examples/")) or any(path in closure for closure in closures.values()):
             add([name for name, closure in closures.items() if path in closure], f"{path} changed")
         elif path == "docs/MCP_EVALUATION.md":
             add(["integration"], f"{path} changed")

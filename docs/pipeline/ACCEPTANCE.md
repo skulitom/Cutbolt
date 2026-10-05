@@ -10,7 +10,8 @@ Prepared 2 October 2026; updated after the first technical pilot. **Bounded P1/P
 - [x] Define compatibility, revision and recovery acceptance cases.
 - [x] Provide an explicit pinned-model download helper and external receipt format.
 - [x] Execute the bounded P1/P2 file handoff and five-second scene fixture; evidence in [RESULTS.md](RESULTS.md).
-- [ ] Execute P3-P6 inference, production review/revision, delivery and coordinator recovery work.
+- [x] Build the local workflow coordinator ([PRODUCTION.md](../PRODUCTION.md)): manifest, stage receipts, invalidation by content keys, resumption, review records, batched offline narration and delivery. Evidence and the partial Y cases are in [RESULTS.md](RESULTS.md#production-coordinator-5-october-2026).
+- [ ] Finish P3-P6: a permitted reference voice with the Base model, human review gates on a real production, every interruption point of Y11, and full playback review.
 
 Download completion is recorded by the external `download-receipt.json`, not by treating an unchecked pipeline test as passed. Preparation does not change `progress/capabilities.json`.
 

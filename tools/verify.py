@@ -212,6 +212,8 @@ STAGES = [
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
     fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech"]), fixture("remapping"),
+    # Offline checks always; the full companion build only with CUTBOLT_PRODUCTION_CONFIG, _MUSIC and _FONT set.
+    fixture("production"),
     # Real-time capture is rejected (correctly) when a busy machine delays a packet; outside the thorough
     # run's quiet phase it may retry once, and the record says so.
     fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"], retry=True,

@@ -1,6 +1,6 @@
-# Local production contract (draft 1)
+# Local production contract
 
-Prepared 2 October 2026. Design for the [YouTube pilot](../YOUTUBE_PIPELINE.md); no parser, adapter or production runner implements this contract yet. The [example](example.production.json) is illustrative data, not a current CLI request. Stabilize a machine-readable schema only with the first implementation and its acceptance tests.
+Prepared 2 October 2026 as draft 1 for the [YouTube pilot](../YOUTUBE_PIPELINE.md). Since 5 October 2026 the coordinator [`tools/production.py`](../PRODUCTION.md) implements it as manifest version `cutbolt-production-1`, with the [example](example.production.json) as an executable manifest; [PRODUCTION.md](../PRODUCTION.md#contract-coverage) lists what is and is not implemented. The design below still governs; where the implementation chose between options, PRODUCTION.md says which.
 
 ## Document boundaries
 

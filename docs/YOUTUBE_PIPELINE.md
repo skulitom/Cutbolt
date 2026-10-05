@@ -1,6 +1,6 @@
 # PixelForge + Qwen + Cutbolt: agent handoff
 
-Prepared 2 October 2026. **The bounded P1/P2 scene pilot is implemented; the full production pipeline remains planned.** See [SCENES.md](SCENES.md) for executable commands and [pilot results](pipeline/RESULTS.md) for evidence. Read [USAGE.md](USAGE.md) for supported engine commands. Preparation and downloaded weights do not earn editing capability points.
+Prepared 2 October 2026. **The bounded P1/P2 scene pilot is implemented, and since 5 October 2026 so is the local workflow coordinator: [`tools/production.py`](PRODUCTION.md) builds a narrated pixel-art explainer from one manifest.** Human review, reference-voice narration and the P4-P6 acceptance cases remain partly open; see [pilot results](pipeline/RESULTS.md). See [SCENES.md](SCENES.md) for executable scene commands. Read [USAGE.md](USAGE.md) for supported engine commands. Preparation and downloaded weights do not earn editing capability points.
 
 ## What the user agreed
 
@@ -14,7 +14,7 @@ YouTube is the delivery use case. Account connection, upload, publication, cloud
 
 1. [Production contract](pipeline/CONTRACT.md): asset identities, exact timing, review invalidation and recovery rules.
 2. [Acceptance plan](pipeline/ACCEPTANCE.md): implementation slices, evidence and failure cases.
-3. [Example production manifest](pipeline/example.production.json): original six-scene brief and draft data shape. **Not an executable Cutbolt request or validated schema.**
+3. [Example production manifest](pipeline/example.production.json): the original six-scene brief as an executable `cutbolt-production-1` manifest for [`tools/production.py`](PRODUCTION.md).
 4. [Current engine usage](USAGE.md), [broader plan](PLAN.md), [dependency ledger](DEPENDENCIES.md) and [progress history](PROGRESS_HISTORY.md).
 
 ## Responsibilities
@@ -36,7 +36,7 @@ flowchart LR
 | PixelForge | Editable pixel art, frame exports, animation timing, visual inspection and bounded patches | Existing CLI first; optional existing stdio MCP. No source copied into Cutbolt |
 | Qwen3-TTS | Speech synthesis from approved text and a permitted reference voice | Separate Python process loading local weights; writes a fresh WAV and receipt |
 | Cutbolt | Media validation, exact timeline timing, composition, audio, previews and export | Existing Rust library/JSON CLI, extended through explicit capability work |
-| Workflow coordinator | Scene dependencies, durable stage receipts, review decisions and resuming tasks | Local file/state contract; no listening service. Do not add orchestration fields to PixelForge recipes or current Cutbolt snapshots |
+| Workflow coordinator | Scene dependencies, durable stage receipts, review decisions and resuming tasks | [`tools/production.py`](PRODUCTION.md): a local tool, not an engine command (reasons in [PRODUCTION.md](PRODUCTION.md#engine-command-or-local-coordinator-the-decision)). Local file/state contract under each production folder; no listening service; engine jobs and sessions reused through their public requests. No orchestration fields in PixelForge recipes or Cutbolt snapshots |
 
 Use argument arrays rather than shell-built commands. Keep adapters replaceable: a user-supplied PNG sequence or WAV must enter through the same media contract. Review can happen through local images, audio and video artifacts; a dedicated review application is not required.
 
@@ -133,7 +133,7 @@ Use `C:\DEV\CutboltData\pipeline\<run-id>\` with distinct `sources`, `generated`
 
 ## Start here when implementation resumes
 
-Implement slice P1 in the [acceptance plan](pipeline/ACCEPTANCE.md): export a small original PixelForge fixture to a fresh external directory and validate the proposed media handoff, then build the single-scene renderer path in P2. Do not start with a six-scene orchestration framework. Qwen runtime setup can proceed independently after the weights are verified, but an editorial voice test needs the permitted voice reference. No concrete narrator has been selected.
+P1/P2 and the coordinator exist. Continue with the open P3-P6 cases in the [acceptance plan](pipeline/ACCEPTANCE.md): a permitted reference voice for the Base model, human review gates on a real production, and the measurements in [RESULTS.md](pipeline/RESULTS.md). Historical note: the plan was to implement slice P1 first and not to start with a six-scene orchestration framework; that order was followed. Qwen runtime setup can proceed independently after the weights are verified, but an editorial voice test needs the permitted voice reference. No concrete narrator has been selected.
 
 Keep [PROGRESS_HISTORY.md](PROGRESS_HISTORY.md) current. Run `python tools/verify.py --date 2026-10-02` for this preparation and the appropriate local date for later work. Add editing evidence only when it covers an existing criterion; record workflow compatibility results separately. See the acceptance plan for which existing capability IDs may eventually be affected.
 

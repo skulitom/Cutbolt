@@ -39,6 +39,38 @@ Fixture coverage:
   - The English and Greek passages report no uncovered sounds.
 
 Unit tests cover document bounds, stitching, known terms, joined matches and the review's seams. Both fixtures pass in the quick tier; no thorough run was made, so evidence and scoring are unchanged.
+## 5 October 2026: a narrated explainer from one manifest
+
+The progress demo (`C:\DEV\CutboltData\demo-progress-20261005`) made an 80.64 s narrated pixel-art explainer in about 2 h 12 min. About 75 of the first 97 minutes were agent authoring: a PixelForge art generator, a scene builder, ten step scripts and about 170 MCP calls. Engine compute for the same steps is now a few minutes. The target was a new video in the same style in under 3 minutes end to end.
+
+The changes:
+- **A production manifest, `cutbolt-production-1`.** Script lines, one visual beat per scene, palette, motion patterns, music, timing policy, delivery, review policy and overrides. It is validated strictly; unknown fields fail with the field named. [docs/pipeline/example.production.json](pipeline/example.production.json) is now the six-scene pilot as an executable manifest.
+- **The pixel-stage template** (`tools/cutbolt_production/pixel_stage.py`). It is the demo's art generator and scene builder, generalized:
+  - original PixelForge recipes, recoloured by named palette slots;
+  - eight beat types: title, switch, cards, strip, compare, recolor, travel, end;
+  - native 1920x1080 scenes whose cue layers start on the frame where the narrator says their word;
+  - one scene per story beat, with no shot slicing, since scenes now last two minutes.
+- **A local coordinator, `tools/production.py`, not an engine command.** It runs every stage as a durable, resumable job:
+  - PixelForge art;
+  - one batched Qwen load for all lines (`tools/qwen_tts_worker.py`), 43 s of speech generated in 30 s against 67 s line by line;
+  - voice assets;
+  - known-text alignment of those assets;
+  - captions;
+  - scenes on parallel job lanes;
+  - mix;
+  - one saved-session revision;
+  - export, then a final review, with a speech check on an audio-only render of the same revision beside the export.
+
+  Every stage has a content key and a receipt, so the contract's invalidation rules follow from the data. Interrupted stages resume as the same attempt and collect their engine jobs by request ID. Review decisions bind to identities, and agents' decisions on human-required gates stay advice. [PRODUCTION.md](PRODUCTION.md) records why this is a coordinator beside the engine.
+- **One sentence in the MCP instructions** points agents to it. `tools/impact.py` now follows fixtures into the `tools/` modules they import, so changing the coordinator re-runs its fixture.
+
+Verification:
+- `tests/production.py` passes its offline checks: manifest rejections, template art and scenes, timing, reconciliation, review gates and worker refusal.
+- With the companions installed and `CUTBOLT_PRODUCTION_CONFIG`, `_MUSIC` and `_FONT` set, it also passes a real build, a repeat that reuses every stage, a one-line rebuild and a palette rebuild. The verifier runs the offline part.
+
+Measured: a new six-scene, 44.64 s video from a new manifest took **252.5 s** from the timer start to the reviewed delivery, with **3 agent calls**, on a machine busy with other sessions' verification. That is not under 3 minutes. The H.264 export (96-99 s) and narration (49-53 s) are the largest stages. Details, the other runs and the partial Y cases are in [RESULTS.md](pipeline/RESULTS.md#production-coordinator-5-october-2026).
+
+No capability points change: this is agent workflow over existing editing capabilities. Evidence in `verification/latest.json` is stale until the next thorough run.
 
 ## 5 October 2026: independent jobs run at once in one job root
 
