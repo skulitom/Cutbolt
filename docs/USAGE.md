@@ -216,6 +216,17 @@ It then proposes a gain curve for every clip on `music_track_id` that overlaps s
 
 The result lists the speech runs with exact times, a summary per clip, and `clip_audio` `operations`. Check them with `session.preview`, apply them with `session.apply`, and listen back with `timeline.meters` `curve` or a preview range.
 
+## Finding the beat
+
+`audio.beats` is read-only and analyses a music file for cutting to it. The file can be any format FFmpeg decodes, up to an hour (`start` and `duration` select a range). It reports the onsets, the tempo and a beat grid as exact file times. With `frame_rate`, it also gives each listed beat's nearest frame start.
+
+The analysis works on 10 ms hops of the first audio stream, mixed to mono and resampled to 48 kHz:
+- **Onsets.** An onset is a rise in level of at least 6 dB from the previous hop that is also the largest rise within 50 ms on either side.
+- **Tempo.** It comes from the autocorrelation of onset strength over the tempo range (`min_bpm` 60 to `max_bpm` 200 by default). Strength is the rise weighted by the hop's amplitude, so loud hits count more than quiet ones such as hi-hats. Each hop pairs with the strongest of the three hops around the lag, so a period between whole hops still scores as one lag.
+- **Grid.** The phase is the offset whose grid collects the most strength, and each grid beat moves to an onset within 30 ms when there is one. A least-squares line through the beats that landed on onsets then refines the period and places the grid again.
+
+Beats on onsets are accurate to one hop. Fewer than four onsets give no tempo. As with any tempo detector, a pattern can be read at half or double speed; narrow `min_bpm` and `max_bpm` when the expected tempo is known.
+
 ## Tightening pauses (jump cuts)
 
 `audio.tighten` is read-only. It finds the pauses in speech and proposes ripple deletions that shorten them, the jump cuts of talking-head video.

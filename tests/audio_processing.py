@@ -196,6 +196,48 @@ def run(root):
     assert originals=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     assert not list(output.glob(".cutbolt-scene-*"))
     passed.append("audio_processing.validation_preservation_mcp")
+    # Beats against ground truth: synthetic drums at known tempos. Every true beat must have a
+    # detected beat within one 10 ms hop, with no extra beats, and the tempo within 0.1 BPM.
+    music = root/"music"; music.mkdir()
+    def drums(name, bpm, offset, seconds, hats=False, accent=False):
+        count = seconds*RATE; pcm = [[0, 0] for _ in range(count)]; period = 60/bpm; truth = []; k = 0
+        while offset+k*period < seconds-0.1:
+            t = offset+k*period; truth.append(t); start = round(t*RATE); amplitude = 30000 if not accent or k % 4 == 0 else 16000
+            for i in range(int(0.03*RATE)):
+                v = int(amplitude*math.exp(-i/600)*math.sin(math.tau*60*i/RATE)); pcm[start+i] = [v, v]
+            if hats:
+                h = round((t+period/2)*RATE)
+                for i in range(int(0.01*RATE)):
+                    if h+i < count:v = int(6000*(((i*7919) % 200)-100)/100); pcm[h+i] = [pcm[h+i][0]+v, pcm[h+i][1]+v]
+            k += 1
+        with wave.open(str(music/name), "wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(RATE); w.writeframes(b"".join(struct.pack("<hh", *x) for x in pcm))
+        return truth
+    seconds_of = lambda t: t["num"]/t["den"]
+    for name, bpm, offset, hats, accent in (("kick120.wav", 120, 0.25, True, False), ("click128.wav", 128, 0.1, False, False), ("accent93.wav", 93, 0.4, True, True)):
+        truth = drums(name, bpm, offset, 20, hats, accent)
+        found = request({"command":"audio.beats","path":str(music/name),"input_root":str(music),"frame_rate":time(25)})
+        beats = [seconds_of(t) for t in found["beats"]["times"]]
+        assert abs(found["tempo_bpm"]-bpm) <= .1 and found["beats"]["count"] == len(truth) == len(beats), (name, found["tempo_bpm"], len(beats), len(truth))
+        assert all(min(abs(b-t) for b in beats) < .01 for t in truth) and all(min(abs(b-t) for t in truth) < .01 for b in beats), name
+        from fractions import Fraction
+        assert found["beat_frames"]["frames"] == [math.floor(Fraction(t["num"], t["den"])*25+Fraction(1, 2)) for t in found["beats"]["times"]]
+    # A range reports file times inside it; silence has no tempo.
+    part = request({"command":"audio.beats","path":str(music/"kick120.wav"),"input_root":str(music),"start":time(5),"duration":time(10)})
+    times = [seconds_of(t) for t in part["beats"]["times"]]
+    assert part["tempo_bpm"] == 120 and all(5 <= t < 15 for t in times) and min(abs(t-5.25) for t in times) < .01 and len(times) == 20
+    write("silent-music", [(0, 0)]*(RATE*3))
+    quiet = request({"command":"audio.beats","path":str(sources/"silent-music.wav"),"input_root":str(sources)})
+    assert quiet["tempo_bpm"] is None and quiet["beats"]["count"] == 0 and quiet["onsets"]["count"] == 0
+    for fields, code in (({"min_bpm":20}, "INVALID_ARGUMENT"), ({"min_bpm":100, "max_bpm":140}, "INVALID_ARGUMENT"), ({"frame_rate":time(23)}, "UNSUPPORTED_TIMELINE")):
+        request({"command":"audio.beats","path":str(music/"kick120.wav"),"input_root":str(music),**fields}, code)
+    client = Client(executable)
+    try:
+        client.initialize()
+        tool = next(t for t in client.rpc("tools/list")["result"]["tools"] if t["name"] == "cutbolt_audio_beats")
+        assert tool["annotations"]["readOnlyHint"] and client.call("audio.beats", path=str(music/"click128.wav"), input_root=str(music))["tempo_bpm"] == request({"command":"audio.beats","path":str(music/"click128.wav"),"input_root":str(music)})["tempo_bpm"]
+    finally:client.close()
+    passed.append("audio_processing.beats_match_ground_truth")
     report={"passed":passed,"pcm_sample_frames_compared":total,"pcm_tolerance":1,"comparisons":comparisons,"meter_reference":"FFmpeg ebur128, original 997 Hz calibration, independent PCM peak/RMS math; no true-peak certification", "meter_tolerance_lu":.11,"meter_comparisons":meter_comparisons,"rejected_cases":len(bad),"ffmpeg":subprocess.run(["ffmpeg","-version"],capture_output=True,text=True,check=True).stdout.splitlines()[0]}
     (root/"verification.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     (root/"mix.json").write_text(json.dumps(first,indent=2)+"\n",encoding="utf-8")

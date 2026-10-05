@@ -138,6 +138,28 @@ pub enum Request {
         #[serde(default = "crate::commands::yes")]
         edges: bool,
     },
+    #[serde(rename = "audio.beats")]
+    AudioBeats {
+        /// Music to analyse: any file FFmpeg decodes with an audio stream.
+        path: PathBuf,
+        /// Existing absolute directory that must contain `path`.
+        input_root: PathBuf,
+        /// File time to start at, on the 48 kHz grid; default zero. Reported times are file times.
+        #[serde(default)]
+        start: Option<Time>,
+        /// Length to analyse, at most one hour; default to the end.
+        #[serde(default)]
+        duration: Option<Time>,
+        /// Slowest tempo considered, 30-300 BPM; default 60.
+        #[serde(default)]
+        min_bpm: Option<u32>,
+        /// Fastest tempo considered, 30-300 BPM and at least 1.5 times min_bpm; default 200.
+        #[serde(default)]
+        max_bpm: Option<u32>,
+        /// Also give each listed beat's nearest frame start at this native rate, for placing cuts.
+        #[serde(default)]
+        frame_rate: Option<Time>,
+    },
     #[serde(rename = "audio.duck")]
     AudioDuck {
         /// Project whose music to lower under speech; it needs placed tracks.
@@ -1743,6 +1765,23 @@ pub fn handle(request: Request) -> Result<Value> {
                 edges,
             },
         ),
+        Request::AudioBeats {
+            path,
+            input_root,
+            start,
+            duration,
+            min_bpm,
+            max_bpm,
+            frame_rate,
+        } => crate::beats::analyse(&crate::beats::Request {
+            path: &path,
+            input_root: &input_root,
+            start,
+            duration,
+            min_bpm: min_bpm.unwrap_or(60),
+            max_bpm: max_bpm.unwrap_or(200),
+            frame_rate,
+        }),
         Request::FilesList {
             input_root,
             dir,
@@ -1787,7 +1826,7 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
+    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
     "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"]},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},

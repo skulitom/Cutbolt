@@ -4,6 +4,7 @@ pub mod audio;
 pub mod audio_processing;
 pub mod audio_repair;
 pub mod audio_routing;
+pub mod beats;
 pub mod cache;
 mod cache_store;
 pub mod caption_overlay;

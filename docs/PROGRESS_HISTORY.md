@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: beats for cutting to music
+
+An agent cutting a montage had no way to know where the beats of its music fell. The read-only `audio.beats` reports a music file's onsets, tempo and beat grid as exact file times, and optionally each beat's nearest frame. Onsets are sharp level rises on a 10 ms hop. The tempo comes from an amplitude-weighted onset-strength autocorrelation that tolerates periods between whole hops. The grid is aligned to the onsets and refined by least squares.
+
+The first version read a 93 BPM pattern with accented downbeats and off-beat hi-hats at double tempo, and 128 BPM as 127.79. Weighting by amplitude, tolerant lags and the least-squares refinement fixed both. The audio-processing fixture checks against ground truth: synthetic drums at 120, 128 and 93 BPM. Every true beat must have a detected beat within one hop, with no extra beats, the tempo within 0.1 BPM, and exact frame snapping. It also covers a range, silence, validation and MCP. No scoring changed.
+
 ## 5 October 2026: whole-file speech recognition
 
 Recognizing speech took one `transcript.transcribe` call per 120 s window, with `start` and `duration` worked out by hand. It also only read WAV files or 25 fps reference movies, so prepared 30 fps assets could not be transcribed. `media.transcribe`, queued with `job.start`, now extracts a file's audio losslessly and recognizes it in overlapping windows. It stitches the windows at word boundaries into documents that meet without overlapping, binds them to the source file, and saves them to one JSON file that outlines, captions, reviews and word cuts can use directly.
