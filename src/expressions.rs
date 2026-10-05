@@ -7,6 +7,17 @@ use std::collections::BTreeMap;
 mod number;
 pub use number::{Kind, Number, Value};
 
+/// Node evaluations a scene render may make, nodes x exposure samples: every node of the largest
+/// graph over the longest scene without shutter sampling (7,200 frames at 60 fps), about 0.7 s.
+pub(crate) const MAX_RENDER_EVALUATIONS: u64 =
+    MAX_NODES as u64 * crate::scene::MAX_UNSAMPLED_FRAMES;
+/// Bound values a scene render keeps and reports, bindings x exposure samples: every binding over
+/// the longest scene without shutter sampling.
+pub(crate) const MAX_BINDING_RECORDS: u64 =
+    MAX_BINDINGS as u64 * crate::scene::MAX_UNSAMPLED_FRAMES;
+const MAX_NODES: usize = 256;
+const MAX_BINDINGS: usize = 32;
+
 /// Bindable layer property: `position` (vector2 pixels, bound components -32768..=32768) or `opacity` (scalar, bound 0..=255).
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -299,9 +310,9 @@ impl<'a> Prepared<'a> {
             .ok_or_else(|| invalid("Scene has no property expression program"))?;
         if program.schema_version != 1
             || program.nodes.is_empty()
-            || program.nodes.len() > 256
+            || program.nodes.len() > MAX_NODES
             || program.bindings.is_empty()
-            || program.bindings.len() > 32
+            || program.bindings.len() > MAX_BINDINGS
         {
             return Err(error(
                 "LIMIT_EXCEEDED",
@@ -728,10 +739,17 @@ impl<'a> Prepared<'a> {
         Ok(())
     }
     pub(crate) fn check_render_work(&self, samples: usize) -> Result<()> {
-        if samples == 0 || samples > 8000 || samples * self.program.nodes.len() > 65_536 {
+        let samples = samples as u64;
+        let evaluations = samples * self.program.nodes.len() as u64;
+        let records = samples * self.program.bindings.len() as u64;
+        if samples == 0 || evaluations > MAX_RENDER_EVALUATIONS || records > MAX_BINDING_RECORDS {
             return Err(error(
                 "LIMIT_EXCEEDED",
-                "Scene property evaluation permits at most 8000 temporal slots and 65536 node evaluations",
+                format!(
+                    "Scene property evaluation needs {evaluations} node evaluations ({} nodes x {samples} samples) and {records} bound values ({} bindings x {samples}); the limits are {MAX_RENDER_EVALUATIONS} and {MAX_BINDING_RECORDS}, what the largest graph needs over 7200 frames without shutter sampling. Use fewer nodes or bindings, fewer shutter samples or a shorter scene",
+                    self.program.nodes.len(),
+                    self.program.bindings.len(),
+                ),
             ));
         }
         Ok(())
@@ -757,7 +775,8 @@ pub fn inspect(request: &Inspect) -> Result<Json> {
 
 pub fn capabilities() -> Json {
     json!({"profile":"typed-property-graph-v1","maximum_nodes":256,"maximum_bindings":32,"maximum_dependency_depth":64,
-        "maximum_samples":256,"maximum_node_evaluations":65536,"types":["scalar","vector2","boolean"],
+        "maximum_samples":256,"maximum_node_evaluations":65536,"maximum_render_node_evaluations":MAX_RENDER_EVALUATIONS,
+        "maximum_render_bound_values":MAX_BINDING_RECORDS,"types":["scalar","vector2","boolean"],
         "bound_properties":["position","opacity"],"numeric":"checked_exact_signed_rationals",
         "maximum_absolute_reduced_numerator":9007199254740991u64,"maximum_reduced_denominator":1000000000000u64,
         "seeded":"sha256_domain_seed_stream_integer_index;first_u32_le_divided_by_2_pow_32",

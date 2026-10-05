@@ -287,11 +287,34 @@ def narration(path, samples):
         w.writeframes(np.stack([left, right], 1).tobytes())
 
 
+def unchanging(scene, l):
+    """The documented recipe rule for a layer that looks the same at every frame: the whole scene, one held
+    image (one per tile) that never ends, and no curves or bindings (these scenes have no effects or spatial maps)."""
+    def seconds(t):
+        return F(t["num"], t["den"])
+
+    def held(frames, end):
+        return len(frames) == 1 and (end != "transparent" or seconds(frames[0]["hold"]) >= seconds(l["duration"]))
+
+    if "graphics" in l:
+        source = True
+    elif l.get("tilemap"):
+        source = all(held(t["frames"], t["end"]) for t in l["tilemap"]["tiles"])
+    else:
+        source = held(l["frames"], l["end"])
+    bound = any(b["layer"] == l["id"] for b in (scene.get("expressions") or {}).get("bindings", []))
+    return (source and seconds(l["start"]) == 0 and seconds(l["duration"]) == seconds(scene["duration"]) and not l.get("animation")
+            and not (l.get("mask") or {}).get("animation") and not l.get("effects") and "spatial" not in l["transform"] and not bound)
+
+
 def expected_work(scene):
     """The documented compositing estimate for 25 fps integer-path layers: per active frame, the transformed
-    crop clipped to the scene, plus the whole canvas a tilemap assembles."""
+    crop clipped to the scene, plus the whole canvas a tilemap assembles. The unchanging bottom layers
+    composite once per render and count once."""
     total = 0
+    once = True
     for l in scene["layers"]:
+        once = once and unchanging(scene, l)
         t = l["transform"]
         w, h = t["crop"][2:]
         if t["quarter_turns"] % 2:
@@ -299,7 +322,7 @@ def expected_work(scene):
         area = min(scene["width"], w * t["scale"]) * min(scene["height"], h * t["scale"])
         if l.get("tilemap"):
             area += l["canvas"][0] * l["canvas"][1]
-        total += int(F(l["duration"]["num"], l["duration"]["den"]) * 25) * area
+        total += (1 if once else int(F(l["duration"]["num"], l["duration"]["den"]) * 25)) * area
     return total
 
 
@@ -527,7 +550,26 @@ def run(root, long_form=False):
                          "transform": {**sprite["transform"], "position": [30 * i, 16 * i]}} for i in range(64)])
     inspected = call({"command": "scene.inspect", "scene": most, "input_root": str(sources)})
     assert inspected["frames"] == 3000 and len(inspected["timing"]) == 64
-    assert inspected["work"]["composited_pixels"] == expected_work(most) == 64 * 3000 * 40 * 30
+    # Sprites that never move or change composite once per render, so they count once.
+    assert inspected["work"]["static_layers"] == 64
+    assert inspected["work"]["composited_pixels"] == expected_work(most) == 64 * 40 * 30
+    moving = copy.deepcopy(most)
+    for i, l in enumerate(moving["layers"]):
+        l["animation"] = {"position_x": keys((0, 30 * i), ((3000, 25), 30 * i + 100))}
+    inspected = call({"command": "scene.inspect", "scene": moving, "input_root": str(sources)})
+    assert inspected["work"]["static_layers"] == 0
+    assert inspected["work"]["composited_pixels"] == expected_work(moving) == 64 * 3000 * 40 * 30
+    # The 32 full-frame titles the work check rejects above pass once they stop fading: they count once.
+    still = native_scene(sources, distinct, animated, 3000)
+    title = {k: v for k, v in still["layers"][5].items() if k != "animation"}
+    still.update(id="still", audio_mix=None, layers=[{**copy.deepcopy(title), "id": f"still{i}"} for i in range(32)])
+    inspected = call({"command": "scene.inspect", "scene": still, "input_root": str(sources)})
+    assert inspected["work"]["static_layers"] == 32
+    assert inspected["work"]["composited_pixels"] == expected_work(still) == 32 * W * H
+    fading = copy.deepcopy(still)
+    fading["layers"][0]["animation"] = {"opacity": keys((0, 0), ((50, 25), 255))}
+    error = call({"command": "scene.inspect", "scene": fading, "input_root": str(sources)}, "LIMIT_EXCEEDED")
+    assert "199065600000 layer pixels" in error["message"] and "bottom 0 layer(s)" in error["message"], error
     passed.append("native.long_and_layered_limits")
     error = call({"command": "preview.frame", "project": project, "input_root": str(output), "output_root": str(output),
                   "output": str(output / "bad.png"), "time": time(1, 10)}, "UNALIGNED_TIME")

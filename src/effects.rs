@@ -101,6 +101,21 @@ pub enum Effect {
     /// Chroma key that lowers alpha near a screen color.
     ChromaKey(crate::keying::ChromaKey),
 }
+impl Effect {
+    /// Whether the recipe alone fixes every sampled value: no curves and no animated mask.
+    pub(crate) fn is_constant(&self) -> bool {
+        let still = |mask: &Option<Box<crate::selection::Mask>>| {
+            mask.as_ref().is_none_or(|m| m.animation.is_none())
+        };
+        match self {
+            Self::Grade(g) => g.animation.is_none(),
+            Self::SelectiveGrade(s) => {
+                s.grade.animation.is_none() && s.mix_curve.is_none() && still(&s.mask)
+            }
+            Self::ChromaKey(k) => k.strength_curve.is_none() && still(&k.mask),
+        }
+    }
+}
 /// Grade applied only where a color qualifier and/or correction mask select pixels.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

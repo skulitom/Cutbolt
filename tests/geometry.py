@@ -358,8 +358,9 @@ def run(root):
         l=layer(f'L{i}',0,64);l['canvas']=[1,1];l['frames']=l['frames'][:1];l['frames'][0]['image']=identity(sources/'white.png',sources)
         l['transform']['crop']=[0,0,1,1];l['transform']['opacity']=255;maximum['layers'].append(l)
         maximum['geometry']['nodes'].append(node(f'n{i}',l['id'],position=(0,0,i),extent=(1000000,1000000)))
+    # A fixed 16,777,216-visit render (the former maximum). Visits now share the scene compositing budget.
     began=clock.perf_counter();mr,_=check(maximum,'maximum-work',oracle=lambda n:bytes([255])*(128*128*3));elapsed=clock.perf_counter()-began
-    assert mr['geometry']['pixel_plane_sample_visits']==16777216,elapsed
+    assert mr['geometry']['pixel_plane_sample_visits']==mr['work']['composited_pixels']==16777216,elapsed
     budgets.check(elapsed<180,elapsed)
     records=copy.deepcopy(maximum);records.update(width=1,height=1,duration=time(128,25),temporal=exposure(8,360,0))
     for l in records['layers']:l['duration']=records['duration']
@@ -404,7 +405,9 @@ def run(root):
     bad('empty-animation',lambda s:s['geometry']['nodes'][0]['transform']['position_milli'].update(animation={}))
     bad('zero-light-direction',lambda s:s['geometry'].update(lights=[{'kind':'directional','color':[255]*3,'intensity_milli':scalar(1000),'toward_light_milli':vector([0,0,0])}]))
     bad('point-distance',lambda s:s['geometry'].update(lights=[{'kind':'point','color':[255]*3,'intensity_milli':scalar(1000),'position_milli':vector([0,0,1]),'falloff':'inverse_square','reference_distance_milli':0}]))
-    bad('pixel-work',lambda s:s.update(width=129),'LIMIT_EXCEEDED',maximum)
+    # Every plane is tested at every pixel and sample, active or not: 501 frames of 4000 x 2000 with 16 planes
+    # is 64,128,000,000 visits, though the layers composite only 8,192,000,000 pixels in their 64 frames.
+    bad('pixel-work',lambda s:s.update(width=4000,height=2000,duration=time(501,25)),'LIMIT_EXCEEDED',maximum)
     bad('record-work',lambda s:(s.update(duration=time(129,25)),[l.update(duration=time(129,25)) for l in s['layers']]),'LIMIT_EXCEEDED',records)
     for reverse in (False,True):
         def depth(s,reverse=reverse):
@@ -417,7 +420,8 @@ def run(root):
         s['geometry']['nodes'][0]['parent']='p5'
     bad('world-precision',precision,'GEOMETRY_PRECISION')
     for name,s,code in invalid:
-        p=output/('invalid-'+name+'.mkv');call('scene.render',code,scene=s,input_root=str(sources),output_root=str(output),output=str(p));assert not p.exists()
+        p=output/('invalid-'+name+'.mkv');error=call('scene.render',code,scene=s,input_root=str(sources),output_root=str(output),output=str(p));assert not p.exists()
+        if name=='pixel-work':assert '64128000000 pixel-plane sample visits' in error['message'],error
     digest=hashlib.sha256((output/'perspective.mkv').read_bytes()).hexdigest()
     call('scene.render','OUTPUT_EXISTS',scene=scene,input_root=str(sources),output_root=str(output),output=str(output/'perspective.mkv'))
     assert hashlib.sha256((output/'perspective.mkv').read_bytes()).hexdigest()==digest
@@ -428,7 +432,8 @@ def run(root):
     assert originals=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     passed.append('geometry.invalid_hierarchies_materials_shadows_and_publication_guards')
     result={'passed':passed,'frames_compared':frames,'stereo_sample_frames_compared':samples,'previews':previews,'rejections':rejected,'cases':cases,
-            'maximum_render_seconds':elapsed,'maximum_pixel_plane_sample_visits':16777216,'maximum_node_sample_records':32768,'source_preserved':True,
+            'maximum_render_seconds':elapsed,'heavy_render_pixel_plane_sample_visits':16777216,'maximum_pixel_plane_sample_visits':64000000000,
+            'maximum_node_sample_records':32768,'source_preserved':True,
             'reference':'60-digit forward vertex transforms, camera-space polygon clipping and projected barycentric texture/depth interpolation; independent point-light/alpha equations',
             'scope':'Textured planes, nearest held textures, bounded camera hierarchy and encoded-color lighting; no meshes or shadows'}
     (root/'scene.json').write_text(json.dumps(scene,indent=2)+'\n');(root/'verification.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))

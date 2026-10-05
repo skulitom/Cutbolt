@@ -260,18 +260,27 @@ def run(root):
     finally:client.close()
     passed.append('temporal.typed_scene_inspection_saved_edits_and_previews')
 
-    # Fixed maximum-work render, independently known to be an opaque constant.
+    # Fixed heavy render, independently known to be an opaque constant: 256 samples of a 512 x 512 scene.
+    # Its one unchanging layer composites once; averaging visits the whole scene at every sample.
     maximum=copy.deepcopy(scene);maximum.update(id='maximum',width=512,height=512,audio=None,temporal=exposure(32,360,0))
     l=maximum['layers'][0];l.update(canvas=[512,512]);l['frames'][0]['image']=identity(sources/'large.png',sources)
     l['transform']={'position':[0,0],'crop':[0,0,512,512],'scale':1,'quarter_turns':0,'opacity':255}
     start=clock.perf_counter();mr,_=check(maximum,'maximum',lambda n:bytes([255])*(512*512*3));seconds=clock.perf_counter()-start
-    assert mr['temporal']['layer_pixel_sample_visits']==67108864,seconds
+    assert mr['work']['static_layers']==1 and mr['work']['composited_pixels']==512*512+8*32*512*512==67371008,(mr['work'],seconds)
+    assert mr['temporal']['layer_sample_records']==8*32
     budgets.check(seconds<90,seconds)
-    records=copy.deepcopy(maximum);records.update(id='records',width=1,height=1,duration=time(64,25))
-    records['layers']=[copy.deepcopy(records['layers'][0]) for _ in range(16)]
+    # Sampling counts against the scene compositing budget: at 4000 x 2000 with 32 samples, 249 frames fit and
+    # 250 frames do not (the layer once plus 256,000,000 accumulated pixels a frame, against 64,000,000,000).
+    wide=copy.deepcopy(maximum);wide.update(id='wide',width=4000,height=2000,duration=time(249,25))
+    wide['layers'][0]['duration']=wide['duration'];wide['layers'][0]['frames'][0]['hold']=wide['duration']
+    wr=call('scene.inspect',scene=wide,input_root=str(sources))
+    assert wr['work']['composited_pixels']==512*512+249*256000000<=wr['work']['maximum_composited_pixels']==64000000000,wr['work']
+    # Shutter samples keep as many layer records as 64 layers keep over 7,200 frames without sampling.
+    records=copy.deepcopy(maximum);records.update(id='records',width=1,height=1,duration=time(225,25))
+    records['layers']=[copy.deepcopy(records['layers'][0]) for _ in range(64)]
     for i,l in enumerate(records['layers']):l.update(id=f'record-{i}',duration=records['duration'])
     rr,_=check(records,'maximum-records',lambda n:bytes([255])*3)
-    assert sum(len(per_frame(t['sampled_parameters'])) for t in rr['timing'])==32768
+    assert sum(len(per_frame(t['sampled_parameters'])) for t in rr['timing'])==rr['temporal']['layer_sample_records']==460800
     passed.append('temporal.maximum_render_work_and_sample_record_limits')
 
     invalid=[]
@@ -286,13 +295,19 @@ def run(root):
     bad('integration',lambda s:s['temporal'].update(integration='linear_rgb'),'INVALID_JSON')
     bad('history',lambda s:s['temporal'].update(history_frames=2),'INVALID_JSON')
     bad('optical-flow',lambda s:s['layers'][0].update(effects=[{'kind':'optical_flow'}]),'INVALID_JSON')
-    bad('raster-work',lambda s:(s.update(duration=time(9,25)),s['layers'][0].update(duration=time(9,25))),'LIMIT_EXCEEDED',maximum)
-    bad('record-work',lambda s:(s.update(duration=time(65,25)),[l.update(duration=time(65,25)) for l in s['layers']]),'LIMIT_EXCEEDED',records)
-    bad('graph-work',lambda s:s['expressions']['nodes'].extend([constant(f'filler{i}',0) for i in range(230)]),'LIMIT_EXCEEDED',expr)
+    bad('raster-work',lambda s:(s.update(duration=time(250,25)),s['layers'][0].update(duration=time(250,25))),'LIMIT_EXCEEDED',wide)
+    bad('record-work',lambda s:(s.update(duration=time(226,25)),[l.update(duration=time(226,25)) for l in s['layers']]),'LIMIT_EXCEEDED',records)
+    # 8,000 samples of a 231-node graph pass the 1,843,200 evaluations 256 nodes need over 7,200 unsampled frames.
+    bad('graph-work',lambda s:(s.update(duration=time(10),temporal=exposure(32)),
+                               s['expressions']['nodes'].extend([constant(f'filler{i}',0) for i in range(231-len(s['expressions']['nodes']))])),
+        'LIMIT_EXCEEDED',expr)
     for name,s,code in invalid:
         p=output/('invalid-'+name+'.mkv')
         result=call('scene.render',code,scene=s,input_root=str(sources),output_root=str(output),output=str(p))
         if name=='optical-flow':assert 'optical_flow' in result['message'] and 'unknown variant' in result['message']
+        if name=='raster-work':assert '64000262144 layer pixels' in result['message'] and 'averaging the shutter samples adds 64000000000' in result['message'],result
+        if name=='record-work':assert '462848 layer sample records' in result['message'],result
+        if name=='graph-work':assert '1848000 node evaluations' in result['message'],result
         assert not p.exists()
     existing=hashlib.sha256((output/'animated-boundaries.mkv').read_bytes()).hexdigest()
     call('scene.render','OUTPUT_EXISTS',scene=changes,input_root=str(sources),output_root=str(output),output=str(output/'animated-boundaries.mkv'))
@@ -304,7 +319,7 @@ def run(root):
     passed.append('temporal.precision_effect_diagnostics_and_publication_preservation')
     result={'passed':passed,'frames_compared':frames,'stereo_sample_frames_compared':samples,'previews':previews,
             'rejections':rejected,'cases':cases,'convergence':convergences,'maximum_render_seconds':seconds,
-            'maximum_layer_pixel_sample_visits':67108864,'maximum_layer_sample_records':32768,
+            'heavy_render_composited_pixels':67371008,'maximum_composited_pixels':64000000000,'maximum_layer_sample_records':460800,
             'source_preserved':True,'reference':'Analytic moving-box exposure and independent Fraction time enumeration with high-precision forward pixels',
             'scope':'Encoded-RGB equal-weight midpoint exposures; held source images; no optical flow or history effects'}
     (root/'scene.json').write_text(json.dumps(scene,indent=2)+'\n');(root/'verification.json').write_text(json.dumps(result,indent=2)+'\n')

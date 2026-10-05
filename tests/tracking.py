@@ -144,6 +144,11 @@ def run(root):
         frame['image']=identity(path,sources)
     premult_result=track(premult,positions,'tracked-premultiplied')
     assert premult_result[0]['observations']==semi_result[0]['observations'] and premult_result[2]==semi_result[2]
+    # Sources follow the scene's PNG limits rather than 512 pixels per axis: the same texture in a 1920 x 1080 shot.
+    wide_positions=[(900+2*i,500+[0,1,2,1][i]) for i in range(4)]
+    wide=footage('wide',wide_positions,size=(1920,1080),trim=False)
+    observed=call(request(wide,region=[*wide_positions[0],12,10]))['observations']
+    assert [m['region'] for m in observed]==[[*wide_positions[n//2],12,10] for n in range(8)],observed
     passed.append('tracking.known_motion_confidence_and_boundaries')
     # Transform and effect state does not alter the measured source-space trajectory.
     transformed=copy.deepcopy(moving);l=transformed['layers'][0]

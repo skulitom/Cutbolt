@@ -31,6 +31,9 @@ pub(crate) const MAX_LAYERS: usize = 64;
 /// Longest scene at any of the native rates: 3,000 frames at 25 fps, 7,200 at 60 fps.
 pub(crate) const MAX_SECONDS: u64 = 120;
 pub(crate) const MAX_FRAMES: u64 = MAX_SECONDS * 25;
+/// Frames in the longest scene at the fastest native rate, 60 fps. Shutter sampling and
+/// expressions may keep as many per-sample records as such a scene keeps without them.
+pub(crate) const MAX_UNSAMPLED_FRAMES: u64 = MAX_SECONDS * 60;
 /// Bound on destination pixels the compositor may visit over a whole scene (see `Scene::work`).
 /// It keeps the worst case near the former 600-frame, 16-layer, 8-megapixel maximum.
 pub(crate) const MAX_COMPOSITED_PIXELS: u64 = 64_000_000_000;
@@ -45,7 +48,8 @@ pub(crate) fn limits() -> Value {
     json!({"canvas_per_axis":[1,MAX_CANVAS],"output_scale":[1,8],"maximum_output_pixels":MAX_OUTPUT_PIXELS,
         "frames":[1,MAX_FRAMES],"frame_rate":{"num":25,"den":1},"frame_rates":"eight_native_rates_default_25","maximum_seconds":MAX_SECONDS,
         "frames_at_60_fps":[1,MAX_SECONDS*60],"layers":[1,MAX_LAYERS],"maximum_frame_references":MAX_REFERENCES,
-        "maximum_composited_pixels":MAX_COMPOSITED_PIXELS,"composited_pixels":"per_active_sample_clipped_destination_rectangle_plus_tilemap_canvas_whole_scene_for_spatial_or_3d_twice_when_transparent",
+        "maximum_composited_pixels":MAX_COMPOSITED_PIXELS,"composited_pixels":"per_active_sample_clipped_destination_rectangle_plus_tilemap_canvas_whole_scene_for_spatial_or_3d_twice_when_transparent;unchanging_bottom_layers_once;plus_whole_scene_per_shutter_sample",
+        "unchanging_layers":"whole_scene_one_held_image_no_curves_bindings_animated_effects_masks_or_spatial_and_every_layer_below_also_unchanging",
         "maximum_decoded_pixels":MAX_DECODED_PIXELS,"decoded_pixels":"png_sources_mattes_and_visible_bounds_of_graphics","png_per_axis":[1,MAX_CANVAS],"png_maximum_bytes":64*1024*1024,
         "png_total_bytes":256*1024*1024,"text_size":[1,MAX_TEXT_SIZE],"glyph_bitmap_per_axis":MAX_GLYPH,
         "integer_layer_scale":[1,16],"tilemap":{"maximum_tiles":MAX_TILES,"maximum_cells":MAX_TILE_CELLS,"tile_size_per_axis":[1,MAX_CANVAS],
@@ -262,6 +266,49 @@ pub struct Layer {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<crate::effects::Effect>,
 }
+impl Layer {
+    /// Whether the recipe alone guarantees the same source pixels and sampled values at every
+    /// exposure sample inside the scene: active for the whole scene, one held image (or one per
+    /// tile) that never ends, and no position/opacity curves, expression bindings, animated mask
+    /// or effect values, or time-varying spatial mapping. `static_base` treats such layers as
+    /// unchanging, so the work estimate may count them once.
+    fn unchanging(&self, scene: &Scene) -> Result<bool> {
+        let held = |frames: &[Frame], end: &End| -> Result<bool> {
+            Ok(match frames {
+                [frame] => {
+                    !matches!(end, End::Transparent) || !frame.hold.compare(self.duration)?.is_lt()
+                }
+                _ => false,
+            })
+        };
+        let source = if self.graphics.is_some() {
+            true
+        } else if let Some(map) = &self.tilemap {
+            let mut all = true;
+            for tile in &map.tiles {
+                all &= held(&tile.frames, &tile.end)?;
+            }
+            all
+        } else {
+            held(&self.frames, &self.end)?
+        };
+        Ok(source
+            && self.start.num == 0
+            && self.duration.compare(scene.duration)?.is_eq()
+            && self.animation.is_none()
+            && self.mask.as_ref().is_none_or(|m| m.animation.is_none())
+            && self.effects.iter().all(crate::effects::Effect::is_constant)
+            && self
+                .transform
+                .spatial
+                .as_ref()
+                .is_none_or(crate::spatial::Transform::is_constant)
+            && !scene
+                .expressions
+                .as_ref()
+                .is_some_and(|p| p.bindings.iter().any(|b| b.layer == self.id)))
+    }
+}
 /// WAV channel mapping to stereo output: `duplicate_mono` copies a mono file to both channels; `preserve_stereo` keeps a stereo file's channels.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -363,6 +410,8 @@ struct Prepared {
     selected: Vec<Vec<Option<usize>>>,
     /// For tilemap layers: per tile, the selected frame for every exposure sample.
     tiles: Vec<Option<Vec<Vec<Option<usize>>>>>,
+    /// Exposure sample times, frame-major; None outside the scene, where samples show the backdrop.
+    times: Vec<Option<Time>>,
     samples_per_frame: usize,
     geometry: Option<crate::geometry::Prepared>,
     /// Composite of the unchanging bottom layers, made once per render (see `static_base`).
@@ -546,26 +595,53 @@ impl Scene {
         let (work, heaviest) = self.work(rate)?;
         if work > MAX_COMPOSITED_PIXELS {
             let (index, share) = heaviest;
+            let accumulation = match self.accumulation(rate)? {
+                0 => String::new(),
+                pixels => format!(
+                    "; averaging the shutter samples adds {pixels}, one whole-scene pass per sample"
+                ),
+            };
             return Err(error(
                 "LIMIT_EXCEEDED",
                 format!(
-                    "Scene compositing work is {work} layer pixels over all frames, above the {MAX_COMPOSITED_PIXELS} budget; the largest share is layers[{index}] ({}) with {share}. Shorten the scene or the layers' active ranges, crop or shrink large layers, or split the scene",
-                    self.layers[index].id
+                    "Scene compositing work is {work} layer pixels over all frames, above the {MAX_COMPOSITED_PIXELS} budget; the largest share is layers[{index}] ({}) with {share}{accumulation}. The bottom {} layer(s) never change and count once; a layer counts once only when it and every layer below it last the whole scene with one held image and no curves, bindings, animated effects or masks. Shorten the scene or the layers' active ranges, crop or shrink large layers, move unchanging layers to the bottom, use fewer shutter samples, or split the scene",
+                    self.layers[index].id,
+                    self.static_layers()?
                 ),
             ));
         }
         Ok(frames)
     }
 
+    /// Bottom layers that `static_base` will certainly composite once per render, judged from
+    /// the recipe before any media is read (see `Layer::unchanging`). 3D scenes have none.
+    pub(crate) fn static_layers(&self) -> Result<usize> {
+        if self.geometry.is_some() {
+            return Ok(0);
+        }
+        let mut count = 0;
+        for layer in &self.layers {
+            if !layer.unchanging(self)? {
+                break;
+            }
+            count += 1;
+        }
+        Ok(count)
+    }
+
     /// Upper bound on destination pixels the compositor visits over the whole scene, before any
     /// media is read, and the layer contributing most. Each active sample of a layer costs its
     /// transformed crop clipped to the scene (the whole scene for spatial or 3D layers, whose
     /// footprint depends on sampled values) plus the canvas a tilemap assembles; a transparent
-    /// scene composes a color and a matte pass. Call after the layer checks of `validate`.
+    /// scene composes a color and a matte pass. The unchanging bottom layers (`static_layers`)
+    /// are composited once per render and count once. With shutter sampling every layer counts
+    /// at every sample, and averaging adds one whole-scene pass per sample (`accumulation`).
+    /// Call after the layer checks of `validate`.
     pub(crate) fn work(&self, rate: Time) -> Result<(u64, (usize, u64))> {
         let scene = self.width as u64 * self.height as u64;
         let samples = self.temporal.as_ref().map_or(1, |t| t.samples.clamp(1, 32)) as u64;
         let passes = 1 + self.transparent as u64;
+        let once = self.static_layers()?;
         let mut total = 0u64;
         let mut heaviest = (0, 0);
         for (index, layer) in self.layers.iter().enumerate() {
@@ -586,17 +662,34 @@ impl Scene {
             } else {
                 0
             };
-            let share = layer
-                .duration
-                .units(rate)?
-                .saturating_mul(samples * passes)
+            let composited = if index < once {
+                1
+            } else {
+                layer.duration.units(rate)?.saturating_mul(samples)
+            };
+            let share = composited
+                .saturating_mul(passes)
                 .saturating_mul(destination + assembly);
             if share > heaviest.1 {
                 heaviest = (index, share);
             }
             total = total.saturating_add(share);
         }
-        Ok((total, heaviest))
+        Ok((total.saturating_add(self.accumulation(rate)?), heaviest))
+    }
+
+    /// Pixels a shutter-sampled render visits to start and average its samples: the whole scene
+    /// once per sample and pass, about as costly as one full-scene layer. Zero without sampling.
+    fn accumulation(&self, rate: Time) -> Result<u64> {
+        let samples = self.temporal.as_ref().map_or(1, |t| t.samples.clamp(1, 32)) as u64;
+        if samples == 1 {
+            return Ok(0);
+        }
+        Ok(self
+            .duration
+            .units(rate)?
+            .saturating_mul(samples * (1 + self.transparent as u64))
+            .saturating_mul(self.width as u64 * self.height as u64))
     }
 }
 
@@ -1111,7 +1204,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
     report["frame_matte"] = json!({"profile":"binary-source-matte-v1","matted_pairs":matted.len(),"sampling":"same held frame as source; applied before effects and spatial filtering"});
     let (work, _) = scene.work(scene.clock()?)?;
     report["work"] = json!({"composited_pixels":work,"maximum_composited_pixels":MAX_COMPOSITED_PIXELS,
-        "decoded_pixels":pixels,"maximum_decoded_pixels":MAX_DECODED_PIXELS});
+        "static_layers":scene.static_layers()?,"decoded_pixels":pixels,"maximum_decoded_pixels":MAX_DECODED_PIXELS});
     if let Some(samples) = expression_samples {
         report["expressions"] = json!({"profile":"typed-property-graph-v1","program":scene.expressions,"frame_bindings":samples});
     }
@@ -1131,6 +1224,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         parameters,
         selected: selections,
         tiles: tile_selections,
+        times: exposure.times,
         samples_per_frame: exposure.samples,
         geometry,
         base: None,
@@ -1335,14 +1429,15 @@ fn runs<T: Serialize>(values: &[T]) -> Value {
     }
     Value::Array(out)
 }
-/// Compose one sample. A transparent scene composes over black; with `matte`, every source pixel
-/// becomes white with its own alpha, so the result accumulates 255 x alpha with the same weights
-/// and rounding as the color pass.
+/// Compose one sample into `rgb`, reusing its allocation. A transparent scene composes over
+/// black; with `matte`, every source pixel becomes white with its own alpha, so the result
+/// accumulates 255 x alpha with the same weights and rounding as the color pass.
 fn compose_sample(
     scene: &Scene,
     prepared: &Prepared,
     sample: usize,
     matte: bool,
+    mut rgb: Vec<u8>,
 ) -> Result<Vec<u8>> {
     let backdrop = if scene.transparent {
         [0, 0, 0]
@@ -1358,7 +1453,13 @@ fn compose_sample(
                 .repeat((scene.width * scene.height) as usize)
         });
     }
-    match &prepared.base {
+    let pixels = (scene.width * scene.height) as usize;
+    // Outside the scene no layer is selected, so the sample is the bare backdrop.
+    let inside = prepared.times[sample].is_some();
+    let base = prepared.base.as_ref().filter(|_| inside);
+    // Shutter sampling hands back the previous sample's buffer; a single sample starts afresh.
+    let reuse = rgb.len() == pixels * 3;
+    match base {
         Some(base) => {
             let start = if matte {
                 base.matte
@@ -1367,23 +1468,40 @@ fn compose_sample(
             } else {
                 &base.color
             };
-            compose_layers(
-                scene,
-                prepared,
-                sample,
-                matte,
-                base.layers..scene.layers.len(),
-                start.clone(),
-            )
+            if reuse {
+                rgb.copy_from_slice(start);
+            } else {
+                rgb = start.clone();
+            }
         }
-        None => compose_layers(
-            scene,
-            prepared,
-            sample,
-            matte,
-            0..scene.layers.len(),
-            backdrop.repeat((scene.width * scene.height) as usize),
-        ),
+        None if reuse => fill(&mut rgb, backdrop),
+        None => rgb = backdrop.repeat(pixels),
+    }
+    if !inside {
+        return Ok(rgb);
+    }
+    let first = base.map_or(0, |b| b.layers);
+    compose_layers(
+        scene,
+        prepared,
+        sample,
+        matte,
+        first..scene.layers.len(),
+        rgb,
+    )
+}
+
+/// Fill packed RGB with one color, doubling the copied span as `[T]::repeat` does.
+fn fill(rgb: &mut [u8], color: [u8; 3]) {
+    if rgb.len() < 3 {
+        return;
+    }
+    rgb[..3].copy_from_slice(&color);
+    let mut filled = 3;
+    while filled < rgb.len() {
+        let span = filled.min(rgb.len() - filled);
+        rgb.copy_within(..span, filled);
+        filled += span;
     }
 }
 
@@ -1807,28 +1925,37 @@ fn compose_geometry(
 }
 
 /// One output frame: RGB, or straight RGBA for a transparent scene.
-/// The bottom layers that look the same at every exposure sample (same frame, tile frames and
-/// sampled parameters), composited once. Compositing is sequential, rounding after each layer, and
-/// each layer reads only its own inputs and the destination, so every frame that continues from
-/// this base gets exactly the values of compositing all layers. 3D scenes composite per sample.
+/// The bottom layers that look the same at every exposure sample inside the scene (same frame,
+/// tile frames and sampled parameters), composited once. Compositing is sequential, rounding after
+/// each layer, and each layer reads only its own inputs and the destination, so every frame that
+/// continues from this base gets exactly the values of compositing all layers. Samples outside the
+/// scene show the bare backdrop (see `compose_sample`). 3D scenes composite per sample.
 fn static_base(scene: &Scene, prepared: &Prepared) -> Result<Option<Base>> {
     if prepared.geometry.is_some() {
         return Ok(None);
     }
+    let inside = (0..prepared.times.len())
+        .filter(|&s| prepared.times[s].is_some())
+        .collect::<Vec<_>>();
+    let Some(&first) = inside.first() else {
+        return Ok(None);
+    };
     let unchanging = |index: usize| -> Result<bool> {
         let selected = &prepared.selected[index];
-        if selected.iter().any(|s| *s != selected[0]) {
+        if inside.iter().any(|&s| selected[s] != selected[first]) {
             return Ok(false);
         }
         if let Some(tiles) = &prepared.tiles[index]
-            && tiles.iter().any(|t| t.iter().any(|s| *s != t[0]))
+            && tiles
+                .iter()
+                .any(|t| inside.iter().any(|&s| t[s] != t[first]))
         {
             return Ok(false);
         }
         let parameters = &prepared.parameters[index];
-        let first = serde_json::to_vec(&parameters[0])?;
-        for p in &parameters[1..] {
-            if serde_json::to_vec(p)? != first {
+        let reference = serde_json::to_vec(&parameters[first])?;
+        for &s in &inside[1..] {
+            if serde_json::to_vec(&parameters[s])? != reference {
                 return Ok(false);
             }
         }
@@ -1847,9 +1974,16 @@ fn static_base(scene: &Scene, prepared: &Prepared) -> Result<Option<Base>> {
         scene.background
     };
     let blank = backdrop.repeat((scene.width * scene.height) as usize);
-    let color = compose_layers(scene, prepared, 0, false, 0..layers, blank.clone())?;
+    let color = compose_layers(scene, prepared, first, false, 0..layers, blank.clone())?;
     let matte = if scene.transparent {
-        Some(compose_layers(scene, prepared, 0, true, 0..layers, blank)?)
+        Some(compose_layers(
+            scene,
+            prepared,
+            first,
+            true,
+            0..layers,
+            blank,
+        )?)
     } else {
         None
     };
@@ -1858,6 +1992,22 @@ fn static_base(scene: &Scene, prepared: &Prepared) -> Result<Option<Base>> {
         color,
         matte,
     }))
+}
+
+/// The work estimate counts `Scene::static_layers` once, so the render must composite at least
+/// those layers once into its base; anything else would exceed the approved work.
+fn approved_base(scene: &Scene, prepared: &Prepared) -> Result<()> {
+    let counted = scene.static_layers()?;
+    let cached = prepared.base.as_ref().map_or(0, |b| b.layers);
+    if cached < counted {
+        return Err(error(
+            "LIMIT_EXCEEDED",
+            format!(
+                "The work estimate counted {counted} unchanging bottom layers once, but only {cached} composite once; the scene was not rendered"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Source images of layers above the base whose effects sample the same values at every exposure
@@ -2062,19 +2212,27 @@ fn compose_plane(scene: &Scene, prepared: &Prepared, frame: u64, matte: bool) ->
     let samples = prepared.samples_per_frame;
     let first = frame as usize * samples;
     if samples == 1 {
-        return compose_sample(scene, prepared, first, matte);
+        return compose_sample(scene, prepared, first, matte, Vec::new());
     }
-    let mut sums = vec![0u32; (scene.width * scene.height * 3) as usize];
+    // At most 32 samples of 255 sum to 8,160, so 16-bit sums are exact; one buffer serves every
+    // sample of the frame and then holds the result.
+    let mut sums = vec![0u16; (scene.width * scene.height * 3) as usize];
+    let mut rgb = Vec::new();
     for sample in first..first + samples {
-        let rgb = compose_sample(scene, prepared, sample, matte)?;
-        for (sum, value) in sums.iter_mut().zip(rgb) {
-            *sum += value as u32;
+        rgb = compose_sample(scene, prepared, sample, matte, rgb)?;
+        for (sum, value) in sums.iter_mut().zip(&rgb) {
+            *sum += u16::from(*value);
         }
     }
-    Ok(sums
-        .into_iter()
-        .map(|sum| ((sum + samples as u32 / 2) / samples as u32) as u8)
-        .collect())
+    // The equal-weight mean of each possible sum, rounded to nearest with exact half ties upward.
+    let count = samples as u32;
+    let means = (0..=255 * count)
+        .map(|sum| ((sum + count / 2) / count) as u8)
+        .collect::<Vec<_>>();
+    for (value, sum) in rgb.iter_mut().zip(&sums) {
+        *value = means[usize::from(*sum)];
+    }
+    Ok(rgb)
 }
 
 /// Owned scratch directory. Cleanup only the known files we created, never recursive traversal.
@@ -2117,6 +2275,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     let output = render::destination(output, output_root)?;
     let mut prepared = prepare(scene, root)?;
     prepared.base = static_base(scene, &prepared)?;
+    approved_base(scene, &prepared)?;
     prepared.processed = processed_sources(scene, &prepared)?;
     let scratch = Scratch::new(output.parent().expect("validated parent"))?;
     let rate = scene.clock()?;
@@ -2199,12 +2358,21 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     // Allow composition time in addition to the original fixed encoding allowance.
     let megapixel_frames = frames * out_w as u64 * out_h as u64 / 1_000_000;
     let timeout = Duration::from_secs((180 + 2 * megapixel_frames).min(3600));
+    let pixels = u64::from(scene.width) * u64::from(scene.height);
+    // With shutter sampling each worker also holds 16-bit sums and one sample (9 bytes a pixel);
+    // together they stay within about 512 MiB.
+    let scratch = if prepared.samples_per_frame > 1 {
+        9 * pixels
+    } else {
+        0
+    };
     let workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
-        .clamp(1, 64);
+        .clamp(1, 64)
+        .min(((512u64 << 20) / scratch.max(1)).max(1) as usize);
     // At least one frame per worker may wait for the writer, up to two within about 256 MiB.
-    let frame_bytes = u64::from(scene.width) * u64::from(scene.height) * 4;
+    let frame_bytes = pixels * 4;
     let window = ((256u64 << 20) / frame_bytes).clamp(workers as u64, 2 * workers as u64);
     let shared = &prepared;
     media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, |stdin| {
@@ -2266,7 +2434,10 @@ pub fn still(
     time: Time,
 ) -> Result<Value> {
     let output = render::destination_extension(output, output_root, "png")?;
-    let prepared = prepare(scene, root)?;
+    let mut prepared = prepare(scene, root)?;
+    // As in a render, the unchanging bottom layers composite once rather than once per sample.
+    prepared.base = static_base(scene, &prepared)?;
+    approved_base(scene, &prepared)?;
     let rate = scene.clock()?;
     let frames = scene.duration.units(rate)?;
     // The frame on screen at `time`: the last frame start at or before it.
@@ -2532,9 +2703,16 @@ mod tests {
         assert!(error.message.contains("1-64 layers") && error.message.contains("65 layers"));
     }
 
+    /// An opacity curve from `from` to 255 over the panel scene's three seconds.
+    fn fade(from: i32) -> Option<Animation> {
+        Some(serde_json::from_value(json!({"opacity":{"keys":[{"time":{"num":0,"den":1},"value":from,"interpolation":"linear"},{"time":{"num":3,"den":1},"value":255,"interpolation":"hold"}]}})).unwrap())
+    }
+
     #[test]
     fn work_counts_clipped_destinations_assembly_and_passes() {
         let mut scene = panel_scene();
+        // An animated layer composites in every frame.
+        scene.layers[0].animation = fade(0);
         // 160 x 90 shown for 75 frames.
         assert_eq!(
             scene.work(FPS).unwrap(),
@@ -2561,6 +2739,147 @@ mod tests {
                 (0, 75 * 120 * 90)
             )
         );
+    }
+
+    #[test]
+    fn unchanging_bottom_layers_count_once_and_composite_once() {
+        let mut scene = panel_scene();
+        let panel = scene.layers[0].clone();
+        let named = |id: &str| Layer {
+            id: id.into(),
+            ..panel.clone()
+        };
+        let moving = Layer {
+            animation: fade(40),
+            ..named("moving")
+        };
+        scene.layers = vec![named("a"), named("b"), moving, named("above")];
+        let one = 160 * 90;
+        assert_eq!(scene.static_layers().unwrap(), 2);
+        assert_eq!(scene.work(FPS).unwrap().0, 2 * one + 2 * 75 * one);
+        // Whatever can change keeps the bottom layer, and so every layer above it, per frame.
+        let effect = |value: Value| -> Vec<crate::effects::Effect> {
+            vec![serde_json::from_value(value).unwrap()]
+        };
+        let curve = json!({"keys":[{"time":{"num":0,"den":1},"value":0,"interpolation":"linear"},{"time":{"num":1,"den":1},"value":20,"interpolation":"hold"}]});
+        type Change<'a> = Box<dyn Fn(&mut Layer) + 'a>;
+        let changes: Vec<(&str, Change)> = vec![
+            (
+                "late start",
+                Box::new(|l| (l.start, l.duration) = (frames(1, FPS), frames(74, FPS))),
+            ),
+            ("early end", Box::new(|l| l.duration = frames(74, FPS))),
+            ("flat curve", Box::new(|l| l.animation = fade(255))),
+            (
+                "moving mask",
+                Box::new(|l| {
+                    l.mask = Some(
+                        serde_json::from_value(json!({"rect":[0,0,9,9],"animation":{"x":curve}}))
+                            .unwrap(),
+                    )
+                }),
+            ),
+            (
+                "graded over time",
+                Box::new(|l| {
+                    l.effects = effect(
+                        json!({"kind":"grade","exposure_milli":0,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000],"animation":{"exposure_milli":curve}}),
+                    )
+                }),
+            ),
+            (
+                "fading key",
+                Box::new(|l| {
+                    l.effects = effect(
+                        json!({"kind":"chroma_key","key_rgb":[0,255,0],"inner_milli":60,"outer_milli":300,"strength_milli":700,"strength_curve":curve}),
+                    )
+                }),
+            ),
+            (
+                "spatial curve",
+                Box::new(|l| {
+                    l.transform.spatial = Some(serde_json::from_value(json!({"translate_milli":[0,0],"scale_milli":[1000,1000],"rotation_mdeg":0,"flip":[false,false],"pixel_aspect":{"num":1,"den":1},"sampling":"nearest","edge":"transparent","animation":{"rotation_mdeg":curve}})).unwrap())
+                }),
+            ),
+        ];
+        let root = std::env::temp_dir();
+        let cached_layers = |scene: &Scene| {
+            let prepared = prepare(scene, &root).unwrap();
+            static_base(scene, &prepared)
+                .unwrap()
+                .map_or(0, |b| b.layers)
+        };
+        for (name, change) in &changes {
+            let mut changed = scene.clone();
+            change(&mut changed.layers[0]);
+            assert_eq!(changed.static_layers().unwrap(), 0, "{name}");
+            // The render may find more unchanging layers than the recipe proves, never fewer.
+            assert!(
+                cached_layers(&changed) >= changed.static_layers().unwrap(),
+                "{name}"
+            );
+        }
+        // Constant effects, masks and mappings stay unchanging.
+        let mut constant = scene.clone();
+        let l = &mut constant.layers[1];
+        l.effects = effect(
+            json!({"kind":"grade","exposure_milli":300,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000]}),
+        );
+        l.mask = Some(serde_json::from_value(json!({"rect":[2,2,90,40],"inverted":true})).unwrap());
+        assert_eq!(constant.static_layers().unwrap(), 2);
+        assert_eq!(cached_layers(&constant), 2);
+        // A binding replaces the layer's values even when the graph is constant.
+        let mut bound = scene.clone();
+        bound.expressions = Some(serde_json::from_value(json!({"schema_version":1,"seed":0,
+            "nodes":[{"id":"full","kind":"scalar","expression":{"op":"literal","value":{"type":"scalar","value":{"num":255,"den":1}}}}],
+            "bindings":[{"layer":"b","property":"opacity","node":"full"}]})).unwrap());
+        assert_eq!(bound.static_layers().unwrap(), 1);
+        assert!(cached_layers(&bound) >= 1);
+        // One held image that never ends is unchanging; a second image or an ending is not.
+        let image = Frame {
+            image: Identity {
+                path: "a.png".into(),
+                sha256: String::new(),
+                bytes: 0,
+            },
+            matte: None,
+            hold: frames(1, FPS),
+            offset: [0, 0],
+            anchor: [0, 0],
+        };
+        let mut held = scene.clone();
+        held.layers[0].graphics = None;
+        held.layers[0].frames = vec![image.clone()];
+        assert_eq!(held.static_layers().unwrap(), 2);
+        held.layers[0].end = End::Transparent;
+        assert_eq!(held.static_layers().unwrap(), 0);
+        held.layers[0].frames[0].hold = held.duration;
+        assert_eq!(held.static_layers().unwrap(), 2);
+        held.layers[0].frames.push(image);
+        assert_eq!(held.static_layers().unwrap(), 0);
+        // A centered shutter samples outside the scene at both ends; those samples show the
+        // backdrop, so the base still holds and every frame is unchanged.
+        scene.temporal = Some(serde_json::from_value(json!({"shutter_angle":{"num":360,"den":1},"phase":{"num":-180,"den":1},"samples":4,"integration":"encoded_rgb"})).unwrap());
+        // Every sample of a changing layer counts, and averaging adds a whole-scene pass each.
+        assert_eq!(
+            scene.work(FPS).unwrap().0,
+            2 * one + 2 * 75 * 4 * one + 75 * 4 * one
+        );
+        for transparent in [false, true] {
+            scene.transparent = transparent;
+            let plain = prepare(&scene, &root).unwrap();
+            let mut cached = prepare(&scene, &root).unwrap();
+            cached.base = static_base(&scene, &cached).unwrap();
+            approved_base(&scene, &cached).unwrap();
+            assert_eq!(cached.base.as_ref().unwrap().layers, 2);
+            for n in 0..75 {
+                assert_eq!(
+                    compose(&scene, &cached, n).unwrap(),
+                    compose(&scene, &plain, n).unwrap(),
+                    "frame {n}, transparent {transparent}"
+                );
+            }
+        }
     }
 
     #[test]

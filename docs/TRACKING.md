@@ -19,6 +19,7 @@ The reference is the specified patch at the first active layer frame. Coordinate
 | `minimum_margin_milli` | 20–1000; minimum difference from every other candidate, including adjacent positions. |
 | `maximum_frame_change_milli` | 1–1000; maximum mean absolute associated-luminance difference over the whole canvas, divided by 255. |
 | Work | At most 64 million patch-pixel comparisons, conservatively counted before analysis. |
+| Source images | The scene's PNG limits: up to 4096 pixels per axis, within its 64-million decoded-pixel budget. A 1920 x 1080 layer can therefore be tracked across up to 30 distinct images; repeated images are decoded once. |
 | `mask` | Existing rectangle/inversion/feather declaration, with no initial animation. The returned x/y curves follow measured displacement; size remains fixed. |
 
 Matching uses alpha-associated encoded luminance, with RGB weights 54/256, 183/256 and 19/256, rounded to one byte. Straight input is associated before rounding; explicitly premultiplied input keeps its stored associated values. Fully transparent RGB cannot influence motion. Both the reference and a candidate require at least five encoded levels of standard deviation. Original integer sums calculate zero-mean normalized correlation; a floating-point square root completes the score. Tied or insufficiently separated peaks reject.

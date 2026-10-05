@@ -484,7 +484,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
                 *size
             } else {
                 let (_, bytes) = scene::identity_bytes(&frame.image, &request.input_root)?;
-                let image = scene::decode_png(&bytes)?;
+                let image = scene::decode_png_bounded(&bytes, scene::MAX_CANVAS)?;
                 let size = [image.width, image.height];
                 dimensions.insert(frame.image.path.clone(), size);
                 size

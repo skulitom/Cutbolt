@@ -368,10 +368,27 @@ def run(root):
     cache = {n:expected_frame(static,sources,n) for n in range(10)}
     begun = clock.perf_counter(); render(maximum,'maximum',lambda n:cache[n%10]); render_elapsed = clock.perf_counter()-begun
     budgets.check(render_elapsed < 60, render_elapsed)
+    # A render evaluates every node at every frame: the full graph fits the longest scene at 60 fps (1,843,200
+    # evaluations), and a second shutter sample per frame does not. Bound values stop at 32 x 7,200.
+    longest = copy.deepcopy(maximum); longest.update(id='longest-graph',duration=time(120),frame_rate=time(60))
+    longest['layers'] = [dict(longest['layers'][0],duration=time(120))]
+    longest['expressions']['bindings'] = [{'layer':'L0','property':'opacity','node':'d62'}]
+    begun = clock.perf_counter(); long_report = call('scene.inspect',scene=longest,input_root=str(sources)); long_elapsed = clock.perf_counter()-begun
+    assert len(long_report['expressions']['frame_bindings']) == 7200 and long_report['expressions']['frame_bindings'][-1][0]['rounded'] == [128]
+    budgets.check(long_elapsed < 15, long_elapsed)
+    sampled = copy.deepcopy(longest); sampled['temporal'] = {'shutter_angle':number(180),'phase':number(0),'samples':2,'integration':'encoded_rgb'}
+    error = call('scene.inspect','LIMIT_EXCEEDED',scene=sampled,input_root=str(sources))
+    assert '3686400 node evaluations' in error['message'] and '1843200' in error['message'], error
+    bound = copy.deepcopy(sampled); bound['expressions']['nodes'] = bound['expressions']['nodes'][:65]
+    bound['layers'] = [dict(copy.deepcopy(maximum['layers'][i]),duration=time(120)) for i in range(16)]
+    bound['expressions']['bindings'] = maximum['expressions']['bindings']
+    error = call('scene.inspect','LIMIT_EXCEEDED',scene=bound,input_root=str(sources))
+    assert '460800 bound values' in error['message'] and '230400' in error['message'], error
     passed.append('expressions.maximum_graph_depth_bindings_samples_and_render_work')
     result = {'passed':passed,'frames_compared':frames,'samples_compared':samples,'previews':previews,'rejections':rejected,
               'maximum_inspect_seconds':elapsed,'maximum_render_seconds':render_elapsed,'maximum_nodes':256,'maximum_bindings':32,
               'maximum_dependency_depth':64,'maximum_samples':256,'maximum_node_evaluations':65536,
+              'maximum_render_node_evaluations':1843200,'maximum_render_bound_values':230400,'longest_graph_inspect_seconds':long_elapsed,
               'references':'Authored closed-form Fraction motion/opacity; fixed operator truth tables; forward pixels and high-precision geometry',
               'source_preserved':True,'execution_profile':'closed typed graph; no source code, IO or ambient random state'}
     (root/'scene.json').write_text(json.dumps(scene,indent=2)+'\n')

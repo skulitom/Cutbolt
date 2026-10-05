@@ -225,7 +225,12 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
     for frame in &layer.frames {
         if !images.contains_key(&frame.image.path) {
             let (_, bytes) = scene::identity_bytes(&frame.image, &request.input_root)?;
-            images.insert(frame.image.path.clone(), scene::decode_png(&bytes)?);
+            // The scene's own PNG bound; `scene::inspect` above has already held the layer's images
+            // to the decoded-pixel budget.
+            images.insert(
+                frame.image.path.clone(),
+                scene::decode_png_bounded(&bytes, scene::MAX_CANVAS)?,
+            );
         }
     }
     let initial = [x as i32, y as i32, w as i32, h as i32];

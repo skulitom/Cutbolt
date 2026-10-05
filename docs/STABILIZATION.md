@@ -28,7 +28,7 @@ The request contains `scene`, absolute `input_root`, `layer_id`, `model`, `segme
 | `sampling` | `nearest` or `bilinear`, explicitly selected for the returned spatial transform. |
 | Work | At most 128 million conservative patch-pixel comparisons overall and 64 million for any individual patch run. |
 
-Choose patches on a common rigid background, distributed across the shot. A moving foreground patch, parallax, insufficient texture or inconsistent matches can fail the motion fit. The roll limit is a rejection bound, not a guarantee that every appearance change within that angle will match. The scene retains its existing maximum duration, canvas and media limits.
+Choose patches on a common rigid background, distributed across the shot. A moving foreground patch, parallax, insufficient texture or inconsistent matches can fail the motion fit. The roll limit is a rejection bound, not a guarantee that every appearance change within that angle will match. The scene retains its existing maximum duration, canvas and media limits; source images follow the scene's PNG limits, up to 4096 pixels per axis within its 64-million decoded-pixel budget.
 
 ## Measurement and confidence
 

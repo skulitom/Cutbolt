@@ -137,6 +137,56 @@ Tests:
 - New unit tests cover the implied-entry rules and the lane and per-key limits.
 
 No scoring changed. Evidence stays stale until the next thorough run.
+## 5 October 2026: scene work limits sized for the faster compositor
+
+The visual-effects stress test (`C:\DEV\CutboltData\vfx-stress-20261005`, VFX-STRESS.md, "Limits that block real use") found scene limits still sized for the per-pixel compositor that `d4eaf9d` replaced. Its `scene.inspect` probes, on release builds of `c0fe223` and of this change:
+
+| Probe | Before | After |
+| --- | --- | --- |
+| 11 unchanging full-frame 1080p layers, 120 s | rejected at 68.4 billion pixels | 22.8 million; rendered in 44.6 s, 277 MB engine peak |
+| 2 layers, 8 shutter samples, 1080p, 1 s | rejected (2 frames passed) | accepted |
+| 480 x 270, 4 samples, 10 s | rejected | accepted |
+| 8 samples at 1080p for 120 s, background and one sprite | rejected | accepted, 56.1 billion |
+| 8 samples at 1080p for 60 s, background and 12 moving sprites | rejected | 62.6 billion; rendered in 47 s, 525 MB engine peak |
+| One 3D plane at 1080p, 1 s | rejected (about 8 frames passed) | accepted; four planes for 120 s too |
+| 25 expression nodes over 120 s | rejected (21 passed) | accepted; every graph at every length |
+| Tracking a 1920 x 1080 shot | rejected above 512 pixels per axis | tracked exactly, 0.6 s |
+
+No scene the old limits accepted is now rejected.
+
+The changes:
+- **Unchanging bottom layers count once.** `static_base` composites them once per render, and now the work estimate counts them once too. A layer counts once when its recipe alone proves it never changes: it lasts the whole scene and shows graphics or one held image (one per tile) that does not end early. It also has no position or opacity curves, expression bindings, mask or effect curves, or spatial curves or compensation, and every layer below it qualifies too.
+  - Receipts report `work.static_layers`, and the `LIMIT_EXCEEDED` message names the rule.
+  - A render that finds fewer layers to cache than the estimate counted fails instead of exceeding the approved work.
+  - `scene.still` caches them too.
+- **Shutter samples outside the scene no longer disable that cache.** Those samples show the bare backdrop, as before; the cache compares only in-scene samples. A centered shutter therefore keeps an unchanging background.
+- **Shutter sampling shares the scene budget.**
+  - The 67,108,864 layer-pixel visit cap is gone. Every changing layer already counted at every sample, and averaging now adds the whole scene once per sample: at 1080p a sample costs about as much as a full-frame layer.
+  - Parameter records rise from 32,768 to 460,800, as many as 64 layers keep over 7,200 frames without sampling. With every value changing at every sample, 460,800 records peaked at 1.3 GB and returned a 27 MB receipt, the same as the unsampled scene that was already allowed.
+- **Cheaper averaging, identical output.** Each frame reuses one sample buffer and sums in 16 bits (32 x 255 fits), instead of allocating 6 MB per sample and 25 MB of 32-bit sums per frame. A render runs fewer workers if this scratch would pass about 512 MiB. On a 1080p scene of 250 frames with 32 samples, runs alternated:
+  - wall time 15.3-16.1 s before, 9.6-10.0 s after;
+  - engine CPU 132-141 s before, 42-69 s after;
+  - engine peak 955-972 MB before, 426-543 MB after.
+
+  Four shutter scenes decode identically on the old and new builds: centered, open, late-phase and transparent.
+- **3D geometry.**
+  - Each pixel no longer allocates a hit list, and a perspective camera's per-plane ray origin is computed once per frame from the same values. Decoded output is identical, with about a third less engine CPU at 1080p.
+  - A ray-plane visit measured about 40 ns, half a bilinear spatial pixel, so visits rise from 16,777,216 to the scene's 64 billion. One plane at 1080p rendered 10 s in 7.8 s and 30 s in 11.1 s.
+  - Node records stay at 32,768: each one reports matrices and plane state, about 0.8 KB of receipt.
+- **Expressions.** A render may make 1,843,200 node evaluations and keep 230,400 bound values: every node and binding over 7,200 unsampled frames. Before, the limits were 65,536 evaluations and 8,000 samples. An evaluation measured about 0.4 µs. Read-only `expression.inspect` keeps its 256 times.
+- **Tracking and stabilization** read sources up to the scene's 4096 pixels per axis instead of 512, within its 64-million decoded-pixel budget: up to 30 distinct 1080p images.
+
+Measured on the 32-thread development machine while other sessions kept it 45-100 % busy. The measurement scripts and results are in `C:\DEV\CutboltData\vfx-stress-20261005\caps`.
+
+Tests:
+- Rust tests cover the counted-once rule against every disqualifier, and the cache finding at least the counted layers. They also check that a centered shutter keeps the cache with identical opaque and transparent frames, and they cover the work arithmetic.
+- `native_scenes` gives `expected_work` an independent version of the rule. It accepts 32 still full-frame titles for two minutes, counted once, and rejects them once the bottom one fades.
+- `temporal` renders the former 67,108,864-pixel maximum, now counted with its averaging, and all 460,800 records. It checks the 64-billion boundary at 4000 x 2000 with 32 samples (249 frames pass, 250 fail) and rejects 462,848 records and 1,848,000 evaluations.
+- `geometry` rejects 64,128,000,000 visits from planes active for only 64 of 501 frames.
+- `expressions` inspects the 256-node graph over 7,200 frames and rejects twice that work and 460,800 bound values.
+- `tracking` follows a texture across a 1920 x 1080 shot.
+
+These are limits, not features: no capability points change. X01-X03 keep their check names; the record and budget checks inside them changed with the limits. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: independent jobs run at once in one job root
 

@@ -15,6 +15,15 @@ use math::{Matrix, V, add, cross, dot, mul, sub, unit};
 pub use spec::*;
 use spec::{ScalarSampler, VectorSampler};
 
+/// Camera rays tested against planes over the whole scene, pixels x planes x exposure samples:
+/// the scene compositing budget. A visit measured about 40 ns on the development machine, half
+/// an interpolated spatial pixel, so a full budget takes no longer than a full spatial scene.
+pub(crate) const MAX_VISITS: u64 = crate::scene::MAX_COMPOSITED_PIXELS;
+/// Node transforms sampled and reported, nodes x exposure samples. Each sample reports every
+/// node's world matrix and every plane's state, about 0.8 KB per record, so the receipt stays
+/// near 25 MB.
+pub(crate) const MAX_NODE_RECORDS: u64 = 32_768;
+
 fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_GEOMETRY", message)
 }
@@ -213,10 +222,17 @@ pub(crate) fn prepare(scene: &Scene, times: &[Option<Time>]) -> Result<Option<Pr
     }
     let visits =
         scene.width as u64 * scene.height as u64 * scene.layers.len() as u64 * times.len() as u64;
-    if visits > 16_777_216 || times.len() * spec.nodes.len() > 32768 {
+    let records = times.len() as u64 * spec.nodes.len() as u64;
+    if visits > MAX_VISITS || records > MAX_NODE_RECORDS {
         return Err(error(
             "LIMIT_EXCEEDED",
-            "Geometry exceeds 16777216 pixel-plane sample visits or 32768 node sample records",
+            format!(
+                "Geometry needs {visits} pixel-plane sample visits ({}x{} pixels x {} planes x {} samples) and {records} node sample records; the limits are {MAX_VISITS} and {MAX_NODE_RECORDS}. Use a smaller canvas, fewer planes, samples or nodes, a shorter scene, or split the scene",
+                scene.width,
+                scene.height,
+                scene.layers.len(),
+                times.len()
+            ),
         ));
     }
     for layer in &scene.layers {
@@ -533,6 +549,14 @@ pub(crate) fn compose(
         .background
         .repeat((scene.width * scene.height) as usize);
     let c = &state.camera;
+    // A perspective camera casts every ray from its position, so each plane's local ray origin
+    // is the same for the whole frame; the hit list is reused from pixel to pixel.
+    let origins = state
+        .planes
+        .iter()
+        .map(|plane| plane.inverse.point(c.position))
+        .collect::<Vec<_>>();
+    let mut hits = Vec::with_capacity(state.planes.len());
     for y in 0..scene.height {
         for x in 0..scene.width {
             let u = ((x as f64 + 0.5) / scene.width as f64 - 0.5)
@@ -551,13 +575,17 @@ pub(crate) fn compose(
             } else {
                 c.forward
             };
-            let mut hits = Vec::with_capacity(state.planes.len());
+            hits.clear();
             for (i, plane) in state.planes.iter().enumerate() {
                 let facing = dot(plane.normal, direction);
                 if !plane.double_sided && facing >= 0.0 {
                     continue;
                 }
-                let local_origin = plane.inverse.point(origin);
+                let local_origin = if c.perspective {
+                    origins[i]
+                } else {
+                    plane.inverse.point(origin)
+                };
                 let local_direction = plane.inverse.vector(direction);
                 if local_direction[2] == 0.0 {
                     continue;
@@ -585,7 +613,7 @@ pub(crate) fn compose(
                 b.1.total_cmp(&a.1)
                     .then_with(|| state.planes[a.0].id.cmp(&state.planes[b.0].id))
             });
-            for (i, depth, facing, mut texel) in hits {
+            for (i, depth, facing, mut texel) in hits.drain(..) {
                 let plane = &state.planes[i];
                 if plane.lambert && texel.rgba[3] > 0 {
                     let normal = if facing > 0.0 {
@@ -626,7 +654,7 @@ pub(crate) fn compose(
 
 pub fn capabilities() -> Value {
     json!({"profile":"textured-planes-v1","maximum_nodes":32,"maximum_parent_depth":16,"maximum_planes":16,"maximum_lights":8,
-        "maximum_pixel_plane_sample_visits":16777216,"maximum_node_sample_records":32768,"projections":["perspective","orthographic"],
+        "maximum_pixel_plane_sample_visits":MAX_VISITS,"maximum_node_sample_records":MAX_NODE_RECORDS,"projections":["perspective","orthographic"],
         "materials":["unlit","lambert"],"lights":["ambient","directional","point"],"shadows":["none"],"time":"exact_rational",
         "geometry_numeric":"bounded_f64","textures":"nearest_held_images","depth":"per_pixel_back_to_front"})
 }

@@ -136,6 +136,10 @@ impl Transform {
             compensation: None,
         }
     }
+    /// Whether the mapping is the same at every time: no curves and no stabilization compensation.
+    pub(crate) fn is_constant(&self) -> bool {
+        self.animation.is_none() && self.compensation.is_none()
+    }
     pub(crate) fn prepare(&self, duration: Time) -> Result<Sampler> {
         self.pixel_aspect.validate()?;
         if self.pixel_aspect.compare(Time::new(1, 16)?)?.is_lt()

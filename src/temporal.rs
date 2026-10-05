@@ -24,6 +24,12 @@ pub struct Exposure {
     pub integration: Integration,
 }
 
+/// Layer parameter records, layers x frames x samples per frame: as many as 64 layers keep over
+/// the longest scene without shutter sampling (7,200 frames at 60 fps). When every value changes
+/// at every sample this is about 1.3 GB while preparing and a 27 MB receipt.
+pub(crate) const MAX_RECORDS: u64 =
+    crate::scene::MAX_LAYERS as u64 * crate::scene::MAX_UNSAMPLED_FRAMES;
+
 pub(crate) struct Plan {
     pub times: Vec<Option<Time>>,
     pub samples: usize,
@@ -57,15 +63,14 @@ impl Plan {
             ));
         }
         let samples = spec.samples as usize;
-        let work = scene.width as u64
-            * scene.height as u64
-            * scene.layers.len() as u64
-            * frames
-            * samples as u64;
-        if work > 67_108_864 || scene.layers.len() as u64 * frames * samples as u64 > 32768 {
+        let records = scene.layers.len() as u64 * frames * samples as u64;
+        if records > MAX_RECORDS {
             return Err(error(
                 "LIMIT_EXCEEDED",
-                "Temporal exposure exceeds 67108864 layer-pixel sample visits or 32768 layer sample records",
+                format!(
+                    "Shutter sampling needs {records} layer sample records ({} layers x {frames} frames x {samples} samples), above the {MAX_RECORDS} that 64 layers keep over 7200 frames without it. Use fewer samples per frame, fewer layers or a shorter scene, or split the scene",
+                    scene.layers.len()
+                ),
             ));
         }
         let duration = Number::make(scene.duration.num as i128, scene.duration.den as u128)?;
@@ -91,7 +96,7 @@ impl Plan {
         let report = json!({"profile":"midpoint-exposure-v1","specification":spec,
             "sample_times":signed,"active_sample_times":times,"samples_per_frame":samples,
             "sample_layout":"frame_major_then_increasing_shutter_time","sample_count":times.len(),
-            "layer_pixel_sample_visits":work,"outside_scene":"background","source_frames":"piecewise_hold",
+            "layer_sample_records":records,"outside_scene":"background","source_frames":"piecewise_hold",
             "integration":"equal_weight_encoded_rgb_nearest_rounding_after_complete_compositing",
             "audio":"unchanged","effects":{"grade":"per_sample_stateless","selective_grade":"per_sample_stateless",
                 "chroma_key":"per_sample_stateless","history_filters":"unsupported","optical_flow":"unsupported"},
@@ -106,7 +111,8 @@ impl Plan {
 
 pub fn capabilities() -> Value {
     json!({"profile":"midpoint-exposure-v1","shutter_angle_degrees":[0,360],"phase_degrees":[-360,360],
-        "maximum_samples_per_frame":32,"maximum_layer_pixel_sample_visits":67108864,"maximum_layer_sample_records":32768,
+        "maximum_samples_per_frame":32,"maximum_layer_sample_records":MAX_RECORDS,
+        "compositing_work":"scenes.limits.maximum_composited_pixels_counts_every_sample_and_its_accumulation",
         "integration":["encoded_rgb"],"sampling":"exact_rational_midpoints","outside_scene":"background",
         "source_interpolation":"held_images","optical_flow":false,"history_effects":false,"changes_audio":false})
 }
