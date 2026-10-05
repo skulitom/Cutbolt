@@ -37,17 +37,22 @@ impl Drop for Scratch {
     }
 }
 
-/// Speech regions of the voice track, `[start, end)` in timeline samples on the 10 ms grid.
-fn speech(
+/// Speech regions, `[start, end)` in timeline samples on the 10 ms grid: of the `voice` audio
+/// track played alone, or of the whole program when `voice` is `None`. A window is speech when its
+/// mean power reaches `threshold_db`; pauses shorter than `bridge` are merged into speech.
+pub(crate) fn speech(
     project: &Project,
     input_root: &Path,
-    voice: &str,
-    settings: &Settings,
+    voice: Option<&str>,
+    threshold_db: i32,
+    bridge: Time,
 ) -> Result<Vec<(u64, u64)>> {
     let mut solo = project.clone();
-    for track in &mut solo.tracks.as_mut().expect("tracks").tracks {
-        if track.kind == Kind::Audio {
-            track.enabled = track.id == voice;
+    if let (Some(voice), Some(arrangement)) = (voice, solo.tracks.as_mut()) {
+        for track in &mut arrangement.tracks {
+            if track.kind == Kind::Audio {
+                track.enabled = track.id == voice;
+            }
         }
     }
     let nonce = SystemTime::now()
@@ -90,8 +95,7 @@ fn speech(
     }
     // A window is speech when its mean power reaches the threshold: sum(L^2 + R^2) / (2 x 480)
     // against 32768^2 x 10^(threshold / 10).
-    let limit =
-        2.0 * WINDOW as f64 * 32768.0 * 32768.0 * 10f64.powf(settings.threshold_db as f64 / 10.0);
+    let limit = 2.0 * WINDOW as f64 * 32768.0 * 32768.0 * 10f64.powf(threshold_db as f64 / 10.0);
     let mut regions: Vec<(u64, u64)> = Vec::new();
     let mut buffer = vec![0u8; WINDOW as usize * 4];
     let mut at = 0u64;
@@ -129,7 +133,7 @@ fn speech(
         }
     }
     // Pauses shorter than the bridge stay ducked.
-    let bridge = settings.bridge.units(Time::new(48_000, 1)?)?;
+    let bridge = bridge.units(Time::new(48_000, 1)?)?;
     let mut merged: Vec<(u64, u64)> = Vec::new();
     for region in regions {
         match merged.last_mut() {
@@ -197,7 +201,13 @@ pub fn propose(
             "attack and release last at most 10 s",
         ));
     }
-    let regions = speech(project, input_root, voice, settings)?;
+    let regions = speech(
+        project,
+        input_root,
+        Some(voice),
+        settings.threshold_db,
+        settings.bridge,
+    )?;
     let mut operations = Vec::new();
     let mut clips = Vec::new();
     for clip in music_track.clips.iter() {

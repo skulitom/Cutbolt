@@ -216,6 +216,24 @@ It then proposes a gain curve for every clip on `music_track_id` that overlaps s
 
 The result lists the speech runs with exact times, a summary per clip, and `clip_audio` `operations`. Check them with `session.preview`, apply them with `session.apply`, and listen back with `timeline.meters` `curve` or a preview range.
 
+## Tightening pauses (jump cuts)
+
+`audio.tighten` is read-only. It finds the pauses in speech and proposes ripple deletions that shorten them, the jump cuts of talking-head video.
+
+Speech is detected as for `audio.duck`:
+- on placed tracks, in the `voice_track_id` audio track played alone;
+- on a sequential timeline, in the whole program.
+
+A 10 ms window is speech when its mean power reaches `threshold_db` (default -45 dBFS). A silence of at least `min_pause` (default 0.75 s) between speech is a pause. With `edges` (default true), silence before the first and after the last speech counts too.
+
+Each cut removes the middle of a pause and keeps `keep` (default 0.2 s) of silence next to the speech; twice `keep` must be shorter than `min_pause`. Cut ends are rounded inward to whole frames. On placed tracks they must also be whole 48 kHz samples, which at 29.97 fps means multiples of five frames.
+
+On placed tracks every cut ripples every track, with linked partners, so picture, voice and anything else stay in sync. Clips the cut splits get new right-hand IDs `<id>-j<n>`, and so do links whose members are all split. On a sequential timeline the cut is a `timeline.ripple_delete`.
+
+The cuts are ordered from the latest back, so each start is an original timeline time. Each is applied to a working copy first. A cut the editor refuses is listed with its reason and left out, so the returned batch always applies. Refusals include a cut inside a fade or a transition, or one that would split a link unevenly.
+
+The result lists each pause, its cut or the reason it was skipped, the time removed, and the durations before and after. Ripple deletions also cut music on other tracks, so tighten the speech before laying a music bed, or accept the jumps.
+
 ## Normalizing loudness
 
 `audio.normalize` is read-only. It brings the mix of enabled audio tracks to `target_lkfs` (default -14 LKFS, common for online video) by scaling every audio-track clip's level by one factor. This includes clips on disabled tracks, so the balance between tracks is kept. A clip's `gain_milli`, or every key of its `gain_curve`, is multiplied and rounded to the nearest milli-unit; fades are unchanged. Audio tracks with clips must be unlocked, and a sequential timeline must be promoted to tracks first.

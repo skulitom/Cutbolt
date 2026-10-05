@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: jump cuts from pauses in speech
+
+Removing dead air from talking-head footage meant one ripple deletion per pause, each with hand-computed times and fresh IDs for every split clip and link. The read-only `audio.tighten` now proposes them all. It finds pauses in the voice track, or in a sequential timeline's whole program, with the same 10 ms detector as `audio.duck`. Each cut keeps some silence next to the speech, lies on a grid exact in frames and samples, and ripples every track so they stay in sync. Each cut is tried on a working copy first: refused cuts, for example inside a fade, are reported with the reason, so the returned batch always applies.
+
+The transitions fixture adds a talking-head source with silences inside it. It recomputes the pauses, cuts and new IDs from the oracle's voice-only PCM. The tightened render must equal the original render with exactly the cut intervals deleted, on both a placed-track timeline (voice, linked picture and a music clip) and a sequential timeline. It also covers looser settings, a fade that refuses both cuts, and the rejections. No scoring changed.
+
 ## 5 October 2026: whole caption tracks as one overlay
 
 Burned-in captions went through scenes, which hold at most ten seconds and 16 layers. A ten-minute video therefore needed about sixty caption scenes, each rendered, added and placed by hand. `captions.render`, queued with `job.start`, now renders a whole caption document as one transparent overlay asset for an `alpha_over` track. Internally it compiles consecutive transparent caption windows through the existing `captions.scene` path. Each window is as long as ten seconds and the 16-layer limit allow, in steps exact in samples and milliseconds. The windows are joined losslessly with exact lengths and checked before publication.

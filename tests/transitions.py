@@ -273,6 +273,109 @@ def run(root):
                           (ducked,{'target_lkfs':-50},'INVALID_ARGUMENT'),(ducked,{'peak_ceiling_dbfs':1},'INVALID_ARGUMENT')):
         call({'command':'audio.normalize','project':subject,'input_root':str(root),**fields},code)
     passed.append('transitions.normalize_proposal_reaches_target_or_limit')
+    # Tightening: a 4 s talking-head source with silences at frames 20-45, 70-80 and 92-100. Cuts are
+    # recomputed here from the oracle's voice-only PCM, and the result is the original render with
+    # exactly those intervals deleted.
+    talk_frames=100
+    talk_pictures=[bytes(v for y in range(H) for x in range(W) for v in ((n*7+x*5)%256,(y*13+n*3)%256,(x*y+n*11)%256)) for n in range(talk_frames)]
+    talk_pcm=array('h',(0 if 20*1920<=n<45*1920 or 70*1920<=n<80*1920 or n>=92*1920 else v for n in range(talk_frames*1920) for v in (((n*67)%60000)-30000,((n*41)%60000)-30000)))
+    (sources/'3.rgb').write_bytes(b''.join(talk_pictures));(sources/'3.pcm').write_bytes(talk_pcm.tobytes())
+    ff(['-f','rawvideo','-pixel_format','rgb24','-video_size',f'{W}x{H}','-framerate','25','-i',str(sources/'3.rgb'),'-f','s16le','-ar','48000','-ac','2','-i',str(sources/'3.pcm'),
+        '-map','0:v','-map','1:a','-c:v','ffv1','-level','3','-slices','4','-pix_fmt','bgr0','-threads','1','-c:a','pcm_s16le','-colorspace','rgb','-color_range','pc','-color_primaries','bt709','-color_trc','iec61966-2-1',str(sources/'3.mkv')])
+    pictures.append(talk_pictures);sounds.append(talk_pcm)
+    talk_asset={'id':'3','path':str(sources/'3.mkv'),'duration':time(talk_frames,25),'identity':{'sha256':hashlib.sha256((sources/'3.mkv').read_bytes()).hexdigest(),'bytes':(sources/'3.mkv').stat().st_size}}
+    original.update({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()})
+    talking=call({'command':'project.create','id':'talking','width':W,'height':H,'frame_rate':time(25)})
+    talking=apply(talking,[{'op':'media.add','asset':a} for a in assets+[talk_asset]]+[edit('create',duration=time(150,25)),
+        edit('add',track=track('v','video')),edit('add',track=track('a','audio')),edit('add',track=track('m','audio')),
+        edit('place',track_id='v',clip=placement('tv',3,10,100,0),collision='reject'),edit('place',track_id='a',clip=placement('ta',3,10,100,0),collision='reject'),
+        edit('place',track_id='m',clip=placement('mb',0,25,30,0),collision='reject'),edit('link',id='talk',clip_ids=['tv','ta']),
+        edit('clip_audio',clip_ids=['mb'],gain_milli=300,fade_in=time(1,5))])
+    def tighten_oracle(p,voice,threshold=-45,min_pause=F(3,4),keep=F(1,5),edges=True):
+        solo=copy.deepcopy(p)
+        if p.get('tracks'):
+            for t in solo['tracks']['tracks']:
+                if t['kind']=='audio':t['enabled']=t['id']==voice
+            pcm=array('h',oracle(solo)[1])
+        else:pcm=array('h',sequential_oracle(solo)[1])
+        limit=2*480*32768**2*10**(threshold/10);regions=[];count=len(pcm)//2
+        for w in range((count+479)//480):
+            chunk=pcm[w*960:(w+1)*960]
+            if sum(v*v for v in chunk)>=limit:
+                end=w*480+len(chunk)//2
+                if regions and regions[-1][1]==w*480:regions[-1][1]=end
+                else:regions.append([w*480,end])
+        merged=[]
+        for r in regions:
+            if merged and r[0]-merged[-1][1]<min_pause*48000:merged[-1][1]=r[1]
+            else:merged.append(r)
+        duration=seconds(p['tracks']['duration']) if p.get('tracks') else sum(seconds(c['duration']) for c in p['clips'])
+        total=math.floor(duration*48000);pauses=[]
+        if merged:
+            if edges and merged[0][0]>=min_pause*48000:pauses.append((0,merged[0][0],'leading'))
+            pauses+=[(a[1],b[0],'between') for a,b in zip(merged,merged[1:])]
+            if edges and total-merged[-1][1]>=min_pause*48000:pauses.append((merged[-1][1],total,'trailing'))
+        cuts=[]
+        for a,b,kind in pauses:
+            first=0 if kind=='leading' else math.ceil(F(a+keep*48000,48000)*25)
+            last=int(duration*25) if kind=='trailing' else math.floor(F(b-keep*48000,48000)*25)
+            if last>first:cuts.append((F(first,25),F(last,25)))
+        used={c['id'] for c in p['clips']}
+        if p.get('tracks'):used|={c['id'] for t in p['tracks']['tracks'] for c in t['clips']}|{l['id'] for l in p['tracks']['links']}
+        def fresh(base):
+            n=1
+            while f'{base}-j{n}' in used:n+=1
+            used.add(f'{base}-j{n}');return f'{base}-j{n}'
+        operations=[]
+        for s,e in reversed(cuts):
+            if p.get('tracks'):
+                split=[c['id'] for t in p['tracks']['tracks'] for c in t['clips'] if seconds(c['start'])<s and seconds(c['start'])+seconds(c['duration'])>e]
+                right=[{'id':c,'new_id':fresh(c)} for c in split]
+                links=[{'id':l['id'],'new_id':fresh(l['id'])} for l in p['tracks']['links'] if all(m['clip_id'] in split for m in l['members'])]
+                operations.append({'op':'tracks.edit','edit':{'op':'ripple_delete','track_ids':[t['id'] for t in p['tracks']['tracks']],'start':time(s),'duration':time(e-s),
+                    'links':'include','right_clip_ids':right,'right_link_ids':links,'end_policy':'resize','transitions':'reject_affected'}})
+            else:
+                op={'op':'timeline.ripple_delete','start':time(s),'duration':time(e-s)};at=F(0)
+                for c in p['clips']:
+                    if at<s and at+seconds(c['duration'])>e:op['right_id']=fresh(c['id'])
+                    at+=seconds(c['duration'])
+                operations.append(op)
+        return cuts,operations
+    def sequential_oracle(p):
+        rgb,pcm=b'',b''
+        for c in p['clips']:
+            first=int(seconds(c['source_in'])*25);count=int(seconds(c['duration'])*25)
+            if c.get('gap'):rgb+=bytes(count*W*H*3);pcm+=bytes(count*1920*4);continue
+            rgb+=b''.join(pictures[int(c['asset_id'])][first:first+count]);pcm+=sounds[int(c['asset_id'])][first*1920*2:(first+count)*1920*2].tobytes()
+        return rgb,pcm
+    whole_talk=render(talking,'talking')
+    proposal=call({'command':'audio.tighten','project':talking,'input_root':str(root),'voice_track_id':'a'})
+    cuts,operations=tighten_oracle(talking,'a')
+    assert cuts==[(F(35,25),F(50,25)),(F(107,25),F(150,25))] and proposal['operations']==operations,(cuts,proposal['operations'],operations)
+    assert proposal['removed']==time(58,25) and proposal['duration_after']==time(92,25) and proposal['pauses']['cuts']==2
+    tightened=apply(talking,operations);result=render(tightened,'tightened')
+    assert result==(whole_talk[0][:35*W*H*3]+whole_talk[0][50*W*H*3:107*W*H*3],whole_talk[1][:35*1920*4]+whole_talk[1][50*1920*4:107*1920*4])
+    assert {c['id'] for t in tightened['tracks']['tracks'] for c in t['clips']}=={'tv','tv-j1','ta','ta-j1','mb','mb-j1'} and {l['id'] for l in tightened['tracks']['links']}=={'talk','talk-j1'}
+    # A sequential timeline is analysed whole; its cut keeps the right part as a new clip.
+    plain=call({'command':'project.create','id':'plain-talk','width':W,'height':H,'frame_rate':time(25)})
+    plain=apply(plain,[{'op':'media.add','asset':talk_asset},{'op':'clip.append','clip':{'id':'c1','asset_id':'3','source_in':time(0),'duration':time(100,25)}}])
+    proposal=call({'command':'audio.tighten','project':plain,'input_root':str(root)})
+    cuts,operations=tighten_oracle(plain,None)
+    assert cuts==[(F(25,25),F(40,25))] and proposal['operations']==operations==[{'op':'timeline.ripple_delete','start':time(1),'duration':time(15,25),'right_id':'c1-j1'}]
+    rgb,pcm=sequential_oracle(plain);done=apply(plain,operations)
+    out_path=out/'plain-tightened.mkv';call({'command':'render.run','project':done,'input_root':str(root),'output_root':str(out),'output':str(out_path)})
+    compare(out_path,rgb[:25*W*H*3]+rgb[40*W*H*3:],pcm[:25*1920*4]+pcm[40*1920*4:],'plain-tightened')
+    # Cuts the editor refuses are listed, not proposed: here a long fade-out covers both pauses.
+    faded=apply(talking,[edit('clip_audio',clip_ids=['ta'],fade_out=time(3))])
+    refused=call({'command':'audio.tighten','project':faded,'input_root':str(root),'voice_track_id':'a'})
+    assert refused['operations']==[] and all('skipped' in p for p in refused['pauses']['listed']) and refused['pauses']['count']==2,refused
+    loose=call({'command':'audio.tighten','project':talking,'input_root':str(root),'voice_track_id':'a','min_pause':time(3,10),'keep':time(1,10),'edges':False})
+    assert loose['operations']==tighten_oracle(talking,'a',min_pause=F(3,10),keep=F(1,10),edges=False)[1] and loose['pauses']['count']==2
+    for subject,fields,code in ((talking,{},'INVALID_ARGUMENT'),(talking,{'voice_track_id':'v'},'MISSING_TRACK'),(plain,{'voice_track_id':'a'},'INVALID_ARGUMENT'),
+                                (apply(talking,[edit('state',track_id='m',locked=True,enabled=True)]),{'voice_track_id':'a'},'TRACK_LOCKED'),
+                                (talking,{'voice_track_id':'a','keep':time(2,5)},'INVALID_ARGUMENT')):
+        call({'command':'audio.tighten','project':subject,'input_root':str(root),**fields},code)
+    passed.append('transitions.tighten_cuts_pauses_exactly')
     client=Client(exe)
     try:
         client.initialize();catalog=client.rpc('tools/list')['result']['tools'];assert len(catalog)==MCP_TOOLS
