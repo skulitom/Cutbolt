@@ -111,10 +111,15 @@ def main(argv=None):
         except manifest_module.ManifestError as error:
             fail("INVALID_MANIFEST", str(error))
         from . import pixel_stage
-        recipes, index = pixel_stage.art_plan(m["scenes"], m["colors"], pixel_stage.check_patterns(m["patterns"]))
-        emit({"ok": True, "result": {"production_id": m["production_id"], "manifest_sha256": m["manifest_sha256"],
-                                     "scenes": [{"id": s["id"], "beat": s["beat"]["type"], "narrated": bool(s["script"]),
-                                                 "words": len(pixel_stage.words_of(s["script"] or ""))} for s in m["scenes"]],
+        recipes, index = pixel_stage.art_plan(manifest_module.templated(m), m["colors"], pixel_stage.check_patterns(m["patterns"]))
+        scenes = []
+        for s in m["scenes"]:
+            row = {"id": s["id"], "beat": s["beat"]["type"] if s["beat"] else None, "narrated": bool(s["script"]),
+                   "words": len(pixel_stage.words_of(s["script"] or ""))}
+            if s["id"] in m["overrides"]["scenes"]:
+                row["override"] = m["overrides"]["scenes"][s["id"]]
+            scenes.append(row)
+        emit({"ok": True, "result": {"production_id": m["production_id"], "manifest_sha256": m["manifest_sha256"], "scenes": scenes,
                                      "art_recipes": sorted(recipes), "labels": sorted(index["labels"])}})
 
     if args.action == "build":

@@ -26,9 +26,9 @@ from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction as F
 from pathlib import Path
 
-from . import COORDINATOR_VERSION, CONTRACT_VERSION, pixel_stage
+from . import COORDINATOR_VERSION, CONTRACT_VERSION, override as override_module, pixel_stage
 from .engine import Engine, PixelForge, Qwen, ToolError
-from .manifest import digest, summary
+from .manifest import digest, summary, templated
 from .state import State, Timer, now, sha256_file
 
 STAGE_VERSION = "1"
@@ -259,7 +259,8 @@ class Production:
     # ------------------------------------------------------------------ art
     def stage_art(self):
         timer = Timer()
-        recipes, index = pixel_stage.art_plan(self.m["scenes"], self.m["colors"], pixel_stage.check_patterns(
+        # Scenes replaced by a recipe draw nothing from the template.
+        recipes, index = pixel_stage.art_plan(templated(self.m), self.m["colors"], pixel_stage.check_patterns(
             {k: v for k, v in self.m["patterns"].items()}))
         self.art_index = index
         pf = PixelForge(self.cfg["pixelforge"], self.state)
@@ -438,7 +439,8 @@ class Production:
         grid = {"frame": F(1, FPS), "beat": beat, "bar": 4 * beat}[t["snap"]]
         request = {"snap": t["snap"], "grid": fstr(grid), "lead": fstr(t["lead"]), "tail": fstr(t["tail"]), "min": fstr(t["min_scene"]),
                    "title_bars": t["title_bars"], "end_min_bars": t["end_min_bars"],
-                   "scenes": [{"id": s["id"], "duration": fstr(s["duration"]) if s["duration"] else None, "type": s["beat"]["type"],
+                   "scenes": [{"id": s["id"], "duration": fstr(s["duration"]) if s["duration"] else None,
+                               "type": s["beat"]["type"] if s["beat"] else "override",
                                "take": {"samples": takes[s["id"]]["samples"], "rate": takes[s["id"]]["sample_rate"]} if s["id"] in takes else None}
                               for s in self.m["scenes"]]}
         key = self.key("timing", request)
@@ -674,9 +676,9 @@ class Production:
             row = rows[scene["id"]]
             duration = F(row["duration"])
             override = self.m["overrides"]["scenes"].get(scene["id"])
+            resolved = None
             if override:
-                base = json.loads((self.root / inputs[override["input"]]).read_text(encoding="utf-8"))
-                base = base.get("scene", base)
+                base, resolved = self.resolve_override(scene, override, duration, inputs, cue_resolver(scene["id"]))
             else:
                 base = pixel_stage.SceneBuilder(scene, duration, art, self.art_index, patterns, self.m["colors"], cue_resolver(scene["id"]),
                                                 fonts, number).build()
@@ -695,7 +697,10 @@ class Production:
             recipe = json.loads((self.root / final_path).read_text(encoding="utf-8"))
             recipe = recipe.get("scene", recipe)
             # The key is the recipe's content alone: a neighbour's retiming or a caption change elsewhere leaves it alone.
+            # An override's key also names its source file, every cue time it resolved and every input identity it used.
             request = {"recipe": digest(recipe)}
+            if resolved:
+                request["override"] = resolved
             key = self.key(f"scene:{scene['id']}", request, {"engine": self.engine_identity})
 
             def run(attempt):
@@ -714,6 +719,28 @@ class Production:
         built = sum(1 for s in self.m["scenes"] if self.outcomes.get(f"scene:{s['id']}") == "built")
         self.log(f"scenes: {built} rendered, {len(rendered) - built} reused ({timer.seconds():.1f}s)")
         return rendered
+
+    def resolve_override(self, scene, override, duration, inputs, at):
+        """A hand-written recipe with its cue times, input identities and scene length filled in (see override.py).
+        It is read from the production's own copy and checked again, so the build uses exactly what it hashed."""
+        source = inputs[override["input"]]
+        where = f"overrides.scenes.{scene['id']}"
+        identities = {}
+
+        def identity(name):
+            if name not in identities:
+                identities[name] = {k: v for k, v in self.ident(inputs[name]).items() if k in ("path", "sha256", "bytes")}
+            return identities[name]
+        try:
+            document = json.loads((self.root / source).read_text(encoding="utf-8"))
+            recipe, report = override_module.prepare(document, scene, self.m["inputs"], where, override_module.Resolution(at, identity, duration))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise ToolError("production", "INVALID_OVERRIDE", f"{where}: {source} is not a JSON scene recipe: {error}") from None
+        except override_module.OverrideError as error:
+            raise ToolError("production", "INVALID_OVERRIDE", str(error)) from None
+        if report["cues"]:
+            self.log(f"scene {scene['id']}: " + ", ".join(f"{c['word']} at frame {c['frame']}" for c in report["cues"]))
+        return recipe, {"source": self.ident(source)["sha256"], **report}
 
     # ------------------------------------------------------------------ cut (saved session)
     def stage_cut(self, mixed, rendered, timing):

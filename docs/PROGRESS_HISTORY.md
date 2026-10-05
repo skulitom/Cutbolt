@@ -201,6 +201,29 @@ Tests:
 - `cargo test` passes here except two Windows-path unit tests, which fail the same way on the parent commit under Linux.
 
 The demo's speech check has not been re-run; its data is on the development machine. No scoring changed. Evidence stays stale until the next thorough run.
+## 5 October 2026: hand-written scenes follow the narration
+
+The part-two progress demo (`C:\DEV\CutboltData\demo-progress2-20261005`) replaced its effects scene with a hand-written recipe through `overrides.scenes`. Its `ISSUES.md` records three workarounds:
+- Timing the labels to the narration took a build, reading `film/generated/align/effects-*.json`, regenerating the recipe and a second build. Template beats start layers on spoken words; a recipe was fixed JSON.
+- The generator recomputed SHA-256 prefixes to name images by the coordinator's copies, `sources/<input>-<sha12><ext>`.
+- The overridden scene still needed a placeholder `beat`.
+
+The changes (`tools/cutbolt_production/override.py`, documented in [PRODUCTION.md](PRODUCTION.md#hand-written-scenes)):
+- **Cue times in recipes.** A layer's `start`, or any `time` inside a layer, may be `{"cue": "zooms"}` or `{"cue": {"word", "nth", "edge"}, "offset": "-2/25"}`. It resolves from the aligned take with the template's lead and snapping. Offsets are whole frames. A layer's `duration` may be `{"until": <cue time>}` or `{"until": "end"}`, and the scene's `duration` may be `"scene"`, the length the timing plan gives it.
+- **Input references.** `{"input": "vfx_stage"}` stands for the full `{path, sha256, bytes}` identity of the production's copy wherever the engine expects a file identity: frame images and mattes, fonts, audio and LUTs.
+- **Checked with the manifest.** `check` and `build` read the recipe and check its cue words and occurrences against the scene's script, its offsets, and its input names and file types. `check` lists each cue use. Cues anywhere else are refused with their path.
+- **Honest keys.** The scene's key covers the resolved recipe, the recipe file's SHA-256, every cue's time and frame, and every input identity. `show scene:<id>` lists them under `request.override`, and the build log names each cue's frame. A take that moves a cue word, or a changed image, re-renders the scene. A recipe that does not fit its timed scene fails with `OVERRIDE_DURATION` or `OVERRIDE_TIMING`, and an unheard word with `CUE_NOT_HEARD`; nothing is rendered.
+- **`beat` is optional** for a scene with a recipe. A beat beside a recipe only sets the timing rules, and overridden scenes no longer draw template art.
+
+Verification: `tests/production.py` adds four offline checks, which need no models:
+- 16 manifest rejections of bad cues, offsets, placements and inputs;
+- the coordinator's own scene stage resolving a recipe from a stand-in alignment and rendering it, with `scene.inspect` showing each label from the frame of its word (zooms 21, gold 49/51, lands 72, gold 81);
+- reuse, and re-keying when a word moves two frames or an image changes;
+- four build-time refusals.
+
+The offline part, old checks and new, passed in a Linux cloud session. There a local shim let the manifest take POSIX paths, since the coordinator accepts drive-letter paths only, and a DejaVu font stood in for Arial. The Windows verifier runs the fixture unchanged. The demo rebuild with a simplified recipe has not run yet: its folder is on the development machine, which this session could not reach.
+
+No capability points change: this is agent workflow over existing editing capabilities. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: H.264 exports stream straight from the timeline
 

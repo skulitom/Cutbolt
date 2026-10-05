@@ -100,8 +100,8 @@ Unknown fields fail with the field named; nothing is guessed. Times are exact se
 | `timing` | `lead` before each line (default 0.24 s), `tail` after it (0.4 s), `snap` (`frame`, `beat` or `bar`; default `beat` with a tempo, else `frame`), `title_bars` (2), `end_min_bars` (4), `min_scene` (3 s) |
 | `delivery` | `captions` (`burn_in` true; `sidecars` `["srt", "vtt"]`; `line_chars` 40; `lines` 2); `loudness_lkfs` (-14); `peak_dbfs` (-1); `review` (`speech` true, `frames` 16, `preview` false) |
 | `review_policy` | `version`, `gates` (from script, storyboard, narration, rough_cut, final_export) and `human_required` (default final_export) |
-| `scenes` | 1-24 scenes: `id`, optional `script` (1-600 characters; omit for a silent scene), `beat`, optional fixed `duration` (seconds or `{"bars": n}`) |
-| `overrides` | `narration.<scene>.input`: a supplied PCM16 WAV used instead of synthesis. `scenes.<scene>.input`: a complete scene recipe (JSON) used instead of the template's; captions are still added. |
+| `scenes` | 1-24 scenes: `id`, optional `script` (1-600 characters; omit for a silent scene), `beat` (optional when `overrides.scenes` gives the scene a recipe), optional fixed `duration` (seconds or `{"bars": n}`) |
+| `overrides` | `narration.<scene>.input`: a supplied PCM16 WAV used instead of synthesis. `scenes.<scene>.input`: a [hand-written scene recipe](#hand-written-scenes) (JSON) used instead of the template's, whose layers can start on words of the script and name files by input; captions are still added. |
 
 ### Beats
 
@@ -163,6 +163,7 @@ How the [contract's invalidation table](pipeline/CONTRACT.md#reviews-and-invalid
 | Shared palette | Every art recipe and every scene, the cut and delivery | Every take, alignment and voice asset |
 | One label | The labels recipe and the scenes that show labels | Every take |
 | Music, loudness target | Music preparation (new music only), mix, cut and delivery | Takes, scenes |
+| A hand-written scene recipe, or an input it names | That scene, the cut and delivery | Takes, art and every other scene |
 | Engine build | Engine stages, whose keys include the engine's SHA-256 | Takes and art |
 
 The `timing` receipt lists every scene whose start or length changed, with old and new boundaries. This is the contract's `ripple_following_scenes`: later scenes move, and nothing is trimmed or stretched. A scene with a fixed `duration` is the `preserve_scene_duration` choice: a take that does not fit fails with `NARRATION_OVERFLOW` instead of being cut.
@@ -191,12 +192,41 @@ The coordinator takes a lock (`state/coordinator.lock`, with its PID). A second 
 - `--rebuild STAGE` reruns a stage even when its receipt matches. It takes a stage (`tts:s2`, `scene:s4`), a kind (`scene`, `export`) or a batch (`tts`).
 - `--until scenes|cut` stops before the export: after the scene renders, or after the saved cut, for example to look at stills or `preview.frame` first.
 - `overrides.narration` substitutes a supplied WAV for synthesis, which still gets aligned.
-- `overrides.scenes` substitutes a whole scene recipe for the template's.
+- `overrides.scenes` substitutes a whole [hand-written scene recipe](#hand-written-scenes) for the template's.
 - Every intermediate is an ordinary file in the production folder, so an agent can open any of them with the engine's own tools:
   - the PixelForge recipe under `generated/art/`;
   - the base and captioned scene recipes under `scenes/`;
   - the target snapshots under `generated/timeline/`;
   - the caption draft under `generated/captions/`.
+
+### Hand-written scenes
+
+A scene the template cannot draw takes a recipe of its own: `overrides.scenes.<scene>.input` names a JSON input holding an ordinary [scene recipe](SCENES.md) (the scene itself, or `{"scene": ...}`). The scene then needs no `beat`. A beat given beside a recipe only sets the scene's timing rules (a title's bars, an end card's minimum) and draws no art. The scene keeps its place in the timing plan, its narration and its burned-in captions.
+
+Like a template beat, a recipe can follow the narration and the production's files. Four values may name production data instead of fixed numbers and paths; the coordinator resolves them before the engine sees the recipe:
+
+| In the recipe | Write | Becomes |
+| --- | --- | --- |
+| A layer's `start` | `{"cue": "zooms"}`, `{"cue": {"word": "gold", "nth": 1, "edge": "end"}}`, optionally with `"offset": "-4/25"` | The frame where the narrator says the word, found as for a template cue: the aligned take's word time plus the scene's lead, to the nearest frame. The offset, in whole frames, may be negative. |
+| Any `time` inside a layer: keyframes of position, opacity, masks, effects | The same cue time | The same moment, measured from the layer's start as keyframe times are |
+| A layer's `duration` | `{"until": <cue time>}` or `{"until": "end"}` | The layer lasts until that word, or until the scene ends |
+| The scene's `duration` | `"scene"` | The scene's length in the timing plan. A fixed length must equal it, or the build fails with `OVERRIDE_DURATION`. |
+| Any file identity: frame `image` and `matte`, `fonts`, audio `file`, LUT `file` | `{"input": "vfx_stage"}` | The full identity of the production's copy of that input, `{"path": "sources/vfx_stage-<sha12>.png", "sha256", "bytes"}` |
+
+For example, a label that fades in on "zooms" and leaves two frames before "gold":
+
+```json
+{"id": "zoom-label", "canvas": [128, 16], "start": {"cue": "zooms"}, "duration": {"until": {"cue": "gold", "offset": "-2/25"}},
+ "frames": [{"image": {"input": "zoom_label"}, "hold": "1/25", "offset": [0, 0], "anchor": [64, 0]}],
+ "timing": "strict", "end": "hold_last",
+ "transform": {"position": [960, 120], "crop": [0, 0, 128, 16], "scale": 6, "quarter_turns": 0, "opacity": 255},
+ "animation": {"opacity": {"keys": [{"time": 0, "value": 0, "interpolation": "linear"}, {"time": "4/25", "value": 255, "interpolation": "hold"}]}}}
+```
+
+- **Checked with the manifest.** `check` and `build` read the recipe and check every cue word and occurrence against the scene's script, every offset, and every input name against `inputs` (a PNG where an image or matte goes, a TrueType or OpenType font in `fonts`). `check` lists each scene's cue uses and inputs. A cue anywhere else, such as a frame `hold`, a `retime` start or the scene audio's `start`, is refused with its path.
+- **Resolved by the build**, from the production's own copy of the recipe and the aligned take. The resolved recipe is the base recipe under `scenes/`. The build log names each cue's frame, and `show scene:<id>` lists, under `request.override`, every cue's word, offset, time and frame, every input identity, the recipe file's SHA-256 and the scene length.
+- **Keyed by what it resolved to.** The scene's key covers the resolved recipe, the recipe file's SHA-256, every cue time and every input identity. A new take that moves a cue word by a frame re-renders the scene, and so does a changed image; a neighbour's retiming does not.
+- **Refused at build time:** a cue word the take never says (`CUE_NOT_HEARD`); a cue time outside the scene, or a keyframe outside its layer (`OVERRIDE_TIMING`); a layer that would end where it starts or after the scene (`OVERRIDE_TIMING`); a recipe whose length is not the scene's (`OVERRIDE_DURATION`); a recipe file that is not valid JSON (`INVALID_OVERRIDE`). Nothing is rendered.
 
 ### Review gates
 
@@ -263,7 +293,7 @@ Not implemented:
 ## Limits and open gaps
 
 - **One template.** A different look needs a new template module and beat catalog.
-- **Cue words** must appear in the script and are matched by letters and digits.
+- **Cue words** must appear in the script and are matched by letters and digits. In a hand-written recipe they can time a layer's start, its end and the keyframes inside it, in whole frames; not frame holds, curve retiming or the scene's own audio.
 - **Narration.** The CustomVoice preset speakers only; no reference-voice cloning. English alignment only.
 - **Music** is placed once from the start and faded out at its end, which is the film's end when the music is longer. It is never looped, so a shorter bed simply ends early.
 - **Composition limits.** Scenes last at most 120 s, so long scripts must be split across scenes; films at most 600 s; 24 scenes.

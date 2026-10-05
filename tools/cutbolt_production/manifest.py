@@ -10,7 +10,7 @@ import re
 from fractions import Fraction as F
 from pathlib import Path, PureWindowsPath
 
-from . import CONTRACT_VERSION, pixel_stage
+from . import CONTRACT_VERSION, override, pixel_stage
 
 ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -209,9 +209,11 @@ def validate(raw):
     seen = set()
     for i, scene in enumerate(scenes):
         where = f"scenes[{i}]"
-        fields(scene, {"id", "title", "script", "beat", "duration"}, where, ["id", "beat"])
+        fields(scene, {"id", "title", "script", "beat", "duration"}, where, ["id"])
         if not isinstance(scene["id"], str) or not ID.match(scene["id"]) or scene["id"] in seen:
             raise ManifestError(f"{where}.id: a unique 1-48 character lowercase id")
+        if "beat" not in scene and scene["id"] not in scene_over:
+            raise ManifestError(f"{where}: missing required field(s) ['beat']; a scene without a beat needs overrides.scenes.{scene['id']}")
         seen.add(scene["id"])
         script = scene.get("script")
         if script is not None and (not isinstance(script, str) or not script.strip() or len(script) > 600):
@@ -232,10 +234,10 @@ def validate(raw):
         else:
             norm["duration"] = None
         try:
-            norm["beat"] = pixel_stage.check_beat({**norm, "beat": scene["beat"]}, patterns, colors)
+            norm["beat"] = pixel_stage.check_beat({**norm, "beat": scene["beat"]}, patterns, colors) if "beat" in scene else None
         except pixel_stage.TemplateError as error:
             raise ManifestError(str(error)) from None
-        if norm["beat"]["type"] == "end":
+        if norm["beat"] and norm["beat"]["type"] == "end":
             norm["fonts_needed"] = True
         out["scenes"].append(norm)
     for key in narration_over:
@@ -251,8 +253,20 @@ def validate(raw):
             raise ManifestError(f"overrides.narration.{key}: the scene has no script to align the take to")
         out["overrides"]["narration"][key] = {"input": input_ref(value["input"], f"overrides.narration.{key}.input", (".wav",))}
     for key, value in scene_over.items():
-        fields(value, {"input"}, f"overrides.scenes.{key}", ["input"])
-        out["overrides"]["scenes"][key] = {"input": input_ref(value["input"], f"overrides.scenes.{key}.input", (".json",))}
+        where = f"overrides.scenes.{key}"
+        fields(value, {"input"}, where, ["input"])
+        name = input_ref(value["input"], f"{where}.input", (".json",))
+        # The recipe's cue words and input references are checked now, as a template beat's are.
+        try:
+            document = json.loads(Path(out["inputs"][name]).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ManifestError(f"{where}.input: cannot read the scene recipe {out['inputs'][name]}: {error}") from None
+        scene = next(s for s in out["scenes"] if s["id"] == key)
+        try:
+            _, uses = override.prepare(document, scene, out["inputs"], where)
+        except override.OverrideError as error:
+            raise ManifestError(str(error)) from None
+        out["overrides"]["scenes"][key] = {"input": name, **uses}
 
     voice = raw.get("voice")
     needs_voice = any(s["script"] and s["id"] not in out["overrides"]["narration"] for s in out["scenes"])
@@ -270,6 +284,11 @@ def validate(raw):
     out["notes"] = raw.get("notes")
     out["manifest_sha256"] = digest(raw)
     return out
+
+
+def templated(manifest):
+    """The scenes the template draws: those with a beat and no override recipe."""
+    return [s for s in manifest["scenes"] if s["beat"] and s["id"] not in manifest["overrides"]["scenes"]]
 
 
 def summary(manifest):

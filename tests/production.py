@@ -5,13 +5,15 @@ their invalidation by palette and label changes; every beat type compiled agains
 engine's scene.inspect, with cue layers starting on the exact frame of their word; the timing plan against hand-computed
 boundaries; reconcile() checked by applying its operations with the engine and comparing the result with the target;
 the TTS worker refusing a missing model before loading anything; the build's order, with stubbed stages, starting
-alignment on the voice assets while the music is still being prepared.
+alignment on the voice assets while the music is still being prepared; a hand-written scene override with word cues
+and input references, checked against its script, resolved from a stand-in alignment, rendered by the coordinator's
+scene stage and re-keyed when a cue time or an input changes.
 
 With CUTBOLT_PRODUCTION_CONFIG (PixelForge, the Qwen worker and the speech runtime installed): a complete four-scene
 production, a repeated build that reuses every stage, a one-line script change that rebuilds only that line's chain
 and the delivery, and a palette change that re-renders art and scenes but keeps every take.
 """
-from engine import ENGINE
+from engine import ENGINE, per_frame
 import argparse
 import copy
 import io
@@ -29,8 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from cutbolt_production import manifest as manifest_module, pixel_stage  # noqa: E402
 from cutbolt_production.pipeline import Production, arrangement_differences, plan_timing, reconcile  # noqa: E402
-from cutbolt_production.engine import ToolError  # noqa: E402
-from cutbolt_production.state import State  # noqa: E402
+from cutbolt_production.engine import Engine, ToolError  # noqa: E402
+from cutbolt_production.state import State, sha256_file  # noqa: E402
 
 
 def engine(command, root=None, **args):
@@ -350,6 +352,205 @@ def check_offline(out, passed):
     assert order.index("voice") < order.index("align") < order.index("music done") < order.index("audio timeline")         < order.index("captions") < order.index("scenes"), order
     passed.append("production.align_starts_before_music_finishes")
 
+    check_overrides(out, inputs, font, passed)
+
+
+EFFECTS_SCRIPT = "The camera zooms in, then the gold label lands on gold."
+
+
+def layer(id, canvas, start, duration, position, **extra):
+    return {"id": id, "canvas": canvas, "start": start, "duration": duration, "timing": "strict", "end": "hold_last",
+            "transform": {"position": position, "crop": [0, 0, *canvas], "scale": 1, "quarter_turns": 0, "opacity": 255}, **extra}
+
+
+def held(name):
+    return [{"image": {"input": name}, "hold": "1/25", "offset": [0, 0], "anchor": [0, 0]}]
+
+
+def recipe(id, layers):
+    return {"scene": {"schema_version": 1, "id": id, "width": 320, "height": 180, "output_scale": 1, "duration": "scene",
+                      "background": [20, 20, 40], "color": "srgb_straight_encoded", "audio": None, "layers": layers}}
+
+
+def effects_recipe():
+    """A hand-written scene that times its labels to the narration and names its files by input."""
+    return recipe("effects", [
+        layer("stage", [320, 180], 0, {"until": "end"}, [0, 0], frames=held("stage")),
+        layer("zoom-label", [64, 16], {"cue": "zooms"}, {"until": {"cue": "gold", "offset": "-2/25"}}, [128, 20], frames=held("label"),
+              animation={"opacity": {"keys": [{"time": 0, "value": 0, "interpolation": "linear"},
+                                              {"time": "4/25", "value": 255, "interpolation": "hold"}]}}),
+        layer("gold-label", [64, 16], {"cue": "gold"}, {"until": "end"}, [128, 40], frames=held("label"),
+              animation={"position_y": {"keys": [{"time": 0, "value": 40, "interpolation": "linear"},
+                                                 {"time": {"cue": {"word": "lands", "edge": "end"}}, "value": 60, "interpolation": "hold"}]}}),
+        layer("caption", [120, 30], {"cue": {"word": "gold", "nth": 1}}, {"until": "end"}, [100, 140], frames=[], graphics={
+            "kind": "text", "text": "GOLD", "fonts": [{"input": "bold"}], "size": 20, "color": [255, 209, 102, 255], "rect": [0, 0, 120, 30],
+            "line_height": 26, "letter_spacing": 0, "align": "left", "wrap": "none", "overflow": "reject"}),
+    ])
+
+
+def stand_in_words(script, moved=None):
+    """A stand-in alignment: word k from 0.3 k + 0.013 s to 0.3 k + 0.25 s, off the frame grid; `moved` comes 2 frames later."""
+    def rt(x):
+        return {"num": x.numerator, "den": x.denominator}
+    words = []
+    for k, text in enumerate(script.split()):
+        at = F(3, 10) * k + (F(2, 25) if pixel_stage.words_of(text) == [moved] else 0)
+        words.append({"text": text, "start": rt(at + F(13, 1000)), "end": rt(at + F(1, 4))})
+    return words
+
+
+class DirectEngine(Engine):
+    """Runs queued commands directly: the job queue's workers need Windows, and these checks are about the coordinator."""
+
+    def job(self, command, args, request_id, lane, label=None, wait_seconds=30):
+        return self.call(command, args, label=label)
+
+
+def check_overrides(out, inputs, font, passed):
+    """Hand-written scene overrides: cue words and input references checked with the manifest, resolved by the build."""
+    folder = out / "override-inputs"
+    folder.mkdir()
+    Image.new("RGBA", (320, 180), (60, 120, 200, 255)).save(folder / "stage.png")
+    Image.new("RGBA", (64, 16), (255, 209, 102, 255)).save(folder / "label.png")
+    (folder / "bold.ttf").write_bytes(font.read_bytes())
+    (folder / "effects.json").write_text(json.dumps(effects_recipe()), encoding="utf-8")
+    (folder / "still.json").write_text(json.dumps(recipe("travel", [layer("stage", [320, 180], 0, {"until": "end"}, [0, 0], frames=held("stage"))])),
+                                       encoding="utf-8")
+    files = {name: folder / f"{name}{suffix}" for name, suffix in (("stage", ".png"), ("label", ".png"), ("bold", ".ttf"), ("effects", ".json"),
+                                                                   ("still", ".json"))}
+
+    # 1. The manifest: a scene may have a recipe and no beat; its cues and inputs are checked against the script and inputs.
+    def film(recipe_file=None, scene=None):
+        raw = every_beat({**inputs, **{k: str(v) for k, v in files.items()}})
+        raw["inputs"]["effects"] = str(recipe_file or files["effects"])
+        raw["scenes"].append(scene or {"id": "effects", "script": EFFECTS_SCRIPT})
+        raw["overrides"] = {"scenes": {"effects": {"input": "effects"}, "travel": {"input": "still"}}}
+        return raw
+    m = manifest_module.validate(film())
+    effects = next(s for s in m["scenes"] if s["id"] == "effects")
+    assert effects["beat"] is None, effects
+    uses = m["overrides"]["scenes"]["effects"]
+    assert [(c["word"], c["nth"], c["edge"], c["offset"]) for c in uses["cues"]] == [
+        ("zooms", 0, "start", "0/1"), ("gold", 0, "start", "-2/25"), ("gold", 0, "start", "0/1"), ("lands", 0, "end", "0/1"),
+        ("gold", 1, "start", "0/1")], uses["cues"]
+    assert uses["inputs"] == ["bold", "label", "stage"] and uses["duration"] == "scene", uses
+    # A recipe replaces the whole scene: neither a scene without a beat nor an overridden beat draws template art.
+    assert [s["id"] for s in manifest_module.templated(m)] == ["title", "one", "two", "end", "cards", "strip", "recolor"]
+    _, art_index = pixel_stage.art_plan(manifest_module.templated(m), m["colors"], pixel_stage.check_patterns(m["patterns"]))
+    assert "TRAVEL" not in art_index["labels"], art_index["labels"]
+
+    cases = []
+
+    def broken(fragment, change=None, edit=None, scene=None):
+        recipe_file = None
+        if edit is not None:
+            document = effects_recipe()
+            edit(document["scene"])
+            recipe_file = folder / f"broken-{len(cases)}.json"
+            recipe_file.write_text(json.dumps(document), encoding="utf-8")
+        raw = film(recipe_file, scene)
+        if change:
+            change(raw)
+        cases.append(rejected(raw, fragment))
+
+    def layers(scene):
+        return scene["layers"]
+    broken("says 'spins' 0 time(s)", edit=lambda s: layers(s)[1].update(start={"cue": "spins"}))
+    broken("cue needs occurrence 2", edit=lambda s: layers(s)[1].update(start={"cue": {"word": "zooms", "nth": 1}}))
+    broken("cue needs occurrence 3", edit=lambda s: layers(s)[2]["animation"]["position_y"]["keys"][1].update(time={"cue": {"word": "gold", "nth": 2}}))
+    broken("not a whole number of 25 fps frames", edit=lambda s: layers(s)[1].update(start={"cue": "zooms", "offset": "1/50"}))
+    broken("a cue time has cue and an optional offset", edit=lambda s: layers(s)[1].update(start={"cue": "zooms", "lead": 1}))
+    broken("cue times may be a layer's start", edit=lambda s: layers(s)[1]["frames"][0].update(hold={"cue": "zooms"}))
+    broken("cue times may be a layer's start", edit=lambda s: s.update(audio={"file": {"input": "stage"}, "start": {"cue": "zooms"}}))
+    broken('{"until": "end"} or {"until": <cue time>}', edit=lambda s: layers(s)[0].update(duration={"until": "later"}))
+    broken("'missing' is not declared in inputs", edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "missing"}))
+    broken("input 'bold' must be a .png file here", edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "bold"}))
+    broken("input 'stage' must be a .ttf/.otf file here", edit=lambda s: layers(s)[3]["graphics"].update(fonts=[{"input": "stage"}]))
+    broken('an input reference is {"input": name} alone', edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "stage", "bytes": 1}))
+    broken("is not an exact time", edit=lambda s: s.update(duration="whole"))
+    broken("cues need narration", scene={"id": "effects"})
+    broken("a scene without a beat needs overrides.scenes.effects", change=lambda r: r["overrides"]["scenes"].pop("effects"))
+    broken("cannot read the scene recipe", change=lambda r: r["inputs"].update(effects=str(folder / "absent.json")))
+    passed.append(f"production.override_manifest_checks ({len(cases)} rejections)")
+
+    # 2. The scene stage resolves the recipe from the take's alignment and renders it; cue layers start on their words.
+    root = out / "override-film"
+    for d in ("sources", "renders"):
+        (root / d).mkdir(parents=True)
+    log = io.StringIO()
+    production = Production(m, root, {"engine": str(ENGINE)}, log=log)
+    production.engine = DirectEngine(ENGINE, root, {}, production.state, 1)
+    production.engine_identity = {"sha256": sha256_file(ENGINE)}
+    production.lanes = 1
+    production.m = {**m, "scenes": [effects], "overrides": {"narration": {}, "scenes": {"effects": uses}}}
+    copies = production.stage_inputs()
+    assert copies["stage"] == f"sources/stage-{sha256_file(files['stage'])[:12]}.png", copies
+
+    def scenes(words, copies=copies, length="5/1"):
+        production.outcomes.clear()
+        production.stage_scenes({"result": {"scenes": [{"id": "effects", "start": "0/1", "duration": length}]}},
+                                {"effects": {"words": words}}, None, {}, copies)
+        return production.outcomes["scene:effects"], production.state.receipt("scene:effects")
+    outcome, receipt = scenes(stand_in_words(EFFECTS_SCRIPT))
+    assert outcome == "built", outcome
+    resolved = receipt["request"]["override"]
+    # Lead 6/25 plus the word's time, to the nearest frame: zooms (word 2) 0.853 s -> 21; gold (6) 2.053 s -> 51, two frames
+    # early for the zoom label's end -> 49; lands (8) ends at 2.89 s -> 72; the second gold (10) 3.253 s -> 81.
+    assert [(c["word"], c["frame"]) for c in resolved["cues"]] == [("zooms", 21), ("gold", 49), ("gold", 51), ("lands", 72), ("gold", 81)], resolved
+    assert resolved["inputs"]["label"] == {"path": copies["label"], "sha256": sha256_file(files["label"]), "bytes": files["label"].stat().st_size}
+    assert resolved["source"] == sha256_file(files["effects"]) and resolved["duration"] == "5/1", resolved
+    assert "zooms at frame 21" in log.getvalue(), log.getvalue()
+    base = json.loads(next((root / "scenes").glob("effects-base-*.json")).read_text(encoding="utf-8"))
+    placed = {layer["id"]: (layer["start"], layer["duration"]) for layer in base["layers"]}
+    assert placed == {"stage": (0, {"num": 5, "den": 1}), "zoom-label": ({"num": 21, "den": 25}, {"num": 28, "den": 25}),
+                      "gold-label": ({"num": 51, "den": 25}, {"num": 74, "den": 25}),
+                      "caption": ({"num": 81, "den": 25}, {"num": 44, "den": 25})}, placed
+    assert base["layers"][2]["animation"]["position_y"]["keys"][1]["time"] == {"num": 21, "den": 25}
+    assert base["layers"][3]["graphics"]["fonts"] == [resolved["inputs"]["bold"]] and base["duration"] == {"num": 5, "den": 1}
+    report = engine("scene.inspect", root, scene=base)
+    sampled = {layer["layer_id"]: per_frame(layer["sampled_parameters"]) for layer in report["timing"]}
+    shown = {k: [i for i, v in enumerate(values) if v is not None] for k, values in sampled.items()}
+    assert (shown["zoom-label"], shown["gold-label"], shown["caption"]) == (list(range(21, 49)), list(range(51, 125)), list(range(81, 125))), \
+        {k: (v[:1], v[-1:]) for k, v in shown.items()}
+    # The gold label settles on the frame where "lands" ends.
+    assert [sampled["gold-label"][f]["position"][1] for f in (51, 71, 72, 124)] == [40, 59, 60, 60], [sampled["gold-label"][f] for f in (51, 71, 72)]
+    passed.append("production.override_cues_land_on_words (zooms 21, gold 49/51, lands 72, gold 81)")
+
+    # 3. Keys: the same take and inputs reuse the render; a word said later, or a changed image, re-keys the scene.
+    assert scenes(stand_in_words(EFFECTS_SCRIPT))[0] == "reused"
+    outcome, moved = scenes(stand_in_words(EFFECTS_SCRIPT, moved="lands"))
+    assert outcome == "built" and moved["key"] != receipt["key"], outcome
+    assert [c["frame"] for c in moved["request"]["override"]["cues"]] == [21, 49, 51, 74, 81], moved["request"]["override"]["cues"]
+    Image.new("RGBA", (64, 16), (240, 90, 90, 255)).save(files["label"])
+    recopied = production.stage_inputs()
+    assert recopied["label"] != copies["label"]
+    outcome, relabeled = scenes(stand_in_words(EFFECTS_SCRIPT), recopied)
+    assert outcome == "built" and relabeled["key"] not in (receipt["key"], moved["key"]), outcome
+    assert relabeled["request"]["override"]["inputs"]["label"]["sha256"] == sha256_file(files["label"])
+    passed.append("production.override_keys_follow_cues_and_inputs")
+
+    # 4. Build-time refusals: a cue word the take never says, a recipe longer than its timed scene, a cue after the scene's
+    #    end, and a layer that would end where it starts.
+    def refused(code, words=None, edit=None, length="5/1"):
+        document = effects_recipe()
+        if edit:
+            edit(document["scene"])
+        name = f"sources/refused-{len(cases)}.json"
+        (root / name).write_text(json.dumps(document), encoding="utf-8")
+        production.m["overrides"]["scenes"]["effects"] = {"input": "refused"}
+        try:
+            scenes(words or stand_in_words(EFFECTS_SCRIPT), {**recopied, "refused": name}, length)
+        except ToolError as error:
+            assert error.code == code, (code, error)
+            cases.append(str(error))
+            return
+        raise AssertionError(f"a build accepted an override that should fail with {code}")
+    refused("CUE_NOT_HEARD", words=[w for w in stand_in_words(EFFECTS_SCRIPT) if w["text"] != "lands"])
+    refused("OVERRIDE_DURATION", edit=lambda s: s.update(duration=4))
+    refused("OVERRIDE_TIMING", length="3/1")
+    refused("OVERRIDE_TIMING", edit=lambda s: layers(s)[1].update(duration={"until": {"cue": "zooms"}}))
+    passed.append("production.override_build_refusals")
+
 
 def build(manifest_path, root, config, *extra):
     done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "build", str(manifest_path), "--root", str(root),
@@ -410,9 +611,10 @@ def run(out, config):
     if full:
         check_full(out, config, passed)
     report = {"passed": passed, "full_run": full,
-              "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal, build order; with a "
+              "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal, build order, "
+                       "hand-written scene overrides with word cues and input references; with a "
                        "production config, a real PixelForge/Qwen/Cutbolt build with stage reuse and selective rebuilds",
-              "oracle": "Hand-computed boundaries and cue frames, the engine's own scene.inspect and timeline.apply, recipe digests"}
+              "oracle": "Hand-computed boundaries and cue frames, the engine's own scene.inspect and timeline.apply, recipe digests and stage keys"}
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))
 
