@@ -878,7 +878,7 @@ pub enum Sampling {
 pub struct SceneRequest {
     /// Caption document to sample; it is not changed.
     pub document: Document,
-    /// Base scene to extend; duration must be 1-250 whole frames at 25 fps.
+    /// Base scene to extend; duration must be 1 frame to 120 seconds of whole frames at its frame_rate.
     pub scene: Scene,
     /// ID of the returned scene.
     pub scene_id: String,
@@ -902,15 +902,16 @@ pub fn to_scene(request: &SceneRequest) -> Result<Value> {
     request.offset.validate()?;
     let rate = request.scene.clock()?;
     let frames = request.scene.duration.units(rate)?;
-    if !(1..=10 * rate.num / rate.den).contains(&frames)
+    if !(1..=scene::max_frames(rate)).contains(&frames)
         || request.offset.compare(DAY)? == Ordering::Greater
         || !id_ok(&request.layer_prefix)
         || request.layer_prefix.len() > 32
         || request.layouts.keys().any(|k| !d.styles.contains_key(k))
     {
-        return Err(invalid(
-            "Caption scenes require 1 frame to 10 seconds at the scene's frame_rate, a bounded offset/prefix and known layout style IDs",
-        ));
+        return Err(invalid(&format!(
+            "Caption scenes require 1 frame to {} seconds at the scene's frame_rate, a bounded offset/prefix and known layout style IDs",
+            scene::MAX_SECONDS
+        )));
     }
     let window_end = request.offset.plus(request.scene.duration)?;
     let mut result = request.scene.clone();

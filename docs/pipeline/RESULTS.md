@@ -38,7 +38,7 @@ The first fixture-generation attempt used the wrong PixelForge `pixels` shape an
 | Y13 | passed | Native scene engine consumes ordinary PNG/WAV without PixelForge/Qwen. Live companion exports substitute with identical decoded content. |
 | Y14 | partial | Missing tool has a structured failure, leaves no final output and cleans owned scratch files. Scene-stage timeout/kill/publication recovery remains unverified; existing reference-job tests do not close this case. |
 
-P1/P2 do not require closing every broader Y case. The fixture proves the specific file handoff and single-scene exit criteria; ten-second limits do not yet accommodate the proposed twelve-second storyboard slots. Do not silently shorten those production slots to fit this implementation.
+P1/P2 do not require closing every broader Y case. The fixture proves the specific file handoff and single-scene exit criteria; scenes now last up to 120 seconds, so each proposed twelve-second storyboard slot compiles as one scene; the 5 October 2026 demo, made under the former ten-second limit, had to split every story scene into two shots. Do not silently shorten production slots to fit an implementation limit.
 
 ## Progress accounting and next work
 

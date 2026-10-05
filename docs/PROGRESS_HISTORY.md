@@ -70,6 +70,24 @@ Fixture coverage:
 - The whole-file check that came with `media.transcribe` applied the 10% word-error gate to the six isolated Greek words. The recognizer hears "κύπος" for "κήπος" there, also with the previous engine, which is 17%. Gates skip this fixture when no speech runtime is configured, so the check had not run since it was added. It now uses the gates of direct recognition: every word found, and the error rate only for passages.
 
 No scoring changed.
+## 5 October 2026: two-minute scenes with 64 layers
+
+The 5 October demo hit two scene limits. Scenes stopped at ten seconds, while its narration lines ran 7.8-11 s and the pilot brief plans 12-second scenes. Every story scene was therefore split into two shots, with loop phases and keyframes re-cut by hand across the split. A plain stage background took 7 of the 16 allowed layers, and `captions.scene` adds a layer per cue, so busy shots ran out. The ten-second cap dated from compositing into a raw-video scratch file; frames have since been streamed to the encoder.
+
+Scenes now last up to 120 seconds at their frame rate (3,000 frames at 25 fps, 7,200 at 60 fps) and hold up to 64 layers:
+- A compositing budget replaces the length cap as the bound on work. `scene.inspect` reports each scene's `work.composited_pixels`: every active layer's clipped destination, plus a tilemap's canvas, summed over frames. Scenes above 64 billion fail before any media is read, naming the layer with the largest share. The budget keeps the worst case near the former 600-frame, 16-layer, 8-megapixel limit.
+- Text and shape layers keep only the bounding box of their visible pixels, and only that counts toward the 64-million decoded-pixel budget. Forty full-frame 1080p caption cues use 4.4 million instead of 83 million. Compositing a fully transparent straight-alpha pixel never changes the destination, so output is identical; layers with effects or spatial transforms, and 3D scenes, keep whole canvases.
+- The decode that verifies every reference output frame now gets a timeout that grows with frames and pixels. A two-minute 60 fps output takes 85-100 s to decode, close to the former fixed 120 s.
+- Each tile's `tile_selected_frames` is run-length encoded like the other per-frame arrays. Per-frame parameter records shrank from about 370 bytes to 64 by boxing the rarely used spatial mapping.
+- Schema text no longer says scenes are 25 fps only.
+
+Measured with the release build: a 120-second native 1080p stage of 18 layers built from the demo's art renders in 75-86 s at 156 MB engine peak. With 40 caption cues (58 layers) it takes 79 s and 189 MB, and at 60 fps 162 s and 170 MB. Receipts grow with movement (558 KB for that stage), so `SCENES.md` recommends `save_as` for long receipts.
+
+Unit tests cover the limits at both rates, 64 and 65 layers, the work estimate and its rejection, run-length tile selections, record size, and trimmed graphics compositing exactly like whole canvases (blend modes, turns, crops, masks, transparent scenes, empty canvases). `tests/native_scenes.py` adds a 12-second scene of 24 layers (two minutes with `--long-form`, which the thorough run uses) with narration and 18 caption cues. It checks:
+- every frame's count and the soundtrack exactly, and pixels against the oracle every second, on both sides of each caption boundary and at the last frame;
+- the work estimate against an independent computation;
+- that scratch holds only the output and PCM, with engine memory and time.
+It also rejects 3,001 frames at 25 fps, 7,201 at 60 fps, 65 layers and an over-budget scene, and inspects a 64-layer, 3,000-frame scene. The captions fixture's layer-limit case now uses 64 cues. The evidence is stale until the next thorough run. No scoring changed.
 
 ## 5 October 2026: colour matching between cameras
 

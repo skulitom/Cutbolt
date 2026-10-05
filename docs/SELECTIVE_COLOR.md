@@ -2,7 +2,7 @@
 
 The `selective_grade` scene effect applies a [primary grade](GRADING.md) through color qualifiers, a correction mask, or both. It supports hard/soft selection boundaries, inversion, an adjustable mix and animated grade controls, mix and mask rectangles. Pixels outside the selection keep their original color and alpha interpretation. This changes color without creating transparency; [chroma keying](KEYING.md) is a separate ordered effect, and tracking remains open.
 
-Use the existing `scene.inspect` CLI/library/MCP command to validate and inspect sampled parameters, then `scene.render` through CLI/library to compile a new asset. No new command or dependency is required. The scene limit is still eight ordered effects per layer in total, ten seconds and 16 layers. This path processes bounded PNG/graphics scenes, not arbitrary native video tracks.
+Use the existing `scene.inspect` CLI/library/MCP command to validate and inspect sampled parameters, then `scene.render` through CLI/library to compile a new asset. No new command or dependency is required. The scene limit is still eight ordered effects per layer in total, 120 seconds and 64 layers. This path processes bounded PNG/graphics scenes, not arbitrary native video tracks.
 
 ## Effect schema
 

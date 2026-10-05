@@ -27,8 +27,13 @@ const RATE: Time = Time { num: 48000, den: 1 };
 /// A logical canvas may be composited at native output size (output_scale 1, e.g. 1920x1080).
 pub(crate) const MAX_CANVAS: u32 = 4096;
 pub(crate) const MAX_OUTPUT_PIXELS: u64 = 8_000_000;
-pub(crate) const MAX_LAYERS: usize = 16;
-pub(crate) const MAX_FRAMES: u64 = 250;
+pub(crate) const MAX_LAYERS: usize = 64;
+/// Longest scene at any of the native rates: 3,000 frames at 25 fps, 7,200 at 60 fps.
+pub(crate) const MAX_SECONDS: u64 = 120;
+pub(crate) const MAX_FRAMES: u64 = MAX_SECONDS * 25;
+/// Bound on destination pixels the compositor may visit over a whole scene (see `Scene::work`).
+/// It keeps the worst case near the former 600-frame, 16-layer, 8-megapixel maximum.
+pub(crate) const MAX_COMPOSITED_PIXELS: u64 = 64_000_000_000;
 pub(crate) const MAX_REFERENCES: usize = 1024;
 pub(crate) const MAX_DECODED_PIXELS: usize = 64_000_000;
 pub(crate) const MAX_TEXT_SIZE: u16 = 512;
@@ -38,8 +43,10 @@ pub(crate) const MAX_TILE_CELLS: usize = 4096;
 
 pub(crate) fn limits() -> Value {
     json!({"canvas_per_axis":[1,MAX_CANVAS],"output_scale":[1,8],"maximum_output_pixels":MAX_OUTPUT_PIXELS,
-        "frames":[1,MAX_FRAMES],"frame_rate":{"num":25,"den":1},"frame_rates":"eight_native_rates_default_25","maximum_seconds":10,"layers":[1,MAX_LAYERS],"maximum_frame_references":MAX_REFERENCES,
-        "maximum_decoded_pixels":MAX_DECODED_PIXELS,"png_per_axis":[1,MAX_CANVAS],"png_maximum_bytes":64*1024*1024,
+        "frames":[1,MAX_FRAMES],"frame_rate":{"num":25,"den":1},"frame_rates":"eight_native_rates_default_25","maximum_seconds":MAX_SECONDS,
+        "frames_at_60_fps":[1,MAX_SECONDS*60],"layers":[1,MAX_LAYERS],"maximum_frame_references":MAX_REFERENCES,
+        "maximum_composited_pixels":MAX_COMPOSITED_PIXELS,"composited_pixels":"per_active_sample_clipped_destination_rectangle_plus_tilemap_canvas_whole_scene_for_spatial_or_3d_twice_when_transparent",
+        "maximum_decoded_pixels":MAX_DECODED_PIXELS,"decoded_pixels":"png_sources_mattes_and_visible_bounds_of_graphics","png_per_axis":[1,MAX_CANVAS],"png_maximum_bytes":64*1024*1024,
         "png_total_bytes":256*1024*1024,"text_size":[1,MAX_TEXT_SIZE],"glyph_bitmap_per_axis":MAX_GLYPH,
         "integer_layer_scale":[1,16],"tilemap":{"maximum_tiles":MAX_TILES,"maximum_cells":MAX_TILE_CELLS,"tile_size_per_axis":[1,MAX_CANVAS],
         "empty_cells":"null","assembly":"straight_rgba_copy_into_layer_canvas_before_mask_effects_transform"},
@@ -68,14 +75,14 @@ pub struct Frame {
     /// Optional binary matte PNG of the same size: opaque black clears source pixels, white keeps them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matte: Option<Identity>,
-    /// Positive display length, rational seconds; strict timing needs a whole number of 25 fps frames.
+    /// Positive display length, rational seconds; strict timing needs a whole number of scene frames.
     pub hold: Time,
     /// `[x, y]` pixel position of a trimmed PNG inside the layer canvas or tile; the image must fit.
     pub offset: [u32; 2],
     /// `[x, y]` full-canvas pivot (pixel corners) placed at the transform position; each -4096..4096.
     pub anchor: [i32; 2],
 }
-/// How frame holds map to the 25 fps scene clock: `strict` requires every hold to be whole frames; `sample_start` shows the frame containing each exact sample time.
+/// How frame holds map to the scene's frame clock: `strict` requires every hold to be whole frames; `sample_start` shows the frame containing each exact sample time.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Timing {
@@ -130,8 +137,9 @@ struct Parameters {
     mask_rect: Option<[i32; 4]>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     effects: Vec<crate::effects::Sample>,
+    /// Boxed: a mapping is large, and long scenes hold one record per layer and frame.
     #[serde(skip_serializing_if = "Option::is_none")]
-    spatial: Option<crate::spatial::Mapping>,
+    spatial: Option<Box<crate::spatial::Mapping>>,
 }
 /// One reusable tile: an ordinary held-frame animation with its own clock, relative to layer start.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -139,7 +147,7 @@ struct Parameters {
 pub struct Tile {
     /// Ordered held frames, at least one; each must fit `tile_size`.
     pub frames: Vec<Frame>,
-    /// How this tile's holds map to the 25 fps clock.
+    /// How this tile's holds map to the scene's frame clock.
     pub timing: Timing,
     /// What the tile shows after its frame cycle ends.
     pub end: End,
@@ -220,9 +228,9 @@ pub struct Layer {
     pub id: String,
     /// `[width, height]` of the full source canvas in pixels, 1..4096 each; frames, crop and masks use it.
     pub canvas: [u32; 2],
-    /// Scene time the layer becomes active, rational seconds on the 25 fps grid.
+    /// Scene time the layer becomes active, rational seconds on the scene's frame grid.
     pub start: Time,
-    /// Nonzero active length, rational seconds on the 25 fps grid; start plus duration must fit the scene.
+    /// Nonzero active length, rational seconds on the scene's frame grid; start plus duration must fit the scene.
     pub duration: Time,
     /// Ordered held PNG frames; leave empty when using `graphics` or `tilemap`.
     pub frames: Vec<Frame>,
@@ -232,7 +240,7 @@ pub struct Layer {
     /// Grid of animated tiles assembled into the canvas; needs strict timing and hold_last, and no geometry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tilemap: Option<Tilemap>,
-    /// How frame holds map to the 25 fps scene clock.
+    /// How frame holds map to the scene's frame clock.
     pub timing: Timing,
     /// What shows after the frame cycle ends; the layer duration still limits activation.
     pub end: End,
@@ -294,7 +302,7 @@ pub struct Audio {
 pub enum Color {
     SrgbStraightEncoded,
 }
-/// Bounded pixel scene of layers and audio, validated by scene.inspect and compiled by scene.render to a lossless 25 fps asset.
+/// Bounded pixel scene of layers and audio, validated by scene.inspect and compiled by scene.render to a lossless asset at its frame_rate.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Scene {
@@ -308,7 +316,7 @@ pub struct Scene {
     pub height: u32,
     /// Integer nearest-neighbor output enlargement, 1..8; the scaled output is at most 8,000,000 pixels.
     pub output_scale: u32,
-    /// Scene length, rational seconds; a whole number of frames at `frame_rate` and of 48 kHz samples, at most 10 seconds (250 frames at 25 fps).
+    /// Scene length, rational seconds; a whole number of frames at `frame_rate` and of 48 kHz samples, at most 120 seconds (3,000 frames at 25 fps, 7,200 at 60 fps).
     pub duration: Time,
     /// Output frame rate, one of the eight native rates; default 25. Match the timeline's rate so the compiled asset can be placed on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -317,7 +325,7 @@ pub struct Scene {
     pub background: [u8; 3],
     /// Color interpretation of sources and compositing.
     pub color: Color,
-    /// Ordered layers, 1..16, with at most 1024 frame references in total.
+    /// Ordered layers, 1..64, with at most 1024 frame references in total.
     pub layers: Vec<Layer>,
     /// Optional narration WAV; null gives silence unless `audio_mix` is set. Cannot be combined with `audio_mix`.
     pub audio: Option<Audio>,
@@ -346,7 +354,8 @@ pub(crate) struct Pixels {
 struct Prepared {
     images: HashMap<PathBuf, Pixels>,
     matted: HashMap<(PathBuf, PathBuf), Pixels>,
-    graphics: HashMap<String, Pixels>,
+    /// Rasterized graphics by layer ID, with the image's offset inside the layer canvas.
+    graphics: HashMap<String, (Pixels, [u32; 2])>,
     sources: Vec<(PathBuf, Identity)>,
     pcm: Vec<i16>,
     report: Value,
@@ -414,7 +423,8 @@ impl Scene {
             || self.layers.len() > MAX_LAYERS
         {
             return Err(invalid(&format!(
-                "Scene v1 requires 1 frame to 10 seconds of frames at its frame_rate, 1-16 layers, canvas 1-{MAX_CANVAS} per axis, output scale 1-8 and at most 8M output pixels (got {}x{} x{}, {frames} frames, {} layers)",
+                "Scene v1 requires 1 frame to {MAX_SECONDS} seconds of frames at its frame_rate ({} at {rate} fps), 1-{MAX_LAYERS} layers, canvas 1-{MAX_CANVAS} per axis, output scale 1-8 and at most 8M output pixels (got {}x{} x{}, {frames} frames, {} layers)",
+                max_frames(rate),
                 self.width,
                 self.height,
                 self.output_scale,
@@ -520,7 +530,60 @@ impl Scene {
                 ));
             }
         }
+        let (work, heaviest) = self.work(rate)?;
+        if work > MAX_COMPOSITED_PIXELS {
+            let (index, share) = heaviest;
+            return Err(error(
+                "LIMIT_EXCEEDED",
+                format!(
+                    "Scene compositing work is {work} layer pixels over all frames, above the {MAX_COMPOSITED_PIXELS} budget; the largest share is layers[{index}] ({}) with {share}. Shorten the scene or the layers' active ranges, crop or shrink large layers, or split the scene",
+                    self.layers[index].id
+                ),
+            ));
+        }
         Ok(frames)
+    }
+
+    /// Upper bound on destination pixels the compositor visits over the whole scene, before any
+    /// media is read, and the layer contributing most. Each active sample of a layer costs its
+    /// transformed crop clipped to the scene (the whole scene for spatial or 3D layers, whose
+    /// footprint depends on sampled values) plus the canvas a tilemap assembles; a transparent
+    /// scene composes a color and a matte pass. Call after the layer checks of `validate`.
+    pub(crate) fn work(&self, rate: Time) -> Result<(u64, (usize, u64))> {
+        let scene = self.width as u64 * self.height as u64;
+        let samples = self.temporal.as_ref().map_or(1, |t| t.samples.clamp(1, 32)) as u64;
+        let passes = 1 + self.transparent as u64;
+        let mut total = 0u64;
+        let mut heaviest = (0, 0);
+        for (index, layer) in self.layers.iter().enumerate() {
+            let t = &layer.transform;
+            let destination = if self.geometry.is_some() || t.spatial.is_some() {
+                scene
+            } else {
+                let (w, h) = if t.quarter_turns % 2 == 0 {
+                    (t.crop[2], t.crop[3])
+                } else {
+                    (t.crop[3], t.crop[2])
+                };
+                (w as u64 * t.scale as u64).min(self.width as u64)
+                    * (h as u64 * t.scale as u64).min(self.height as u64)
+            };
+            let assembly = if layer.tilemap.is_some() {
+                layer.canvas[0] as u64 * layer.canvas[1] as u64
+            } else {
+                0
+            };
+            let share = layer
+                .duration
+                .units(rate)?
+                .saturating_mul(samples * passes)
+                .saturating_mul(destination + assembly);
+            if share > heaviest.1 {
+                heaviest = (index, share);
+            }
+            total = total.saturating_add(share);
+        }
+        Ok((total, heaviest))
     }
 }
 
@@ -738,23 +801,36 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         selections.push(selected.clone());
         let mut total = Time::ZERO;
         let graphic_report = if let Some(graphic) = &layer.graphics {
-            pixels += layer.canvas[0] as u64 * layer.canvas[1] as u64;
-            if pixels > MAX_DECODED_PIXELS as u64 {
+            // The whole canvas exists while it is rasterized; only its visible part is kept.
+            if pixels + layer.canvas[0] as u64 * layer.canvas[1] as u64 > MAX_DECODED_PIXELS as u64
+            {
                 return Err(error(
                     "LIMIT_EXCEEDED",
-                    "Decoded scene image budget exceeded",
+                    format!(
+                        "Decoded scene image budget exceeded at layer {:?}: {MAX_DECODED_PIXELS} pixels hold the PNG sources, mattes and visible parts of graphics",
+                        layer.id
+                    ),
                 ));
             }
             let (rgba, report) =
                 crate::graphics::rasterize(graphic, layer.canvas, root, &mut font_cache)?;
-            graphics.insert(
-                layer.id.clone(),
-                Pixels {
-                    width: layer.canvas[0],
-                    height: layer.canvas[1],
-                    rgba,
-                },
-            );
+            let canvas = Pixels {
+                width: layer.canvas[0],
+                height: layer.canvas[1],
+                rgba,
+            };
+            // Trimming relies on the integer path skipping pixels outside the image exactly as it
+            // composites fully transparent ones; effects, spatial taps and 3D keep the canvas.
+            let (image, offset) = if layer.effects.is_empty()
+                && layer.transform.spatial.is_none()
+                && scene.geometry.is_none()
+            {
+                trim(canvas)
+            } else {
+                (canvas, [0, 0])
+            };
+            pixels += image.width as u64 * image.height as u64;
+            graphics.insert(layer.id.clone(), (image, offset));
             total = layer.duration;
             Some(report)
         } else {
@@ -906,7 +982,8 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         if let (Some(map), Some(chosen)) = (&layer.tilemap, &tile_selection) {
             let (columns, rows) = map.grid();
             layer_report["tilemap"] = json!({"grid":[columns,rows],"tile_size":map.tile_size,"tiles":map.tiles.len(),
-                "occupied_cells":map.cells.iter().flatten().filter(|c|c.is_some()).count(),"tile_selected_frames":chosen});
+                "occupied_cells":map.cells.iter().flatten().filter(|c|c.is_some()).count(),
+                "tile_selected_frames":chosen.iter().map(|tile|runs(tile)).collect::<Vec<_>>()});
         }
         tile_selections.push(tile_selection);
         if !layer.effects.is_empty() {
@@ -1019,6 +1096,9 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
     }
     let mut report = json!({"profile":"pixel-scene-v1","scene_id":scene.id,"frame_rate":scene.clock()?,"frames":frames,"samples":samples,"width":scene.width*scene.output_scale,"height":scene.height*scene.output_scale,"color":"srgb-opaque-composited-in-encoded-srgb","timing":timing,"audio":audio_report,"sources":sources.iter().map(|(path,i)|json!({"path":path,"identity":i})).collect::<Vec<_>>()});
     report["frame_matte"] = json!({"profile":"binary-source-matte-v1","matted_pairs":matted.len(),"sampling":"same held frame as source; applied before effects and spatial filtering"});
+    let (work, _) = scene.work(scene.clock()?)?;
+    report["work"] = json!({"composited_pixels":work,"maximum_composited_pixels":MAX_COMPOSITED_PIXELS,
+        "decoded_pixels":pixels,"maximum_decoded_pixels":MAX_DECODED_PIXELS});
     if let Some(samples) = expression_samples {
         report["expressions"] = json!({"profile":"typed-property-graph-v1","program":scene.expressions,"frame_bindings":samples});
     }
@@ -1146,7 +1226,7 @@ fn sample_parameters(
                 })
                 .transpose()?;
             Ok(Some(Parameters {
-                spatial: mapped,
+                spatial: mapped.map(Box::new),
                 effects: effects
                     .iter()
                     .map(|e| e.sample(time))
@@ -1163,9 +1243,9 @@ pub(crate) fn select_frame(layer: &Layer, n: u64, rate: Time) -> Result<Option<u
     select_at(layer, Time::new(n * rate.den, rate.num)?)
 }
 
-/// Frames in ten seconds at `rate`: 250 at 25 fps, 600 at 60 fps.
-fn max_frames(rate: Time) -> u64 {
-    10 * rate.num / rate.den
+/// Frames in the longest scene at `rate`: 3,000 at 25 fps, 7,200 at 60 fps.
+pub(crate) fn max_frames(rate: Time) -> u64 {
+    MAX_SECONDS * rate.num / rate.den
 }
 
 impl Scene {
@@ -1270,7 +1350,8 @@ fn compose_sample(
         };
         let assembled;
         let (image, offset, anchor) = if layer.graphics.is_some() {
-            (&prepared.graphics[&layer.id], [0, 0], [0, 0])
+            let (image, offset) = &prepared.graphics[&layer.id];
+            (image, *offset, [0, 0])
         } else if let Some(map) = &layer.tilemap {
             assembled = assemble_tiles(map, layer, prepared, layer_index, sample);
             (&assembled, [0, 0], [0, 0])
@@ -1433,6 +1514,48 @@ fn compose_sample(
     Ok(rgb)
 }
 
+/// The bounding box of a straight-RGBA canvas's nonzero alpha, as an image and its offset in the
+/// canvas; a fully transparent canvas becomes an empty image. A fully transparent straight pixel
+/// leaves the destination unchanged in every blend mode, so drawing the trimmed image at its
+/// offset on the integer path composites exactly as the whole canvas does.
+fn trim(canvas: Pixels) -> (Pixels, [u32; 2]) {
+    let (width, height) = (canvas.width as usize, canvas.height as usize);
+    let (mut left, mut top, mut right, mut bottom) = (width, height, 0, 0);
+    for (y, row) in canvas.rgba.chunks_exact(width * 4).enumerate() {
+        for (x, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
+            if pixel[3] != 0 {
+                (left, right) = (left.min(x), right.max(x));
+                (top, bottom) = (top.min(y), y);
+            }
+        }
+    }
+    if left > right {
+        let empty = Pixels {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+        };
+        return (empty, [0, 0]);
+    }
+    if (left, top, right, bottom) == (0, 0, width - 1, height - 1) {
+        return (canvas, [0, 0]);
+    }
+    let row_bytes = (right + 1 - left) * 4;
+    let mut rgba = Vec::with_capacity(row_bytes * (bottom + 1 - top));
+    for y in top..=bottom {
+        let start = (y * width + left) * 4;
+        rgba.extend_from_slice(&canvas.rgba[start..start + row_bytes]);
+    }
+    (
+        Pixels {
+            width: (right + 1 - left) as u32,
+            height: (bottom + 1 - top) as u32,
+            rgba,
+        },
+        [left as u32, top as u32],
+    )
+}
+
 /// Copy each occupied cell's selected tile frame (straight RGBA, trim offset applied) into a
 /// transparent canvas. Cells never overlap, so no blending happens during assembly.
 fn assemble_tiles(
@@ -1510,7 +1633,8 @@ fn compose_geometry(
             return None;
         }
         let (image, offset) = if layer.graphics.is_some() {
-            (&prepared.graphics[&layer.id], [0, 0])
+            let (image, offset) = &prepared.graphics[&layer.id];
+            (image, *offset)
         } else {
             let frame = &layer.frames[index];
             (prepared.frame_pixels(frame), frame.offset)
@@ -1902,5 +2026,196 @@ mod tests {
         let error = scene.validate().unwrap_err();
         assert_eq!(error.code, "UNSUPPORTED_SCENE");
         assert!(error.message.contains("normal-blend"));
+    }
+
+    /// The title card with only its panel, a shape that rasterizes without files.
+    fn panel_scene() -> Scene {
+        let template: Value =
+            serde_json::from_str(include_str!("../examples/title-card-template.json")).unwrap();
+        let mut scene: Scene = serde_json::from_value(template["scene"].clone()).unwrap();
+        scene.layers.truncate(1);
+        scene
+    }
+
+    fn frames(n: u64, rate: Time) -> Time {
+        Time::new(n * rate.den, rate.num).unwrap()
+    }
+
+    #[test]
+    fn scenes_last_two_minutes_at_their_rate() {
+        for (rate, longest) in [(FPS, 3000), (Time { num: 60, den: 1 }, 7200)] {
+            assert_eq!(max_frames(rate), longest);
+            let mut scene = panel_scene();
+            scene.frame_rate = Some(rate);
+            scene.duration = frames(longest, rate);
+            assert_eq!(scene.validate().unwrap(), longest);
+            scene.duration = frames(longest + 1, rate);
+            let error = scene.validate().unwrap_err();
+            assert_eq!(error.code, "INVALID_SCENE");
+            assert!(error.message.contains(&format!(
+                "1 frame to 120 seconds of frames at its frame_rate ({longest} at {} fps)",
+                rate.num
+            )));
+        }
+    }
+
+    #[test]
+    fn scenes_hold_sixty_four_layers() {
+        let mut scene = panel_scene();
+        let panel = scene.layers[0].clone();
+        scene.layers = (0..64)
+            .map(|i| Layer {
+                id: format!("panel{i}"),
+                ..panel.clone()
+            })
+            .collect();
+        scene.validate().unwrap();
+        scene.layers.push(Layer {
+            id: "one-too-many".into(),
+            ..panel
+        });
+        let error = scene.validate().unwrap_err();
+        assert_eq!(error.code, "INVALID_SCENE");
+        assert!(error.message.contains("1-64 layers") && error.message.contains("65 layers"));
+    }
+
+    #[test]
+    fn work_counts_clipped_destinations_assembly_and_passes() {
+        let mut scene = panel_scene();
+        // 160 x 90 shown for 75 frames.
+        assert_eq!(
+            scene.work(FPS).unwrap(),
+            (75 * 160 * 90, (0, 75 * 160 * 90))
+        );
+        // A 40 x 30 crop turned a quarter and enlarged 4x covers 120 x 160, clipped to 120 x 90.
+        let t = &mut scene.layers[0].transform;
+        (t.crop, t.scale, t.quarter_turns) = ([0, 0, 40, 30], 4, 1);
+        assert_eq!(scene.work(FPS).unwrap().0, 75 * 120 * 90);
+        // Transparent scenes compose a color and a matte pass.
+        scene.transparent = true;
+        assert_eq!(scene.work(FPS).unwrap().0, 2 * 75 * 120 * 90);
+        // A tilemap also assembles its whole canvas for every active sample.
+        scene.transparent = false;
+        let mut tiled = scene.layers[0].clone();
+        tiled.id = "tiles".into();
+        tiled.duration = frames(10, FPS);
+        tiled.tilemap = Some(serde_json::from_value(json!({"tile_size":[80,45],"tiles":[{"frames":[],"timing":"strict","end":"hold_last"}],"cells":[[0,0],[0,0]]})).unwrap());
+        scene.layers.push(tiled);
+        assert_eq!(
+            scene.work(FPS).unwrap(),
+            (
+                75 * 120 * 90 + 10 * (120 * 90 + 160 * 90),
+                (0, 75 * 120 * 90)
+            )
+        );
+    }
+
+    #[test]
+    fn work_over_the_budget_is_rejected_before_media_is_read() {
+        // Eight 8-megapixel layers for 1,000 frames is exactly the budget.
+        let mut scene = panel_scene();
+        (scene.width, scene.height, scene.output_scale) = (4000, 2000, 1);
+        scene.duration = frames(1001, FPS);
+        let panel = &mut scene.layers[0];
+        (panel.canvas, panel.duration) = ([4000, 2000], frames(1000, FPS));
+        panel.transform.crop = [0, 0, 4000, 2000];
+        let panel = panel.clone();
+        scene.layers = (0..8)
+            .map(|i| Layer {
+                id: format!("wash{i}"),
+                ..panel.clone()
+            })
+            .collect();
+        assert_eq!(scene.work(FPS).unwrap().0, MAX_COMPOSITED_PIXELS);
+        scene.validate().unwrap();
+        scene.layers[5].duration = frames(1001, FPS);
+        let error = scene.validate().unwrap_err();
+        assert_eq!(error.code, "LIMIT_EXCEEDED");
+        assert!(
+            error.message.contains("64008000000 layer pixels")
+                && error.message.contains("layers[5] (wash5) with 8008000000"),
+            "{}",
+            error.message
+        );
+        // Inspection reports the same estimate; nothing is read for a rejected scene.
+        let missing = std::env::temp_dir().join("cutbolt-no-such-root");
+        assert_eq!(
+            inspect(&scene, &missing).unwrap_err().code,
+            "LIMIT_EXCEEDED"
+        );
+    }
+
+    #[test]
+    fn trimmed_graphics_composite_exactly_like_whole_canvases() {
+        let root = std::env::temp_dir();
+        let transform = |position: [i32; 2], crop, scale, quarter_turns, opacity| Transform {
+            position,
+            crop,
+            scale,
+            quarter_turns,
+            opacity,
+            spatial: None,
+        };
+        let base = panel_scene();
+        let panel = base.layers[0].clone();
+        let mut empty = panel.clone();
+        empty.id = "empty".into();
+        empty.graphics = Some(serde_json::from_value(json!({"kind":"shape","shape":"rectangle","rect":[0,0,160,90],"fill":[9,9,9,0],"stroke":null})).unwrap());
+        let mut turned = panel.clone();
+        turned.id = "turned".into();
+        turned.transform = transform([150, -20], [4, 10, 150, 70], 2, 1, 200);
+        turned.blend_mode = composite::BlendMode::Multiply;
+        turned.mask =
+            Some(serde_json::from_value(json!({"rect":[30,20,90,40],"inverted":true})).unwrap());
+        let mut moved = panel.clone();
+        moved.id = "moved".into();
+        moved.transform = transform([-30, 25], [0, 0, 160, 90], 1, 2, 255);
+        moved.blend_mode = composite::BlendMode::Screen;
+        let mut opaque = base.clone();
+        opaque.layers = vec![panel.clone(), empty, turned, moved];
+        let mut transparent = base.clone();
+        transparent.transparent = true;
+        transparent.layers = vec![panel.clone()];
+        transparent.layers[0].transform = transform([20, 7], [2, 3, 150, 80], 1, 3, 180);
+        for scene in [opaque, transparent] {
+            let mut prepared = prepare(&scene, &root).unwrap();
+            assert_ne!(prepared.graphics["panel"].1, [0, 0]);
+            let trimmed = compose(&scene, &prepared, 0).unwrap();
+            let mut retained = 0;
+            for layer in &scene.layers {
+                let (image, offset) = &prepared.graphics[&layer.id];
+                retained += image.width * image.height;
+                assert!(image.width * image.height < 160 * 90 && offset[0] + image.width <= 160);
+                let (rgba, _) = crate::graphics::rasterize(
+                    layer.graphics.as_ref().unwrap(),
+                    layer.canvas,
+                    &root,
+                    &mut Default::default(),
+                )
+                .unwrap();
+                let whole = Pixels {
+                    width: 160,
+                    height: 90,
+                    rgba,
+                };
+                prepared.graphics.insert(layer.id.clone(), (whole, [0, 0]));
+            }
+            assert_eq!(prepared.report["work"]["decoded_pixels"], retained);
+            assert_eq!(trimmed, compose(&scene, &prepared, 0).unwrap());
+        }
+    }
+
+    #[test]
+    fn per_frame_records_stay_small() {
+        // 64 layers x 7,200 frames hold one record each.
+        assert!(std::mem::size_of::<Option<Parameters>>() <= 64);
+    }
+
+    #[test]
+    fn tile_selections_are_run_length_encoded() {
+        assert_eq!(
+            runs(&[Some(0), Some(0), Some(1), None, None]),
+            json!([{"count":2,"value":0},{"count":1,"value":1},{"count":2,"value":null}])
+        );
     }
 }

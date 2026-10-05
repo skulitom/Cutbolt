@@ -1,6 +1,6 @@
 # Chroma keying and reusable effect presets
 
-The original `chroma_key` scene effect removes a specified screen color, with hard or soft boundaries, optional spill suppression, optional screen-color subtraction, feathered masks and animated strength. Each layer has its own ordered effect chain; keys can run before, between or after primary/selective grades. The existing limit is eight effects per layer in total, 16 scene layers and ten seconds. PNG sequences and generated text/shapes use the same path. Direct general video-track effects remain open.
+The original `chroma_key` scene effect removes a specified screen color, with hard or soft boundaries, optional spill suppression, optional screen-color subtraction, feathered masks and animated strength. Each layer has its own ordered effect chain; keys can run before, between or after primary/selective grades. The existing limit is eight effects per layer in total, 64 scene layers and 120 seconds. PNG sequences and generated text/shapes use the same path. Direct general video-track effects remain open.
 
 Keying changes the layer's transparency before it is composited against lower layers and the scene background. The compiled reference MKV is flattened RGB; this feature does not add an alpha-bearing delivery format. Keep the editable scene and original images for later changes.
 

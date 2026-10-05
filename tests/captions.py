@@ -285,7 +285,8 @@ def run(root):
                         (lambda c:c['layouts']['warm']['fonts'][0].update(sha256='0'*64),'MEDIA_CHANGED'),
                         (lambda c:c.update(layer_prefix='backdrop',scene={**base,'layers':[{**base['layers'][0],'id':'backdrop-alpha'}]}),'INVALID_CAPTIONS'),
                         (lambda c:c.update(sampling='nearest'),'INVALID_JSON'),
-                        (lambda c:c['document'].update(cues=[{**render_doc['cues'][0],'id':f'cue{i}'} for i in range(17)]),'INVALID_SCENE')]:
+                        # The backdrop plus 64 cue layers exceeds the 64-layer scene limit.
+                        (lambda c:c['document'].update(cues=[{**render_doc['cues'][0],'id':f'cue{i}'} for i in range(64)]),'INVALID_SCENE')]:
         cmd=copy.deepcopy(scene_request());change(cmd);invalid.append((cmd,code))
     bad_sources=[('WEBVTT\n\nalpha\n00:00.000 --> 00:00.040 position:20%\nA\n','webvtt','UNSUPPORTED_CAPTIONS'),
         ('WEBVTT\n\n00:00.000 --> 00:00.040\n<b>A</b>\n','webvtt','UNSUPPORTED_CAPTIONS'),

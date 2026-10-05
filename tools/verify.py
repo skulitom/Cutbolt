@@ -223,7 +223,8 @@ STAGES = [
     fixture("registry", lane="quiet"), fixture("acceleration", "--device", device, lane="gated", needs=["device"]),
     fixture("unicode_text", lane="gated"), fixture("reframing", lane="gated"), fixture("cache_previews", lane="gated"),
     fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated"),
-    fixture("native_scenes", lane="gated", result="run/verification.json"),
+    fixture("native_scenes", lane="gated", result="run/verification.json", long=["--long-form"],
+            check=require("long_form", "Full native scene verification requires the two-minute long scene")),
     fixture("agent_ergonomics", lane="gated", result="run/verification.json"),
 ]
 assert len({s["name"] for s in STAGES}) == len(STAGES)

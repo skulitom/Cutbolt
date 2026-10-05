@@ -2,7 +2,8 @@
 
 Independent checks: a vectorised integer oracle for every decoded 1080p frame, exact equivalence between a
 4x enlarged 480x270 scene and its native 1920x1080 counterpart, analytic large-text coverage, captions at
-native size, downstream preview/export, explicit limits and measured time/memory/scratch use.
+native size, downstream preview/export, explicit limits and measured time/memory/scratch use. A long scene
+of 24 layers (twelve seconds, or two minutes with --long-form) checks the raised duration and layer limits.
 """
 from engine import ENGINE
 import argparse
@@ -257,6 +258,69 @@ def native_scene(sources, distinct, animated, frames_total=225):
             "background": [10, 12, 30], "color": "srgb_straight_encoded", "layers": layers, "audio": None, "audio_mix": mix}
 
 
+def long_scene(sources, distinct, animated, total, cues):
+    """The native scene stretched to `total` frames, with narration and `cues` caption layers in turn."""
+    scene = native_scene(sources, distinct, animated, total)
+    scene.update(id="long", audio_mix=None, audio={"file": identity(sources / "narration.wav", sources), "start": time(1, 2),
+                                                    "channels": "preserve_stereo", "resampling": "linear", "padding": "silence"})
+    font = identity(sources / "primary.ttf", sources)
+    words = ["A", "AB", "ABC", "CAB", "BA", "CA"]
+    step = total // cues
+    for i in range(cues):
+        # Size 100 puts every glyph edge and advance of the test font on whole pixels, as the analytic oracle needs.
+        text = {"kind": "text", "text": f"{words[i % 6]} {words[(i + 1) % 6]}", "fonts": [font], "size": 100, "color": [255, 255, 255, 255],
+                "rect": [160, 900, 1600, 140], "line_height": 120, "letter_spacing": 0, "align": "center", "wrap": "none",
+                "overflow": "reject", "background": {"color": [0, 0, 0, 150], "padding": 12}}
+        cue = layer(f"cue{i}", (W, H), [], end="hold_last", graphics=text)
+        cue.update(start=time(i * step, 25), duration=time(total - i * step if i == cues - 1 else step, 25))
+        scene["layers"].append(cue)
+    return scene
+
+
+def narration(path, samples):
+    """48 kHz stereo PCM16 that needs no resampling, so the expected soundtrack is the file itself."""
+    n = np.arange(samples)
+    left = (np.sin(2 * np.pi * 220 * n / 48000) * 7000 + (n % 97) * 13).astype("<i2")
+    right = ((n * 11) % 4000 * 4 - 8000).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(48000)
+        w.writeframes(np.stack([left, right], 1).tobytes())
+
+
+def expected_work(scene):
+    """The documented compositing estimate for 25 fps integer-path layers: per active frame, the transformed
+    crop clipped to the scene, plus the whole canvas a tilemap assembles."""
+    total = 0
+    for l in scene["layers"]:
+        t = l["transform"]
+        w, h = t["crop"][2:]
+        if t["quarter_turns"] % 2:
+            w, h = h, w
+        area = min(scene["width"], w * t["scale"]) * min(scene["height"], h * t["scale"])
+        if l.get("tilemap"):
+            area += l["canvas"][0] * l["canvas"][1]
+        total += int(F(l["duration"]["num"], l["duration"]["den"]) * 25) * area
+    return total
+
+
+def decode_sampled(path, count, checked, expected):
+    """Decode every frame, require exactly `count`, and compare the frames in `checked` with the oracle."""
+    child = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(path), "-an", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        for n in range(count):
+            actual = child.stdout.read(W * H * 3)
+            assert len(actual) == W * H * 3, f"Missing frame {n}"
+            if n in checked:
+                assert actual == expected(n), f"Decoded frame {n} differs"
+        assert child.stdout.read(1) == b"", "Unexpected extra frame"
+        assert child.wait(timeout=60) == 0, child.stderr.read().decode()
+    finally:
+        if child.poll() is None:
+            child.kill(); child.wait()
+        child.stdout.close(); child.stderr.close()
+
+
 def equivalence_pair(sources, key_effects, frames_total=50):
     """A 480x270 scene enlarged 4x must equal the native scene whose layer scales and positions are 4x larger."""
     grade = {"kind": "grade", "exposure_milli": 300, "contrast_milli": 1150, "white_balance_milli": [1100, 1000, 900],
@@ -290,7 +354,7 @@ def equivalence_pair(sources, key_effects, frames_total=50):
 class Watch:
     """Sample the engine's peak working set and the largest scene scratch directory while it runs."""
     def __init__(self, directory):
-        self.directory, self.peak_rss, self.peak_scratch, self.stop = directory, 0, 0, False
+        self.directory, self.peak_rss, self.peak_scratch, self.engine_peak, self.stop = directory, 0, 0, 0, False
 
     def run(self, request):
         child = subprocess.Popen([str(EXE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
@@ -311,6 +375,8 @@ class Watch:
             try:
                 tree = [process] + process.children(recursive=True)
                 self.peak_rss = max(self.peak_rss, sum(p.memory_info().rss for p in tree))
+                info = process.memory_info()
+                self.engine_peak = max(self.engine_peak, getattr(info, "peak_wset", info.rss))
             except psutil.Error:
                 pass
             scratch = sum(f.stat().st_size for d in self.directory.glob(".cutbolt-scene-*") for f in d.glob("*") if f.is_file())
@@ -318,7 +384,7 @@ class Watch:
             clock.sleep(0.1)
 
 
-def run(root):
+def run(root, long_form=False):
     root.mkdir(parents=True, exist_ok=False)
     sources, output = root / "sources", root / "output"
     sources.mkdir(); output.mkdir()
@@ -330,6 +396,8 @@ def run(root):
     caps = call({"command": "capabilities", "section": "all"})["scenes"]["limits"]
     assert caps["canvas_per_axis"] == [1, 4096] and caps["maximum_output_pixels"] == 8_000_000 and caps["text_size"] == [1, 512]
     assert caps["tilemap"]["maximum_tiles"] == 256 and caps["tilemap"]["maximum_cells"] == 4096
+    assert caps["maximum_seconds"] == 120 and caps["frames"] == [1, 3000] and caps["frames_at_60_fps"] == [1, 7200]
+    assert caps["layers"] == [1, 64] and caps["maximum_composited_pixels"] == 64_000_000_000
     passed.append("native.capability_limits")
 
     # 1. Native 1920x1080 scene, every decoded frame and sample against the independent oracle.
@@ -338,7 +406,10 @@ def run(root):
     inspection = call({"command": "scene.inspect", "scene": scene, "input_root": str(sources)})
     mosaic = next(l for l in inspection["timing"] if l["layer_id"] == "mosaic")["tilemap"]
     assert mosaic["grid"] == [8, 5] and mosaic["tiles"] == 40 and mosaic["occupied_cells"] == 39
-    assert mosaic["tile_selected_frames"][0][:7] == [0, 1, 1, 2, 2, 2, 0]
+    # Tile selections are run-length encoded like the layer's own selected frames.
+    assert mosaic["tile_selected_frames"][0][:4] == [{"count": 1, "value": 0}, {"count": 2, "value": 1}, {"count": 3, "value": 2},
+                                                     {"count": 1, "value": 0}]
+    assert all(runs == [{"count": 225, "value": 0}] for runs in mosaic["tile_selected_frames"][1:])
     watch = Watch(output)
     result, seconds = watch.run({"command": "scene.render", "scene": scene, "input_root": str(sources), "output_root": str(output),
                                  "output": str(output / "native.mkv")})
@@ -439,6 +510,25 @@ def run(root):
     large = sources / "large.png"
     png(large, np.zeros((10, 4097, 4), np.uint8))
     reject("large-png", lambda s: s["layers"][4]["frames"][0].update(image=identity(large, sources)), "UNSUPPORTED_IMAGE")
+    # Scenes last up to 120 seconds at their own rate and hold up to 64 layers within a compositing budget.
+    reject("too-long", lambda s: s.update(duration=time(3001, 25), audio_mix=None), "INVALID_SCENE",
+           ["120 seconds of frames at its frame_rate (3000 at 25 fps)", "3001 frames"])
+    reject("too-long-60", lambda s: s.update(duration=time(7201, 60), frame_rate=time(60), audio_mix=None), "INVALID_SCENE",
+           ["(7200 at 60 fps)", "7201 frames"])
+    reject("too-many-layers", lambda s: s["layers"].extend({**copy.deepcopy(s["layers"][2]), "id": f"more{i}"} for i in range(59)),
+           "INVALID_SCENE", ["1-64 layers", "65 layers"])
+    reject("work", lambda s: (s.update(duration=time(3000, 25), audio_mix=None),
+                              s.update(layers=[{**copy.deepcopy(s["layers"][5]), "id": f"wash{i}", "duration": time(3000, 25)} for i in range(32)])),
+           "LIMIT_EXCEEDED", ["199065600000 layer pixels", "64000000000 budget", "layers[0] (wash0) with 6220800000"])
+    most = native_scene(sources, distinct, animated, 25)
+    sprite = most["layers"][4]
+    most.update(id="most", duration=time(3000, 25), audio_mix=None,
+                layers=[{**copy.deepcopy(sprite), "id": f"s{i}", "duration": time(3000, 25),
+                         "transform": {**sprite["transform"], "position": [30 * i, 16 * i]}} for i in range(64)])
+    inspected = call({"command": "scene.inspect", "scene": most, "input_root": str(sources)})
+    assert inspected["frames"] == 3000 and len(inspected["timing"]) == 64
+    assert inspected["work"]["composited_pixels"] == expected_work(most) == 64 * 3000 * 40 * 30
+    passed.append("native.long_and_layered_limits")
     error = call({"command": "preview.frame", "project": project, "input_root": str(output), "output_root": str(output),
                   "output": str(output / "bad.png"), "time": time(1, 10)}, "UNALIGNED_TIME")
     assert error["message"].startswith("time:"), error
@@ -473,9 +563,45 @@ def run(root):
     assert int(np.any(np.frombuffer(still, np.uint8).reshape(H, W, 3) != [10, 12, 30], axis=2).sum()) > 40000
     decode_check(output / "spatial.mkv", W, H, lambda n: still, 2)
     passed.append("native.spatial_rotation_exact")
+    # 7. One scene for a whole storyboard slot: 12 seconds (two minutes with --long-form) of 24 layers, where
+    # scenes used to stop at ten seconds and 16 layers. Every frame is decoded and counted; frames at a stride
+    # of one second, both sides of every caption boundary and the last frame match the oracle.
+    total, cues = (3000, 18) if long_form else (300, 18)
+    narration(sources / "narration.wav", total * 1920 - 24000)
+    originals["narration.wav"] = hashlib.sha256((sources / "narration.wav").read_bytes()).hexdigest()
+    long = long_scene(sources, distinct, animated, total, cues)
+    (root / "long-scene.json").write_text(json.dumps(long, indent=1), encoding="utf-8")
+    inspected = call({"command": "scene.inspect", "scene": long, "input_root": str(sources)})
+    assert inspected["frames"] == total and len(long["layers"]) == 24
+    assert inspected["work"]["composited_pixels"] == expected_work(long) <= inspected["work"]["maximum_composited_pixels"]
+    # The title and 18 caption canvases are whole frames (19 x W x H untrimmed); only their visible text counts.
+    assert inspected["work"]["decoded_pixels"] < 8 * W * H, inspected["work"]
+    watch = Watch(output)
+    result, seconds = watch.run({"command": "scene.render", "scene": long, "input_root": str(sources), "output_root": str(output),
+                                 "output": str(output / "long.mkv")})
+    out_bytes = (output / "long.mkv").stat().st_size
+    pcm_bytes = total * 1920 * 4
+    measurements["long_scene"] = {"frames": total, "seconds_of_video": total / 25, "layers": 24, "seconds": round(seconds, 3),
+                                  "frames_per_second": round(total / seconds, 2), "peak_engine_working_set_bytes": watch.engine_peak,
+                                  "peak_process_tree_bytes": watch.peak_rss, "peak_scratch_bytes": watch.peak_scratch,
+                                  "output_bytes": out_bytes, "receipt_bytes": len(json.dumps(result)), "work": inspected["work"]}
+    assert result["frames"] == total and result["samples"] == total * 1920 and result["work"] == inspected["work"]
+    assert watch.peak_scratch <= out_bytes + pcm_bytes + 16 * 1024 * 1024, watch.peak_scratch
+    assert watch.engine_peak <= 1024 * 1024 * 1024, watch.engine_peak
+    budgets.check(seconds <= (1800 if long_form else 300), measurements["long_scene"])
+    boundaries = {n for i in range(1, cues) for n in (i * (total // cues) - 1, i * (total // cues))}
+    checked = set(range(0, total, 25)) | boundaries | {total - 1}
+    decode_sampled(output / "long.mkv", total, checked, lambda n: expected_frame(long, n, sources, fonts))
+    with wave.open(str(sources / "narration.wav")) as w:
+        assert audio_bytes(output / "long.mkv") == b"\0" * 96000 + w.readframes(total * 1920)
+    measurements["long_scene"]["frames_compared"] = len(checked)
+    passed.append("native.long_scene_layers_exact")
+    passed.append("native.long_scene_time_memory_scratch")
+
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir() if p.name in originals} == originals
     passed.append("native.sources_preserved")
-    report = {"passed": passed, "measurements": measurements, "frames_compared": 225 + 50 + 25 + 1 + 2,
+    report = {"passed": passed, "measurements": measurements, "long_form": long_form,
+              "frames_compared": 225 + 50 + 25 + 1 + 2 + len(checked),
               "oracle": "vectorised documented integer blend equations, Pillow tile assembly, analytic text coverage, Fraction keyframes"}
     (root / "verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
@@ -484,4 +610,6 @@ def run(root):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
-    run(parser.parse_args().output)
+    parser.add_argument("--long-form", action="store_true", help="render the two-minute long scene instead of twelve seconds")
+    arguments = parser.parse_args()
+    run(arguments.output, arguments.long_form)

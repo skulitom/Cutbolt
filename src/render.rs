@@ -493,16 +493,14 @@ fn inspect_source_with(
     let frames = if timing == Timing::Packets {
         &inspection.video
     } else {
+        // Decoding takes 8-13 ms per 1080p frame (155-260 Mpx/s) on the development machine. Long
+        // sources, such as two-minute 60 fps scenes, get 20 Mpx/s of allowance beyond the base.
+        let pixels = inspection.video.len() as u64 * u64::from(width) * u64::from(height);
+        let budget = |base: u64| Duration::from_secs(base.max(pixels / 20_000_000));
         decoded = if large_raster(width, height) {
-            media::frame_info_with_budget(
-                path,
-                "v:0",
-                Some("16"),
-                Duration::from_secs(900),
-                control,
-            )?
+            media::frame_info_with_budget(path, "v:0", Some("16"), budget(900), control)?
         } else {
-            media::frame_info_controlled(path, "v:0", control)?
+            media::frame_info_with_budget(path, "v:0", None, budget(120), control)?
         };
         decoded["frames"]
             .as_array()

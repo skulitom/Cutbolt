@@ -67,7 +67,7 @@ The corresponding layer timing report contains the declared `effects`, its `effe
 
 The `capabilities` response exposes supported effect types, ranges, ordering, curve limits, working/output spaces and alpha behavior. There are no new MCP tools: effects are part of the shared scene schema. Templates can preserve and instantiate complete grade recipes; typed template bindings do not yet target grade parameters. Compiled graded assets retain ordinary saved-session trimming, retries and export behavior. Changing the editable recipe requires recompilation to a new output.
 
-All existing scene limits remain in force, including ten seconds, 16 layers, bounded source canvases/output dimensions, source identity checks and no-overwrite publication. There is no runtime download or new dependency.
+All existing scene limits remain in force, including 120 seconds, 64 layers, the compositing budget, bounded source canvases/output dimensions, source identity checks and no-overwrite publication. There is no runtime download or new dependency.
 
 ## Runnable workflow and acceptance
 

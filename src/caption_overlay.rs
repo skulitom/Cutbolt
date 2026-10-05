@@ -1,6 +1,7 @@
 //! A whole caption document rendered as one transparent overlay asset for an `alpha_over` track.
-//! Scenes hold at most ten seconds and sixteen layers, so the overlay is compiled as a series of
-//! caption windows, each an ordinary caption scene, and the windows are joined losslessly.
+//! A document can run for hours, longer than any scene, so the overlay is compiled as a series of
+//! caption windows, each an ordinary caption scene, and the windows are joined losslessly. Windows
+//! stay at ten seconds and fifteen cues, well inside the scene limits, so each one's work is small.
 use crate::{
     Result,
     captions::{self, Document, Layout},

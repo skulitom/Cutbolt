@@ -69,7 +69,7 @@ The value depends only on these explicit inputs, independent of request order, n
 
 ## Work limits and diagnostics
 
-The graph permits 1..256 nodes, 1..32 bindings and a maximum dependency path of 64 nodes. Read-only inspection permits 1..256 samples and at most 65,536 node evaluations. Ordinary scene compilation retains its own limit of 250 frames, so its maximum is 64,000 node evaluations. Optional [temporal integration](TEMPORAL.md) permits up to 8,000 exposure slots while retaining the aggregate 65,536-node-work limit; out-of-scene slots contribute background and skip evaluation. Graph preparation checks depth independently of traversal order.
+The graph permits 1..256 nodes, 1..32 bindings and a maximum dependency path of 64 nodes. Read-only inspection permits 1..256 samples and at most 65,536 node evaluations. Scene compilation evaluates every node at every output frame within the same 65,536 node evaluations, so a 250-frame scene allows 256 nodes and a two-minute 25 fps scene (3,000 frames) allows 21. Optional [temporal integration](TEMPORAL.md) permits up to 8,000 exposure slots while retaining the aggregate 65,536-node-work limit; out-of-scene slots contribute background and skip evaluation. Graph preparation checks depth independently of traversal order.
 
 `INVALID_EXPRESSION` covers missing references, duplicate bindings and malformed labels. `EXPRESSION_CYCLE`, `EXPRESSION_TYPE`, `EXPRESSION_DOMAIN`, `EXPRESSION_PRECISION` and `EXPRESSION_RANGE` distinguish evaluation failures. Structural schema errors remain `INVALID_JSON`, and work/version bounds use `LIMIT_EXCEEDED`. Rendering validates the complete graph before reading sources or producing media. Existing root, identity, output-collision and publication rules remain in force.
 

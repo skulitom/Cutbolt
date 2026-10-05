@@ -46,7 +46,7 @@ Explicit timeline gaps produce black video and silence, including in previews an
 
 [Proxy previews](docs/PROXIES.md) provide half, quarter and eighth-size variants with unchanged frame timing and audio. Attachments, preview selection and relinking use saved sessions with undo/history. Final synchronous and queued exports always read the full-quality media, even when a proxy preview is selected.
 
-[Scenes](docs/SCENES.md) render natively up to 4096 pixels per axis (output scale 1) or enlarge small artwork exactly; `tilemap` layers assemble large canvases from reusable, independently animated tiles, and frames stream to the encoder without a raw-video buffer.
+[Scenes](docs/SCENES.md) last up to two minutes with up to 64 layers, render natively up to 4096 pixels per axis (output scale 1) or enlarge small artwork exactly; `tilemap` layers assemble large canvases from reusable, independently animated tiles, and frames stream to the encoder without a raw-video buffer.
 
 [Text and shapes](docs/GRAPHICS.md) add external TrueType fonts, explicit fallback, bounded LTR layout, rectangles and ellipses to scenes. They use the same transform, mask and position/opacity animation as image layers. [Reusable templates](docs/TEMPLATES.md) expose typed parameters with validated, independent instances; original lower-third and title-card recipes are included. [Timed captions](docs/CAPTIONS.md) now import/edit/export a bounded SRT/WebVTT subset and compile explicit styled windows into scenes. Optional [Unicode shaping and bidirectional layout](docs/UNICODE_TEXT.md) now adds contextual forms, combining marks, cluster-safe fallback and word wrapping with explicit external fonts.
 

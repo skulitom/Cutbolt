@@ -41,7 +41,7 @@ Use `scene.inspect` to validate sources and inspect exact exposure times before 
 
 ## Work and precision limits
 
-The scene profile still permits at most 250 output frames and 16 layers; its canvas and output limits are listed in [SCENES.md](SCENES.md#limits). Temporal evaluation additionally limits:
+The scene profile permits up to 120 seconds and 64 layers; its canvas, output and compositing limits are listed in [SCENES.md](SCENES.md#limits). Temporal evaluation additionally limits:
 
 - 32 samples per output frame;
 - 67,108,864 `width * height * layers * frames * samples` visits;
