@@ -555,6 +555,8 @@ pub fn run_many(
             .collect());
     }
     check_runtime(runtime)?;
+    control.phase("transcribing windows")?;
+    control.total(requests.len() as u64);
     // Aligning known text needs no recognition model.
     let model_path = if checked.iter().any(|(_, given)| given.is_none()) {
         if fs::metadata(&runtime.model)?.len() != MODEL_BYTES
@@ -638,7 +640,7 @@ pub fn run_many(
             "-B".into(),
             format!("{root}/transcribe_supervisor.py"),
         ];
-        control.phase("transcription.recognition")?;
+        control.check()?;
         let launched = capture(
             &args,
             &json!({"request":payload,"worker_sha256":worker_hash,"timeout_seconds":timeout}),
@@ -676,6 +678,7 @@ pub fn run_many(
                 }
             }
         }
+        control.frames(outcomes.iter().filter(|o| o.is_some()).count() as u64)?;
     }
     Ok(outcomes
         .into_iter()
@@ -694,7 +697,7 @@ fn prepare(
     let start = exact(request.start)?;
     let length = exact(request.duration)?;
     let source_samples = exact(request.source.duration)?;
-    control.phase("transcription.source")?;
+    control.check()?;
     let source = source_file(request, control)?;
     let actual = match request.format {
         Format::StereoWav => pcm_stream::inspect(&source, control)?.frames,
@@ -708,7 +711,7 @@ fn prepare(
             "Declared transcription duration differs from actual source samples",
         ));
     }
-    control.phase("transcription.analysis")?;
+    control.check()?;
     let channel = match request.channel {
         Channel::Left => "c0=c0",
         Channel::Right => "c0=c1",
