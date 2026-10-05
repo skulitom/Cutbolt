@@ -34,6 +34,7 @@ Tests:
 - **`transcription`**: a music-only tail with a vocabulary. The fixture voice's named line is followed by 26 s of the steady bed. Before the change the engine heard `PixelForge, Cutbolt.` in the window at 11–25 s, and the case failed. Now the windows after the line are not decoded, every word lies in the line, and both names are whole.
 
 These fixtures pass in quick mode: transcription (718 s, with the speech runtime). Its numbers case, added on 5 October, ran on the speech runtime for the first time and passed. No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 6 October 2026: lossy deliveries meet their true-peak target
 
 The part-two demo rebuilt on `dbd6ffe` (`demo-progress2-20261005/film-merged`, ISSUES.md item 10) missed its -1 dBTP target. Its mix stage lowered the master limiter ceiling over three AAC trials, and the encoded true peak rose each time. The mix stage took 60 s on the build's critical path.
