@@ -14,6 +14,19 @@ const CHUNK: usize = 4 * 1024 * 1024;
 /// the next chunk is read.
 pub(crate) fn raw_sha256(args: &[String], bytes: u64, timeout: Duration) -> Result<String> {
     let mut reader = media::StreamReader::spawn(&media::tool("ffmpeg"), args, timeout)?;
+    let digest = exact_sha256(bytes, |chunk| reader.read_exact(chunk), |_| Ok(()))?;
+    reader.finish()?;
+    Ok(digest)
+}
+
+/// Lowercase hex SHA-256 of exactly `bytes` bytes that `fill` supplies, one buffer at a time.
+/// Hashing runs on its own thread while the next buffer fills; `progress` receives the number of
+/// bytes read so far after each one. The caller checks that the source has nothing more.
+pub(crate) fn exact_sha256(
+    bytes: u64,
+    mut fill: impl FnMut(&mut [u8]) -> Result<()>,
+    mut progress: impl FnMut(u64) -> Result<()>,
+) -> Result<String> {
     let (full, filled) = mpsc::sync_channel::<Vec<u8>>(2);
     let (empty, recycled) = mpsc::channel::<Vec<u8>>();
     let hasher = thread::spawn(move || {
@@ -29,14 +42,14 @@ pub(crate) fn raw_sha256(args: &[String], bytes: u64, timeout: Duration) -> Resu
         let n = left.min(CHUNK as u64) as usize;
         let mut chunk = recycled.try_recv().unwrap_or_else(|_| vec![0; CHUNK]);
         chunk.resize(n, 0);
-        reader.read_exact(&mut chunk)?;
+        fill(&mut chunk)?;
         left -= n as u64;
         if full.send(chunk).is_err() {
             break;
         }
+        progress(bytes - left)?;
     }
     drop(full);
-    reader.finish()?;
     hasher
         .join()
         .map_err(|_| crate::error("TOOL_FAILED", "Digest thread failed"))
@@ -59,6 +72,39 @@ pub(crate) fn zeros_sha256(size: u64, count: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_digests_hash_every_buffer_in_order() {
+        // More than two chunks and not a multiple of one, so buffers are recycled and the last
+        // one is partial.
+        let data: Vec<u8> = (0..CHUNK * 2 + 12_345)
+            .map(|i| (i * 7 % 251) as u8)
+            .collect();
+        let (mut read, mut reported) = (0, Vec::new());
+        let digest = exact_sha256(
+            data.len() as u64,
+            |chunk| {
+                chunk.copy_from_slice(&data[read..read + chunk.len()]);
+                read += chunk.len();
+                Ok(())
+            },
+            |done| {
+                reported.push(done);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(digest, format!("{:x}", Sha256::digest(&data)));
+        assert_eq!(
+            reported,
+            [CHUNK as u64, 2 * CHUNK as u64, data.len() as u64]
+        );
+        // A failed read or a refused progress report stops the digest with that error.
+        let short = exact_sha256(10, |_| Err(crate::error("SHORT", "short")), |_| Ok(()));
+        assert_eq!(short.unwrap_err().code, "SHORT");
+        let cancelled = exact_sha256(10, |_| Ok(()), |_| Err(crate::error("STOP", "stop")));
+        assert_eq!(cancelled.unwrap_err().code, "STOP");
+    }
 
     #[test]
     fn zero_digests_match_a_direct_hash() {

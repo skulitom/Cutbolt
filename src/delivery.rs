@@ -13,6 +13,7 @@ use std::{
 const FPS: Time = Time { num: 25, den: 1 };
 mod sequence;
 mod settings;
+mod stream;
 pub use settings::{Compatibility, H264, RateControl};
 /// Export profile: `reference` (FFV1/bgr0 and PCM16 `.mkv`, audio-only `.wav`), `h264_aac` (`.mp4` at the timeline's native rate, audio-only `.m4a`), `png_mov` (PNG RGB and optional PCM16 `.mov`), `png_sequence` (new `.frames` directory of numbered PNGs, manifest and optional WAV; Windows only).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
@@ -39,11 +40,23 @@ impl Streams {
         self != Self::Video
     }
 }
+/// x264 slice threads (each frame is coded as up to this many slices) and scaler threads for
+/// H.264 video. The count is fixed rather than taken from the host, so the encoded stream is the
+/// same on every machine; the scaler's threads split rows without changing any value. x264's
+/// frame threads would be faster, but with the VBV cap their rate control depends on when frames
+/// arrive, and repeated exports of one timeline then differ.
+const ENCODER_THREADS: u32 = 8;
 impl Transfer {
     fn filter(self) -> String {
-        let matrix = "scale=in_range=pc:out_range=tv:out_color_matrix=bt709:out_h_chr_pos=0:out_v_chr_pos=128:flags=bilinear+accurate_rnd,format=yuv420p";
+        format!("format=rgb24,{}", self.conversion())
+    }
+    /// The conversion of packed RGB24 to limited-range BT.709 YUV 4:2:0.
+    fn conversion(self) -> String {
+        let matrix = format!(
+            "scale=in_range=pc:out_range=tv:out_color_matrix=bt709:out_h_chr_pos=0:out_v_chr_pos=128:flags=bilinear+accurate_rnd:threads={ENCODER_THREADS},format=yuv420p"
+        );
         match self {
-            Self::Bt709 => format!("format=rgb24,{matrix}"),
+            Self::Bt709 => matrix,
             Self::Srgb => {
                 // Explicit public transfer equations; quantize the converted encoded RGB to 8 bits.
                 let linear =
@@ -51,7 +64,7 @@ impl Transfer {
                 let transfer = format!(
                     "floor(255*if(lt({linear},0.018),4.5*{linear},1.099*pow({linear},0.45)-0.099)+0.5)"
                 );
-                format!("format=rgb24,lutrgb=r='{transfer}':g='{transfer}':b='{transfer}',{matrix}")
+                format!("lutrgb=r='{transfer}':g='{transfer}':b='{transfer}',{matrix}")
             }
         }
     }
@@ -294,6 +307,7 @@ impl Drop for Scratch {
             "encoded.mov",
             "decoded.pcm",
             "reference.pcm",
+            "timeline.pcm",
             "rate-control-0.log",
             "rate-control-0.log.mbtree",
             "rate-control-0.log.temp",
@@ -402,94 +416,103 @@ fn arguments(
                 "-vf".into(),
                 request.transfer().expect("validated transfer").filter(),
             ]);
-            args.extend(
-                [
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "medium",
-                    "-g",
-                    &settings::gop(request.project.frame_rate).to_string(),
-                    "-keyint_min",
-                    &(settings::gop(request.project.frame_rate) / 2).to_string(),
-                    "-sc_threshold",
-                    "0",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-color_range",
-                    "tv",
-                    "-colorspace",
-                    "bt709",
-                    "-color_primaries",
-                    "bt709",
-                    "-color_trc",
-                    "bt709",
-                    "-chroma_sample_location",
-                    "left",
-                    "-threads",
-                    "1",
-                ]
-                .map(str::to_owned),
-            );
-            let h264 = request.h264.unwrap_or_default();
-            let level = h264
-                .compatibility
-                .level(
-                    request.project.width,
-                    request.project.height,
-                    request.project.frame_rate,
-                )
-                .expect("validated level");
-            h264.arguments(&mut args, pass, scratch, level.0);
         }
-        if request.streams.audio() && pass != Some(1) {
-            args.extend(
-                [
-                    "-c:a",
-                    "aac",
-                    "-profile:a",
-                    "aac_low",
-                    "-aac_coder",
-                    "twoloop",
-                    "-aac_pns",
-                    "1",
-                    "-ar",
-                    "48000",
-                    "-ac",
-                    "2",
-                ]
-                .map(str::to_owned),
-            );
-            args.extend([
-                "-b:a".into(),
-                request.aac_bitrate.unwrap_or(320000).to_string(),
-            ]);
-        }
-        if pass == Some(1) {
-            args.extend(["-f".into(), "null".into()]);
-        } else {
-            args.extend(
-                [
-                    "-movflags",
-                    "+faststart",
-                    "-use_editlist",
-                    "1",
-                    "-movie_timescale",
-                    "48000",
-                    "-video_track_timescale",
-                    &timescale(request.project.frame_rate).to_string(),
-                    "-f",
-                    "mp4",
-                ]
-                .map(str::to_owned),
-            );
-        }
+        args.extend(h264_options(request, pass, scratch, output));
+        return args;
     }
-    args.push(if pass == Some(1) {
-        "-".into()
+    args.push(output.to_string_lossy().into_owned());
+    args
+}
+/// Encoder and container options of an H.264/AAC output after its stream maps, ending with the
+/// output: MP4, or nothing for a two-pass encode's first pass.
+fn h264_options(request: &Export, pass: Option<u8>, scratch: &Path, output: &Path) -> Vec<String> {
+    let mut args = Vec::new();
+    if request.streams.video() {
+        args.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-g",
+                &settings::gop(request.project.frame_rate).to_string(),
+                "-keyint_min",
+                &(settings::gop(request.project.frame_rate) / 2).to_string(),
+                "-sc_threshold",
+                "0",
+                "-pix_fmt",
+                "yuv420p",
+                "-color_range",
+                "tv",
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-chroma_sample_location",
+                "left",
+                "-threads",
+                &ENCODER_THREADS.to_string(),
+                "-thread_type",
+                "slice",
+            ]
+            .map(str::to_owned),
+        );
+        let h264 = request.h264.unwrap_or_default();
+        let level = h264
+            .compatibility
+            .level(
+                request.project.width,
+                request.project.height,
+                request.project.frame_rate,
+            )
+            .expect("validated level");
+        h264.arguments(&mut args, pass, scratch, level.0);
+    }
+    if request.streams.audio() && pass != Some(1) {
+        args.extend(
+            [
+                "-c:a",
+                "aac",
+                "-profile:a",
+                "aac_low",
+                "-aac_coder",
+                "twoloop",
+                "-aac_pns",
+                "1",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+            ]
+            .map(str::to_owned),
+        );
+        args.extend([
+            "-b:a".into(),
+            request.aac_bitrate.unwrap_or(320000).to_string(),
+        ]);
+    }
+    if pass == Some(1) {
+        args.extend(["-f", "null", "-"].map(str::to_owned));
     } else {
-        output.to_string_lossy().into_owned()
-    });
+        args.extend(
+            [
+                "-movflags",
+                "+faststart",
+                "-use_editlist",
+                "1",
+                "-movie_timescale",
+                "48000",
+                "-video_track_timescale",
+                &timescale(request.project.frame_rate).to_string(),
+                "-f",
+                "mp4",
+            ]
+            .map(str::to_owned),
+        );
+        args.push(output.to_string_lossy().into_owned());
+    }
     args
 }
 pub(crate) fn exact_time(value: &Value, ticks: &str) -> Result<Time> {
@@ -588,11 +611,15 @@ fn prefix_hash(path: &Path, bytes: u64) -> Result<String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
+/// Check a staged output against the plan. `reference` is the lossless intermediate the output
+/// was copied or converted from (not H.264), whose decoded samples it must equal. The complete
+/// decodes are independent reads, so they run at the same time; a failure is reported in the
+/// order the checks are listed.
 fn validate_output(
     request: &Export,
     c: &Checked,
     path: &Path,
-    reference: &Path,
+    reference: Option<&Path>,
     scratch: &Path,
 ) -> Result<Value> {
     let metadata = media::probe(path)?;
@@ -616,115 +643,16 @@ fn validate_output(
         return Err(verification("Unexpected output container"));
     }
     let mut result = json!({"decoded_video_sha256":null,"decoded_audio_prefix_sha256":null,"decoded_audio_samples":0,"audio_tail_padding_samples":0});
-    if request.streams.video() {
+    let video = if request.streams.video() {
         let v = streams
             .iter()
             .find(|s| s["codec_type"] == "video")
             .ok_or_else(|| verification("Missing video"))?;
-        if v["width"] != c.project.width
-            || v["height"] != c.project.height
-            || !render::clock::rate_hint(v, &metadata, c.project.frame_rate)
-        {
-            return Err(verification("Output video geometry/rate mismatch"));
-        }
-        if request.profile == Profile::Reference {
-            if v["codec_name"] != "ffv1" || v["pix_fmt"] != "bgr0" {
-                return Err(verification("Unexpected reference video codec"));
-            }
-        } else if request.profile == Profile::PngMov {
-            if v["codec_name"] != "png"
-                || v["pix_fmt"] != "rgb24"
-                || v["color_range"] != "pc"
-                || v["color_space"] != "gbr"
-                || v["color_primaries"] != "bt709"
-                || v["color_transfer"] != request.transfer().expect("validated transfer").tag()
-                || v["start_pts"] != 0
-                || exact_time(v, "duration_ts")?
-                    .compare(c.range.duration)?
-                    .is_ne()
-            {
-                return Err(verification(
-                    "Unexpected lossless MOV codec or exact duration",
-                ));
-            }
-        } else if v["codec_name"] != "h264"
-            || v["profile"]
-                != request
-                    .h264
-                    .unwrap_or_default()
-                    .compatibility
-                    .decoded_profile()
-            || v["level"]
-                != request
-                    .h264
-                    .unwrap_or_default()
-                    .compatibility
-                    .level(c.project.width, c.project.height, c.project.frame_rate)?
-                    .1
-            || v["pix_fmt"] != "yuv420p"
-            || v["color_range"] != "tv"
-            || v["color_space"] != "bt709"
-            || v["color_primaries"] != "bt709"
-            || v["color_transfer"] != "bt709"
-            || v["chroma_location"] != "left"
-            || v["start_pts"] != 0
-            || exact_time(v, "duration_ts")?.compare(c.range.duration)? != std::cmp::Ordering::Equal
-        {
-            return Err(verification(
-                "Delivery video profile, color tags or exact duration mismatch",
-            ));
-        }
-        let mut args: Vec<String> = [
-            "-v",
-            "error",
-            "-protocol_whitelist",
-            "file,pipe",
-            "-select_streams",
-            "v:0",
-            "-show_frames",
-            "-show_entries",
-            "frame=best_effort_timestamp,best_effort_timestamp_time",
-            "-of",
-            "json",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        args.push(path.to_string_lossy().into_owned());
-        let info: Value = serde_json::from_slice(&media::capture(
-            &media::tool("ffprobe"),
-            &args,
-            Duration::from_secs(600),
-        )?)?;
-        let frames = info["frames"]
-            .as_array()
-            .ok_or_else(|| verification("Missing decoded frames"))?;
-        if frames.len() as u64 != c.reference.frames {
-            return Err(verification("Decoded frame count mismatch"));
-        }
-        for (n, frame) in frames.iter().enumerate() {
-            let mut timestamp = frame.clone();
-            timestamp["time_base"] = v["time_base"].clone();
-            if request.profile == Profile::Reference {
-                render::clock::timestamp(frame, n, c.project.frame_rate, v)
-                    .map_err(|_| verification("Decoded frame timestamp mismatch"))?;
-            } else if exact_time(&timestamp, "best_effort_timestamp")?
-                .compare(Time::new(
-                    n as u64 * c.project.frame_rate.den,
-                    c.project.frame_rate.num,
-                )?)?
-                .is_ne()
-            {
-                return Err(verification("Decoded frame timestamp mismatch"));
-            }
-        }
-        let hash = video_hash(path, c)?;
-        if request.profile != Profile::H264Aac && hash != video_hash(reference, c)? {
-            return Err(verification(
-                "Reference video samples changed during export",
-            ));
-        }
-        result["decoded_video_sha256"] = json!(hash);
-    }
+        check_video_stream(request, c, v, &metadata)?;
+        Some(v)
+    } else {
+        None
+    };
     if request.streams.audio() {
         let a = streams
             .iter()
@@ -746,65 +674,218 @@ fn validate_output(
                 "Delivery audio profile or exact presentation duration mismatch",
             ));
         }
-        let decoded = scratch.join("decoded.pcm");
-        let count = decode_pcm(path, &decoded)?;
-        let samples = c.reference.samples;
-        let expected = if request.profile != Profile::H264Aac {
-            samples
-        } else {
-            samples.div_ceil(1024) * 1024
-        };
-        if count != expected {
-            return Err(verification("Decoded audio count/padding mismatch"));
-        }
-        let hash = prefix_hash(&decoded, samples * 4)?;
-        if request.profile != Profile::H264Aac {
-            let original = scratch.join("reference.pcm");
-            if decode_pcm(reference, &original)? != samples
-                || hash != prefix_hash(&original, samples * 4)?
-            {
-                return Err(verification("Reference PCM changed during export"));
-            }
-        } else {
-            let mut args: Vec<String> = [
-                "-v",
-                "error",
-                "-protocol_whitelist",
-                "file,pipe",
-                "-select_streams",
-                "a:0",
-                "-read_intervals",
-                "%+#1",
-                "-show_packets",
-                "-show_entries",
-                "packet=pts,side_data_list",
-                "-of",
-                "json",
-            ]
-            .map(str::to_owned)
-            .to_vec();
-            args.push(path.to_string_lossy().into_owned());
-            let packets: Value = serde_json::from_slice(&media::capture(
-                &media::tool("ffprobe"),
-                &args,
-                Duration::from_secs(30),
-            )?)?;
-            let first = &packets["packets"][0];
-            if first["pts"] != -1024
-                || !first["side_data_list"].as_array().is_some_and(|v| {
-                    v.iter()
-                        .any(|d| d["side_data_type"] == "Skip Samples" && d["skip_samples"] == 1024)
-                })
-            {
-                return Err(verification("AAC priming/edit metadata mismatch"));
-            }
-            result["aac_priming_samples"] = json!(1024);
-        }
-        result["decoded_audio_prefix_sha256"] = json!(hash);
-        result["decoded_audio_samples"] = json!(count);
-        result["audio_tail_padding_samples"] = json!(count - samples);
     }
-    Ok(result)
+    std::thread::scope(|scope| {
+        let timestamps =
+            video.map(|v| scope.spawn(move || decoded_timestamps(request, c, path, v)));
+        let hash = video.map(|_| scope.spawn(|| video_hash(path, c)));
+        let original = video
+            .and(reference)
+            .map(|reference| scope.spawn(move || video_hash(reference, c)));
+        let audio = request
+            .streams
+            .audio()
+            .then(|| scope.spawn(|| decoded_audio(request, c, path, reference, scratch)));
+        if let Some(timestamps) = timestamps {
+            joined(timestamps)?;
+        }
+        if let Some(hash) = hash {
+            let hash = joined(hash)?;
+            if let Some(original) = original
+                && joined(original)? != hash
+            {
+                return Err(verification(
+                    "Reference video samples changed during export",
+                ));
+            }
+            result["decoded_video_sha256"] = json!(hash);
+        }
+        if let Some(audio) = audio {
+            for (key, value) in joined(audio)? {
+                result[key] = value;
+            }
+        }
+        Ok(result)
+    })
+}
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, Result<T>>) -> Result<T> {
+    handle
+        .join()
+        .map_err(|_| verification("Verification thread failed"))?
+}
+/// The output video stream's codec, color tags and exact duration for the profile.
+fn check_video_stream(request: &Export, c: &Checked, v: &Value, metadata: &Value) -> Result<()> {
+    if v["width"] != c.project.width
+        || v["height"] != c.project.height
+        || !render::clock::rate_hint(v, metadata, c.project.frame_rate)
+    {
+        return Err(verification("Output video geometry/rate mismatch"));
+    }
+    if request.profile == Profile::Reference {
+        if v["codec_name"] != "ffv1" || v["pix_fmt"] != "bgr0" {
+            return Err(verification("Unexpected reference video codec"));
+        }
+    } else if request.profile == Profile::PngMov {
+        if v["codec_name"] != "png"
+            || v["pix_fmt"] != "rgb24"
+            || v["color_range"] != "pc"
+            || v["color_space"] != "gbr"
+            || v["color_primaries"] != "bt709"
+            || v["color_transfer"] != request.transfer().expect("validated transfer").tag()
+            || v["start_pts"] != 0
+            || exact_time(v, "duration_ts")?
+                .compare(c.range.duration)?
+                .is_ne()
+        {
+            return Err(verification(
+                "Unexpected lossless MOV codec or exact duration",
+            ));
+        }
+    } else if v["codec_name"] != "h264"
+        || v["profile"]
+            != request
+                .h264
+                .unwrap_or_default()
+                .compatibility
+                .decoded_profile()
+        || v["level"]
+            != request
+                .h264
+                .unwrap_or_default()
+                .compatibility
+                .level(c.project.width, c.project.height, c.project.frame_rate)?
+                .1
+        || v["pix_fmt"] != "yuv420p"
+        || v["color_range"] != "tv"
+        || v["color_space"] != "bt709"
+        || v["color_primaries"] != "bt709"
+        || v["color_transfer"] != "bt709"
+        || v["chroma_location"] != "left"
+        || v["start_pts"] != 0
+        || exact_time(v, "duration_ts")?.compare(c.range.duration)? != std::cmp::Ordering::Equal
+    {
+        return Err(verification(
+            "Delivery video profile, color tags or exact duration mismatch",
+        ));
+    }
+    Ok(())
+}
+/// Decode every picture of `path` and require one per timeline frame at its exact time.
+fn decoded_timestamps(request: &Export, c: &Checked, path: &Path, v: &Value) -> Result<()> {
+    let mut args: Vec<String> = [
+        "-v",
+        "error",
+        "-protocol_whitelist",
+        "file,pipe",
+        "-select_streams",
+        "v:0",
+        "-show_frames",
+        "-show_entries",
+        "frame=best_effort_timestamp,best_effort_timestamp_time",
+        "-of",
+        "json",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    args.push(path.to_string_lossy().into_owned());
+    let info: Value = serde_json::from_slice(&media::capture(
+        &media::tool("ffprobe"),
+        &args,
+        Duration::from_secs(600),
+    )?)?;
+    let frames = info["frames"]
+        .as_array()
+        .ok_or_else(|| verification("Missing decoded frames"))?;
+    if frames.len() as u64 != c.reference.frames {
+        return Err(verification("Decoded frame count mismatch"));
+    }
+    for (n, frame) in frames.iter().enumerate() {
+        let mut timestamp = frame.clone();
+        timestamp["time_base"] = v["time_base"].clone();
+        if request.profile == Profile::Reference {
+            render::clock::timestamp(frame, n, c.project.frame_rate, v)
+                .map_err(|_| verification("Decoded frame timestamp mismatch"))?;
+        } else if exact_time(&timestamp, "best_effort_timestamp")?
+            .compare(Time::new(
+                n as u64 * c.project.frame_rate.den,
+                c.project.frame_rate.num,
+            )?)?
+            .is_ne()
+        {
+            return Err(verification("Decoded frame timestamp mismatch"));
+        }
+    }
+    Ok(())
+}
+/// Decode the output's audio and check its count, padding and priming, or, for lossless
+/// profiles, that it equals the reference's samples. Returns the receipt fields.
+fn decoded_audio(
+    request: &Export,
+    c: &Checked,
+    path: &Path,
+    reference: Option<&Path>,
+    scratch: &Path,
+) -> Result<Vec<(&'static str, Value)>> {
+    let decoded = scratch.join("decoded.pcm");
+    let count = decode_pcm(path, &decoded)?;
+    let samples = c.reference.samples;
+    let expected = if request.profile != Profile::H264Aac {
+        samples
+    } else {
+        samples.div_ceil(1024) * 1024
+    };
+    if count != expected {
+        return Err(verification("Decoded audio count/padding mismatch"));
+    }
+    let hash = prefix_hash(&decoded, samples * 4)?;
+    let mut fields = Vec::new();
+    if request.profile != Profile::H264Aac {
+        let original = scratch.join("reference.pcm");
+        let reference = reference.expect("lossless outputs have a reference");
+        if decode_pcm(reference, &original)? != samples
+            || hash != prefix_hash(&original, samples * 4)?
+        {
+            return Err(verification("Reference PCM changed during export"));
+        }
+    } else {
+        let mut args: Vec<String> = [
+            "-v",
+            "error",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-select_streams",
+            "a:0",
+            "-read_intervals",
+            "%+#1",
+            "-show_packets",
+            "-show_entries",
+            "packet=pts,side_data_list",
+            "-of",
+            "json",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        args.push(path.to_string_lossy().into_owned());
+        let packets: Value = serde_json::from_slice(&media::capture(
+            &media::tool("ffprobe"),
+            &args,
+            Duration::from_secs(30),
+        )?)?;
+        let first = &packets["packets"][0];
+        if first["pts"] != -1024
+            || !first["side_data_list"].as_array().is_some_and(|v| {
+                v.iter()
+                    .any(|d| d["side_data_type"] == "Skip Samples" && d["skip_samples"] == 1024)
+            })
+        {
+            return Err(verification("AAC priming/edit metadata mismatch"));
+        }
+        fields.push(("aac_priming_samples", json!(1024)));
+    }
+    fields.push(("decoded_audio_prefix_sha256", json!(hash)));
+    fields.push(("decoded_audio_samples", json!(count)));
+    fields.push(("audio_tail_padding_samples", json!(count - samples)));
+    Ok(fields)
 }
 pub fn run(request: &Export) -> Result<Value> {
     use media::Control;
@@ -819,49 +900,69 @@ pub fn run(request: &Export) -> Result<Value> {
     } else {
         "reference.mkv"
     });
-    let render = if audio_only {
-        render::run_audio_range
-    } else {
-        render::run_intermediate_range
-    };
-    render(
-        &c.project,
-        &request.input_root,
-        &scratch.0,
-        &reference,
-        c.range.start,
-        c.range.duration,
-    )?;
-    if request.profile == Profile::PngSequence {
-        return sequence::run(request, &c, &reference, &scratch.0);
-    }
     let encoded = scratch.0.join(format!("encoded.{}", request.extension()));
-    let two_pass = request.profile == Profile::H264Aac
-        && request.streams.video()
-        && request.h264.unwrap_or_default().rate_control.two_pass();
-    // Long exports get time in proportion: at least 2 Mpx per second beyond the fixed allowance.
-    let pixels = u64::from(c.project.width) * u64::from(c.project.height);
-    let timeout =
-        Duration::from_secs(600) + Duration::from_millis(c.reference.frames * pixels / 2_000);
-    let encode = |pass: Option<u8>, phase: &str| -> Result<()> {
-        control.phase(phase)?;
-        let mut args = arguments(request, &reference, &encoded, pass, &scratch.0);
-        args.splice(
-            0..0,
-            ["-progress".into(), "pipe:1".into(), "-nostats".into()],
-        );
-        media::capture_controlled(&media::tool("ffmpeg"), &args, timeout, &control).map(|_| ())
-    };
-    if two_pass {
-        encode(Some(1), "encoding pass 1")?;
-    }
-    encode(two_pass.then_some(2), "encoding")?;
-    control.phase("verifying")?;
-    let verified = validate_output(request, &c, &encoded, &reference, &scratch.0)?;
-    for source in &c.reference.sources {
-        if media::file_hash(&source.path)? != source.sha256 {
-            return Err(error("MEDIA_CHANGED", "Source changed during export"));
+    // H.264 video is encoded straight from the timeline. Other outputs are made from a verified
+    // lossless intermediate, which they must then match exactly.
+    let streamed = stream::encode(request, &c, &scratch.0, &encoded, &control)?;
+    if streamed.is_none() {
+        let render = if audio_only {
+            render::run_audio_range
+        } else {
+            render::run_intermediate_range
+        };
+        render(
+            &c.project,
+            &request.input_root,
+            &scratch.0,
+            &reference,
+            c.range.start,
+            c.range.duration,
+        )?;
+        if request.profile == Profile::PngSequence {
+            return sequence::run(request, &c, &reference, &scratch.0);
         }
+        let two_pass = request.profile == Profile::H264Aac
+            && request.streams.video()
+            && request.h264.unwrap_or_default().rate_control.two_pass();
+        // Long exports get time in proportion: at least 2 Mpx per second beyond the fixed allowance.
+        let pixels = u64::from(c.project.width) * u64::from(c.project.height);
+        let timeout =
+            Duration::from_secs(600) + Duration::from_millis(c.reference.frames * pixels / 2_000);
+        let encode = |pass: Option<u8>, phase: &str| -> Result<()> {
+            control.phase(phase)?;
+            let mut args = arguments(request, &reference, &encoded, pass, &scratch.0);
+            args.splice(
+                0..0,
+                ["-progress".into(), "pipe:1".into(), "-nostats".into()],
+            );
+            media::capture_controlled(&media::tool("ffmpeg"), &args, timeout, &control).map(|_| ())
+        };
+        if two_pass {
+            encode(Some(1), "encoding pass 1")?;
+        }
+        encode(two_pass.then_some(2), "encoding")?;
+    }
+    control.phase("verifying")?;
+    let lossless = (request.profile != Profile::H264Aac).then_some(reference.as_path());
+    // Sources are checked again beside the output's decodes; an output failure is reported first.
+    let (verified, unchanged) = std::thread::scope(|scope| {
+        let unchanged = scope.spawn(|| -> Result<()> {
+            for source in &c.reference.sources {
+                if media::file_hash(&source.path)? != source.sha256 {
+                    return Err(error("MEDIA_CHANGED", "Source changed during export"));
+                }
+            }
+            Ok(())
+        });
+        let verified = validate_output(request, &c, &encoded, lossless, &scratch.0);
+        (verified, joined(unchanged))
+    });
+    let mut verified = verified?;
+    unchanged?;
+    if let Some(timeline) = streamed {
+        verified["encoder_input"] = json!("streamed");
+        verified["timeline_video_sha256"] = json!(timeline.video);
+        verified["timeline_audio_sha256"] = json!(timeline.audio);
     }
     let mut result = report(request, &c);
     result["verification"] = verified;
@@ -872,5 +973,5 @@ pub fn run(request: &Export) -> Result<Value> {
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
+    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
 }

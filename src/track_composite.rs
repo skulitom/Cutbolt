@@ -70,12 +70,55 @@ impl Compositor {
     }
 }
 
+/// A decoder whose frames are read on their own thread, up to two ahead, so the pipe transfers
+/// of all decoders overlap one another and the composition. Read frames can be handed back for
+/// reuse.
+struct Ahead {
+    frames: mpsc::Receiver<Result<Vec<u8>>>,
+    spare: mpsc::Sender<Vec<u8>>,
+}
+impl Ahead {
+    /// Read `count` frames of `size` bytes, then require the decoder to end cleanly; its result
+    /// is the last message. The thread stops when the receiver is dropped, and the decoder with it.
+    fn start(mut reader: StreamReader, size: usize, count: u64) -> Self {
+        let (sender, frames) = mpsc::sync_channel(2);
+        let (spare, spares) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            for _ in 0..count {
+                let mut frame = spares.try_recv().unwrap_or_else(|_| vec![0; size]);
+                let read = reader.read_exact(&mut frame).map(|()| frame);
+                let failed = read.is_err();
+                if sender.send(read).is_err() || failed {
+                    return;
+                }
+            }
+            let _ = sender.send(reader.finish().map(|()| Vec::new()));
+        });
+        Self { frames, spare }
+    }
+    fn next(&self) -> Result<Vec<u8>> {
+        self.frames.recv().map_err(|_| {
+            error(
+                "RENDER_VALIDATION_FAILED",
+                "A composition decoder stopped early",
+            )
+        })?
+    }
+    fn recycle(&self, frame: Vec<u8>) {
+        let _ = self.spare.send(frame);
+    }
+    /// The decoder's own end, after its last frame.
+    fn finish(self) -> Result<()> {
+        self.next().map(|_| ())
+    }
+}
+
 /// Decoders of one composition and the frame they are on.
 struct Decoders<'a> {
     compositor: &'a Compositor,
-    base: StreamReader,
+    base: Ahead,
     pending: Vec<(usize, Command)>,
-    active: Vec<(usize, StreamReader, Vec<u8>)>,
+    active: Vec<(usize, Ahead)>,
     program: String,
     timeout: Duration,
     abort: Arc<AtomicBool>,
@@ -84,8 +127,7 @@ impl Decoders<'_> {
     /// The composited frame `n` as planar G, B, R.
     fn next(&mut self, n: u64) -> Result<Vec<u8>> {
         let c = self.compositor;
-        let mut frame = vec![0; c.plane() * 3];
-        self.base.read_exact(&mut frame)?;
+        let mut frame = self.base.next()?;
         while let Some(position) = self
             .pending
             .iter()
@@ -100,25 +142,28 @@ impl Decoders<'_> {
                     abort: Some(self.abort.clone()),
                 },
             )?;
-            self.active
-                .push((index, reader, vec![0; c.layers[index].frame_bytes()]));
-            self.active
-                .sort_by_key(|(index, _, _)| c.layers[*index].track);
+            let layer = &c.layers[index];
+            self.active.push((
+                index,
+                Ahead::start(reader, layer.frame_bytes(), layer.end - layer.first),
+            ));
+            self.active.sort_by_key(|(index, _)| c.layers[*index].track);
         }
         let base = c.base_index(n);
-        for (index, reader, pixels) in &mut self.active {
-            reader.read_exact(pixels)?;
+        for (index, decoder) in &self.active {
+            let pixels = decoder.next()?;
             let layer = &c.layers[*index];
             if base.is_none_or(|b| layer.track > b) {
-                over(&mut frame, c.width, c.height, layer, pixels);
+                over(&mut frame, c.width, c.height, layer, &pixels);
             }
+            decoder.recycle(pixels);
         }
         let mut still = Vec::with_capacity(self.active.len());
-        for (index, reader, pixels) in self.active.drain(..) {
+        for (index, decoder) in self.active.drain(..) {
             if c.layers[index].end == n + 1 {
-                reader.finish()?;
+                decoder.finish()?;
             } else {
-                still.push((index, reader, pixels));
+                still.push((index, decoder));
             }
         }
         self.active = still;
@@ -133,14 +178,18 @@ fn decoders<'a>(
     abort: &Arc<AtomicBool>,
 ) -> Result<Decoders<'a>> {
     let program = control.tool("ffmpeg");
-    let base = StreamReader::spawn_with(
-        control.command(&program, &compositor.base)?,
-        &program,
-        timeout,
-        Watch {
-            abort: Some(abort.clone()),
-        },
-    )?;
+    let base = Ahead::start(
+        StreamReader::spawn_with(
+            control.command(&program, &compositor.base)?,
+            &program,
+            timeout,
+            Watch {
+                abort: Some(abort.clone()),
+            },
+        )?,
+        compositor.plane() * 3,
+        compositor.frames,
+    );
     let pending = compositor
         .layers
         .iter()
@@ -169,16 +218,33 @@ pub(crate) fn encode(
     done: u64,
     control: &dyn Control,
 ) -> Result<()> {
+    let discard = |mut stdout: std::process::ChildStdout| {
+        let _ = std::io::copy(&mut stdout, &mut std::io::sink());
+        Ok(())
+    };
+    encode_consuming(compositor, encoder, timeout, done, control, discard)
+}
+
+/// `encode` for an encoder that also writes a stream to stdout, which `consume` reads to its end.
+pub(crate) fn encode_consuming<T: Send + 'static>(
+    compositor: &Compositor,
+    encoder: &[String],
+    timeout: Duration,
+    done: u64,
+    control: &dyn Control,
+    consume: impl FnOnce(std::process::ChildStdout) -> Result<T> + Send + 'static,
+) -> Result<T> {
     let program = control.tool("ffmpeg");
     let abort = Arc::new(AtomicBool::new(false));
     let mut decoders = decoders(compositor, timeout, control, &abort)?;
-    let stopped = media::feed_stdin_with(
+    let stopped = media::feed_stdin_consuming(
         control.command(&program, encoder)?,
         &program,
         timeout,
         Watch {
             abort: Some(abort.clone()),
         },
+        consume,
         |stdin| {
             std::thread::scope(|scope| {
                 let (sender, receiver) = mpsc::sync_channel::<Result<Vec<u8>>>(2);

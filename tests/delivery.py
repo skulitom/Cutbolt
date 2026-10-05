@@ -111,6 +111,10 @@ def run(root):
                 assert video==b''.join(bytes(W*H*3) if item is None else frame(*item) for item in selected)
             else:
                 video=decode(path,True);assert len(video)==count*W*H*3
+                # The encoder received exactly the timeline's frames and samples, straight from its graph.
+                verified=result['verification'];assert verified['encoder_input']=='streamed'
+                assert verified['timeline_video_sha256']==hashlib.sha256(b''.join(bytes(W*H*3) if item is None else frame(*item) for item in selected)).hexdigest()
+                assert verified['timeline_audio_sha256']==(hashlib.sha256(expected).hexdigest() if r['streams']=='audio_video' else None)
                 yuv=subprocess.check_output(['ffmpeg','-v','error','-i',str(path),'-map','0:v:0','-an','-pix_fmt','yuv420p','-f','rawvideo','-'])
                 assert len(yuv)==count*W*H*3//2
                 transfer=r['input_transfer'];errors=0;patch_error=0;identity_frames=0
@@ -137,6 +141,7 @@ def run(root):
                 assert F(v['duration_ts'])*F(v['time_base'])==F(count,25)
                 data=path.read_bytes();assert data.index(b'moov')<data.index(b'mdat')
             frames_checked+=count
+        if r['streams']=='audio':assert 'encoder_input' not in result['verification']
         if r['streams']!='video':
             audio_raw=decode(path,False);wanted=count*1920
             if r['profile']=='reference':assert audio_raw==expected
@@ -246,14 +251,14 @@ def run(root):
     call({**base,'output_root':str(sources),'output':assets[0]['path']},'OUTPUT_EXISTS')
     call(request('missing-tool'), 'TOOL_UNAVAILABLE',{**os.environ,'CUTBOLT_FFMPEG':str(root/'missing.exe')})
 
-    # Original controlled tool fixture: corrupt only our own staged output after a successful codec call.
+    # Original controlled tool fixture: corrupt only our own staged output after the successful call that writes it.
     wrapper=root/'controlled.rs';wrapper.write_text(r'''
 use std::{env,process::{Command,exit},path::Path,fs};
 fn main(){let a:Vec<String>=env::args().skip(1).collect();let status=Command::new(env::var("EXPORT_REAL_FFMPEG").unwrap()).args(&a).status().unwrap();
 if !status.success(){exit(status.code().unwrap_or(1));}
-if let Some(last)=a.last(){let p=Path::new(last);if p.file_name().is_some_and(|x|x=="encoded.mp4"){
+if let Some(i)=a.iter().position(|x|Path::new(x).file_name().is_some_and(|x|x=="encoded.mp4")){let p=Path::new(&a[i]);if i==0||a[i-1]!="-i"{
 let parent=p.parent().unwrap();let root=fs::canonicalize(env::var("EXPORT_FIXTURE_ROOT").unwrap()).unwrap();assert!(fs::canonicalize(parent).unwrap().starts_with(root));
-if env::var("EXPORT_FAULT").unwrap()=="container"{fs::copy(parent.join("reference.mkv"),p).unwrap();}
+if env::var("EXPORT_FAULT").unwrap()=="container"{fs::copy(env::var("EXPORT_FIXTURE_SOURCE").unwrap(),p).unwrap();}
 else {let source=Path::new(&env::var("EXPORT_FIXTURE_SOURCE").unwrap()).to_path_buf();assert!(fs::canonicalize(&source).unwrap().starts_with(fs::canonicalize(env::var("EXPORT_FIXTURE_ROOT").unwrap()).unwrap()));let mut bytes=fs::read(&source).unwrap();bytes.push(1);fs::write(source,bytes).unwrap();}
 }}}
 ''',encoding='utf-8')

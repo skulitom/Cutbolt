@@ -1,5 +1,48 @@
 # Progress history
 
+## 5 October 2026: H.264 exports stream straight from the timeline
+
+On main `d3c9140`, the progress demo's final cut (`pip-explainer` revision 13: 80.64 s of 1080p25, 14 FFV1 scene shots, 7 narration clips and a ducked music bed) exported to H.264 in 127 s. Revision 10, with a caption overlay and a picture-in-picture clip, took 112 s warm. Export was the slowest single step of a new video. A logging shim on FFmpeg timed revision 13's warm export:
+- The timeline graph wrote the lossless FFV1 intermediate with one encoder thread: 83 s. The graph alone runs in 14 s.
+- x264 read the intermediate back with one thread: 49 s.
+- Verification decoded the delivery twice, one decode after the other: 3.4 s for the timestamp scan and 6.1 s for the RGB digest.
+- Probes, PCM checks and source hashes took about 1.5 s.
+
+The changes:
+- **No intermediate for H.264 video.** One FFmpeg run executes the reference graph and converts and encodes its picture and mix. With engine-composited overlays, the encoder fed by the compositor does the same. That run also returns exactly what it encoded:
+  - the packed RGB24 frames on stdout, which the engine counts and hashes as they arrive;
+  - the PCM samples, written to a scratch file.
+
+  Both must hold exactly the range's frames and samples. The receipt's `verification.timeline_video_sha256` and `timeline_audio_sha256` equal a reference export's decoded digests of the same range. The delivery fixture checks them against its own independently generated frames and samples. Two-pass encodes run the graph twice, and both passes must receive identical frames. Reference and PNG profiles, audio-only delivery and joined chunks (more than 64 clips per graph) keep the verified intermediate.
+- **Threaded encoding that still repeats.** x264 runs eight slice threads and the RGB-to-YUV scaler eight threads, both fixed counts. x264's frame threads were tried first and rejected: under the VBV cap their rate control depends on frame arrival timing. Three exports of one timeline gave three different pictures, which `delivery_profiles`' concurrent repeatability check caught. Slices cost about 4 % more bytes at the same CRF. With one x264 thread, the streamed path decodes bit-identically to the old path on the demo (decoded RGB SHA-256 `e07031bb…`), and AAC output is identical, so the threading mode is the only change to delivered content.
+- **Parallel verification.** The timestamp scan, the RGB digest, the PCM decode, the AAC priming probe and the source re-hash now run at the same time. The documented checks themselves are unchanged.
+- **Overlay decoders read ahead.** The engine compositor used to read the base picture and each overlay from their pipes one after the other, on one thread. For the demo's full-frame caption that is 14.5 MB per frame. Each decoder now has its own reader thread, up to two frames ahead, so the transfers overlap each other and the composition. The composition arithmetic is unchanged, and so is the overlay export's decoded output. In an alternating A/B on revision 10 the read-ahead alone took the export from 42.5 s to 35.6 s (medians of 3).
+- `export.run` progress for H.264 video now reads `inspecting`, `encoding` and `verifying`. Peak FFmpeg memory is unchanged at about 4 GB for the demo.
+
+Measured with release builds of `d3c9140` and of this change rebased on main `68dc052`, back to back, while other sessions kept the machine's 32 threads 8-37 % busy before most runs (99 % before one). Source inspections were warm, so the parallel cold inspection that landed meanwhile does not enter. Medians of 3 runs:
+
+| Export of the demo | `d3c9140` | Now |
+| --- | ---: | ---: |
+| Final cut (revision 13) | 115.2 s | 34.0 s |
+| Caption overlay + picture-in-picture (revision 10) | 118.0 s | 30.9 s |
+
+The streamed run is now bounded by FFmpeg's single filter-graph thread (about 145 fps here), not by x264: a `veryfast` preset measured no faster. Verification is bounded by SHA-256 of the 12.5 GB of decoded RGB, at about 1.7 GB/s. For that reason a draft preset and an NVENC option were not added. Segment-parallel encoding was not built either: it would need VBV continuity across joins, and a per-segment digest instead of one.
+
+Not changed:
+- the documented checks;
+- the output container, timing, profile, level and color tags;
+- `export.review`'s inputs.
+
+The FFV1 intermediates of reference and PNG exports still encode with one thread (`render.rs`, `track_render.rs`).
+
+Tests:
+- unit tests for the argument layout, plan parsing and the exact pipelined digest;
+- the delivery fixture asserts the streamed digests;
+- its fault injection now targets the call that writes the staged MP4;
+- the dynamics fixture exports its master-limited timeline to H.264, and requires the PCM the encoder received to equal the limiter oracle exactly.
+
+These fixtures pass: delivery, delivery_profiles, overlays, tracks, transitions, native_timing, export_formats, agent_ergonomics, color, hdr, native_scenes, transcripts, queue_recovery and dynamics (quick mode, with the CUDA decode device). No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: recognition vocabulary and uncovered speech
 
 Known-text alignment fixed two demo problems (ISSUES.md 5 and 6) for synthesized narration, but not for real recorded speech:

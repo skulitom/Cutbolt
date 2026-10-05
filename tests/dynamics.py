@@ -319,6 +319,12 @@ def run(root):
     max_db, reduced = reduction(gains['master'])
     assert receipt['dynamics']['master']['max_reduction_db'] == max_db and receipt['dynamics']['tracks'] == [], receipt['dynamics']
     assert receipt['dynamics']['master']['reduced_seconds'] == round(reduced / 48000, 3) and max_db > 6, (receipt['dynamics'], max_db)
+    # An H.264 export streams the timeline into its encoder: what AAC received is the limited mix.
+    delivery = call({'command': 'export.run', 'project': limited, 'input_root': str(root), 'output_root': str(out), 'output': str(out / 'master-limiter.mp4'),
+                     'profile': 'h264_aac', 'streams': 'audio_video', 'input_transfer': 'bt709'})
+    assert delivery['verification']['encoder_input'] == 'streamed'
+    assert delivery['verification']['timeline_audio_sha256'] == hashlib.sha256(expected.tobytes()).hexdigest()
+    preserved()
     passed.append('dynamics.master_limiter_exact')
 
     # 2. A track limiter before the master: the voice is limited alone, then the sum again.

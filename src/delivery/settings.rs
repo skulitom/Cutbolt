@@ -166,7 +166,7 @@ impl H264 {
             .level(width, height, rate)
             .map(|l| l.0)
             .unwrap_or("unsupported");
-        let mut report = json!({"codec":"h264","encoder":"libx264","profile":self.compatibility.decoded_profile(),"level":level,"preset":"medium",
+        let mut report = json!({"codec":"h264","encoder":"libx264","slice_threads":ENCODER_THREADS,"profile":self.compatibility.decoded_profile(),"level":level,"preset":"medium",
             "compatibility":self.compatibility,"rate_control":self.rate_control,"maximum_bitrate":self.rate_control.maximum(),"buffer_size":self.rate_control.buffer(),
             "pixel_format":"yuv420p","matrix":"bt709","primaries":"bt709","transfer":"bt709","range":"limited","chroma_location":"left","chroma_filter":"bilinear",
             "gop_frames":gop(rate),"b_frames":self.compatibility.b_frames(),"reference_frames":self.compatibility.references()});

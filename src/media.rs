@@ -383,12 +383,30 @@ pub(crate) fn feed_stdin(
 }
 /// `feed_stdin` for a prepared command (for example from `Control::command`), with extra supervision.
 pub(crate) fn feed_stdin_with(
-    mut command: Command,
+    command: Command,
     program: &str,
     timeout: Duration,
     watch: Watch,
     produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
 ) -> Result<()> {
+    let consume = |stdout: std::process::ChildStdout| {
+        drain(stdout, 64 * 1024, None);
+        Ok(())
+    };
+    feed_stdin_consuming(command, program, timeout, watch, consume, produce)
+}
+/// `feed_stdin_with` whose stdout goes to `consume` on its own thread, for tools that write a
+/// stream back while they read one. `consume` must read to the end of the stream so the tool
+/// never blocks on a full pipe. The tool's own failure wins over the producer's, which wins over
+/// the consumer's.
+pub(crate) fn feed_stdin_consuming<T: Send + 'static>(
+    mut command: Command,
+    program: &str,
+    timeout: Duration,
+    watch: Watch,
+    consume: impl FnOnce(std::process::ChildStdout) -> Result<T> + Send + 'static,
+    produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
+) -> Result<T> {
     use std::sync::{Arc, Mutex};
     command
         .stdin(Stdio::piped())
@@ -401,7 +419,7 @@ pub(crate) fn feed_stdin_with(
     let mut stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
-    let out_thread = thread::spawn(move || drain(stdout, 64 * 1024, None));
+    let out_thread = thread::spawn(move || consume(stdout));
     let err_thread = thread::spawn(move || drain(stderr, 64 * 1024, None));
     let child = Arc::new(Mutex::new(ChildGuard(child)));
     let watchdog = Watchdog::start(child.clone(), program, timeout, watch);
@@ -414,7 +432,9 @@ pub(crate) fn feed_stdin_with(
         thread::sleep(Duration::from_millis(20));
     };
     watchdog.finish();
-    let _ = out_thread.join();
+    let consumed = out_thread
+        .join()
+        .map_err(|_| error("TOOL_FAILED", "Output reader failed"));
     let (err, _) = err_thread
         .join()
         .map_err(|_| error("TOOL_FAILED", "Diagnostic reader failed"))?;
@@ -428,7 +448,8 @@ pub(crate) fn feed_stdin_with(
         ));
     }
     // A producer failure (e.g. a composition error) wins over a broken pipe from the tool.
-    produced
+    produced?;
+    consumed?
 }
 
 /// A tool whose stdout is read incrementally (e.g. decoded frames), so large outputs never reach disk.

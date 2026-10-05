@@ -56,7 +56,7 @@ The version-1 `h264_aac` profile selects the existing external FFmpeg build's `l
 | AAC | LC, 48 kHz stereo, target 320,000 bits/s, native two-loop coder with perceptual noise substitution enabled |
 | MP4 | Faststart index, edit lists, 48,000-unit movie clock and 12,800-unit video clock |
 
-Encoding uses one video thread. Source chapters and copied metadata are removed; output encoder/container metadata is still generated. Binary files are not promised to be identical across tool builds. Decoded repeatability is tested on the recorded build. The optional controls have a bounded software/CUDA compatibility matrix; broader browser/device playback remains unverified.
+x264 runs eight slice threads, coding each frame as up to eight slices, and the RGB-to-YUV scaler runs eight threads. Both counts are fixed rather than taken from the host, so the encoded stream is the same on every machine with the recorded build; the scaler's threads only divide rows and change no value. x264's frame threads would be slightly faster, but under the VBV cap their rate control depends on when frames arrive, and repeated exports of one timeline differed. Slices cost about 4 % more bytes at the same CRF. Exports made before 5 October 2026 used one thread and one slice, so their pictures can differ slightly from a new export of the same timeline; with one thread the new path decodes bit-identically to the old one, and audio is identical. The report's `video.slice_threads` records the count. Source chapters and copied metadata are removed; output encoder/container metadata is still generated. Binary files are not promised to be identical across tool builds. Decoded repeatability is tested on the recorded build. The optional controls have a bounded software/CUDA compatibility matrix; broader browser/device playback remains unverified.
 
 ### Explicit color interpretation
 
@@ -88,17 +88,33 @@ Inspection reports the selected range, dimensions, stream policy, source identit
 
 Audio-only exports (`streams: "audio"`) never decode, composite or encode pictures. Sequential timelines are trimmed and concatenated directly from source PCM with exact silence for gaps; track timelines mix only their enabled audio tracks with the same placement and saturation rules as a full render. Sources are still identity-checked and their stream metadata, audio samples and video timestamps validated, but video timing is read from FFV1 packets instead of decoding every frame. The intermediate is a lossless PCM WAV, so cost scales with audio duration rather than picture size.
 
-Rendering then:
+H.264 exports with video are encoded straight from the timeline. No lossless intermediate is written, checked and decoded again:
 
-1. Compiles the selected full-quality reference interval under a private scratch directory beside the output.
-2. Extracts reference streams or encodes the fixed delivery profile.
-3. Checks container, exact stream count, codec, dimensions, frame rate and every decoded video's presentation timestamp. Delivery metadata must match the declared profile and exact track duration.
-4. Decodes complete video/audio, checks counts and records decoded digests. Reference video and PCM must match the intermediate's decoded samples exactly. Delivery audio padding is reported separately.
-5. Rechecks every used original source hash, then publishes by a no-overwrite hard link and cleans up known scratch files.
+1. One FFmpeg run executes the selected full-quality reference graph and converts and encodes its picture and mix. With [engine-composited overlays](TRACKS.md), the engine compositor feeds that run's picture on stdin instead.
+2. The same run also returns exactly what it encoded. The packed RGB24 frames go to the engine on stdout, which counts and hashes them as they arrive, and the stereo PCM s16le samples go to a scratch file. Both must hold exactly the range's frames and samples, at the timeline's exact clock. The receipt reports `verification.encoder_input: "streamed"`, `timeline_video_sha256` and `timeline_audio_sha256`. These equal the `decoded_video_sha256` and `decoded_audio_prefix_sha256` of a `reference` export of the same range, so a delivery can be tied to a lossless render without making one. Two-pass encodes run the graph twice, and both passes must receive identical frames.
+
+Reference and PNG exports, audio-only delivery, and ranges rendered as joined chunks (more than 64 clips per graph) still compile the selected interval into a lossless intermediate under a private scratch directory beside the output, verify it, then extract reference streams or encode from it.
+
+Every export then:
+
+1. Checks container, exact stream count, codec, dimensions, frame rate and every decoded video's presentation timestamp. Delivery metadata must match the declared profile and exact track duration.
+2. Decodes complete video/audio, checks counts and records decoded digests. Reference video and PCM must match the intermediate's decoded samples exactly. Delivery audio padding is reported separately. These decodes run at the same time.
+3. Rechecks every used original source hash, beside those decodes, then publishes by a no-overwrite hard link and cleans up known scratch files.
 
 Runtime validation proves structure, timing, successful decoding and reference equality. It does not compute a content-quality score for every lossy export. Quality thresholds are exercised by the original acceptance fixture. The receipt includes output SHA-256, original source hashes, exact tool versions, decoded RGB hash and presentation-PCM-prefix hash. The RGB digest uses the recorded FFmpeg build's ordinary RGB24 decoding; its codec/scaler behavior remains an external dependency.
 
-Missing tools, malformed input, changed sources or validation failure leave no final output. Existing outputs are never replaced. A process crash can leave scratch files for inspection; automatic export retry/recovery and queue integration remain open. The intermediate and validation PCM require temporary disk space, in addition to the final output.
+Missing tools, malformed input, changed sources or validation failure leave no final output. Existing outputs are never replaced. A process crash can leave scratch files for inspection; automatic export retry/recovery and queue integration remain open. An intermediate and the validation PCM require temporary disk space, in addition to the final output; H.264 video needs only the timeline and validation PCM.
+
+### Export speed
+
+Measured on the progress demo's final cut (80.64 s of 1080p25: 14 FFV1 scene shots, 7 narration clips and a ducked music bed) with release builds, back to back on the development machine while other sessions kept its 32 threads 8-37 % busy before most runs (99 % before one). Each figure is the median of 3 runs with warm source inspections. With overlays, each compositor decoder also reads ahead on its own thread.
+
+| Export | Intermediate (`d3c9140`) | Streamed |
+| --- | ---: | ---: |
+| Final cut, no overlays | 115.2 s | 34.0 s |
+| Same timeline with the full-length caption overlay and a picture-in-picture clip (engine-composited) | 118.0 s | 30.9 s |
+
+The old path spent its time in the single-threaded FFV1 encode of the intermediate (83 s here) and the single-threaded x264 encode (49 s). The streamed run takes about 21 s, bounded by FFmpeg's one graph thread rather than by x264, so a faster x264 preset or hardware encoder gains little on this material. Verification takes about 6 s, bounded by SHA-256 of the 12.5 GB of decoded RGB (about 1.7 GB/s on one core).
 
 ## Runnable workflow and evidence
 

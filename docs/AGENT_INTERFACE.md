@@ -27,7 +27,7 @@ These jobs share the queue's request IDs, ticket replay, output reservation and 
 
 - **Cancellation.** `job.cancel` stops a queued job at once and a running one within seconds. The command is told to stop: its tools are killed and its partial files removed. Anything still running 20 s later is terminated. The job ends `cancelled` with `JOB_CANCELLED`, unless its output was already published.
 - **Watchdog.** A command whose processes together use less than 1 s of CPU in 180 s, without reporting progress, is stuck (a deadlocked tool sits at 0 %); it is stopped the same way and fails with `JOB_STALLED`. A command running longer than 12 hours fails with `JOB_TIMEOUT`. Neither publishes output.
-- **Progress.** `progress` shows the command's phase and frames as it runs. `export.run` reports `inspecting`, `rendering` (frames of the lossless reference), `verifying`, then `encoding` (frames encoded) and `verifying` for H.264, PNG MOV and similar profiles, with `total_frames` set to the exported frames. Commands that count no frames keep `frames` at 0.
+- **Progress.** `progress` shows the command's phase and frames as it runs. `export.run` reports `inspecting`, `encoding` (frames converted and encoded straight from the timeline; two-pass encodes report `encoding pass 1` first) and `verifying` for H.264 video. Other profiles report `inspecting`, `rendering` (frames of the lossless reference), `verifying`, then `encoding` and `verifying` where they encode. `total_frames` is set to the exported frames. Commands that count no frames keep `frames` at 0.
 
 An interrupted run is reported, not retried. Reference renders keep `render.start` with its retry and publication recovery.
 
