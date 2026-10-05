@@ -36,7 +36,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from cutbolt_production import manifest as manifest_module, pixel_stage, quality  # noqa: E402
-from cutbolt_production.pipeline import CODEC_CHECK, Production, arrangement_differences, estimate, music_clips, plan_timing, reconcile  # noqa: E402
+from cutbolt_production.pipeline import CODEC_CHECK, Production, arrangement_differences, codec_step, estimate, music_clips, plan_timing, reconcile  # noqa: E402
 from cutbolt_production.engine import Engine, ToolError  # noqa: E402
 from cutbolt_production.state import State, sha256_file  # noqa: E402
 
@@ -701,13 +701,33 @@ def check_quality(out, passed):
     rejected({**raw, "delivery": {"review": {"min_speech_match": 1.5}}}, "min_speech_match")
     passed.append("production.music_loop_and_estimate")
 
-    # 10. The mix through the engine: a supplied take over a harsh bed looped on bars, normalized loud. Each AAC trial
-    #     encodes the mix as the export will; a true peak over the target lowers the limiter ceiling by the excess plus
-    #     the margin. The chosen trial's decoded audio equals the delivered MP4's, and its review reads the same peak.
+    # 10. When the AAC trials stop. A trial over the target lowers the ceiling by the excess plus the margin; one no
+    #     better than the best before it stops them (the part-two demo's second trial read +1.40 dBTP after +0.02, and
+    #     its third +1.62), as do the cap, the ceiling's floor and an unmeasured encode.
+    def trial(ceiling, peak):
+        return {"ceiling_dbfs": ceiling, "true_peak_dbtp": peak}
+    assert codec_step([trial(-1.3, -1.37)], -1)[0] == "under_target"
+    assert codec_step([trial(-1.3, -1.004)], -1)[0] == "under_target"
+    assert codec_step([trial(-1.5, 0.02)], -1) == (None, round(-1.5 - 1.02 - CODEC_CHECK["margin_db"], 2))
+    stop, reason = codec_step([trial(-1.5, 0.02), trial(-2.57, 1.40)], -1)
+    assert stop == "not_better" and "no lower than the best earlier trial's 0.02 dBTP" in reason, reason
+    assert codec_step([trial(-1.3, -0.5), trial(-1.85, -0.5)], -1)[0] == "not_better"
+    assert codec_step([trial(-1.3, -0.5), trial(-1.85, -0.8)], -1) == (None, round(-1.85 - 0.2 - CODEC_CHECK["margin_db"], 2))
+    capped = [trial(-1.3, -0.5), trial(-1.85, -0.8), trial(-2.1, -0.9)]
+    assert codec_step(capped, -1)[0] == "trial_cap" and len(capped) == CODEC_CHECK["trials"]
+    assert codec_step([trial(-20, -0.5)], -1)[0] == "ceiling_floor"
+    assert codec_step([trial(-1.3, None)], -1)[0] == "unmeasured"
+    note = quality.codec_note({"trials": [trial(-1.5, 0.02), trial(-2.57, 1.40)], "decision": {"stop": stop, "reason": reason}})
+    assert "-1.5 dBFS -> 0.02 dBTP, -2.57 dBFS -> 1.40 dBTP; the trials stopped (not_better): trial 2" in note, note
+    passed.append("production.aac_trial_rules")
+
+    # 11. The mix through the engine: a supplied take over a harsh bed looped on bars, normalized loud. Each AAC trial
+    #     encodes the mix as the export will; the rules above decide each next ceiling and when to stop, and the
+    #     receipt records the decision. The chosen trial's decoded audio equals the delivered MP4's, and its review
+    #     reads the same peak.
     root = out / "mix"
     root.mkdir()
-    # With this FFmpeg 6.1.1 the first trial reads -0.30 dBTP and the corrected ceiling of -2.25 dBFS -1.45 dBTP; other
-    # encoder builds may need fewer or more trials, so the rule is checked rather than the count.
+    # Other encoder builds may need fewer or more trials, so the rules are checked rather than the count.
     write_wav(sources / "take.wav", speech_like(5.2, 41), 24000)
     write_wav(sources / "bed.wav", harsh_bed(4.0, 42), 48000)
     raw = {"contract_version": "cutbolt-production-1", "production_id": "mix-fixture", "template": {"id": "pixel-stage-explainer", "version": 1},
@@ -733,15 +753,18 @@ def check_quality(out, passed):
     assert [(c["id"], F(c["start"]["num"], c["start"]["den"]), F(c["duration"]["num"], c["duration"]["den"])) for c in music] == \
         [("m-music", 0, F(384, 100)), ("m-music-2", F(384, 100), total - F(384, 100))], music
     assert "fade_out" not in music[0] and music[1]["fade_out"] == {"num": 48, "den": 25}, music
-    codec = production.stage_mix(audio)["result"]["report"]["codec"]
+    receipt = production.stage_mix(audio)
+    codec = receipt["result"]["report"]["codec"]
     trials = codec["trials"]
-    assert trials[0]["ceiling_dbfs"] == -1 - CODEC_CHECK["headroom_db"] and 1 <= len(trials) <= CODEC_CHECK["trials"], trials
-    for before, after in zip(trials, trials[1:]):
-        assert round(before["true_peak_dbtp"], 2) > -1, trials
-        assert after["ceiling_dbfs"] == max(-20, round(before["ceiling_dbfs"] - (round(before["true_peak_dbtp"], 2) + 1) - CODEC_CHECK["margin_db"], 2)), trials
+    assert trials[0]["ceiling_dbfs"] == round(-1 - CODEC_CHECK["headroom_db"], 2) and 1 <= len(trials) <= CODEC_CHECK["trials"], trials
+    for n, (before, after) in enumerate(zip(trials, trials[1:]), 1):
+        assert codec_step(trials[:n], -1) == (None, after["ceiling_dbfs"]), trials
+    assert codec["decision"] == dict(zip(("stop", "reason"), codec_step(trials, -1))) and codec["headroom_db"] == CODEC_CHECK["headroom_db"], codec
+    # Each trial records what the encode added to the mix's own true peak.
+    assert all(t["codec_overshoot_db"] == round(t["true_peak_dbtp"] - t["mix_true_peak_dbtp"], 2) for t in trials), trials
     under = [i for i, t in enumerate(trials) if round(t["true_peak_dbtp"], 2) <= -1]
-    assert codec["passed"] == bool(under) and (codec["chosen"] == under[0] if under else
-                                               codec["chosen"] == min(range(len(trials)), key=lambda i: trials[i]["true_peak_dbtp"])), codec
+    assert codec["passed"] == bool(under) == (codec["decision"]["stop"] == "under_target"), codec
+    assert codec["chosen"] == (under[0] if under else min(range(len(trials)), key=lambda i: trials[i]["true_peak_dbtp"])), codec
     chosen = trials[codec["chosen"]]
     production.engine.call("export.run", {"project": {"file": chosen["snapshot"]}, "output": "exports/mix.mp4", "profile": "h264_aac",
                                           "streams": "audio_video"})
@@ -758,8 +781,8 @@ def check_quality(out, passed):
     assert "PEAK_OVER_TARGET" in [w["code"] for w in quality.review_warnings(review, -10, round(peak - 0.1, 2), True, codec)]
     assert "PEAK_OVER_TARGET" not in [w["code"] for w in quality.review_warnings(review, -10, min(0, round(peak + 0.1, 2)), True, codec)]
     assert bool(quality.codec_warnings(codec, -1)) != codec["passed"]
-    passed.append(f"production.mix_aac_trial ({len(trials)} trial(s), ceiling {chosen['ceiling_dbfs']} dBFS, "
-                  f"delivered {chosen['true_peak_dbtp']:.2f} dBTP)")
+    passed.append(f"production.mix_aac_trial ({len(trials)} trial(s), {codec['decision']['stop']}, ceiling {chosen['ceiling_dbfs']} dBFS, "
+                  f"delivered {chosen['true_peak_dbtp']:.2f} dBTP, codec overshoot {chosen['codec_overshoot_db']:+.2f} dB)")
 
 
 def build(manifest_path, root, config, *extra):

@@ -279,7 +279,7 @@ fn report(request: &Export, c: &Checked) -> Value {
         "timeline_frames":c.reference.frames,"video_frames":if request.streams.video(){c.reference.frames}else{0},"audio_samples":if request.streams.audio(){c.reference.samples}else{0},
         "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.transfer(),"sources":c.reference.sources,
         "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report(c.project.width,c.project.height,c.project.frame_rate)},
-        "audio":if !request.streams.audio(){Value::Null}else if request.profile!=Profile::H264Aac{json!({"codec":"pcm_s16le","sample_rate":48000,"channels":2,"decoded_tail_padding":0})}else{json!({"codec":"aac","profile":"LC","bitrate":request.aac_bitrate.unwrap_or(320000),"sample_rate":48000,"channels":2,"presentation_samples":c.reference.samples,"decoder_tail_padding":"reported_separately_0_to_1023_samples"})},
+        "audio":if !request.streams.audio(){Value::Null}else if request.profile!=Profile::H264Aac{json!({"codec":"pcm_s16le","sample_rate":48000,"channels":2,"decoded_tail_padding":0})}else{json!({"codec":"aac","profile":"LC","bitrate":request.aac_bitrate.unwrap_or(320000),"coder":"twoloop","noise_substitution":false,"sample_rate":48000,"channels":2,"presentation_samples":c.reference.samples,"decoder_tail_padding":"reported_separately_0_to_1023_samples"})},
         "encoder_passes":if request.profile==Profile::Reference{0}else if request.streams.video() && request.h264.unwrap_or_default().rate_control.two_pass(){2}else{1},
         "container":match request.profile { Profile::H264Aac=>"mp4",Profile::PngMov=>"mov",Profile::PngSequence=>"numbered_png_and_manifest",Profile::Reference=>if request.streams==Streams::Audio{"wav"}else{"matroska"}},"sequence_first":if request.profile==Profile::PngSequence{Some(request.sequence_first.unwrap_or(0))}else{None}})
 }
@@ -471,6 +471,9 @@ fn h264_options(request: &Export, pass: Option<u8>, scratch: &Path, output: &Pat
         h264.arguments(&mut args, pass, scratch, level.0);
     }
     if request.streams.audio() && pass != Some(1) {
+        // Noise substitution stays off: on percussive onsets and strong high bands it decodes as
+        // bursts several dB above the input (measured up to +8 dB, with clipping), which no
+        // limiter ceiling can absorb. Real mixes also decode closer to the input without it.
         args.extend(
             [
                 "-c:a",
@@ -480,7 +483,7 @@ fn h264_options(request: &Export, pass: Option<u8>, scratch: &Path, output: &Pat
                 "-aac_coder",
                 "twoloop",
                 "-aac_pns",
-                "1",
+                "0",
                 "-ar",
                 "48000",
                 "-ac",
@@ -973,5 +976,5 @@ pub fn run(request: &Export) -> Result<Value> {
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
+    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_encoder":"native_lc_twoloop_without_noise_substitution","aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
 }

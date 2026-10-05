@@ -152,7 +152,9 @@ def codec_warnings(codec, peak_dbfs, stage="mix"):
 def codec_note(codec):
     trials = codec.get("trials") or []
     tried = ", ".join(f"{t['ceiling_dbfs']:g} dBFS -> {t['true_peak_dbtp']:.2f} dBTP" for t in trials if t.get("true_peak_dbtp") is not None)
-    return f"AAC trial encodes of the mix (limiter ceiling -> delivered true peak): {tried}" if tried else "no AAC trial was measured"
+    note = f"AAC trial encodes of the mix (limiter ceiling -> delivered true peak): {tried}" if tried else "no AAC trial was measured"
+    decision = codec.get("decision") or {}
+    return note + (f"; the trials stopped ({decision['stop']}): {decision.get('reason', '')}" if decision.get("stop") else "")
 
 
 def highest(values):

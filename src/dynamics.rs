@@ -92,7 +92,7 @@ pub fn capabilities() -> Value {
     json!({"profile":"timeline-limiter-v1","edit":"audio_dynamics","scopes":["audio_track","master"],"timeline":"project_tracks_only",
         "order":"track_limiters_then_sum_then_master_limiter_then_pcm16_saturation","ceiling_dbfs":[-20,0],"ceiling_codes":"floor(32768*10^(dB/20)) at most 32767",
         "lookahead_ms":[1,20],"release_ms":[10,2000],"defaults":{"lookahead_ms":5,"release_ms":150},"detection":"linked_stereo_4x_oversampled_peaks_within_8_samples",
-        "attack":"linear_over_lookahead","release":"linear","arithmetic":"integer","sample_peak":"never_above_ceiling","true_peak":"measured_not_guaranteed",
+        "attack":"linear_over_lookahead","release":"linear","arithmetic":"integer","sample_peak":"never_above_ceiling","true_peak":"detected_at_the_meters_4x_points; output_within_0.01_dB_of_the_ceiling_in_tests_not_guaranteed",
         "windows":"exact_any_range_or_chunk","reach":"lookahead+release+15 samples before, lookahead+16 after"})
 }
 
@@ -970,6 +970,84 @@ mod tests {
         drop(capture);
         assert!(!dir.join("0.s32").exists() && !dir.join("1.s32").exists());
         std::fs::remove_dir(&dir).unwrap();
+    }
+
+    /// The limiter detects peaks the way the meter measures them, so its output's true peak stays
+    /// on the ceiling (within 0.01 dB) even under 20 dB of reduction with the shortest lookahead
+    /// and release: full-band noise bursts, a gated tone near 11 kHz, clicks over a tone and a
+    /// square wave.
+    #[test]
+    fn output_true_peak_stays_on_the_ceiling() {
+        let frames = 12_000;
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut noise = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % 20_001) as f64 - 10_000.0
+        };
+        let wave = |n: usize, hz: f64, phase: f64| {
+            (2.0 * std::f64::consts::PI * hz * n as f64 / 48_000.0 + phase).sin()
+        };
+        let bursts: Vec<[f64; 2]> = (0..frames)
+            .map(|n| {
+                let on = if (n / 900) % 5 == 0 { 1.0 } else { 0.05 };
+                [noise() * on, noise() * on]
+            })
+            .collect();
+        let gated: Vec<[f64; 2]> = (0..frames)
+            .map(|n| {
+                let v = 20_000.0 * wave(n, 11_000.0, 0.3) * ((n / 2400) % 2) as f64;
+                [v, -v]
+            })
+            .collect();
+        let clicks: Vec<[f64; 2]> = (0..frames)
+            .map(|n| {
+                let click = match n % 4800 {
+                    0 => 30_000.0,
+                    1 => -30_000.0,
+                    _ => 0.0,
+                };
+                let v = click + 3000.0 * wave(n, 7000.0, 0.0);
+                [v, v]
+            })
+            .collect();
+        let square: Vec<[f64; 2]> = (0..frames)
+            .map(|n| {
+                let v = 30_000.0 * wave(n, 3.0, 0.0).signum();
+                [v, v]
+            })
+            .collect();
+        let mut worst = f64::NEG_INFINITY;
+        for signal in [&bursts, &gated, &clicks, &square] {
+            for scale in [2.0, 10.0] {
+                let input: Vec<[i64; 2]> = signal
+                    .iter()
+                    .map(|f| f.map(|v| (v * scale).round() as i64))
+                    .collect();
+                for (lookahead_ms, release_ms) in [(1, 10), (5, 150)] {
+                    for ceiling_dbfs in [-1.0, -5.02] {
+                        let limiter = Limiter {
+                            ceiling_dbfs,
+                            lookahead_ms,
+                            release_ms,
+                        };
+                        let output = run(&limiter, &input, 0, frames, (0, frames));
+                        let mut meter = TruePeak::new();
+                        output.iter().for_each(|f| meter.push(f.map(|v| v as i16)));
+                        let [left, right] = meter.finish();
+                        let peak = left.unwrap().max(right.unwrap());
+                        worst = worst.max(peak - ceiling_dbfs);
+                        assert!(
+                            peak <= ceiling_dbfs + 0.01,
+                            "{peak} dBTP over {ceiling_dbfs} at {lookahead_ms}/{release_ms} ms, x{scale}"
+                        );
+                    }
+                }
+            }
+        }
+        // The ceiling is reached, not undershot by a margin.
+        assert!(worst > -0.05, "{worst}");
     }
 
     /// The true-peak meter finds the intersample peak of a quarter-rate sine at 45 degrees.

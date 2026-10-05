@@ -36,11 +36,12 @@ from .state import State, Timer, now, sha256_file
 
 STAGE_VERSION = "1"
 FPS = pixel_stage.FPS
-# AAC encoding moves peaks, by an amount that depends on the signal and is not monotonic in the limiter ceiling:
-# on the progress demo a -1 dBFS ceiling delivered -0.6 dBFS, and commit 2313efd measured +0.2 to +0.5 dB. The mix
-# therefore starts 0.5 dB under the delivery peak, encodes the mix to AAC exactly as the export will, measures the
-# decoded true peak, and lowers the ceiling by the measured excess plus a margin, for up to `trials` encodes.
-CODEC_CHECK = {"version": 1, "profile": "h264_aac", "headroom_db": 0.5, "margin_db": 0.05, "trials": 3}
+# AAC encoding moves peaks by an amount that depends on the signal. Since the export's encoder runs without noise
+# substitution (whose bursts read up to 8 dB over the mix), 15 production mixes measured at most 0.22 dB of codec
+# overshoot, more under heavier limiting. The mix therefore aims the limiter ceiling `headroom_db` under the delivery
+# peak, encodes the mix to AAC exactly as the export will and measures the decoded true peak. A trial over the target
+# lowers the ceiling by the measured excess plus a margin; see codec_step for when the trials stop.
+CODEC_CHECK = {"version": 2, "profile": "h264_aac", "headroom_db": 0.3, "margin_db": 0.05, "trials": 3}
 
 
 def rt(x):
@@ -281,7 +282,8 @@ class Production:
         if self.codec:
             chosen = self.codec["trials"][self.codec["chosen"]]
             result["mix"] = {"limiter_ceiling_dbfs": chosen["ceiling_dbfs"], "aac_true_peak_dbtp": chosen["true_peak_dbtp"],
-                             "aac_trials": len(self.codec["trials"]), "aac_under_peak": self.codec["passed"]}
+                             "aac_trials": len(self.codec["trials"]), "aac_under_peak": self.codec["passed"],
+                             "aac_stopped": (self.codec.get("decision") or {}).get("stop")}
         result["warnings"] = list(self.warnings)
         self.state.event({"event": "build_finished", "revision": self.revision["revision"], "built": built, "reused": reused,
                           "warnings": [w["code"] for w in self.warnings]})
@@ -698,13 +700,14 @@ class Production:
                 if duck.get("operations"):
                     snapshot = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": duck["operations"]})
                 report["duck"] = {"speech_runs": len(duck.get("speech", duck.get("runs", [])) or []), "operations": len(duck.get("operations", []))}
-            # Normalize under the delivery peak, then hear the mix as the export will encode it: the same AAC encoder,
-            # bitrate and samples (an audio-only M4A decodes identically to the MP4's audio). A true peak over the target
-            # lowers the limiter ceiling by the excess and tries again.
+            # Normalize under the delivery peak by the codec headroom, then hear the mix as the export will encode it:
+            # the same AAC encoder, bitrate and samples (an audio-only M4A decodes identically to the MP4's audio). A true
+            # peak over the target lowers the limiter ceiling by the excess and tries again, while that still helps.
             peak = delivery["peak_dbfs"]
             ceiling = max(-20.0, round(peak - CODEC_CHECK["headroom_db"], 2))
-            trials, chosen = [], None
-            for n in range(1, CODEC_CHECK["trials"] + 1):
+            trials = []
+            while True:
+                n = len(trials) + 1
                 norm = self.engine.call("audio.normalize", {"project": snapshot, "target_lkfs": delivery["loudness_lkfs"],
                                                             "peak_ceiling_dbfs": ceiling}, label="mix")
                 mixed = snapshot
@@ -715,22 +718,25 @@ class Production:
                 write_new(self.root / path, mixed)
                 trial = {"ceiling_dbfs": ceiling, "snapshot": path, "normalize": {k: norm.get(k) for k in ("result", "limited_by", "factor") if k in norm},
                          **self.aac_trial(path, f"{key[:12]}-{attempt}-t{n}")}
+                # What the encode added to the mix's own true peak: the codec headroom this mix needs.
+                mix_peak = trial["mix_true_peak_dbtp"] = (norm.get("result") or {}).get("true_peak_dbtp")
+                if trial["true_peak_dbtp"] is not None and mix_peak is not None:
+                    trial["codec_overshoot_db"] = round(trial["true_peak_dbtp"] - mix_peak, 2)
                 trials.append(trial)
-                excess = None if trial["true_peak_dbtp"] is None else round(trial["true_peak_dbtp"], 2) - peak
                 self.log(f"mix: AAC trial {n} at a {ceiling:g} dBFS ceiling: {db(trial['integrated_lkfs'], 'LKFS')}, "
                          f"true peak {db(trial['true_peak_dbtp'], 'dBTP')}")
-                if excess is None or excess <= 0:
-                    chosen = len(trials) - 1
+                stop, value = codec_step(trials, peak)
+                if stop:
                     break
-                lower = max(-20.0, round(ceiling - excess - CODEC_CHECK["margin_db"], 2))
-                if lower >= ceiling:
-                    break
-                ceiling = lower
-            passed = chosen is not None
+                ceiling = value
+            passed = stop == "under_target"
+            measured = [i for i, t in enumerate(trials) if t["true_peak_dbtp"] is not None]
+            chosen = len(trials) - 1 if passed or not measured else min(measured, key=lambda i: trials[i]["true_peak_dbtp"])
             if not passed:
-                chosen = min(range(len(trials)), key=lambda i: trials[i]["true_peak_dbtp"])
+                self.log(f"mix: AAC trials stopped ({stop}): {value}")
             report["normalize"] = trials[chosen]["normalize"]
             report["codec"] = {"profile": CODEC_CHECK["profile"], "passed": passed, "chosen": chosen, "peak_dbfs": peak,
+                               "headroom_db": CODEC_CHECK["headroom_db"], "decision": {"stop": stop, "reason": value},
                                "trials": [{k: v for k, v in t.items() if k != "normalize"} for t in trials]}
             path = trials[chosen]["snapshot"]
             return [self.ident(path)], {"snapshot": path, "report": report}
@@ -739,7 +745,8 @@ class Production:
             codec = receipt["result"]["report"]["codec"]
             chosen = codec["trials"][codec["chosen"]]
             self.log(f"mix: bed, duck and loudness set; limiter ceiling {chosen['ceiling_dbfs']:g} dBFS, AAC true peak "
-                     f"{db(chosen['true_peak_dbtp'], 'dBTP')} after {len(codec['trials'])} trial(s) ({timer.seconds():.1f}s)")
+                     f"{db(chosen['true_peak_dbtp'], 'dBTP')} after {len(codec['trials'])} trial(s), "
+                     f"{codec['decision']['stop']} ({timer.seconds():.1f}s)")
         return receipt
 
     def aac_trial(self, snapshot, tag):
@@ -1014,6 +1021,33 @@ def plan_timing(t, scenes):
     if start > 600:
         raise ToolError("production", "TOO_LONG", f"the film would last {float(start):.1f} s; this template stops at 600 s")
     return {"scenes": rows, "total": fstr(start)}
+
+
+def codec_step(trials, peak, check=CODEC_CHECK):
+    """After each AAC trial: (None, the next ceiling) to try again, or (code, reason) to stop. The trials stop
+    - `under_target`: the last trial delivers at or under `peak`;
+    - `not_better`: its true peak is no lower than the best earlier trial's (a lower ceiling squeezes the mix harder,
+      and the codec can overshoot more, so trying lower again would waste an encode);
+    - `trial_cap`: `check["trials"]` encodes ran;
+    - `ceiling_floor`: the ceiling cannot go lower;
+    - `unmeasured`: the encode's true peak could not be measured."""
+    n, last = len(trials), trials[-1]
+    ceiling = last["ceiling_dbfs"]
+    if last["true_peak_dbtp"] is None:
+        return "unmeasured", f"trial {n}'s encode has no measured true peak"
+    measured = round(last["true_peak_dbtp"], 2)
+    if measured <= peak:
+        return "under_target", f"trial {n} at a {ceiling:g} dBFS ceiling delivers {measured:.2f} dBTP, at or under the {peak:g} dBTP target"
+    earlier = [round(t["true_peak_dbtp"], 2) for t in trials[:-1] if t["true_peak_dbtp"] is not None]
+    if earlier and measured >= min(earlier):
+        return "not_better", (f"trial {n} at a {ceiling:g} dBFS ceiling delivers {measured:.2f} dBTP, no lower than the best "
+                              f"earlier trial's {min(earlier):.2f} dBTP; a lower ceiling only limits the mix harder")
+    if n >= check["trials"]:
+        return "trial_cap", f"all {n} trials, the most allowed, deliver over {peak:g} dBTP"
+    lower = max(-20.0, round(ceiling - (measured - peak) - check["margin_db"], 2))
+    if lower >= ceiling:
+        return "ceiling_floor", f"the limiter ceiling cannot go below {ceiling:g} dBFS"
+    return None, lower
 
 
 def db(value, unit):

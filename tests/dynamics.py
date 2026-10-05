@@ -1,6 +1,7 @@
 """Timeline dynamics: track and master limiters, checked sample by sample against an independent
 integer oracle of the documented design over whole renders, ranges, previews and chunked renders,
-with the 4x true-peak meter and audio.normalize's limiter proposal."""
+with the 4x true-peak meter, the output's true peak under heavy limiting, an AAC delivery's peaks and
+audio.normalize's limiter proposal."""
 from engine import ENGINE
 import argparse
 import copy
@@ -128,6 +129,7 @@ def run(root):
         path.mkdir()
     passed, cases = [], []
     counts = {'rejected': 0, 'samples': 0}
+    peaks = {}
 
     def call(request, error=None):
         p = subprocess.run([str(ENGINE)], input=json.dumps(request).encode(), capture_output=True, timeout=600)
@@ -166,9 +168,18 @@ def run(root):
     hot = np.stack([hot, -hot], axis=1)
     # Clicks: short bursts of noise for many-clip (chunked) timelines.
     clicks = rng.integers(-20000, 20000, size=(T, 2)) * (np.arange(T) % 1920 < 240)[:, None]
+    # Hats: decaying bursts of differenced noise (a crude hi-hat, strongest near the top of the
+    # band) on every eighth at 125 BPM over a quiet low chord. AAC noise substitution turned this
+    # seed's bursts into peaks 2.3 dB over the input's.
+    hat_rng = np.random.default_rng(6)
+    bed = 0.05 * 32768 * (np.sin(2 * np.pi * 110 * n / 48000) + 0.5 * np.sin(2 * np.pi * 165 * n / 48000 + 1))
+    hats = np.stack([bed, bed], axis=1)
+    for start in range(4800, T - 4800, 11520):
+        burst = np.diff(hat_rng.uniform(-1, 1, (1921, 2)), axis=0)
+        hats[start:start + 1920] += 0.3 * 32768 * burst * np.exp(-np.arange(1920) / 3840)[:, None]
     signals = {}
     assets = []
-    for index, (name, values) in enumerate([('voice', voice), ('music', music), ('hot', hot), ('clicks', clicks)]):
+    for index, (name, values) in enumerate([('voice', voice), ('music', music), ('hot', hot), ('clicks', clicks), ('hats', hats)]):
         pcm = np.clip(np.round(values), -32768, 32767).astype(np.int64)
         path = sources / f'{name}.wav'
         wav(path, pcm)
@@ -388,6 +399,24 @@ def run(root):
     assert true_peak(pcm) <= -1 + 0.05, true_peak(pcm)
     passed.append('dynamics.true_peak_detection_and_meter')
 
+    # 5b. Heavy limiting: the voice at 4x, its consonant clicks about 9 dB over full scale, the bed and the
+    #     shortest lookahead and release, so the gain moves fast across the interpolation taps. The
+    #     output's true peak, recomputed from the oracle's samples, stays on the -1.5 dBFS ceiling.
+    #     FFmpeg's separate meter, whose interpolation filter differs, read 0.2 dB higher (to its
+    #     0.1 dB display).
+    heavy = apply(base, [edit('clip_audio', clip_ids=['v1', 'v2'], gain_milli=4000),
+                         edit('audio_dynamics', dynamics={'limiter': {'ceiling_dbfs': -1.5, 'lookahead_ms': 1, 'release_ms': 10}})])
+    _, expected, gains = render(heavy, 'heavy-limiting')
+    assert reduction(gains['master'])[0] > 10, reduction(gains['master'])
+    meter = call({'command': 'timeline.meters', 'project': heavy, 'input_root': str(root), 'tracks': False})['mix']
+    assert abs(max(meter['true_peak_dbtp']) - true_peak(expected)) < 1e-9, (meter['true_peak_dbtp'], true_peak(expected))
+    assert -1.55 < true_peak(expected) <= -1.5 + 0.01, true_peak(expected)
+    heavy_ebur128 = ebur128(out / 'heavy-limiting.mkv')
+    assert heavy_ebur128 <= -1.5 + 0.3, heavy_ebur128
+    peaks.update(heavy_limiting_ceiling_dbfs=-1.5, heavy_limiting_reduction_db=reduction(gains['master'])[0],
+                 heavy_limiting_true_peak_dbtp=round(true_peak(expected), 4), heavy_limiting_ebur128_dbtp=heavy_ebur128)
+    passed.append('dynamics.true_peak_under_heavy_limiting')
+
     # 6. Normalizing proposes the limiter the target needs and measures the result honestly. Its
     #    passes replay one render of the mix in memory; the proposed levels are rendered once more
     #    and measured exactly, so measured and result equal the meters of the mix before and after.
@@ -429,6 +458,21 @@ def run(root):
     assert after['dynamics'] == proposal['result']['dynamics'] and [t['track_id'] for t in after['dynamics']['tracks']] == ['voice'], after['dynamics']
     passed.append('dynamics.normalize_proposes_limiter')
 
+    # 6b. An AAC delivery keeps the timeline's true peak: the hats, encoded with the delivery
+    #     preset, decode within 0.25 dB of it (noise substitution read 2.3 dB over).
+    hat_project = apply(base, [edit('add', track=track('hats', 'audio')), edit('place', track_id='hats', clip=placement('hats', 4, 0, 75, 0), collision='reject'),
+                               edit('state', track_id='voice', locked=False, enabled=False), edit('state', track_id='music', locked=False, enabled=False)])
+    timeline, _ = oracle(hat_project)
+    receipt = call({'command': 'export.run', 'project': hat_project, 'input_root': str(root), 'output_root': str(out), 'output': str(out / 'hats.m4a'),
+                    'profile': 'h264_aac', 'streams': 'audio'})
+    assert receipt['audio']['coder'] == 'twoloop' and receipt['audio']['noise_substitution'] is False, receipt['audio']
+    decoded = pcm_of(out / 'hats.m4a')[:len(timeline)]
+    aac_overshoot = true_peak(decoded) - true_peak(timeline)
+    assert aac_overshoot <= 0.25, (true_peak(timeline), true_peak(decoded))
+    peaks.update(hats_timeline_dbtp=round(true_peak(timeline), 3), hats_aac_dbtp=round(true_peak(decoded), 3))
+    preserved()
+    passed.append('dynamics.aac_delivery_keeps_true_peak')
+
     # 7. Saved sessions keep the dynamics, the schema describes them and bad settings are refused.
     created = call({'command': 'session.create', 'store_root': str(store), 'project': base, 'request_id': 'create'})
     receipt = call({'command': 'session.apply', 'store_root': str(store), 'project_id': base['id'], 'expected_revision': 0, 'request_id': 'limit',
@@ -460,7 +504,8 @@ def run(root):
     passed.append('dynamics.sessions_schema_rejections')
 
     report = {'passed': passed, 'stereo_sample_frames_compared': counts['samples'], 'render_cases': cases, 'rejected_cases': counts['rejected'],
-              'reference': 'Independent integer oracle of the documented limiter (Kaiser-sinc 4x interval peaks, lookahead minimum, linear release, mean over the lookahead, rounding half away from zero) over an independent clip/curve/fade/transition mix; every sample matches exactly. True peak also within 0.2 dB of FFmpeg ebur128.',
+              'true_peaks': peaks,
+              'reference': 'Independent integer oracle of the documented limiter (Kaiser-sinc 4x interval peaks, lookahead minimum, linear release, mean over the lookahead, rounding half away from zero) over an independent clip/curve/fade/transition mix; every sample matches exactly. True peak also within 0.2 dB of FFmpeg ebur128 on tones; under 10.9 dB of limiting the output stays on the ceiling (ebur128 within 0.3 dB). Percussive bursts delivered through the AAC preset decode within 0.25 dB of the timeline true peak.',
               'limits': 'Linked-stereo peak limiter on top-level audio tracks and the master; no compressor, sidechain or per-sequence dynamics. True peak is measured, not guaranteed.'}
     (root / 'verification.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(report))

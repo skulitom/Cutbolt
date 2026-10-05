@@ -102,7 +102,12 @@ The limiter is an original linked-stereo design in integer arithmetic. Let x be 
 5. **Attack.** The applied gain is the floor of the mean of the released gains of the sample and the A before it: a linear ramp over the lookahead that reaches each required gain by its sample.
 6. **Output.** x times the gain, rounded to nearest with ties away from zero.
 
-No output sample exceeds C. Peaks between samples are held at C as the filter sees them, so the true peak lands at the ceiling but is measured, not guaranteed. In the fixture, a 12 kHz tone whose samples read -3.5 dBFS but whose true peak is -0.5 dBTP comes out at -1.00 dBTP under a -1 dBFS ceiling.
+No output sample exceeds C. The limiter finds peaks at the same quarter-sample points the [meters](#master-processing-and-meters) read, so its output's true peak lands on the ceiling. This is measured, not guaranteed. Every gain applied within 8 samples of a peak is at most the gain that peak requires, but gains that differ across the 16 taps can still move an interpolated point slightly. In the tests below, the output's true peak never passed the ceiling by more than 0.01 dB:
+- a unit test of full-band noise bursts, a gated 11 kHz tone, clicks over a tone and a square wave, with up to about 24 dB of reduction and the shortest lookahead and release (1 and 10 ms). The worst case was 0.0002 dB over;
+- in the fixture, a voice limited by 10.9 dB with the same settings, which reads -1.5001 dBTP under a -1.5 dBFS ceiling. FFmpeg's `ebur128` reads it 0.2 dB higher, because its interpolation filter differs and it rounds to 0.1 dB;
+- a 12 kHz tone whose samples read -3.5 dBFS but whose true peak is -0.5 dBTP, which comes out at -1.00 dBTP under a -1 dBFS ceiling.
+
+Lossy delivery moves peaks again, after the limiter: an AAC encode of a heavily limited mix can decode a few tenths of a dB above it (see [AAC peaks](EXPORT.md#aac-peaks)). Set the ceiling below a delivery's true-peak target by that headroom, and measure the delivered file with `export.review`.
 
 A limiter's output at a sample depends only on its input from A + R + 15 samples before to A + 16 after. Renders, previews, exports and meters of a range therefore mix that much audio around the range, and give exactly the samples of the whole timeline; long timelines rendered in chunks join exactly. A range may read sources up to about 2 seconds outside itself.
 
@@ -113,7 +118,12 @@ Run `python -X utf8 tests/dynamics.py --output C:\DEV\CutboltData\new-dynamics-t
 - three preview ranges, a meter range and a chunked 70-clip render;
 - inactive limiters, which change nothing.
 
-It also checks true peaks against its own filter arithmetic and FFmpeg's `ebur128`, the normalize proposal and its applied result, saved sessions and the published schema, and 13 rejected requests.
+It also checks:
+- true peaks against its own filter arithmetic and FFmpeg's `ebur128`, including the output's true peak under 10.9 dB of limiting;
+- an AAC delivery of percussive noise bursts, which decodes within 0.25 dB of the timeline's true peak; with noise substitution it read 2.3 dB over;
+- the normalize proposal and its applied result;
+- saved sessions and the published schema;
+- 13 rejected requests.
 
 ## Limits and scene use
 

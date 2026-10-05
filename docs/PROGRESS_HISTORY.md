@@ -34,6 +34,55 @@ Tests:
 - **`transcription`**: a music-only tail with a vocabulary. The fixture voice's named line is followed by 26 s of the steady bed. Before the change the engine heard `PixelForge, Cutbolt.` in the window at 11–25 s, and the case failed. Now the windows after the line are not decoded, every word lies in the line, and both names are whole.
 
 These fixtures pass in quick mode: transcription (718 s, with the speech runtime). Its numbers case, added on 5 October, ran on the speech runtime for the first time and passed. No scoring changed. Evidence stays stale until the next thorough run.
+## 6 October 2026: lossy deliveries meet their true-peak target
+
+The part-two demo rebuilt on `dbd6ffe` (`demo-progress2-20261005/film-merged`, ISSUES.md item 10) missed its -1 dBTP target. Its mix stage lowered the master limiter ceiling over three AAC trials, and the encoded true peak rose each time. The mix stage took 60 s on the build's critical path.
+
+**The cause was the encoder, not the limiter.** Each trial's mix was rendered and compared, sample by sample, with its decoded AAC:
+
+| Limiter ceiling | Mix true peak | AAC as delivered (noise substitution) | Same mix, noise substitution off |
+| ---: | ---: | ---: | ---: |
+| -1.5 dBFS | -1.50 dBTP | +0.02 dBTP | -1.37 dBTP |
+| -2.57 dBFS | -2.58 dBTP | +1.40 dBTP | -2.35 dBTP |
+| -5.02 dBFS | -5.03 dBTP | +1.62 dBTP | -4.42 dBTP |
+
+- The master limiter already detects peaks at the meter's quarter-sample points with lookahead, so each mix's true peak sat on its ceiling.
+- The overshoots were bursts. At 34.08 s and 64.8 s, beats where the bed has a synthetic hi-hat and the mix was about -27 dBFS, the decoded AAC swung beyond full scale (to ±43,000 codes as floats).
+- They came from FFmpeg's perceptual noise substitution (`-aac_pns 1` in the export preset): with it off, the same mixes stayed within 0.6 dB.
+- Over 15 earlier production mixes, the codec added at most 0.22 dB with it off, against up to 7.96 dB with it on, with full-scale clipping in four mixes. The earlier "no lossy headroom" explanation of `fast-normalize-20261005`'s 0.0 dBFS delivery was the same bursts.
+- With the user, it was agreed to test the existing limiter rather than add a second true-peak mode, and to change the default preset.
+
+Changes:
+- **Export preset.** The `h264_aac` preset's native AAC encoder runs without noise substitution, for version-1 and version-2 receipts alike. The receipt's `audio` records `coder` and `noise_substitution`; capabilities add `aac_encoder` ([EXPORT](EXPORT.md#aac-peaks)).
+  - Real mixes also decode closer to the mix: SNR is 2.3-4.5 dB higher on the 15 mixes at 320 kb/s, and 0.7-2.3 dB higher on four of them at 192 and 256 kb/s.
+  - Two synthetic-tone gates dropped below 28 dB. The 40 ms one-frame clip at 320 kb/s fell from 33.9 to 20.47 dB, mostly encoder start-up; the delivery-controls tones at 192 kb/s fell from 33.3 to 26.03 dB.
+  - With the user, those two cases got measured floors of 20 and 25 dB; every other case keeps 28 dB. The other delivery cases measure at least 37.62 dB, and the 256 and 320 kb/s tones 35.25 and 47.45 dB.
+- **The limiter's true peak is tested, not newly designed.**
+  - A unit test runs 32 stress cases: noise bursts, a gated 11 kHz tone, clicks and a square wave, up to about 24 dB of reduction, at 1/10 ms and 5/150 ms. The output's true peak passed the ceiling by at most 0.0002 dB.
+  - The dynamics fixture limits a voice by 10.9 dB at 1/10 ms. Its exact oracle and the engine's meter read -1.5001 dBTP under a -1.5 dBFS ceiling; FFmpeg's `ebur128` reads -1.3.
+  - The capability now says the limiter detects at the meter's points and was measured within 0.01 dB, still not guaranteed ([AUDIO](AUDIO.md#timeline-limiters)).
+- **An AAC regression check.** Percussive bursts of differenced noise, which noise substitution decoded 2.3 dB over the timeline's true peak, must decode within 0.25 dB of it. They read 0.11 dB under.
+- **Production mix** ([PRODUCTION](PRODUCTION.md#the-delivered-peak)):
+  - The first ceiling is 0.3 dB under `peak_dbfs`: the measured 0.22 dB plus a margin, against 0.5 dB before.
+  - The trials stop as soon as one is under the target (`under_target`), or no better than the best before it (`not_better`). They also stop at the cap of three, at the -20 dBFS floor, or when an encode is unmeasured.
+  - The mix receipt records the decision `{stop, reason}`, the headroom, and each trial's `mix_true_peak_dbtp` and `codec_overshoot_db`. The build result has `mix.aac_stopped`, and `PEAK_OVER_TARGET` names the reason.
+  - `tests/production.py` checks the rules offline (with the demo's numbers), then on its harsh square-wave bed through the engine. There the encoder is still non-monotonic: ceilings of -1.3 and -1.5 dBFS decoded at -0.85 and -0.31 dBTP. The loop stopped as `not_better` after two encodes, not three, and that synthetic -10 LKFS mix keeps its warning.
+
+**Part two rebuilt cold** with a copy of the manifest and of `production-config.json`, its `engine` set to this change's release build (SHA-256 `0fc73c2b`). Folder `demo-progress2-20261005/film-truepeak/`, log `logs/build-truepeak.*`:
+
+| Build | Total | Narration | Mix stage | Scenes done | Cut | Delivered |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `dbd6ffe` (`film-merged`, load not recorded) | 147.1 s | 43.0 s | 60.0 s, 3 trials | 69.1 s | 105.3 s | -14.04 LKFS, +0.02 dBTP, `PEAK_OVER_TARGET` |
+| This change (9 % busy before, 31 % during) | **106.7 s** | 35.0 s | **28.0 s**, 1 trial (`under_target`) | 60.5 s | **65.4 s** | **-14.02 LKFS, -1.16 dBTP**, no warnings, no clipping |
+
+- These are single runs. The mix stage's difference is two fewer trials, each a normalize (3.4 s) and an audio-only export (12-19 s), not load.
+- The trial's ceiling was -1.3 dBFS. Normalize settled the limiter at -1.31 to keep the mix's true peak under it (6.13 dB of reduction), and the codec added 0.15 dB.
+- The delivered MP4's audio decodes to exactly the trial M4A's samples, and reads the same true peak.
+
+Open:
+- The single trial still costs 22 s, 18 s of it an audio-only export that renders, then encodes, then decodes. The cut waited 5 s for it after the scenes.
+- Mixes that are heavily limited or strong near the top of the band can still overshoot after AAC. A `-cutoff 20000` encoder setting halved that on the measured mixes; it is a proposed preset change, not made here.
+- Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit; no points change.
 
 ## 5 October 2026: normalizing renders the mix twice instead of up to eleven times
 

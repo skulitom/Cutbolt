@@ -53,7 +53,7 @@ The version-1 `h264_aac` profile selects the existing external FFmpeg build's `l
 | Video buffering | Maximum rate 12,000,000 bits/s, buffer 24,000,000 bits |
 | GOP | Two seconds of frames at the rounded rate (50 at 25 fps, 60 at 29.97), minimum key interval one second, scene-cut insertion disabled, two B-frames, three reference frames |
 | Output pixels | 8-bit YUV 4:2:0, limited range, BT.709 matrix/primaries/transfer, left chroma location |
-| AAC | LC, 48 kHz stereo, target 320,000 bits/s, native two-loop coder with perceptual noise substitution enabled |
+| AAC | LC, 48 kHz stereo, target 320,000 bits/s, native two-loop coder without perceptual noise substitution |
 | MP4 | Faststart index, edit lists, 48,000-unit movie clock and 12,800-unit video clock |
 
 x264 runs eight slice threads, coding each frame as up to eight slices, and the RGB-to-YUV scaler runs eight threads. Both counts are fixed rather than taken from the host, so the encoded stream is the same on every machine with the recorded build; the scaler's threads only divide rows and change no value. x264's frame threads would be slightly faster, but under the VBV cap their rate control depends on when frames arrive, and repeated exports of one timeline differed. Slices cost about 4 % more bytes at the same CRF. Exports made before 5 October 2026 used one thread and one slice, so their pictures can differ slightly from a new export of the same timeline; with one thread the new path decodes bit-identically to the old one, and audio is identical. The report's `video.slice_threads` records the count. Source chapters and copied metadata are removed; output encoder/container metadata is still generated. Binary files are not promised to be identical across tool builds. Decoded repeatability is tested on the recorded build. The optional controls have a bounded software/CUDA compatibility matrix; broader browser/device playback remains unverified.
@@ -70,13 +70,24 @@ The original transfer expressions run through FFmpeg's RGB lookup filter; the ma
 
 The numerical acceptance reference uses public sRGB facts from [W3C CSS Color 4 section 10.2](https://www.w3.org/TR/2026/CRD-css-color-4-20260930/#predefined-sRGB) and BT.709 transfer/matrix/range facts from [ITU-R BT.709-6, sections 1 and 3](https://www.itu.int/rec/R-REC-BT.709-6-201506-I/en). No specification copy or third-party implementation is included. Filter interfaces are documented by FFmpeg's [RGB lookup](https://ffmpeg.org/ffmpeg-filters.html#lut_002c-lutrgb_002c-lutyuv) and [scale](https://ffmpeg.org/ffmpeg-filters.html#scale-1) references.
 
+### AAC peaks
+
+Perceptual noise substitution has been off since 6 October 2026; the receipt's `audio` records `"coder": "twoloop"` and `"noise_substitution": false`. With it on, the native encoder replaced noise-like high bands with generated noise, which decoded as bursts well above the input on percussive onsets and strong top-octave content. Over 15 production mixes, the decoded true peak rose by up to 7.96 dB above the mix's own, with full-scale clipping in four of them, often at quiet moments where no limiter ceiling can help. Without it the same mixes rose by at most 0.22 dB and never clipped. At these fixed bitrates the files are the same size either way, within 0.1 %.
+
+It also changes waveform fidelity, mostly for the better:
+- **Real mixes.** The same 15 mixes at 320 kb/s decode 2.3-4.5 dB closer to the mix (SNR), and four of them gained 0.7-2.3 dB at 192 and 256 kb/s.
+- **Synthetic steady tones.** These lost: the delivery fixture's 40 ms one-frame clip at 320 kb/s fell from 33.9 to 20.5 dB (a clip that is almost all encoder start-up), and the delivery-controls fixture's tones at 192 kb/s fell from 33.3 to 26.0 dB. Longer clips at 320 kb/s still measure at least 37.6 dB.
+- **Gates.** Those two cases now have measured floors of 20 and 25 dB instead of 28 dB; every other case keeps 28 dB.
+
+A lossy encode still moves peaks by a signal-dependent amount, more on heavily limited mixes and on content strong near the top of the band. On one such synthetic mix, -1.3 and -1.5 dBFS limiter ceilings decoded 0.46 and 1.19 dB higher. A delivery with a true-peak target should therefore be measured after encoding: `export.review` reports the delivered file's `true_peak_dbtp`, and the [production coordinator](PRODUCTION.md#the-delivered-peak) trial-encodes its mix before the export. Exports made earlier with noise substitution can decode differently from a new export of the same timeline. The [dynamics fixture](AUDIO.md#timeline-limiters) checks that percussive bursts, which noise substitution decoded 2.3 dB over the timeline's true peak, now decode within 0.25 dB of it.
+
 ### AAC timing and padding
 
 AAC is lossy and encodes blocks of 1,024 samples. The output records a 1,024-sample priming interval with skip/edit metadata, and an exact presentation duration equal to the selected timeline range. The verified decoder skips the priming interval. It can still return a final partial block as padding beyond the presentation end.
 
 Receipts distinguish `audio_samples` (the exact intended presentation length), `verification.decoded_audio_samples`, `aac_priming_samples` and `audio_tail_padding_samples`. The tested decoder returns `ceil(audio_samples/1024)*1024` sample frames, so trailing padding is 0..1023. It must not be interpreted as added timeline content. Verification checks exact track duration and priming metadata as well as decoded count. Consumers extracting raw PCM must use the declared presentation length; use the reference WAV profile when exact uncompressed samples are required.
 
-The one-frame fixture is 1,920 presentation sample frames and decodes to 2,048; an eight-frame fixture is exactly 15,360 and needs no trailing padding. Audio remains lossy inside that interval. The 320 kb/s setting was selected after the initial 192 kb/s candidate failed the short-clip quality threshold; the threshold was retained.
+The one-frame fixture is 1,920 presentation sample frames and decodes to 2,048; an eight-frame fixture is exactly 15,360 and needs no trailing padding. Audio remains lossy inside that interval. The 320 kb/s setting was selected after the initial 192 kb/s candidate failed the short-clip quality threshold; the threshold was retained. Since noise substitution was turned off, that one-frame clip has a measured floor of 20 dB instead (see [AAC peaks](#aac-peaks)).
 
 ## Reviewing the output
 

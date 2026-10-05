@@ -71,7 +71,7 @@ Costs of this choice, recorded as open gaps:
    `check` validates the manifest and lists its scenes, art recipes and labels without running anything. It also estimates the film's length (see [warnings](#warnings)). `build` prints one JSON object, `{"ok": true, "result": ...}` or `{"ok": false, "error": {code, message, stages, warnings}}`, with progress lines on stderr. The result holds:
    - the export path, duration and scene boundaries;
    - the review summary and the speech check;
-   - `mix`: the limiter ceiling and the AAC true peak it was chosen for;
+   - `mix`: the limiter ceiling, the AAC true peak it was chosen for, and why the AAC trials stopped (`aac_stopped`);
    - `warnings`: what the checks found, also printed on stderr as `WARNING` lines;
    - the saved project revision;
    - which stages were built or reused, and how long each took.
@@ -287,12 +287,26 @@ Warnings are derived on every build from the stage results and the review folder
 
 ### The delivered peak
 
-`peak_dbfs` bounds the delivered file's true peak, not just the mix's. AAC encoding moves peaks by an amount that depends on the signal. On the part-two progress demo, a mix limited to -1.0 dBFS delivered -0.6 dBFS. In measurements on synthetic beds here, a lower ceiling sometimes delivered a higher peak. So no fixed headroom is safe, and the mix measures the encode instead:
-1. It normalizes to `loudness_lkfs` with the limiter ceiling 0.5 dB under `peak_dbfs`.
-2. It encodes that mix to an audio-only AAC M4A with the export's own settings, and meters the decoded file the way `export.review` meters the delivery. The M4A decodes to exactly the samples of the MP4's audio.
-3. If the true peak is over `peak_dbfs`, it lowers the ceiling by the excess plus 0.05 dB and tries again, up to three trials. It keeps the first trial under the target, or, if none is, the one with the lowest peak, and the review then warns `PEAK_OVER_TARGET`.
+`peak_dbfs` bounds the delivered file's true peak, not just the mix's. The master limiter holds the mix's own true peak on its ceiling ([AUDIO](AUDIO.md#timeline-limiters)), but AAC encoding moves peaks again, by an amount that depends on the signal.
 
-The mix receipt lists every trial: its ceiling, loudness, peaks, M4A and review folder. The final review checks the delivered file's true peak against `peak_dbfs` either way. Each trial costs one normalize, an audio-only encode and a decode, and it runs while alignment, captions and scenes do.
+Until 6 October 2026 the export's AAC encoder used perceptual noise substitution, and its bursts made deliveries miss the target by up to several dB. On the part-two demo rebuilt on `dbd6ffe`, the mix's three trials at -1.5, -2.57 and -5.02 dBFS ceilings decoded at +0.02, +1.40 and +1.62 dBTP. Each mix's own true peak sat on its ceiling; the bursts came from drum onsets in the bed, at moments when the mix was about -27 dBFS. The encoder now runs without it (see [AAC peaks](EXPORT.md#aac-peaks)). Over 15 production mixes, the codec then added at most 0.22 dB to the mix's true peak, more under heavier limiting.
+
+The mix therefore measures the encode against a measured headroom:
+1. It normalizes to `loudness_lkfs` with the limiter ceiling 0.3 dB under `peak_dbfs`: the codec headroom measured above, plus a margin.
+2. It encodes that mix to an audio-only AAC M4A with the export's own settings, and meters the decoded file the way `export.review` meters the delivery. The M4A decodes to exactly the samples of the MP4's audio.
+3. If the true peak is over `peak_dbfs`, it lowers the ceiling by the excess plus 0.05 dB and tries again. The trials stop as soon as one of these holds, with the code recorded:
+
+   | Code | When |
+   | --- | --- |
+   | `under_target` | The trial delivers at or under `peak_dbfs` |
+   | `not_better` | Its true peak is no lower than the best earlier trial's. A lower ceiling limits the mix harder, and the codec can then overshoot more: on a square-wave fixture bed, ceilings of -1.3 and -1.5 dBFS decoded at -0.85 and -0.31 dBTP. |
+   | `trial_cap` | Three trials ran |
+   | `ceiling_floor` | The ceiling cannot go below -20 dBFS |
+   | `unmeasured` | The encode's true peak could not be measured |
+
+   It keeps the trial under the target, or, if none is, the one with the lowest peak, and the review then warns `PEAK_OVER_TARGET`. That warning's message lists the trials and why they stopped.
+
+The mix receipt (`show mix`) holds the headroom and the decision, `{"stop", "reason"}`, under `result.report.codec`. It lists every trial: its ceiling, loudness, peaks, the mix's own true peak (`mix_true_peak_dbtp`), what the encode added to it (`codec_overshoot_db`), the M4A and the review folder. The final review checks the delivered file's true peak against `peak_dbfs` either way. Each trial costs one normalize, an audio-only encode and a decode: 22 s for the 96 s part-two film, 18 s of it the encode. The trials run while alignment, captions and scenes do. On that film's rebuild the first trial passed (-1.16 dBTP at -14.0 LKFS, 0.15 dB over the mix's own true peak), the mix stage took 28 s instead of 60 s for three trials, and the cut waited 5 s for it after the scenes.
 
 ### Music beds
 
