@@ -915,6 +915,36 @@ impl<'a> Graph<'a> {
         if !limited {
             return self.compose(a, start, duration, Kind::Audio, "aout");
         }
+        let index = self.inputs;
+        self.inputs += 1;
+        let path = std::env::temp_dir().join(format!(
+            ".cutbolt-mix-{}-{}-{index}.wav",
+            std::process::id(),
+            self.nonce
+        ));
+        let premix = self.premix(a, start, duration, path.clone(), 1)?;
+        self.args
+            .extend(["-i".into(), path.to_string_lossy().into_owned()]);
+        self.filters.push(format!(
+            "[{index}:a:0]aformat=sample_fmts=dblp:channel_layouts=stereo[aout]"
+        ));
+        self.generated
+            .push(render::Generated::Mix(Box::new(premix)));
+        Ok(())
+    }
+    /// The premix of a window's audio, to be written to `path`: each limited track's clips summed
+    /// as one group and the other enabled audio tracks as another, unsaturated, over the window and
+    /// the limiters' reach around it. Its runs split that range into `parts` equal pieces, and
+    /// further where more clips overlap than one graph takes; they give the same sums whether they
+    /// run one after another or side by side.
+    fn premix(
+        &mut self,
+        a: &crate::tracks::Arrangement,
+        start: Time,
+        duration: Time,
+        path: PathBuf,
+        parts: u64,
+    ) -> Result<dynamics::Premix> {
         // Each limited track is a group, and the other enabled audio tracks one more.
         let mut groups: Vec<Group> = Vec::new();
         let mut rest = Vec::new();
@@ -941,7 +971,14 @@ impl<'a> Graph<'a> {
         let first = window.0.saturating_sub(before + master_before);
         let last = (window.1 + after + master_after).min(a.duration.units(SAMPLES)?);
         let mut runs = Vec::new();
-        for (from, to) in audio_windows(a, first, last)? {
+        let parts = parts.clamp(1, (last - first).max(1));
+        let mut windows = Vec::new();
+        for part in 0..parts {
+            let piece = (last - first) * part / parts + first;
+            let end = (last - first) * (part + 1) / parts + first;
+            windows.extend(audio_windows(a, piece, end)?);
+        }
+        for (from, to) in windows {
             let mut premix = Graph::new(self.project, self.root, self.control);
             premix.audio_only = true;
             premix.sources = self.sources.clone();
@@ -995,29 +1032,15 @@ impl<'a> Graph<'a> {
                 frames: to - from,
             });
         }
-        let index = self.inputs;
-        self.inputs += 1;
-        let path = std::env::temp_dir().join(format!(
-            ".cutbolt-mix-{}-{}-{index}.wav",
-            std::process::id(),
-            self.nonce
-        ));
-        self.args
-            .extend(["-i".into(), path.to_string_lossy().into_owned()]);
-        self.filters.push(format!(
-            "[{index}:a:0]aformat=sample_fmts=dblp:channel_layouts=stereo[aout]"
-        ));
-        self.generated
-            .push(render::Generated::Mix(Box::new(dynamics::Premix {
-                path,
-                runs,
-                groups: groups.into_iter().map(|(g, _)| g).collect(),
-                master,
-                first,
-                window,
-                report: Default::default(),
-            })));
-        Ok(())
+        Ok(dynamics::Premix {
+            path,
+            runs,
+            groups: groups.into_iter().map(|(g, _)| g).collect(),
+            master,
+            first,
+            window,
+            report: Default::default(),
+        })
     }
     fn sources(&self) -> Vec<Source> {
         let mut values: Vec<_> = self.sources.values().cloned().collect();
@@ -1398,6 +1421,31 @@ pub(crate) fn plan(
         project.duration()?,
         control,
     )
+}
+/// The premix of a whole timeline's audio, with or without limiters, in `parts` or more runs, and
+/// the sources it reads: its group sums, captured once, replay the mix at other levels or through
+/// another master limiter (`audio.normalize`).
+pub(crate) fn premix(
+    project: &Project,
+    input_root: &Path,
+    path: PathBuf,
+    parts: u64,
+) -> Result<(dynamics::Premix, Vec<Source>)> {
+    project.validate()?;
+    media::input_root(input_root)?;
+    let a = project.tracks.as_ref().ok_or_else(|| {
+        error(
+            "UNSUPPORTED_TIMELINE",
+            "Only placed-track timelines have a premix",
+        )
+    })?;
+    let duration = project.duration()?;
+    let mut graph = Graph::new(project, input_root, &media::Uncontrolled);
+    graph.audio_only = true;
+    graph.prefetch(a, Time::ZERO, duration, (false, true));
+    graph.check_arrangement(a, Time::ZERO, duration, Kind::Audio)?;
+    let premix = graph.premix(a, Time::ZERO, duration, path, parts)?;
+    Ok((premix, graph.sources()))
 }
 /// Mix only the enabled audio tracks of a window into a lossless stereo PCM WAV, with the same
 /// clip/sample placement, transitions and saturation as a full reference render, but no video work.

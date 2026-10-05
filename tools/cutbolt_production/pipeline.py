@@ -6,16 +6,15 @@ the CONTRACT's invalidation rules fall out of the data: a changed script line ch
 alignment, captions and scene, and whatever their timing moves; a palette change re-renders the art and every
 scene but keeps every narration take; a new delivery setting only re-exports.
 
-Order (independent branches run at the same time):
+Order (independent branches run at the same time; each stage waits only for the ones named before its arrow):
 
-    inputs ─┬─ art (PixelForge, every recipe at once) ──────────────────────────────────────────┐
-            ├─ music (an audio-only WAV: as it is, resampled, or the kit cache) ───────┐        │
-            └─ tts (one batched Qwen run) ─┬─ timing ──────────────────────────────────┤        │
-                                           └─ voice prepare (one job per take) ────────┴─ audio timeline
-        audio timeline ─┬─ mix (meters, duck, normalize) ───────────────────────────────────────┐
-                        └─ align (one job, on the voice assets) ─ captions ─ scenes (lanes) ─────┴─ cut
-        cut ─┬─ export ─ review
-             └─ speech check (audio-only render of the same revision)
+    inputs → art (PixelForge, every recipe at once), music (an audio-only WAV: as it is, resampled, or the kit cache)
+             and tts (one batched Qwen run)
+    tts → timing and voice prepare (one job per take)
+    voice prepare → align (one job on the voice assets; it waits for nothing else)
+    timing, voice prepare, music → audio timeline → mix (meters, duck, normalize)
+    audio timeline, align → captions → scenes (lanes, with the art)
+    mix, scenes → cut → export → review, beside the speech check (an audio-only render of the same revision)
 """
 import json
 import os
@@ -178,12 +177,14 @@ class Production:
             takes = self.stage_tts(inputs)
             timing = self.stage_timing(takes)
             # Takes become voice assets first and are aligned as those assets, so their transcripts bind to what the
-            # timeline plays, and the mix (which needs only the audio) runs while alignment, captions and scenes do.
+            # timeline plays. Alignment needs nothing else, so it never waits for the music or the audio timeline,
+            # and the mix (which needs only the audio) runs while alignment, captions and scenes do.
             voice = self.stage_prepare_voice(takes)
+            align_future = pool.submit(self.stage_align, voice)
             music = music_future.result() if music_future else None
             audio = self.stage_audio_timeline(timing, voice, music)
             mix_future = pool.submit(self.stage_mix, audio)
-            aligned = self.stage_align(voice)
+            aligned = align_future.result()
             captions = self.stage_captions(audio, aligned)
             art = art_future.result()
             rendered = self.stage_scenes(timing, aligned, captions, art, inputs)

@@ -479,15 +479,106 @@ pub(crate) struct Premix {
     pub window: (u64, u64),
     pub report: Arc<Mutex<Option<Report>>>,
 }
+/// Frames read from a premix at a time.
+const BLOCK: usize = 4096;
+
+/// One frame of every group's sums from a premix's interleaved signed 32-bit codes.
+fn decode(bytes: &[u8], frame: &mut [[i64; 2]]) {
+    for (pair, group) in frame.iter_mut().zip(bytes.as_chunks::<8>().0) {
+        for (value, code) in pair.iter_mut().zip(group.as_chunks::<4>().0) {
+            *value = i64::from(i32::from_le_bytes(*code));
+        }
+    }
+}
+
+/// The groups' frames in, through the track and master limiters, out as the window's saturated
+/// PCM16: the one path by which a limited render and a replayed [`Capture`] become what plays.
+struct Output {
+    mixer: Mixer,
+    window: (i64, i64),
+    /// The timeline sample the next push completes.
+    position: i64,
+    written: u64,
+}
+impl Output {
+    fn new(
+        groups: &[Option<Limiter>],
+        master: Option<&Limiter>,
+        first: i64,
+        window: (i64, i64),
+    ) -> Self {
+        let mixer = Mixer::new(groups, master, first, window);
+        // Input frame k (from `first`) yields the mix at `first + k - latency`.
+        let position = first - mixer.latency as i64;
+        Self {
+            mixer,
+            window,
+            position,
+            written: 0,
+        }
+    }
+    fn push(
+        &mut self,
+        groups: &[[i64; 2]],
+        emit: &mut impl FnMut([i16; 2]) -> Result<()>,
+    ) -> Result<()> {
+        let mix = self.mixer.push(groups);
+        if (self.window.0..self.window.1).contains(&self.position) {
+            emit(mix.map(|value| value.clamp(-32768, 32767) as i16))?;
+            self.written += 1;
+        }
+        self.position += 1;
+        Ok(())
+    }
+    /// Flush the limiters' lookahead with silence after the mixed range, check that the window is
+    /// complete, and report each limiter's gain reduction inside it.
+    fn finish(
+        mut self,
+        groups: &[Option<(String, Limiter)>],
+        master: Option<&Limiter>,
+        emit: &mut impl FnMut([i16; 2]) -> Result<()>,
+    ) -> Result<Report> {
+        let silence = vec![[0i64; 2]; groups.len()];
+        for _ in 0..self.mixer.latency {
+            self.push(&silence, emit)?;
+        }
+        if self.written != (self.window.1 - self.window.0) as u64 {
+            return Err(error(
+                "RENDER_VALIDATION_FAILED",
+                "Limited audio does not cover the rendered window",
+            ));
+        }
+        let mut report = Report::default();
+        for ((stage, _), group) in self.mixer.lanes.iter().zip(groups) {
+            if let (Some(stage), Some((id, limiter))) = (stage, group) {
+                report
+                    .tracks
+                    .push((id.clone(), limiter.clone(), stage.reduction));
+            }
+        }
+        if let (Some(stage), Some(limiter)) = (&self.mixer.master, master) {
+            report.master = Some((limiter.clone(), stage.reduction));
+        }
+        Ok(report)
+    }
+}
+
+fn limiters(groups: &[Option<(String, Limiter)>]) -> Vec<Option<Limiter>> {
+    groups
+        .iter()
+        .map(|g| g.as_ref().map(|(_, l)| l.clone()))
+        .collect()
+}
+
 impl Premix {
     pub(crate) fn write(&self, control: &dyn media::Control, timeout: Duration) -> Result<()> {
-        let limiters: Vec<Option<Limiter>> = self
-            .groups
-            .iter()
-            .map(|g| g.as_ref().map(|(_, l)| l.clone()))
-            .collect();
         let (a, b) = (self.window.0 as i64, self.window.1 as i64);
-        let mut mixer = Mixer::new(&limiters, self.master.as_ref(), self.first as i64, (a, b));
+        let mut output = Output::new(
+            &limiters(&self.groups),
+            self.master.as_ref(),
+            self.first as i64,
+            (a, b),
+        );
         let frames = self.window.1 - self.window.0;
         let bytes = u32::try_from(frames * 4)
             .map_err(|_| error("LIMIT_EXCEEDED", "Limited audio window exceeds 4 GiB"))?;
@@ -500,23 +591,16 @@ impl Premix {
         }
         out.write_all(b"data")?;
         out.write_all(&bytes.to_le_bytes())?;
-        // Input frame k (from `first`) yields the mix at `first + k - latency`.
-        let mut position = self.first as i64 - mixer.latency as i64;
-        let mut written = 0u64;
-        let mut emit = |mix: [i64; 2], out: &mut std::io::BufWriter<std::fs::File>| -> Result<()> {
-            if (a..b).contains(&position) {
-                for value in mix {
-                    out.write_all(&(value.clamp(-32768, 32767) as i16).to_le_bytes())?;
-                }
-                written += 1;
+        let mut emit = |pair: [i16; 2]| -> Result<()> {
+            for value in pair {
+                out.write_all(&value.to_le_bytes())?;
             }
-            position += 1;
             Ok(())
         };
-        let groups = self.groups.len();
-        let mut frame = vec![[0i64; 2]; groups];
+        let mut frame = vec![[0i64; 2]; self.groups.len()];
         let program = control.tool("ffmpeg");
-        const BLOCK: usize = 4096;
+        let width = self.groups.len() * 8;
+        let mut buffer = vec![0u8; BLOCK * width];
         for run in &self.runs {
             let _inputs = render::write_generated(&run.generated, control, timeout)?;
             let mut reader = media::StreamReader::spawn_with(
@@ -525,53 +609,153 @@ impl Premix {
                 timeout,
                 media::Watch::default(),
             )?;
-            let width = groups * 8;
-            let mut buffer = vec![0u8; BLOCK * width];
             let mut left = run.frames;
             while left > 0 {
                 control.check()?;
                 let count = left.min(BLOCK as u64) as usize;
                 reader.read_exact(&mut buffer[..count * width])?;
                 for bytes in buffer[..count * width].chunks_exact(width) {
-                    for (g, pair) in frame.iter_mut().enumerate() {
-                        for (c, value) in pair.iter_mut().enumerate() {
-                            let at = g * 8 + c * 4;
-                            *value = i64::from(i32::from_le_bytes(
-                                bytes[at..at + 4].try_into().expect("sample"),
-                            ));
-                        }
-                    }
-                    emit(mixer.push(&frame), &mut out)?;
+                    decode(bytes, &mut frame);
+                    output.push(&frame, &mut emit)?;
                 }
                 left -= count as u64;
             }
             reader.finish()?;
         }
-        // Silence after the mixed range flushes the limiters' lookahead.
-        let silence = vec![[0i64; 2]; groups];
-        for _ in 0..mixer.latency {
-            emit(mixer.push(&silence), &mut out)?;
-        }
-        if written != frames {
-            return Err(error(
-                "RENDER_VALIDATION_FAILED",
-                "Limited audio does not cover the rendered window",
-            ));
-        }
+        let report = output.finish(&self.groups, self.master.as_ref(), &mut emit)?;
         out.flush()?;
-        let mut report = Report::default();
-        for ((stage, _), group) in mixer.lanes.iter().zip(&self.groups) {
-            if let (Some(stage), Some((id, limiter))) = (stage, group) {
-                report
-                    .tracks
-                    .push((id.clone(), limiter.clone(), stage.reduction));
-            }
-        }
-        if let (Some(stage), Some(limiter)) = (&mixer.master, &self.master) {
-            report.master = Some((limiter.clone(), stage.reduction));
-        }
         *self.report.lock().expect("dynamics report") = Some(report);
         Ok(())
+    }
+}
+
+/// A whole timeline's group sums, kept in scratch files, so its mix can be replayed through
+/// another master limiter, or with every clip level scaled, without rendering it again.
+pub(crate) struct Capture {
+    /// Consecutive pieces of the timeline: a file of interleaved signed 32-bit group sums and its
+    /// frame count.
+    parts: Vec<(PathBuf, u64)>,
+    groups: Vec<Option<(String, Limiter)>>,
+    frames: u64,
+}
+impl Capture {
+    /// Run a premix of a whole timeline (from its first sample to its end), up to `lanes` of its
+    /// runs at once, each into its own file beside the premix's path.
+    pub(crate) fn record(
+        premix: &Premix,
+        control: &(dyn media::Control + Sync),
+        timeout: Duration,
+        lanes: usize,
+    ) -> Result<Self> {
+        let frames = premix.window.1;
+        if premix.first != 0
+            || premix.window.0 != 0
+            || premix.runs.iter().map(|r| r.frames).sum::<u64>() != frames
+        {
+            return Err(error(
+                "INTERNAL_ERROR",
+                "A capture needs a premix of the whole timeline",
+            ));
+        }
+        // The capture owns its files from the start, so a failure removes whatever was written.
+        let capture = Self {
+            parts: (premix.runs.iter().enumerate())
+                .map(|(i, run)| (premix.path.with_extension(format!("{i}.s32")), run.frames))
+                .collect(),
+            groups: premix.groups.clone(),
+            frames,
+        };
+        let width = premix.groups.len() as u64 * 8;
+        let tool = control.tool("ffmpeg");
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let failed = std::sync::atomic::AtomicBool::new(false);
+        let work = || -> Result<()> {
+            use std::sync::atomic::Ordering::Relaxed;
+            while !failed.load(Relaxed) {
+                let index = next.fetch_add(1, Relaxed);
+                let (Some(run), Some((path, _))) =
+                    (premix.runs.get(index), capture.parts.get(index))
+                else {
+                    break;
+                };
+                let done = (|| {
+                    let _inputs = render::write_generated(&run.generated, control, timeout)?;
+                    let mut arguments = run.arguments.clone();
+                    *arguments.last_mut().expect("output argument") =
+                        path.to_string_lossy().into_owned();
+                    media::capture_controlled(&tool, &arguments, timeout, control)?;
+                    if std::fs::metadata(path)?.len() != run.frames * width {
+                        return Err(error(
+                            "RENDER_VALIDATION_FAILED",
+                            "Captured audio does not cover the timeline",
+                        ));
+                    }
+                    Ok(())
+                })();
+                if done.is_err() {
+                    failed.store(true, Relaxed);
+                    return done;
+                }
+            }
+            Ok(())
+        };
+        let lanes = lanes.clamp(1, premix.runs.len().max(1));
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..lanes).map(|_| scope.spawn(work)).collect();
+            workers
+                .into_iter()
+                .map(|w| w.join().expect("capture worker"))
+                .collect::<Result<Vec<()>>>()
+        })?;
+        Ok(capture)
+    }
+    /// The timeline's final PCM, with every group's sum multiplied by `factor` and rounded to whole
+    /// codes (ties away from zero), through the groups' own limiters and `master`: `each` gets
+    /// every frame in order. At factor 1 this is exactly what the timeline plays with `master` on
+    /// its master track. The reduction report is None when there is no limiter at all.
+    pub(crate) fn replay(
+        &self,
+        factor: f64,
+        master: Option<&Limiter>,
+        mut each: impl FnMut([i16; 2]),
+    ) -> Result<Option<Report>> {
+        use std::io::Read;
+        let mut output = Output::new(&limiters(&self.groups), master, 0, (0, self.frames as i64));
+        let mut emit = |pair: [i16; 2]| -> Result<()> {
+            each(pair);
+            Ok(())
+        };
+        let width = self.groups.len() * 8;
+        let mut buffer = vec![0u8; BLOCK * width];
+        let mut frame = vec![[0i64; 2]; self.groups.len()];
+        for (path, frames) in &self.parts {
+            let mut input = std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path)?);
+            let mut left = *frames;
+            while left > 0 {
+                let count = left.min(BLOCK as u64) as usize;
+                input.read_exact(&mut buffer[..count * width])?;
+                for bytes in buffer[..count * width].chunks_exact(width) {
+                    decode(bytes, &mut frame);
+                    if factor != 1.0 {
+                        for value in frame.iter_mut().flatten() {
+                            *value = (*value as f64 * factor).round() as i64;
+                        }
+                    }
+                    output.push(&frame, &mut emit)?;
+                }
+                left -= count as u64;
+            }
+        }
+        let report = output.finish(&self.groups, master, &mut emit)?;
+        let limited = master.is_some() || self.groups.iter().any(Option::is_some);
+        Ok(limited.then_some(report))
+    }
+}
+impl Drop for Capture {
+    fn drop(&mut self) {
+        for (path, _) in &self.parts {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
@@ -720,6 +904,72 @@ mod tests {
         let gain = ((u128::from(limiter.ceiling() * SCALE as u64) << 32) / (32_000 * SCALE as u128))
             as u64;
         assert_eq!(out[1500][0], apply(32_000, gain));
+    }
+
+    /// A capture split into parts replays the mix a limited render writes: the saturated sum
+    /// without limiters, the limiter stage's own output through a master limiter, and with a
+    /// factor, the same of the input scaled and rounded with ties away from zero.
+    #[test]
+    fn capture_replays_the_mix_at_any_level() {
+        let input = signal(20_000);
+        let dir = std::env::temp_dir().join(format!("cutbolt-capture-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let parts = [(0, 7_001), (7_001, 20_000)]
+            .iter()
+            .enumerate()
+            .map(|(i, &(a, b))| {
+                let path = dir.join(format!("{i}.s32"));
+                let bytes: Vec<u8> = input[a..b]
+                    .iter()
+                    .flatten()
+                    .flat_map(|&v| (v as i32).to_le_bytes())
+                    .collect();
+                std::fs::write(&path, bytes).unwrap();
+                (path, (b - a) as u64)
+            })
+            .collect();
+        let capture = Capture {
+            parts,
+            groups: vec![None],
+            frames: input.len() as u64,
+        };
+        let limiter = Limiter {
+            ceiling_dbfs: -3.0,
+            lookahead_ms: 2,
+            release_ms: 40,
+        };
+        let replay = |factor: f64, master: Option<&Limiter>| {
+            let mut out = Vec::new();
+            let report = capture
+                .replay(factor, master, |pair| out.push(pair))
+                .unwrap();
+            (out, report)
+        };
+        let pcm = |frames: &[[i64; 2]]| -> Vec<[i16; 2]> {
+            frames
+                .iter()
+                .map(|f| f.map(|v| v.clamp(-32768, 32767) as i16))
+                .collect()
+        };
+        let scaled: Vec<[i64; 2]> = input
+            .iter()
+            .map(|f| f.map(|v| (v as f64 * 1.37).round() as i64))
+            .collect();
+        let (plain, report) = replay(1.0, None);
+        assert!(report.is_none());
+        assert_eq!(plain, pcm(&input));
+        assert_eq!(replay(1.37, None).0, pcm(&scaled));
+        let (limited, report) = replay(1.0, Some(&limiter));
+        assert_eq!(
+            limited,
+            pcm(&run(&limiter, &input, 0, input.len(), (0, input.len())))
+        );
+        assert!(report.unwrap().master.unwrap().1.reduced > 0);
+        let whole = run(&limiter, &scaled, 0, scaled.len(), (0, scaled.len()));
+        assert_eq!(replay(1.37, Some(&limiter)).0, pcm(&whole));
+        drop(capture);
+        assert!(!dir.join("0.s32").exists() && !dir.join("1.s32").exists());
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     /// The true-peak meter finds the intersample peak of a quarter-rate sine at 45 degrees.

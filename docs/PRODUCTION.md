@@ -137,8 +137,9 @@ flowchart LR
     M --> AU
     TM --> AU
     AU --> X[mix: meters, duck, normalize]
-    AU --> L[align-batch: one engine job on the voice assets]
+    V --> L[align-batch: one engine job on the voice assets]
     L --> C[captions]
+    AU --> C
     C --> S[scenes: one render per lane]
     A --> S
     S --> CUT[cut: one session revision]
@@ -231,7 +232,8 @@ What the coordinator does about the 75 minutes and the compute:
 - **Narration.** All lines are synthesized in one model load, in batches: 43 s of speech in 30 s of generation on the RTX 4090, against 67 s one line at a time.
   - The talker's cost follows the total audio, not the longest line. Splitting into sentences (`voice.split`) changes delivery, not speed.
   - The worker decodes each line's codes on its own, because decoding a padded batch hits a masking bug in the installed torch 2.3.
-- **Alignment.** Known scripts are aligned in one job instead of recognized, on the prepared voice assets, so the transcripts bind to what the timeline plays and the mix is measured while alignment, captions and scenes run.
+- **Alignment.** Known scripts are aligned in one job instead of recognized, on the prepared voice assets, so the transcripts bind to what the timeline plays. The job starts as soon as those assets exist, without waiting for the music or the audio timeline; captions then wait for both.
+- **Mix.** `audio.normalize` renders the mix once, refines the levels in memory and renders the proposed levels once more to measure them exactly ([USAGE](USAGE.md#normalizing-loudness)). The mix stage therefore ends well before the scenes do.
 - **Running at once.** Art renders while the narration is generated. Music and voice become [audio-only assets](USAGE.md#voice-overs-and-music): 48 kHz stereo WAVs with no picture, used as they are or resampled in a fraction of a second, one job per take on separate lanes. Music starts at once. Scenes render one per lane, and the mix is measured while alignment, captions and scenes run.
 - **The speech check.** It listens to an audio-only render of the same revision while the picture exports. The final review then checks only picture, sound and timing, without the 360p preview copy unless asked.
 

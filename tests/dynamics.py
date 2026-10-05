@@ -388,23 +388,45 @@ def run(root):
     assert true_peak(pcm) <= -1 + 0.05, true_peak(pcm)
     passed.append('dynamics.true_peak_detection_and_meter')
 
-    # 6. Normalizing proposes the limiter the target needs and measures the result honestly.
+    # 6. Normalizing proposes the limiter the target needs and measures the result honestly. Its
+    #    passes replay one render of the mix in memory; the proposed levels are rendered once more
+    #    and measured exactly, so measured and result equal the meters of the mix before and after.
+    def hundredths(value):
+        return math.copysign(math.floor(abs(value) * 100 + 0.5), value) / 100
+
+    def exactly(report, meters):
+        assert report['integrated_lkfs'] == hundredths(meters['integrated_lkfs']), (report, meters)
+        assert report['sample_peak_dbfs'] == hundredths(max(meters['sample_peak_dbfs'])), (report, meters)
+        assert report['true_peak_dbtp'] == hundredths(max(meters['true_peak_dbtp'])), (report, meters)
+
     voice_only = apply(base, [edit('remove', clip_ids=['bed'], links='include'), edit('clip_audio', clip_ids=['v1', 'v2'], gain_milli=1000)])
     stopped = call({'command': 'audio.normalize', 'project': voice_only, 'input_root': str(root), 'target_lkfs': -14, 'limiter': False})
     assert stopped['limited_by'] == 'peak_ceiling' and stopped['limiter'] is None and stopped['result']['integrated_lkfs'] < -16, stopped
+    before = call({'command': 'timeline.meters', 'project': voice_only, 'input_root': str(root), 'tracks': False})['mix']
+    exactly(stopped['measured'], before)
+    exactly(stopped['result'], call({'command': 'timeline.meters', 'project': apply(voice_only, stopped['operations']), 'input_root': str(root), 'tracks': False})['mix'])
     proposal = call({'command': 'audio.normalize', 'project': voice_only, 'input_root': str(root), 'target_lkfs': -14})
+    assert proposal['result']['renders'] == 2 and proposal['result']['measured_passes'] > 2, proposal['result']
     assert proposal['limited_by'] is None and abs(proposal['result']['integrated_lkfs'] + 14) <= 0.05, proposal
     assert proposal['result']['true_peak_dbtp'] <= -1 and proposal['result']['sample_peak_dbfs'] <= -1, proposal['result']
     assert proposal['operations'][0]['edit']['op'] == 'audio_dynamics' and proposal['operations'][0]['edit']['dynamics']['limiter'] == proposal['limiter'], proposal['operations']
     assert proposal['limiter']['ceiling_dbfs'] <= -1 and proposal['result']['dynamics']['master']['max_reduction_db'] > 3, proposal
     done = apply(voice_only, proposal['operations'])
     after = call({'command': 'timeline.meters', 'project': done, 'input_root': str(root), 'tracks': False})['mix']
-    assert abs(after['integrated_lkfs'] - proposal['result']['integrated_lkfs']) <= 0.006 and abs(max(after['true_peak_dbtp']) - proposal['result']['true_peak_dbtp']) <= 0.006, (after, proposal['result'])
-    assert after['dynamics']['master']['max_reduction_db'] == proposal['result']['dynamics']['master']['max_reduction_db']
+    exactly(proposal['result'], after)
+    assert after['dynamics'] == proposal['result']['dynamics'], (after['dynamics'], proposal['result']['dynamics'])
     render(done, 'normalized-through-limiter')
     capped = call({'command': 'audio.normalize', 'project': voice_only, 'input_root': str(root), 'target_lkfs': -14, 'max_limiting_db': 2})
     assert capped['limited_by'] == 'limiter_reduction' and capped['result']['dynamics']['master']['max_reduction_db'] <= 2.3, capped
     assert capped['result']['integrated_lkfs'] < proposal['result']['integrated_lkfs'] - 1, (capped['result'], proposal['result'])
+    # With a track limiter the mix has two groups, the limited voice and the bed; the replay limits
+    # the voice before the sum, exactly as a render does.
+    grouped = apply(base, [edit('audio_dynamics', track_id='voice', dynamics={'limiter': {'ceiling_dbfs': -6}})])
+    proposal = call({'command': 'audio.normalize', 'project': grouped, 'input_root': str(root), 'target_lkfs': -14})
+    exactly(proposal['measured'], call({'command': 'timeline.meters', 'project': grouped, 'input_root': str(root), 'tracks': False})['mix'])
+    after = call({'command': 'timeline.meters', 'project': apply(grouped, proposal['operations']), 'input_root': str(root), 'tracks': False})['mix']
+    exactly(proposal['result'], after)
+    assert after['dynamics'] == proposal['result']['dynamics'] and [t['track_id'] for t in after['dynamics']['tracks']] == ['voice'], after['dynamics']
     passed.append('dynamics.normalize_proposes_limiter')
 
     # 7. Saved sessions keep the dynamics, the schema describes them and bad settings are refused.

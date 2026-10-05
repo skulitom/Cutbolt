@@ -4,7 +4,8 @@ Always (no companions needed): strict manifest validation and its rejections; th
 their invalidation by palette and label changes; every beat type compiled against stand-in PNGs and checked by the
 engine's scene.inspect, with cue layers starting on the exact frame of their word; the timing plan against hand-computed
 boundaries; reconcile() checked by applying its operations with the engine and comparing the result with the target;
-the TTS worker refusing a missing model before loading anything.
+the TTS worker refusing a missing model before loading anything; the build's order, with stubbed stages, starting
+alignment on the voice assets while the music is still being prepared.
 
 With CUTBOLT_PRODUCTION_CONFIG (PixelForge, the Qwen worker and the speech runtime installed): a complete four-scene
 production, a repeated build that reuses every stage, a one-line script change that rebuilds only that line's chain
@@ -13,10 +14,12 @@ and the delivery, and a palette change that re-renders art and scenes but keeps 
 from engine import ENGINE
 import argparse
 import copy
+import io
 import json
 import os
 import subprocess
 import sys
+import threading
 from fractions import Fraction as F
 from pathlib import Path
 
@@ -25,7 +28,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from cutbolt_production import manifest as manifest_module, pixel_stage  # noqa: E402
-from cutbolt_production.pipeline import arrangement_differences, plan_timing, reconcile  # noqa: E402
+from cutbolt_production.pipeline import Production, arrangement_differences, plan_timing, reconcile  # noqa: E402
 from cutbolt_production.engine import ToolError  # noqa: E402
 from cutbolt_production.state import State  # noqa: E402
 
@@ -291,6 +294,62 @@ def check_offline(out, passed):
     assert not any((out / "tts-out").iterdir())
     passed.append("production.worker_missing_model")
 
+    # 8. Order: alignment needs only the voice assets, so it starts while the music is still being prepared; captions
+    #    wait for the audio timeline and the alignment. The stages are stubs: nothing runs, no receipt is written.
+    order, aligning = [], threading.Event()
+
+    class Stubbed(Production):
+        def stage_inputs(self):
+            return {}
+
+        def stage_art(self):
+            return "art"
+
+        def stage_tts(self, inputs):
+            return {"one": "take"}
+
+        def stage_timing(self, takes):
+            return "timing"
+
+        def stage_prepare_voice(self, takes):
+            order.append("voice")
+            return {"one": "voice asset"}
+
+        def stage_music(self, inputs):
+            order.append("music started")
+            assert aligning.wait(30), "alignment waited for the music"
+            order.append("music done")
+            return "music"
+
+        def stage_align(self, voice):
+            assert voice == {"one": "voice asset"}, voice
+            order.append("align")
+            aligning.set()
+            return {"one": "aligned"}
+
+        def stage_audio_timeline(self, timing, voice, music):
+            order.append("audio timeline")
+            return {"timing": timing, "voice": voice, "music": music}
+
+        def stage_mix(self, audio):
+            return "mixed"
+
+        def stage_captions(self, audio, aligned):
+            assert audio["music"] == "music" and aligned == {"one": "aligned"}, (audio, aligned)
+            order.append("captions")
+            return "captions"
+
+        def stage_scenes(self, timing, aligned, captions, art, inputs):
+            assert (timing, captions, art) == ("timing", "captions", "art")
+            order.append("scenes")
+            return "scenes"
+
+    stubbed = Stubbed(m, out / "order", {"engine": str(sources / "music.wav"), "lanes": 2}, until="scenes", log=io.StringIO())
+    stubbed.revision = {"revision": 1}
+    assert stubbed._build()["stopped_after"] == "scenes"
+    assert order.index("voice") < order.index("align") < order.index("music done") < order.index("audio timeline")         < order.index("captions") < order.index("scenes"), order
+    passed.append("production.align_starts_before_music_finishes")
+
 
 def build(manifest_path, root, config, *extra):
     done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "build", str(manifest_path), "--root", str(root),
@@ -351,7 +410,7 @@ def run(out, config):
     if full:
         check_full(out, config, passed)
     report = {"passed": passed, "full_run": full,
-              "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal; with a "
+              "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal, build order; with a "
                        "production config, a real PixelForge/Qwen/Cutbolt build with stage reuse and selective rebuilds",
               "oracle": "Hand-computed boundaries and cue frames, the engine's own scene.inspect and timeline.apply, recipe digests"}
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

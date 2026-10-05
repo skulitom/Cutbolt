@@ -1,5 +1,57 @@
 # Progress history
 
+## 5 October 2026: normalizing renders the mix twice instead of up to eleven times
+
+The part-two research (`demo-progress2-20261005/research/RESEARCH.md`, E2 and E3) found that `audio.normalize` took 34 s of the 96 s film's 142 s build, and the cut waited 14 s for it. Normalize measured the mix up to 11 times:
+- once at the start;
+- up to three refinements;
+- once through the proposed limiter, then up to six more.
+
+Each measurement rendered the timeline's audio through FFmpeg to a scratch WAV (two FFmpeg runs with a limiter) and metered it in Rust.
+
+The changes:
+- **One render, then passes in memory.** The mix is rendered once at the current levels, as the unsaturated sums of its limiter groups: each limited track, and the other tracks together.
+  - This is the premix a limited render already runs, now built for any timeline (`track_render::premix`, `dynamics::Capture`).
+  - Each refinement pass replays those sums: scaled by the candidate factor, rounded to whole codes, then through the track limiters and the proposed master limiter, saturated and metered.
+  - Renders and replays share the limiting, summing and saturating code (`dynamics::Output`).
+- **The reported numbers stay exact.** The proposed levels are rendered once more and replayed unscaled, which is what the timeline plays.
+  - On part two, `measured` and `result` equal `timeline.meters` of the mix before and after at full precision: integrated loudness, per-channel RMS over every sample, sample and true peaks, gating counts and limiter reduction.
+  - The limiter's ceiling is settled on that exact replay, without a render.
+  - A third render happens only when the exact result misses the target by more than 0.05 LU, or passes the limit that stopped the gain by more than 0.01 dB. On part two the passes predicted the exact result within 0.003 LU and 0.003 dB in four settings, so none needed one.
+  - The passes see a clipping mix's true peaks, not its clipped ones.
+- **Pieces render side by side.** The render splits the timeline into up to eight pieces of at least 2 s, each its own FFmpeg run. A premix gives the same sums wherever a run starts; chunked renders and previews already rely on this. On part two, rendered in eight pieces, the exact replay matched the single-graph render bit for bit. One render of part two's mix dropped from 3.7-4.9 s to 0.7-1.0 s.
+- **Reported work.** `result.renders` counts the renders, and `measured_passes` now counts passes, the exact ones included. Timelines over 4 hours are refused, the limit `timeline.meters` has. The rendered sums need about 1.4 GB of scratch space per hour for each group.
+- **Coordinator order (E3).** The alignment job is submitted as soon as the voice assets exist, not after the audio timeline, so it never waits for the music. Stage keys and receipts are unchanged.
+  - On `83de4ca`, music preparation still encoded a black 1080p picture for 20-37 s. There this order made alignment slower: it ran beside that work and took 33-34 s instead of 17-22 s, so it ended at most a second earlier, and once 24 s later.
+  - Since audio-only assets (`277f0d2`), music is ready in under a second at the start, so the order only matters when music preparation is slow.
+
+Measured with release builds, run alternately while other sessions loaded the machine:
+- **Normalize alone.** Five interleaved rounds on part two's pre-normalize snapshot, 12-88 % busy. The snapshot was rebuilt from the build's audio timeline as the mix stage builds it, and checked to reproduce the recorded mix.
+  - `83de4ca`: 32.2-43.1 s, median 38.4 s.
+  - This change: 3.3-5.4 s, median 3.5 s.
+  - Both propose −14.00 LKFS and −1.01 dBTP through a −1.01 dBFS limiter. The voice level differs by one milli-unit, 2873 against 2872: exactly −14.0024 against −14.0039 LKFS.
+- **The part-two film, rebuilt cold.** The manifest and `production-config.json` were copied to `C:\DEV\CutboltData\fast-normalize-20261005`, with `engine` set to this release build, and every build had an empty kit cache. On main `015ab6b`, in two alternating pairs ("busy" is the mean during the build):
+
+| Cold build | Total | Narration | `audio.normalize` | Normalize done at | Scenes done at | Cut waits for the mix | After the narration |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pair 1, `015ab6b` (40 % busy) | 134.1 s | 40.6 s | 37.6 s | 86.5 s | 67.7 s | 18.8 s | 93.5 s |
+| Pair 1, now (44 % busy) | **114.6 s** | 38.4 s | 4.3 s | 51.7 s | 65.6 s | none | 76.2 s |
+| Pair 2, now (37 % busy) | **105.5 s** | 38.4 s | 3.5 s | 50.4 s | 63.6 s | none | 67.2 s |
+| Pair 2, `015ab6b` (26 % busy) | 115.4 s | 30.0 s | 35.6 s | 72.9 s | 53.2 s | 19.7 s | 85.4 s |
+
+- **About 18 s less after the narration in both pairs**, because the cut no longer waits for the mix. The research's 141.7 s part-two build (`83de4ca`, a quiet machine) is now 105.5-114.6 s, most of the rest coming from audio-only assets.
+- **On `83de4ca`.** This change against `83de4ca`, in three pairs at 50-70 % mean load, cut `audio.normalize` inside the build from 40.5-45.8 s to 7.7-14.6 s. Alignment's slowdown beside the music conversion cancelled the gain there: 173-220 s against 161-232 s. The first rebuild, at 68 % load, took 163.5 s against the original 141.7 s.
+- **The same mix.** This engine renders the original part-two mix (voice at 2872) to the same PCM as `83de4ca` (SHA-256 `13e03599…`), so moving the limited render onto the shared code changes no sample.
+- **The delivery.** The one milli-unit moves AAC's overshoot: the delivered MP4 now peaks at 0.0 dBFS with 2 clipped samples, against −0.6 dBFS. Both PCM mixes peak at −1.010 dBFS; a plain AAC 320 kbit/s encode of each gives −0.63 and +0.29 dB. The coordinator normalizes to `peak_dbfs` with no lossy headroom (part two's open issue, queued separately), so which film clips is chance. The speech check still fails on spoken numerals in every build, as before.
+
+Tests:
+- a unit test: a capture split into parts replays the plain sum, the limiter stage's own output and scaled input exactly;
+- `transitions`: the normalize oracle replays its own unsaturated sums as the engine does, and must match the engine's operations, passes and renders exactly;
+- `dynamics`: `measured` and `result` equal `timeline.meters` before and after at hundredths, also with a voice-track limiter (two groups), with two renders;
+- `production` (offline): with stubbed stages, alignment must start while the music is still being prepared. With the old order the check fails after 30 s.
+
+These fixtures pass in quick mode: dynamics, transitions, production. No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: audio-only assets for voice-overs and music
 
 Audio tracks have played 48 kHz stereo PCM16 WAV files directly since recording landed. Every other WAV still became a timeline asset with a full-size black FFV1 picture under its sound (`media.prepare`, `src/readiness.rs` `conform_audio`). The part-two research (`demo-progress2-20261005/research/RESEARCH.md`, E1) measured the cost on the 96 s music bed: 14.1 s and 137 CPU-seconds, 117 of them in FFmpeg encoding and decoding the black picture and 19 in the engine hashing about 15 GB of decoded zeros. That is about 1.4 CPU-seconds per second of audio, and the build's alignment waited for it. It was the morning demo's issue 7 in its real form.

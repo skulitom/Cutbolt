@@ -10,10 +10,22 @@ use std::{
 
 /// Longest measured range: four hours. The audio streams from a scratch WAV, so memory does not
 /// grow with length; the scratch file needs about 690 MB per hour.
-const MAX_SECONDS: u64 = 4 * 3600;
+pub(crate) const MAX_SECONDS: u64 = 4 * 3600;
 
-/// Removes a private scratch directory when measuring ends, successfully or not.
-struct Scratch(PathBuf);
+/// A private scratch directory under the system temporary directory, removed when measuring
+/// ends, successfully or not.
+pub(crate) struct Scratch(pub(crate) PathBuf);
+impl Scratch {
+    pub(crate) fn new(prefix: &str) -> Result<Self> {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| error("CLOCK_ERROR", "Clock before epoch"))?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("{prefix}-{}-{nonce}", std::process::id()));
+        fs::create_dir(&path)?;
+        Ok(Self(path))
+    }
+}
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -77,14 +89,7 @@ pub(crate) fn measure(
     duration: Time,
     curve: bool,
 ) -> Result<Value> {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| error("CLOCK_ERROR", "Clock before epoch"))?
-        .as_nanos();
-    let scratch = Scratch(
-        std::env::temp_dir().join(format!("cutbolt-meters-{}-{nonce}", std::process::id())),
-    );
-    fs::create_dir(&scratch.0)?;
+    let scratch = Scratch::new("cutbolt-meters")?;
     let plan = render::plan_audio_range(
         project,
         input_root,

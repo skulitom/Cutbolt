@@ -59,7 +59,7 @@ def run(root):
         if mode=='hold':return va
         u=(t-ta)/(tb-ta);w=va*(u.denominator-u.numerator)+vb*u.numerator
         return (1 if w>=0 else -1)*((abs(w)+u.denominator//2)//u.denominator)
-    def oracle(project,scale=1):
+    def oracle(project,scale=1,wide=False):
         width,height=W//scale,H//scale;count=int(seconds(project['tracks']['duration'])*25);video=[];audio=[0]*(count*1920*2)
         def image(c,t):
             frame=pictures[int(c['asset_id'])][int((seconds(c['source_in'])+t-seconds(c['start']))*25)]
@@ -71,7 +71,7 @@ def run(root):
                 if start<=t<end:return e,left,right,start,end
             return None
         def weights(kind,k,d):return (max(d-2*k,0),max(2*k-d,0)) if kind=='dip_black' else (d-k,k)
-        for n in range(count):
+        for n in range(0 if wide else count):
             pixels=bytes(width*height*3);t=F(n,25)
             for layer in project['tracks']['tracks']:
                 if layer['kind']!='video' or not layer['enabled']:continue
@@ -112,6 +112,8 @@ def run(root):
                         start,end,l,r,kind=e;k=2*(n-start)+1;d=2*(end-start);a,b=weights(kind,k,d);v=value(l)*a+value(r)*b;v=(1 if v>=0 else -1)*((abs(v)+d//2)//d)
                     else:v=value(c) if c else 0
                     audio[n*2+ch]+=v
+        # wide: the unsaturated audio sums alone.
+        if wide:return audio
         return b''.join(video),array('h',(max(-32768,min(32767,v)) for v in audio)).tobytes()
     def compare(path,rgb,pcm,label,scale=1):
         nonlocal frames,samples
@@ -206,8 +208,10 @@ def run(root):
     call({'command':'audio.duck','project':ducking,'input_root':str(root),'voice_track_id':'v','music_track_id':'m'},'MISSING_TRACK')
     passed.append('transitions.ducking_proposal_renders_exactly')
     # Normalizing: one factor scales every audio clip. The factor, its limit and every level are
-    # recomputed here from meters of the oracle's mix; the applied levels render exactly and land
-    # on the target or the limit.
+    # recomputed here from meters of the oracle's mix, as the engine does: from the unsaturated
+    # sums at the current levels, scaled for each pass, then from the sums at the proposed levels,
+    # once more if those miss the target. The applied levels render exactly and land on the target
+    # or the limit.
     import math
     measured_mixes=[0]
     def normalized(p,target,ceiling):
@@ -222,18 +226,31 @@ def run(root):
                     if c.get('gain_curve'):c['gain_curve']['keys']=[{**k,'value':scale(k['value'],f)} for k in c['gain_curve']['keys']]
                     else:c['gain_milli']=scale(c.get('gain_milli',1000),f)
             return q
-        def measure(f):
-            measured_mixes[0]+=1;m=metered(oracle(scaled(f))[1],f'normalize-{measured_mixes[0]}')
+        def away(x):
+            n=math.floor(abs(x));n+=abs(x)-n>=.5
+            return n if x>=0 else -n
+        def capture(f):return oracle(scaled(f),wide=True),f
+        def measure(anchor,f):
+            # The captured sums times the factor's ratio to the capture's, ties away from zero, saturated.
+            sums,at=anchor;r=f/at;values=sums if r==1.0 else [away(v*r) for v in sums]
+            measured_mixes[0]+=1;m=metered(array('h',(max(-32768,min(32767,v)) for v in values)).tobytes(),f'normalize-{measured_mixes[0]}')
             return m['integrated_lkfs'],max(v for v in m['sample_peak_dbfs'] if v is not None)
         largest=max(v for level in levels(1.0) for v in level)
         by_range=4000/largest if largest else math.inf
-        first=measure(1.0);f,(loud,peak),limited,passes=1.0,first,None,1
-        for _ in range(3):
-            wanted=f*10**((target-loud)/20);by_peak=f*10**((ceiling-peak)/20)
-            nxt=min(wanted,by_peak,by_range)
-            limited=None if wanted<=min(by_peak,by_range) else ('peak_ceiling' if by_peak<=by_range else 'clip_gain_range')
-            if levels(nxt)==levels(f):break
-            f=nxt;loud,peak=measure(f);passes+=1
+        anchor,renders=capture(1.0),1
+        first=measure(anchor,1.0);start,passes=first,1
+        while True:
+            f,(loud,peak),limited=anchor[1],start,None
+            for _ in range(3):
+                wanted=f*10**((target-loud)/20);by_peak=f*10**((ceiling-peak)/20)
+                nxt=min(wanted,by_peak,by_range)
+                limited=None if wanted<=min(by_peak,by_range) else ('peak_ceiling' if by_peak<=by_range else 'clip_gain_range')
+                if levels(nxt)==levels(f):break
+                f=nxt;loud,peak=measure(anchor,f);passes+=1
+            if levels(f)!=levels(anchor[1]):anchor,renders=capture(f),renders+1
+            final=measure(anchor,anchor[1]);passes+=1
+            if renders==3 or (abs(final[0]-target)<=.05 if limited is None else final[1]<=ceiling+.01 if limited=='peak_ceiling' else True):break
+            start=final
         groups,curves={},[]
         for c,new in zip(clips,levels(f)):
             if c.get('gain_curve'):
@@ -241,15 +258,15 @@ def run(root):
                     curves.append({'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':[c['id']],'gain_curve':{**c['gain_curve'],'keys':[{**k,'value':v} for k,v in zip(c['gain_curve']['keys'],new)]}}})
             elif new[0]!=c.get('gain_milli',1000):groups.setdefault(new[0],[]).append(c['id'])
         operations=[{'op':'tracks.edit','edit':{'op':'clip_audio','clip_ids':ids,'gain_milli':level}} for level,ids in sorted(groups.items())]+curves
-        return first,f,limited,operations,(loud,peak),passes
+        return first,f,limited,operations,final,passes,renders
     def normalize(p,target,ceiling,label):
         # Without a limiter the gain stops at the ceiling; tests/dynamics.py covers the limiter proposal.
         proposal=call({'command':'audio.normalize','project':p,'input_root':str(root),'target_lkfs':target,'peak_ceiling_dbfs':ceiling,'limiter':False})
-        first,factor,limited,operations,final,passes=normalized(p,target,ceiling)
+        first,factor,limited,operations,final,passes,renders=normalized(p,target,ceiling)
         assert proposal['operations']==operations and proposal['limited_by']==limited,(proposal,operations,limited)
         assert abs(proposal['measured']['integrated_lkfs']-first[0])<=.006 and abs(proposal['measured']['sample_peak_dbfs']-first[1])<=.006
         assert abs(proposal['result']['integrated_lkfs']-final[0])<=.006 and abs(proposal['result']['sample_peak_dbfs']-final[1])<=.006
-        assert proposal['result']['measured_passes']==passes and abs(proposal['gain_db']-20*math.log10(factor))<=.006
+        assert proposal['result']['measured_passes']==passes and proposal['result']['renders']==renders and abs(proposal['gain_db']-20*math.log10(factor))<=.006
         assert proposal['clips']==sum(len(o['edit']['clip_ids']) for o in operations)
         done=apply(p,operations);render(done,label)
         after=call({'command':'timeline.meters','project':done,'input_root':str(root),'tracks':False})['mix']
