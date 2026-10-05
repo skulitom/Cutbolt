@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: scene stills
+
+An agent designing a title, lower third or thumbnail could check its scene's structure with `scene.inspect`, but could not see it without compiling the whole movie. `scene.still` renders the one frame shown at a given time to a PNG at the scene's output size: RGB, or straight RGBA for a transparent scene. Over MCP it comes back as an inline image. It uses the same composition as `scene.render`. A thumbnail is a still of a one-frame scene.
+
+The graphics fixture compares stills of the animated, masked, twice-enlarged scene with the independent expected frames at four times, one of them between frames. A transparent variant must equal its compiled movie's RGBA frames. The fixture also covers the MCP image, the range, overwrite and extension rejections, and leftover scratch files. No scoring changed.
+
 ## 5 October 2026: beats for cutting to music
 
 An agent cutting a montage had no way to know where the beats of its music fell. The read-only `audio.beats` reports a music file's onsets, tempo and beat grid as exact file times, and optionally each beat's nearest frame. Onsets are sharp level rises on a 10 ms hop. The tempo comes from an amplitude-weighted onset-strength autocorrelation that tolerates periods between whole hops. The grid is aligned to the onsets and refined by least squares.

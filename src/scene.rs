@@ -1780,9 +1780,77 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     Ok(report)
 }
 
+/// One frame of a scene as a PNG at its output size, without compiling a movie: RGB, or straight
+/// RGBA for a transparent scene. The frame is the one shown at `time`, as in the compiled asset.
+pub fn still(
+    scene: &Scene,
+    root: &Path,
+    output_root: &Path,
+    output: &Path,
+    time: Time,
+) -> Result<Value> {
+    let output = render::destination_extension(output, output_root, "png")?;
+    let prepared = prepare(scene, root)?;
+    let rate = scene.clock()?;
+    let frames = scene.duration.units(rate)?;
+    // The frame on screen at `time`: the last frame start at or before it.
+    let n = (time.num as u128 * rate.num as u128 / (time.den as u128 * rate.den as u128)) as u64;
+    if n >= frames {
+        return Err(error(
+            "INVALID_RANGE",
+            format!(
+                "time {time} s is not inside the scene's {} s",
+                scene.duration
+            ),
+        ));
+    }
+    let pixels = compose(scene, &prepared, n)?;
+    let channels = if scene.transparent { 4 } else { 3 };
+    let scale = scene.output_scale as usize;
+    let (width, height) = (scene.width as usize, scene.height as usize);
+    let mut enlarged = Vec::with_capacity(pixels.len() * scale * scale);
+    for row in pixels.chunks(width * channels) {
+        let mut line = Vec::with_capacity(row.len() * scale);
+        for pixel in row.chunks(channels) {
+            for _ in 0..scale {
+                line.extend_from_slice(pixel);
+            }
+        }
+        for _ in 0..scale {
+            enlarged.extend_from_slice(&line);
+        }
+    }
+    let scratch = Scratch::new(output.parent().expect("validated parent"))?;
+    let temp = scratch.0.join("frame.png");
+    let (out_w, out_h) = ((width * scale) as u32, (height * scale) as u32);
+    write_png_channels(&temp, out_w, out_h, &enlarged, scene.transparent)?;
+    for (_, identity) in &prepared.sources {
+        identity_bytes(identity, root)?;
+    }
+    media::publish(&temp, &output)?;
+    Ok(
+        json!({"output":output,"scene_id":scene.id,"frame":n,"time":Time::new(n * rate.den, rate.num)?,
+        "frame_rate":rate,"width":out_w,"height":out_h,"transparent":scene.transparent}),
+    )
+}
+
 pub(crate) fn write_png(path: &Path, width: u32, height: u32, bytes: &[u8]) -> Result<()> {
+    write_png_channels(path, width, height, bytes, false)
+}
+
+fn write_png_channels(
+    path: &Path,
+    width: u32,
+    height: u32,
+    bytes: &[u8],
+    alpha: bool,
+) -> Result<()> {
     let mut encoder = png::Encoder::new(BufWriter::new(File::create_new(path)?), width, height);
-    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_color(if alpha {
+        png::ColorType::Rgba
+    } else {
+        png::ColorType::Rgb
+    });
     encoder.set_depth(png::BitDepth::Eight);
     // Reference projects do not yet declare color management; do not invent a color tag.
     let mut writer = encoder

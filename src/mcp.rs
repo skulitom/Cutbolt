@@ -153,6 +153,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         "cache.prune" => {
             "Evict least-recently-used derived cache entries to explicit byte/count budgets; source media and exported files are not removed."
         }
+        "scene.still" => {
+            "See a scene before compiling it: render the one frame shown at time (default 0) to a new PNG at the scene's output size, returned as an inline image; straight RGBA for a transparent scene. Use it to check titles, lower thirds and thumbnails, then compile with scene.render."
+        }
         "preview.frame" => {
             "Export one exact frame from a reference project timeline to an unused PNG and return it as an inline image. Requires absolute input/output roots and rational time on the project's supported native frame boundary. No source or existing output is overwritten."
         }
@@ -488,9 +491,8 @@ impl Call {
 /// A preview command's PNG as an image content block, downscaled to PREVIEW_EDGE.
 fn preview_image(workspace: Option<&Workspace>, command: &str, result: &Value) -> Option<Value> {
     let output = match command {
-        "preview.frame" | "preview.sheet" | "preview.cuts" | "media.sheet" | "media.shots" => {
-            result["output"].as_str()?
-        }
+        "preview.frame" | "preview.sheet" | "preview.cuts" | "media.sheet" | "media.shots"
+        | "scene.still" => result["output"].as_str()?,
         // A finished export.review job shows its contact sheet.
         "job.wait" | "job.status" => result["result"]["picture"]["sheet"]["output"].as_str()?,
         _ => return None,
@@ -516,7 +518,7 @@ impl Server {
             "Typical cut: session.create with id, width, height and frame_rate (30 or 60 fps footage keeps every frame on a 30 or 60 fps project); ",
             "job.start run media.prepare with each source's path and the project, then job.wait, gives an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait; check the delivered file with job.start run export.review. ",
-            "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, compile it with job.start run scene.render, ",
+            "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, look at it with scene.still, compile it with job.start run scene.render, ",
             "and media.add the returned asset. Captions: captions.draft drafts cues from transcripts, or captions.import reads a file; job.start run captions.render burns a whole track into one overlay; then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech, audio.normalize proposes levels that bring the mix to a loudness target such as -14 LKFS, and audio.tighten proposes jump cuts that shorten pauses in speech. ",
             "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",

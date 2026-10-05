@@ -19,6 +19,7 @@ For subtitles, [caption documents](CAPTIONS.md) provide `captions.scene`. It app
 | Command | Fields besides `command` | Result |
 | --- | --- | --- |
 | `scene.inspect` | `scene`, `input_root` | Validate image/audio/font identities, decode media, report exact selected animation frames, text layout and audio conversion counts; no output |
+| `scene.still` | `scene`, `input_root`, `output_root`, `output`, optional `time` | Render the one frame shown at `time` (default 0) to a new `.png` at output size, RGB or straight RGBA for a transparent scene, without compiling; over MCP also an inline image |
 | `scene.render` | `scene`, `input_root`, `output_root`, `output` | Compile and verify a new `.mkv`; return source identities, scene digest, tool versions, counts and a timeline asset |
 | `preview.frame` | `project`, `input_root`, `output_root`, `output`, `time` | Export one timeline frame as a new full-size `.png` with its source/timeline frame numbers |
 | `preview.range` | `project`, `input_root`, `output_root`, `output`, `start`, `duration` | Export an exact half-open timeline range as a new reference `.mkv`, including cuts and sample-exact audio |

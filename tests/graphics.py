@@ -284,6 +284,32 @@ def run(root):
     assert inspect(reordered)==move_info
     check_case(json.loads(json.dumps(reordered)),"reloaded-animation")
     passed.append("graphics.animated_text_shapes_masks")
+    # Stills: the frame on screen at a time, at output size, equal to the independent expectation
+    # (and, for a transparent scene, to the compiled movie's RGBA frame).
+    def still(s,name,t,error=None):
+        return request({"command":"scene.still","scene":s,"input_root":str(sources),"output_root":str(output),"output":str(output/(name+".png")),"time":t},error)
+    for n,t in ((0,time(0)),(4,time(4,25)),(12,time(62,125)),(19,time(19,25))):
+        shown=still(moving,f"still-{n}",t);assert shown["frame"]==n and shown["time"]==time(n,25) and (shown["width"],shown["height"])==(192,128)
+        with Image.open(output/f"still-{n}.png") as image:assert image.mode=="RGB" and image.tobytes()==expected_frame(move_reference,oracle,n),n
+    clear=copy.deepcopy(moving);clear.update(id="moving-alpha",transparent=True)
+    for item in clear["layers"]:item["blend_mode"]="normal"
+    request({"command":"scene.render","scene":clear,"input_root":str(sources),"output_root":str(output),"output":str(output/"moving-alpha.mkv")})
+    rgba=subprocess.check_output(["ffmpeg","-v","error","-i",str(output/"moving-alpha.mkv"),"-an","-pix_fmt","rgba","-f","rawvideo","-"],timeout=90)
+    size=192*128*4
+    for n in (2,9):
+        still(clear,f"still-alpha-{n}",time(n,25))
+        with Image.open(output/f"still-alpha-{n}.png") as image:assert image.mode=="RGBA" and image.tobytes()==rgba[n*size:(n+1)*size],n
+    still(moving,"still-late",time(20,25),"INVALID_RANGE")
+    still(moving,"still-0",time(0),"OUTPUT_EXISTS")
+    request({"command":"scene.still","scene":moving,"input_root":str(sources),"output_root":str(output),"output":str(output/"still.jpg")},"UNSUPPORTED_OUTPUT")
+    viewer=Client(exe)
+    try:
+        viewer.initialize()
+        reply=viewer.rpc("tools/call",{"name":"cutbolt_scene_still","arguments":{"scene":moving,"input_root":str(sources),"output_root":str(output),"output":str(output/"still-mcp.png"),"time":time(4,25)}})["result"]
+        assert [c["type"] for c in reply["content"]]==["text","image"] and reply["structuredContent"]["result"]["frame"]==4
+    finally:viewer.close()
+    assert not list(output.glob(".cutbolt-scene-*"))
+    passed.append("graphics.scene_stills_match_frames")
 
     client=Client(exe)
     try:
