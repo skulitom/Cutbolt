@@ -55,6 +55,19 @@ The root contains one owned `cutbolt-cache.sqlite` database. Payload BLOBs strea
 
 Rollback journaling, full synchronization and checked initialization protect completed entries during failed inserts or process interruption. Tests cover an actual hot rollback journal and SQLite's full-database error; they do not guarantee hardware or power-loss behavior. The five-second lock timeout can return `STORE_BUSY` under contention. A killed producer may leave a known `.cutbolt-cache-*` temporary file or a native producer's scratch directory; cleanup of orphaned temporary files is not automatic. Normal return/error paths remove their owned temporary files. Cache initialization/publication never recursively deletes a directory.
 
+## Source inspections
+
+Renders, previews and exports also reuse **verified source inspections**, separately from `cache.run`. No request field is involved: a workspace keeps them in `.cutbolt/cache/inspections`, and `CUTBOLT_INSPECTION_CACHE` can name another absolute directory. An entry is keyed by the source's SHA-256 and size, the inspection's parameters (size, frame rate, alpha acceptance, frame-by-frame or packet timing), the ffprobe executable's SHA-256 and the engine build. Every command still hashes every source it reads, so changed bytes, even at the same path, size and timestamps, are always inspected again.
+
+- **Outputs are entered as they are written.** `scene.render`, `captions.render`, `render.run` and `media.conform`/`media.prepare` verify their output before publishing it, and that pass becomes an entry. It also records the inspections it proves:
+  - an opaque `bgr0` file passes the alpha-overlay check unchanged, since that check only also accepts `bgra`;
+  - a frame-by-frame pass whose packets carry the same frame times proves the packet-timed check, which reads its audio from the same packets;
+  - a packet-timed pass never stands in for a frame-by-frame one.
+- **Audio-only use is packet-timed.** A source that only feeds audio tracks in a render is timed from its FFV1 packets, as in audio-only exports, and its pictures are not decoded. The same source on a video track is decoded frame by frame.
+- **Parallel inspection.** One render, preview or export inspects the sources it reads up to four at a time, largest file first, and contact sheets read four cells at a time. A request for an inspection already running in the process waits for it rather than decoding the file again. The queue's own render worker keeps inspecting one source at a time.
+
+On the 80.64 s 1080p25 progress-demo timeline (14 scene shots, a full-length caption overlay, a picture-in-picture clip, 7 narration assets and an 80 s music asset), inspecting all 25 sources with no entries took 5.7–6.2 s, against 19.9–22.3 s one at a time and about 100 s on one decoder thread. The same machine was busy with other work. The cold and warm review calls are in [PROGRESS_HISTORY.md](PROGRESS_HISTORY.md).
+
 ## Contact sheets
 
 `preview.sheet` accepts `project`, `spec`, `input_root`, `output_root` and an unused PNG `output`. The cached `sheet` task uses the same fields. A spec is explicit:
@@ -70,7 +83,7 @@ Rollback journaling, full synchronization and checked initialization protect com
 }
 ```
 
-Times are exact timeline positions, retained in caller order. Duplicates are allowed. Every time must be a native frame boundary before the timeline end. Limits are 1–64 times, 1–8 columns, 1–1,920 tile width, 1–1,080 tile height, 0–32 gap pixels and at most eight million final pixels. The last row retains unused cells in the declared background color. Frames are contained and centered within each tile, preserving aspect with integer output dimensions and nearest center sampling. This is an inspection thumbnail, not a new color/grading transform. Receipts report sheet dimensions and each cell's timeline frame, rectangle and original frame dimensions. Gaps, nested sequences, transitions and full/proxy selection use the same timeline frame path as other previews.
+Times are exact timeline positions, retained in caller order. Duplicates are allowed. Every time must be a native frame boundary before the timeline end. Limits are 1–64 times, 1–8 columns, 1–1,920 tile width, 1–1,080 tile height, 0–32 gap pixels and at most eight million final pixels. The last row retains unused cells in the declared background color. Frames are contained and centered within each tile, preserving aspect with integer output dimensions and nearest center sampling. This is an inspection thumbnail, not a new color/grading transform. Receipts report sheet dimensions and each cell's timeline frame, rectangle and original frame dimensions. Gaps, nested sequences, transitions and full/proxy selection use the same timeline frame path as other previews. Cells are read four at a time and placed in order; when cells fail, the first failing cell's error is reported.
 
 ## Acceptance evidence
 

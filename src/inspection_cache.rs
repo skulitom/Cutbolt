@@ -6,19 +6,81 @@
 //! so changed bytes never reuse an entry. Entries live in process memory and, when
 //! `CUTBOLT_INSPECTION_CACHE` names a directory (a workspace sets `.cutbolt/cache/inspections`),
 //! as small self-checking JSON files there. A damaged or foreign entry is ignored and rebuilt.
+//! Inspections of different files may run in parallel (`LANES` at a time); concurrent requests
+//! for the same key wait for one inspection.
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 /// Bump when inspection rules change in a way the engine source identity would not capture.
 const SCHEMA: u32 = 1;
 pub const DIRECTORY_VARIABLE: &str = "CUTBOLT_INSPECTION_CACHE";
+/// Inspections that may probe or decode at once in one process. Process creation stops scaling
+/// at about four launchers (docs/DEVELOPMENT_LOOP.md), and each strict decode uses its own
+/// decoder threads.
+pub(crate) const LANES: usize = 4;
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Keys being inspected in this process.
+fn running() -> &'static (Mutex<HashSet<String>>, Condvar) {
+    static RUNNING: OnceLock<(Mutex<HashSet<String>>, Condvar)> = OnceLock::new();
+    RUNNING.get_or_init(Default::default)
+}
+
+/// The right to inspect one key: a concurrent caller with the same key waits for it and then
+/// finds the entry, instead of decoding the same bytes again.
+pub(crate) struct Turn(String);
+pub(crate) fn turn(key: &str) -> Turn {
+    let (keys, changed) = running();
+    let mut keys = lock(keys);
+    while keys.contains(key) {
+        keys = changed.wait(keys).unwrap_or_else(PoisonError::into_inner);
+    }
+    keys.insert(key.to_owned());
+    Turn(key.to_owned())
+}
+impl Drop for Turn {
+    fn drop(&mut self) {
+        let (keys, changed) = running();
+        lock(keys).remove(&self.0);
+        changed.notify_all();
+    }
+}
+
+/// Inspections probing or decoding in this process.
+fn busy() -> &'static (Mutex<usize>, Condvar) {
+    static BUSY: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
+    BUSY.get_or_init(Default::default)
+}
+
+/// One of the `LANES` places for an inspection's tool work, held until dropped. Nested parallel
+/// callers (contact-sheet cells that each inspect their window) therefore share one limit.
+pub(crate) struct Slot;
+pub(crate) fn slot() -> Slot {
+    let (count, freed) = busy();
+    let mut count = lock(count);
+    while *count >= LANES {
+        count = freed.wait(count).unwrap_or_else(PoisonError::into_inner);
+    }
+    *count += 1;
+    Slot
+}
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let (count, freed) = busy();
+        *lock(count) -= 1;
+        freed.notify_one();
+    }
+}
 
 /// What a passed inspection established about one file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,5 +251,39 @@ mod tests {
         put("unit-test-key", &verified);
         assert_eq!(get("unit-test-key"), Some(verified));
         assert_eq!(get("unit-test-missing"), None);
+    }
+
+    #[test]
+    fn inspections_share_lanes_and_one_key_runs_once_at_a_time() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let (running, most, same) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        std::thread::scope(|scope| {
+            for i in 0..12 {
+                let (running, most, same) = (&running, &most, &same);
+                scope.spawn(move || {
+                    let shared = i % 3 == 0;
+                    let _turn = shared.then(|| turn("unit-test-shared-key"));
+                    let _slot = slot();
+                    most.fetch_max(running.fetch_add(1, SeqCst) + 1, SeqCst);
+                    if shared {
+                        assert_eq!(same.fetch_add(1, SeqCst), 0, "one inspection per key");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                    if shared {
+                        same.fetch_sub(1, SeqCst);
+                    }
+                    running.fetch_sub(1, SeqCst);
+                });
+            }
+        });
+        let most = most.load(SeqCst);
+        assert!(
+            (2..=LANES).contains(&most),
+            "{most} inspections ran at once"
+        );
     }
 }

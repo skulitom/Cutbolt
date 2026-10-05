@@ -384,8 +384,30 @@ pub fn sheet(
     }
     let mut sources = std::collections::BTreeMap::<String, String>::new();
     let mut cells = Vec::new();
+    // Cells are read a few at a time, so a cold sheet inspects and decodes their sources in
+    // parallel. They are placed in order, and the first failing cell's error is the one
+    // reported, as when they were read one by one.
+    let lanes = crate::inspection_cache::LANES;
+    let mut read = Vec::new();
     for (index, time) in spec.times.iter().enumerate() {
-        let (frame, receipt) = read_frame(project, input_root, *time)?;
+        if index % lanes == 0 {
+            let batch = &spec.times[index..(index + lanes).min(spec.times.len())];
+            read = std::thread::scope(|scope| {
+                let readers: Vec<_> = (batch.iter())
+                    .map(|&time| scope.spawn(move || read_frame(project, input_root, time)))
+                    .collect();
+                (readers.into_iter())
+                    .map(|r| {
+                        r.join()
+                            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .into_iter()
+            .rev()
+            .collect();
+        }
+        let (frame, receipt) = read.pop().expect("a read cell")?;
         let sw = receipt["width"].as_u64().expect("frame width");
         let sh = receipt["height"].as_u64().expect("frame height");
         let (dw, dh) = if spec.tile_width as u64 * sh <= spec.tile_height as u64 * sw {

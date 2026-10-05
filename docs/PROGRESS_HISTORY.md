@@ -71,6 +71,72 @@ Verification:
 Measured: a new six-scene, 44.64 s video from a new manifest took **252.5 s** from the timer start to the reviewed delivery, with **3 agent calls**, on a machine busy with other sessions' verification. That is not under 3 minutes. The H.264 export (96-99 s) and narration (49-53 s) are the largest stages. Details, the other runs and the partial Y cases are in [RESULTS.md](pipeline/RESULTS.md#production-coordinator-5-october-2026).
 
 No capability points change: this is agent workflow over existing editing capabilities. Evidence in `verification/latest.json` is stale until the next thorough run.
+## 5 October 2026: cheaper first inspection of a timeline's sources
+
+On main `d3c9140`, the first review of the progress demo's 80.64 s 1080p25 timeline was slow (`C:\DEV\CutboltData\demo-progress-20261005`, FINDINGS-speed.md "Before and after"). The timeline has 14 FFV1 scene shots, a full-length caption overlay, a picture-in-picture clip, 7 narration assets and an 80 s music asset. Its first `preview.frame` took 21.6 s against 0.3–2.5 s warm, and `preview.cuts` 61 s against 6.8 s. The overlay export took 217 s against 106 s.
+
+Measured first, per file, on the demo's sources:
+- **Hashing is not the cost.** SHA-256 takes at most 0.04 s per file, and the packet listing 0.1–0.4 s.
+- **The strict decode is the cost.** It took 25.5 s for the caption overlay, 20.5 s for the music asset's black picture and 1.6 s per scene shot, decoding one source at a time on one decoder thread.
+- **Decoder threads.** `-threads 16` gives byte-identical frame listings and cuts the overlay's decode to 3.2 s. That change shipped separately in `d4eaf9d`.
+- **Parallel launches.** Four inspections at a time took the 14 scene shots from 6.3 s to 2.2 s; eight lanes gave little more.
+
+The changes:
+- **Parallel inspection.** A render, preview or export gathers the inspections its window needs and makes them up to four at a time, largest file first (`render::inspect_many`, `track_render::Graph::prefetch`). Legacy sequential timelines do the same.
+  - The graph then takes each result in its usual order, so errors, receipts and identity checks are unchanged.
+  - A request for an inspection already running in the process waits for it, so a file is never decoded twice at once.
+  - The queue's render worker, whose control cannot be shared between threads, inspects one source at a time as before.
+- **Contact sheets read four cells at a time** (`preview.cuts`, `preview.sheet`). Cells are placed in order, and the first failing cell's error is reported.
+- **Audio-only sources are packet-timed.** A source that only feeds audio tracks in a render with pictures is timed from its FFV1 packets, as in audio-only exports, so its pictures are not decoded. Its audio samples come from the same packets either way, and a picture use of the same source still decodes it frame by frame. On the demo, 3,714 frames of the music and narration assets' black 1080p picture are no longer decoded: about 38 s on one decoder thread, or about 10 s on 16.
+- **A pass records the inspections it proves** (`render::implied`):
+  - an opaque `bgr0` file checked for an opaque track also passes the alpha-overlay check, which only also accepts `bgra`;
+  - a frame-by-frame pass whose packets carry the same frame times proves the packet-timed check.
+
+  So a scene rendered moments ago and placed as picture-in-picture, or a conformed file used on an audio track, is no longer decoded on first use. A packet-timed pass never stands in for a frame-by-frame one. Keys still bind the source's SHA-256 and size, so changed bytes are always inspected again, and entries stay in the workspace's `.cutbolt/cache/inspections`.
+
+Two of the suggested ideas were not taken:
+- **Hashing during the decode.** It would save at most about 0.2 s per pass over the demo's 375 MB.
+- **Verifying only the ranges a preview reads.** After these changes the longest remaining cold inspection is the overlay's 3 s decode, and a range-limited check would make preview verification weaker than the documented frame-by-frame check.
+
+Measured with release builds on copies of the demo workspace. Engines were interleaved step by step, and about half of the machine's 32 threads were busy with other sessions throughout, so warm times are well above the earlier quiet-machine figures. "Cold" means no inspection entry in memory or on disk; warm repeats the call in the same MCP server. Round 1 compared `d3c9140`, `d3c9140` with the 16 decoder threads that `d4eaf9d` shipped, and this change without and with those threads. Round 2 compared `d3c9140`, main `2313efd` and this change on `2313efd`.
+
+Inspecting all 25 sources of the timeline (`render.plan`, which inspects everything and renders nothing), two runs each:
+
+| | `d3c9140` | main `2313efd` | This change |
+| --- | ---: | ---: | ---: |
+| Cold | 105.8 s, 97.8 s | 19.9 s, 22.3 s | **5.7 s, 6.2 s** |
+| Warm | 0.3 s | 0.3 s | 0.1 s |
+
+Round 2, cold / warm:
+
+| Call | `d3c9140` | main `2313efd` | This change |
+| --- | ---: | ---: | ---: |
+| `preview.frame` at 58.08 s | 39.3 / 4.6 s | 17.7 / 5.0 s | **10.8** / 4.8 s |
+| `preview.cuts`, 13 cuts | 158.3 / 81 s | 129.4 / 85 s | **51.8 / 31 s** |
+| Overlay H.264 export | 250.5 / 156 s | 166.2 / 178 s | **151.1** / 174 s |
+
+Round 1, cold / warm:
+
+| Call | `d3c9140` | + decoder threads | This change alone | This change + threads |
+| --- | ---: | ---: | ---: | ---: |
+| `preview.frame` | 29.6 / 7.1 s | 10.3 / 3.1 s | 21.5 / 2.9 s | **7.4** / 3.3 s |
+| `preview.cuts` | 159.1 / 113 s | 139.8 / 78 s | 82.6 / 35 s | **48.0 / 32 s** |
+| Overlay export | 285.2 / 167 s | 187.1 / 158 s | 206.7 / 154 s | **151.6** / 148 s |
+
+In round 1 the export's cold penalty (cold minus warm) fell from 118 s to 30 s with decoder threads, and to 4 s with this change on top. In round 2 the warm exports varied by more than the remaining difference. `preview.cuts` is also faster when warm, because its cells are read four at a time. `preview.frame`'s warm path is unchanged. A first preview of a file Cutbolt has just written and verified is a warm one; the `overlays` check below shows no decode for it.
+
+Tests:
+- `overlays` gained a check with a logging ffprobe:
+  - a freshly rendered opaque scene used as picture-in-picture is not decoded again;
+  - a source on an audio track is packet-listed but never decoded;
+  - a warm export launches no source inspection;
+  - a 10-cell contact sheet read in parallel decodes each of its three sources exactly once;
+  - replacing a source's bytes makes it inspected again, and the exports and sheet match the oracle pixel for pixel.
+
+  Against `d3c9140` the check fails: the scene and the audio-only source are both decoded.
+- New unit tests cover the implied-entry rules and the lane and per-key limits.
+
+No scoring changed. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: independent jobs run at once in one job root
 

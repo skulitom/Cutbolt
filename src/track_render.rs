@@ -11,7 +11,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 const FPS: Time = Time { num: 25, den: 1 };
@@ -44,6 +44,10 @@ struct Graph<'a> {
     alpha_assets: BTreeSet<String>,
     /// Audio-only graphs never decode pictures, so sources are timed from packets.
     audio_only: bool,
+    /// Assets inspected for their audio alone, timed from packets; a picture use inspects again.
+    packet_timed: BTreeSet<String>,
+    /// Inspections made in parallel before compiling (see `prefetch`), taken by `inspect`.
+    prefetched: Vec<(PathBuf, render::Check, render::Inspected)>,
     /// Inputs so far, media and generated gain streams alike.
     inputs: usize,
     /// Gain streams for clips with gain curves, written when the graph runs.
@@ -72,6 +76,8 @@ impl<'a> Graph<'a> {
             overlay_assets: BTreeSet::new(),
             alpha_assets: BTreeSet::new(),
             audio_only: false,
+            packet_timed: BTreeSet::new(),
+            prefetched: Vec::new(),
             inputs: 0,
             generated: Vec::new(),
             // Graphs made in the same clock tick (a premix beside its render) still differ.
@@ -126,7 +132,8 @@ impl<'a> Graph<'a> {
                 ),
             ));
         }
-        if !self.sources.contains_key(&clip.asset_id) {
+        let pictures = kind == Kind::Video && self.packet_timed.contains(&clip.asset_id);
+        if !self.sources.contains_key(&clip.asset_id) || pictures {
             let asset = self
                 .project
                 .assets
@@ -134,11 +141,24 @@ impl<'a> Graph<'a> {
                 .find(|a| a.id == clip.asset_id)
                 .expect("validated asset");
             let path = media::project_file(Path::new(&asset.path), self.root)?;
-            let source = if kind == Kind::Audio
-                && path
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-            {
+            let source = if let Some(check) = self.inspection(&path, kind, overlay) {
+                let (source, pix_fmt) = match self.take_prefetched(&path, check) {
+                    Some(result) => result?,
+                    None => render::inspect_checked(&path, check, self.control)?,
+                };
+                if overlay {
+                    self.overlay_assets.insert(clip.asset_id.clone());
+                    if pix_fmt == "bgra" {
+                        self.alpha_assets.insert(clip.asset_id.clone());
+                    }
+                }
+                if check.timing == render::Timing::Packets && !self.audio_only {
+                    self.packet_timed.insert(clip.asset_id.clone());
+                } else {
+                    self.packet_timed.remove(&clip.asset_id);
+                }
+                source
+            } else {
                 let wave = crate::pcm_stream::inspect(&path, self.control)?;
                 Source {
                     path: path.clone(),
@@ -146,40 +166,139 @@ impl<'a> Graph<'a> {
                     frames: 0,
                     samples: wave.frames,
                 }
-            } else if overlay {
-                let (source, alpha) = render::inspect_overlay(
-                    &path,
-                    self.project.width,
-                    self.project.height,
-                    self.project.frame_rate,
-                    self.control,
-                )?;
-                self.overlay_assets.insert(clip.asset_id.clone());
-                if alpha {
-                    self.alpha_assets.insert(clip.asset_id.clone());
-                }
-                source
-            } else if self.audio_only {
-                render::inspect_reference_audio(
-                    &path,
-                    self.project.width,
-                    self.project.height,
-                    self.project.frame_rate,
-                    self.control,
-                )?
-            } else {
-                render::inspect_reference_at(
-                    &path,
-                    self.project.width,
-                    self.project.height,
-                    self.project.frame_rate,
-                    self.control,
-                )?
             };
             crate::registry::verify_source(asset, &source)?;
             self.sources.insert(asset.id.clone(), source);
         }
         Ok(self.sources[&clip.asset_id].clone())
+    }
+    /// How `inspect` checks an asset file that feeds `kind`, or None for a WAV, which the PCM
+    /// reader inspects. Pictures are inspected strictly, with alpha on overlay tracks. A source
+    /// read only for its audio is timed from packets, as in audio-only graphs: its pictures are
+    /// never decoded, and its samples come from the same packets either way.
+    fn inspection(&self, path: &Path, kind: Kind, overlay: bool) -> Option<render::Check> {
+        if kind == Kind::Audio
+            && path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+        {
+            return None;
+        }
+        Some(render::Check {
+            width: self.project.width,
+            height: self.project.height,
+            rate: self.project.frame_rate,
+            alpha: overlay,
+            timing: if overlay || (kind == Kind::Video && !self.audio_only) {
+                render::Timing::Decoded
+            } else {
+                render::Timing::Packets
+            },
+        })
+    }
+    fn take_prefetched(&mut self, path: &Path, check: render::Check) -> Option<render::Inspected> {
+        let at = (self.prefetched.iter()).position(|(p, c, _)| p == path && *c == check)?;
+        Some(self.prefetched.swap_remove(at).2)
+    }
+    /// Make the inspections that checking this window will need at once, in parallel when the
+    /// control allows (`render::inspect_many`), so a cold timeline waits for about its slowest
+    /// source instead of all of them in turn. `inspect` then takes each result in its usual
+    /// order, so errors and receipts are unchanged. Gathering stops quietly at anything invalid,
+    /// which compiling reports.
+    fn prefetch(
+        &mut self,
+        a: &crate::tracks::Arrangement,
+        start: Time,
+        duration: Time,
+        (video, audio): (bool, bool),
+    ) {
+        if self.control.shared().is_none() {
+            return;
+        }
+        let mut wanted = Vec::new();
+        let mut budget = 256;
+        for (kind, read) in [(Kind::Video, video), (Kind::Audio, audio)] {
+            if read {
+                let _ = self.wanted(a, start, duration, kind, &mut wanted, &mut budget);
+            }
+        }
+        let mut requests: Vec<(PathBuf, render::Check)> = Vec::new();
+        for (id, kind, overlay) in &wanted {
+            // Video is checked first, so an asset that also shows pictures is inspected for them.
+            if *kind == Kind::Audio && wanted.iter().any(|(o, k, _)| o == id && *k == Kind::Video) {
+                continue;
+            }
+            let Some(asset) = self.project.assets.iter().find(|a| &a.id == id) else {
+                continue;
+            };
+            let Ok(path) = media::project_file(Path::new(&asset.path), self.root) else {
+                continue;
+            };
+            if let Some(check) = self.inspection(&path, *kind, *overlay)
+                && !requests.iter().any(|(p, c)| *p == path && *c == check)
+            {
+                requests.push((path, check));
+            }
+        }
+        if requests.len() > 1 {
+            let results = render::inspect_many(&requests, self.control);
+            self.prefetched = (requests.into_iter().zip(results))
+                .map(|((path, check), result)| (path, check, result))
+                .collect();
+        }
+    }
+    /// The inspections `check_arrangement` makes over a window, as (asset, kind, overlay),
+    /// without making them. `budget` bounds the expanded clips as `check_clip` does.
+    fn wanted(
+        &self,
+        a: &crate::tracks::Arrangement,
+        start: Time,
+        duration: Time,
+        kind: Kind,
+        out: &mut Vec<(String, Kind, bool)>,
+        budget: &mut usize,
+    ) -> Result<()> {
+        let end = start.plus(duration)?;
+        for t in a.tracks.iter().filter(|t| t.enabled && t.kind == kind) {
+            for c in &t.clips {
+                if c.start.compare(end)?.is_lt() && c.end()?.compare(start)?.is_gt() {
+                    if t.composite.is_opaque() {
+                        self.wanted_clip(c, c.start, c.duration, kind, out, budget)?;
+                    } else {
+                        out.push((c.asset_id.clone(), kind, true));
+                    }
+                }
+            }
+            for fx in &t.transitions {
+                let (x, y) = t.interval(fx)?;
+                if x.compare(end)?.is_lt() && y.compare(start)?.is_gt() {
+                    let (l, r) = t.endpoints(fx)?;
+                    self.wanted_clip(l, x, y.minus(x)?, kind, out, budget)?;
+                    self.wanted_clip(r, x, y.minus(x)?, kind, out, budget)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    fn wanted_clip(
+        &self,
+        clip: &TrackClip,
+        at: Time,
+        duration: Time,
+        kind: Kind,
+        out: &mut Vec<(String, Kind, bool)>,
+        budget: &mut usize,
+    ) -> Result<()> {
+        *budget = budget
+            .checked_sub(1)
+            .ok_or_else(|| error("LIMIT_EXCEEDED", "Too many clips to inspect ahead"))?;
+        if let Some(id) = &clip.sequence_id {
+            let a = &crate::sequences::get(self.project, id)?.arrangement;
+            let start = clip.source_in.plus(at)?.minus(clip.start)?;
+            return self.wanted(a, start, duration, kind, out, budget);
+        }
+        out.push((clip.asset_id.clone(), kind, false));
+        Ok(())
     }
     /// The source frames or samples `[first, end)` a clip plays over `[at, at + duration)`.
     fn span(
@@ -911,7 +1030,7 @@ impl<'a> Graph<'a> {
     }
     /// A graph for the encoder of an engine-composited picture: input 0 is that picture on
     /// stdin, and everything already inspected and counted carries over.
-    fn successor(&self) -> Graph<'a> {
+    fn successor(&mut self) -> Graph<'a> {
         let mut next = Graph::new(self.project, self.root, self.control);
         next.args.extend(track_composite::raw_input(
             self.project.width,
@@ -923,6 +1042,8 @@ impl<'a> Graph<'a> {
         next.overlay_assets = self.overlay_assets.clone();
         next.alpha_assets = self.alpha_assets.clone();
         next.audio_only = self.audio_only;
+        next.packet_timed = self.packet_timed.clone();
+        next.prefetched = std::mem::take(&mut self.prefetched);
         next.serial = self.serial;
         next.inspected = self.inspected;
         next
@@ -1228,6 +1349,7 @@ fn compile<'a>(
     }
     let mut graph = Graph::new(project, root, control);
     graph.audio_only = !video;
+    graph.prefetch(a, start, duration, (video, audio));
     if video {
         graph.check_arrangement(a, start, duration, Kind::Video)?;
         let overlays = a

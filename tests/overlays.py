@@ -6,11 +6,14 @@ is compared exactly.
 """
 from engine import ENGINE
 import argparse
+from collections import Counter
 import copy
 import hashlib
 import json
+import os
 from fractions import Fraction as F
 from pathlib import Path
+import shutil
 import subprocess
 
 import numpy as np
@@ -21,11 +24,23 @@ from scenes import identity, time
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ENGINE
 W, H = 320, 180
+# An ffprobe stand-in that records each launch's arguments, then runs the real tool.
+PROBE_SHIM = r"""
+use std::{env, fs::OpenOptions, io::Write, process::{Command, exit}};
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let mut log = OpenOptions::new().create(true).append(true).open(env::var("CUTBOLT_PROBE_LOG").unwrap()).unwrap();
+    log.write_all(format!("{}\n", args.join("\t")).as_bytes()).unwrap();
+    drop(log);
+    let status = Command::new(env::var("CUTBOLT_PROBE_REAL").unwrap()).args(&args).status().unwrap();
+    exit(status.code().unwrap_or(1));
+}
+"""
 
 
-def call(command, error=None, **fields):
+def call(command, error=None, env=None, **fields):
     result = json.loads(subprocess.run([str(EXE)], input=json.dumps({"command": command, **fields}), text=True,
-                                       encoding="utf-8", capture_output=True, timeout=1800).stdout)
+                                       encoding="utf-8", capture_output=True, timeout=1800, env=env).stdout)
     if error:
         assert not result["ok"] and result["error"]["code"] == error, (error, result)
         return result["error"]
@@ -309,12 +324,76 @@ def run(root):
          output=str(output / "bad-shrunk-alpha.mkv"))
     assert not (output / "bad-shrunk-alpha.mkv").exists()
     passed.append("overlays.picture_in_picture_transforms_exact")
+
+    # Source inspections. A file the engine verified while writing it is not decoded again, even
+    # as an overlay; a source that only feeds audio is timed from packets; contact-sheet cells read
+    # in parallel decode each source once; a warm call launches no inspection; and changed bytes are
+    # always inspected afresh. A logging ffprobe counts the launches.
+    (root / "probe.rs").write_text(PROBE_SHIM, encoding="utf-8")
+    subprocess.run(["rustc", "--edition=2024", str(root / "probe.rs"), "-o", str(root / "probe.exe")],
+                   capture_output=True, check=True)
+    probes, inspections = root / "probes.log", root / "inspections"
+    env = {**os.environ, "CUTBOLT_FFPROBE": str(root / "probe.exe"), "CUTBOLT_INSPECTION_CACHE": str(inspections),
+           "CUTBOLT_PROBE_REAL": os.environ.get("CUTBOLT_FFPROBE") or shutil.which("ffprobe"),
+           "CUTBOLT_PROBE_LOG": str(probes)}
+    names = {"base-a.mkv", "base-b.mkv", "fresh.mkv", "changing.mkv"}
+
+    def probed(action):
+        probes.unlink(missing_ok=True)
+        action()
+        launches = [line.split("\t") for line in probes.read_text(encoding="utf-8").splitlines()]
+        sources_of = lambda flag: Counter(Path(a[-1]).name for a in launches if flag in a and Path(a[-1]).name in names)
+        return sources_of("-show_frames"), sources_of("-show_packets")
+
+    fresh = call("scene.render", env=env, scene=opaque_scene(sources, "fresh", (200, 100, 50), 2), input_root=str(sources),
+                 output_root=str(sources), output=str(sources / "fresh.mkv"))["asset"]
+    decoded["fresh"] = decode(sources / "fresh.mkv", "rgb24", 3)
+    shutil.copy(sources / "title.mkv", sources / "changing.mkv")
+    decoded["changing"] = decoded["title"]
+    changing = {"id": "changing", "path": str(sources / "changing.mkv"), "duration": time(3)}
+    mixed = call("project.create", id="inspections", width=W, height=H, frame_rate=time(25))
+    mixed = call("timeline.apply", project=mixed, expected_revision=mixed["revision"], operations=[
+        *({"op": "media.add", "asset": a} for a in (assets["base-a"], assets["base-b"], fresh, changing)),
+        {"op": "tracks.edit", "edit": {"op": "create", "duration": time(2)}},
+        track("V1"), track("V2", "alpha_over"), track("V3", "alpha_over"), track("A1", kind="audio"),
+        place("V1", clip("ma", "base-a", (0,), (0,), (2,))),
+        place("V2", {**clip("mf", "fresh", (0,), (0,), (2,)), "transform": {"divisor": 2, "position": [20, 10]}}),
+        place("V3", clip("mc", "changing", (0,), (0,), (2,))),
+        place("A1", clip("mb", "base-b", (0,), (0,), (2,)))])
+
+    def export(name):
+        call("export.run", env=env, project=mixed, input_root=str(sources), output_root=str(output),
+             output=str(output / name), profile="reference", streams="audio_video")
+        frames = decode(output / name, "rgb24", 3)
+        assert frames.shape[0] == 50 and all(np.array_equal(frames[n], composed(mixed, n)) for n in range(50)), name
+
+    decodes, listed = probed(lambda: export("inspections-cold.mkv"))
+    assert decodes == {"base-a.mkv": 1, "changing.mkv": 1}, decodes
+    assert listed == {"base-a.mkv": 1, "base-b.mkv": 1, "changing.mkv": 1}, listed
+    assert probed(lambda: export("inspections-warm.mkv")) == ({}, {})
+    shutil.rmtree(inspections)
+    spec = {"times": [time(n, 5) for n in range(10)], "columns": 5, "tile_width": W, "tile_height": H, "gap": 0,
+            "background": [0, 0, 0]}
+    decodes, listed = probed(lambda: call("preview.sheet", env=env, project=mixed, spec=spec, input_root=str(sources),
+                                          output_root=str(output), output=str(output / "inspections-sheet.png")))
+    assert decodes == listed == {"base-a.mkv": 1, "fresh.mkv": 1, "changing.mkv": 1}, (decodes, listed)
+    with Image.open(output / "inspections-sheet.png") as image:
+        sheet = np.asarray(image.convert("RGB"))
+    for i in range(10):
+        row, column = divmod(i, 5)
+        assert np.array_equal(sheet[row * H:(row + 1) * H, column * W:(column + 1) * W], composed(mixed, 5 * i)), i
+    shutil.copy(sources / "bug.mkv", sources / "changing.mkv")
+    decoded["changing"] = decoded["bug"]
+    decodes, listed = probed(lambda: export("inspections-changed.mkv"))
+    assert decodes == {"changing.mkv": 1} and listed == {"base-b.mkv": 1, "changing.mkv": 1}, (decodes, listed)
+    assert all(p.suffix == ".json" and len(p.stem) == 64 for p in inspections.iterdir())
+    passed.append("overlays.inspections_reused_parallel_and_packet_timed")
     undo = call("session.undo", store_root=str(store), project_id="overlays", request_id="undo", expected_revision=1)
     head = call("session.get", store_root=str(store), project_id="overlays")
     assert undo["revision"] == 2 and head.get("tracks") is None and head["assets"] == []
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir() if p.name in originals} == originals
     passed.append("overlays.sources_preserved")
-    report = {"passed": passed, "frames_compared": 150 + 6 + 60 + 1 + 150 + 150 + 3 + 20,
+    report = {"passed": passed, "frames_compared": 150 + 6 + 60 + 1 + 150 + 150 + 3 + 20 + 3 * 50 + 10,
               "oracle": "separately decoded sources; exact integer straight-alpha over; top opaque track as base"}
     (root / "verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))

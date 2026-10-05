@@ -460,10 +460,95 @@ pub(crate) fn inspect_timeline_source(
 ) -> Result<Source> {
     inspect_source_at(path, width, height, rate, control, true, Timing::Packets)
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Timing {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Timing {
     Decoded,
     Packets,
+}
+/// What one source inspection checks: the timeline's size and clock, whether straight alpha
+/// (`bgra`) is accepted, and how video frames are timed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Check {
+    pub width: u32,
+    pub height: u32,
+    pub rate: Time,
+    pub alpha: bool,
+    pub timing: Timing,
+}
+/// An inspection's parameters in its cache key; `rate` is the normalized native rate.
+fn parameters(width: u32, height: u32, rate: Time, alpha: bool, timing: Timing) -> String {
+    format!(
+        "reference-source:{width}x{height}:{}/{}:alpha={alpha}:{}",
+        rate.num,
+        rate.den,
+        if timing == Timing::Decoded {
+            "decoded"
+        } else {
+            "packets"
+        }
+    )
+}
+/// A source with its video pixel format, or why its inspection failed.
+pub(crate) type Inspected = Result<(Source, String)>;
+/// Inspect as `check` says.
+pub(crate) fn inspect_checked(
+    path: &Path,
+    check: Check,
+    control: &dyn media::Control,
+) -> Inspected {
+    let Check {
+        width,
+        height,
+        rate,
+        alpha,
+        timing,
+    } = check;
+    inspect_source_with(path, width, height, rate, control, alpha, timing)
+}
+/// Inspect several sources: largest file first and up to `inspection_cache::LANES` at a time
+/// when `control` can be shared between threads, otherwise one after another. A cold timeline
+/// then waits for about its slowest file rather than for all of them. Results follow `requests`.
+pub(crate) fn inspect_many(
+    requests: &[(PathBuf, Check)],
+    control: &dyn media::Control,
+) -> Vec<Inspected> {
+    let Some(shared) = control.shared().filter(|_| requests.len() > 1) else {
+        return requests
+            .iter()
+            .map(|(path, check)| inspect_checked(path, *check, control))
+            .collect();
+    };
+    let mut order: Vec<usize> = (0..requests.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(fs::metadata(&requests[i].0).map_or(0, |m| m.len())));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: Vec<_> = requests
+        .iter()
+        .map(|_| std::sync::Mutex::new(None))
+        .collect();
+    std::thread::scope(|scope| {
+        for _ in 0..crate::inspection_cache::LANES.min(requests.len()) {
+            scope.spawn(|| {
+                while let Some(&i) =
+                    order.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                {
+                    let (path, check) = &requests[i];
+                    let result = inspect_checked(path, *check, shared);
+                    *results[i]
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+                }
+            });
+        }
+    });
+    results
+        .into_iter()
+        .map(|result| {
+            result
+                .into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .expect("every request is inspected")
+        })
+        .collect()
 }
 /// Reference source for an alpha_over track: FFV1 with straight alpha (bgra) or opaque bgr0.
 /// Returns whether the source carries an alpha plane.
@@ -494,6 +579,7 @@ fn inspect_source_at(
 /// before any decoding, so unsupported media is rejected exactly as by a plain probe. A passed
 /// inspection is remembered by content identity (see `inspection_cache`): the file is still
 /// hashed, and identical bytes with identical parameters, ffprobe and engine skip the probe.
+/// A pass also records the other parameters it proves (see `implied`).
 /// Returns the video pixel format with the source.
 fn inspect_source_with(
     path: &Path,
@@ -507,26 +593,37 @@ fn inspect_source_with(
     let rate = clock::rate(rate)?;
     let bytes = fs::metadata(path)?.len();
     let before = media::file_hash_controlled(path, control)?;
-    let parameters = format!(
-        "reference-source:{width}x{height}:{}/{}:alpha={allow_alpha}:{}",
-        rate.num,
-        rate.den,
-        if timing == Timing::Decoded {
-            "decoded"
-        } else {
-            "packets"
-        }
-    );
-    let key = crate::inspection_cache::key(&before, bytes, &parameters, &control.tool("ffprobe"));
-    if let Some(verified) = key.as_deref().and_then(crate::inspection_cache::get) {
-        let source = Source {
-            path: path.into(),
-            sha256: before,
-            frames: verified.frames,
-            samples: verified.samples,
-        };
-        return Ok((source, verified.pix_fmt));
+    let ffprobe = control.tool("ffprobe");
+    let key_of = |alpha, timing| {
+        crate::inspection_cache::key(
+            &before,
+            bytes,
+            &parameters(width, height, rate, alpha, timing),
+            &ffprobe,
+        )
+    };
+    let key = key_of(allow_alpha, timing);
+    let cached = || {
+        key.as_deref()
+            .and_then(crate::inspection_cache::get)
+            .map(|verified| {
+                let source = Source {
+                    path: path.into(),
+                    sha256: before.clone(),
+                    frames: verified.frames,
+                    samples: verified.samples,
+                };
+                (source, verified.pix_fmt)
+            })
+    };
+    if let Some(found) = cached() {
+        return Ok(found);
     }
+    let _turn = key.as_deref().map(crate::inspection_cache::turn);
+    if let Some(found) = cached() {
+        return Ok(found);
+    }
+    let _slot = crate::inspection_cache::slot();
     let inspection = media::packet_inspection_controlled(path, control)?;
     let metadata = &inspection.metadata;
     let streams = metadata["streams"]
@@ -594,6 +691,10 @@ fn inspect_source_with(
     for (i, frame) in frames.iter().enumerate() {
         clock::timestamp(frame, i, rate, video)?;
     }
+    let packets_agree = timing == Timing::Decoded
+        && inspection.video.len() == frames.len()
+        && (inspection.video.iter().enumerate())
+            .all(|(i, packet)| clock::timestamp(packet, i, rate, video).is_ok());
     let mut samples = 0u64;
     for frame in &inspection.audio {
         let expected = (samples as u128 * 1_000_000 / 48_000) as i64;
@@ -637,6 +738,11 @@ fn inspect_source_with(
     if let Some(key) = &key {
         crate::inspection_cache::put(key, &verified);
     }
+    for (alpha, timing) in implied(allow_alpha, timing, &verified.pix_fmt, packets_agree) {
+        if let Some(key) = key_of(alpha, timing) {
+            crate::inspection_cache::put(&key, &verified);
+        }
+    }
     let source = Source {
         path: path.into(),
         sha256: before,
@@ -644,6 +750,28 @@ fn inspect_source_with(
         samples,
     };
     Ok((source, verified.pix_fmt))
+}
+/// The other inspections that a pass with `alpha` and `timing` proves for the same bytes, as
+/// (alpha, timing). Accepting `bgra` only widens the accepted pixel formats, so a `bgr0` pass
+/// holds with or without it. A strict pass whose packets carry the same frame times
+/// (`packets_agree`) proves the packet-timed inspection, which reads its audio from the same
+/// packets; a packet-timed pass never proves a strict one.
+fn implied(alpha: bool, timing: Timing, pix_fmt: &str, packets_agree: bool) -> Vec<(bool, Timing)> {
+    let alphas = if pix_fmt == "bgr0" {
+        vec![false, true]
+    } else {
+        vec![alpha]
+    };
+    let timings = if timing == Timing::Decoded && packets_agree {
+        vec![Timing::Decoded, Timing::Packets]
+    } else {
+        vec![timing]
+    };
+    alphas
+        .iter()
+        .flat_map(|&a| timings.iter().map(move |&t| (a, t)))
+        .filter(|&other| other != (alpha, timing))
+        .collect()
 }
 
 pub(crate) fn destination(output: &Path, root: &Path) -> Result<PathBuf> {
@@ -752,6 +880,30 @@ fn plan_controlled(
     let (ffv1_level, ffv1_slices) = media::ffv1_encoding(project.width, project.height);
     let large = large_raster(project.width, project.height);
     let ffv1_slices = if large { "16" } else { ffv1_slices };
+    // Inspect the clips' sources together first; the loop below then finds each one verified.
+    let mut wanted: Vec<(PathBuf, Check)> = Vec::new();
+    for clip in &project.clips {
+        if let Some(asset) = (project.assets.iter()).find(|a| Some(&a.id) == clip.asset_id.as_ref())
+            && let Ok(path) = media::project_file(Path::new(&asset.path), input_root)
+            && !wanted.iter().any(|(p, _)| *p == path)
+        {
+            let (width, height) = (project.width, project.height);
+            let (alpha, timing) = (false, Timing::Decoded);
+            wanted.push((
+                path,
+                Check {
+                    width,
+                    height,
+                    rate,
+                    alpha,
+                    timing,
+                },
+            ));
+        }
+    }
+    if wanted.len() > 1 && control.shared().is_some() {
+        inspect_many(&wanted, control);
+    }
     let mut sources = HashMap::new();
     let mut args: Vec<String> = ["-hide_banner", "-v", "error", "-nostdin", "-n"]
         .iter()
@@ -1342,5 +1494,30 @@ mod tests {
         assert_eq!(fs::read(&sentinel).unwrap(), b"preserve this file");
         fs::remove_file(sentinel).unwrap();
         fs::remove_dir(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::{Timing::*, implied};
+
+    #[test]
+    fn passes_record_only_the_inspections_they_prove() {
+        // An opaque strict pass holds with or without alpha acceptance and, when its packets
+        // agree, with packet timing.
+        let opaque = implied(false, Decoded, "bgr0", true);
+        assert_eq!(opaque, [(false, Packets), (true, Decoded), (true, Packets)]);
+        assert_eq!(implied(false, Decoded, "bgr0", false), [(true, Decoded)]);
+        let overlay = implied(true, Decoded, "bgr0", true);
+        assert_eq!(
+            overlay,
+            [(false, Decoded), (false, Packets), (true, Packets)]
+        );
+        // Straight alpha never satisfies an opaque-only inspection.
+        assert_eq!(implied(true, Decoded, "bgra", true), [(true, Packets)]);
+        assert!(implied(true, Decoded, "bgra", false).is_empty());
+        // Packet timing never proves the strict decode.
+        assert_eq!(implied(false, Packets, "bgr0", false), [(true, Packets)]);
+        assert!(implied(true, Packets, "bgra", false).is_empty());
     }
 }

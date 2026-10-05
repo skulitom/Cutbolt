@@ -125,9 +125,18 @@ pub trait Control {
         self.check()?;
         publish(temp, output)
     }
+    /// This control for helper threads that inspect sources in parallel, when it can be shared;
+    /// None keeps that work on the calling thread.
+    fn shared(&self) -> Option<&(dyn Control + Sync)> {
+        None
+    }
 }
 pub struct Uncontrolled;
-impl Control for Uncontrolled {}
+impl Control for Uncontrolled {
+    fn shared(&self) -> Option<&(dyn Control + Sync)> {
+        Some(self)
+    }
+}
 
 pub fn publish(temp: &Path, output: &Path) -> Result<()> {
     fs::hard_link(temp, output).map_err(|e| {
