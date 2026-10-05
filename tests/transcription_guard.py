@@ -69,7 +69,7 @@ if mode in ('timeout','owner-eof','bridge-kill','success-detached'):
   time.sleep(.01)
 if mode in ('timeout','owner-eof','bridge-kill'):time.sleep(60)
 if mode=='malformed':print('broken-json')
-elif mode=='oversized':print('x'*1100000)
+elif mode=='oversized':print('x'*(16*1048576+100000))
 elif mode=='stderr-limit':sys.stderr.write('x'*70000)
 else:print(json.dumps({'ok':True,'result':{'mode':mode}}))
 if mode=='nonzero':sys.exit(7)

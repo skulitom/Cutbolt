@@ -279,8 +279,15 @@ pub enum Request {
     },
     #[serde(rename = "media.transcribe")]
     MediaTranscribe {
-        /// Source to recognize: any file FFmpeg decodes with an audio stream, such as a timeline asset.
-        path: PathBuf,
+        /// Source to recognize: any file FFmpeg decodes with an audio stream, such as a timeline asset. Give this or `paths`.
+        #[serde(default)]
+        path: Option<PathBuf>,
+        /// Several whole files, 1-64, absolute or relative to input_root, recognized together so the speech models load once; documents are `<file stem>-1`, … and all go in one output.
+        #[serde(default)]
+        paths: Vec<PathBuf>,
+        /// Known text of each file in `paths`, in order, to align instead of recognize (as `text` does for `path`).
+        #[serde(default)]
+        texts: Vec<String>,
         /// Existing absolute directory that must contain `path`; documents name the source relative to it.
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
@@ -1371,6 +1378,8 @@ pub fn handle(request: Request) -> Result<Value> {
         }
         Request::MediaTranscribe {
             path,
+            paths,
+            texts,
             input_root,
             output_root,
             output,
@@ -1383,7 +1392,9 @@ pub fn handle(request: Request) -> Result<Value> {
             timeout_seconds,
             text,
         } => crate::media_transcribe::run(&crate::media_transcribe::Request {
-            path: &path,
+            path: path.as_deref(),
+            paths: &paths,
+            texts: &texts,
             input_root: &input_root,
             output_root: &output_root,
             output: &output,

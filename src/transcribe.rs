@@ -30,7 +30,11 @@ const FILES: [&str; 3] = [
 ];
 const MODEL_HASH: &str = "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794";
 const MODEL_BYTES: u64 = 483617219;
-const PROTOCOL: &str = "cutbolt-transcription-v1";
+const PROTOCOL: &str = "cutbolt-transcription-v2";
+/// Analyses one worker launch takes; the worker and supervisor own `analysis-<n>.wav` up to this.
+const BATCH: usize = 16;
+/// Bound of one worker launch's result, matching the supervisor and worker.
+const RESULT_BYTES: usize = 16 * 1048576;
 const PROFILE: &str = "local-en-el-context-v1";
 /// Known text aligned to the audio instead of recognized.
 const ALIGN_PROFILE: &str = "local-en-el-align-v1";
@@ -276,8 +280,15 @@ impl Drop for Scratch {
         for name in FILES {
             let _ = fs::remove_file(self.0.join(name));
         }
+        for slot in 0..BATCH {
+            let _ = fs::remove_file(self.0.join(analysis_name(slot)));
+        }
         let _ = fs::remove_dir(&self.0);
     }
+}
+/// Owned analysis file of a launch's `slot`.
+fn analysis_name(slot: usize) -> String {
+    format!("analysis-{slot}.wav")
 }
 struct Worker(Child);
 impl Drop for Worker {
@@ -338,7 +349,7 @@ fn capture(
             .spawn()
             .map_err(|e| error("RUNTIME_UNAVAILABLE", e.to_string()))?,
     );
-    let stdout = reader(child.0.stdout.take().expect("piped"), 1048576);
+    let stdout = reader(child.0.stdout.take().expect("piped"), RESULT_BYTES);
     let stderr = reader(child.0.stderr.take().expect("piped"), 65536);
     let mut encoded = serde_json::to_vec(request)?;
     encoded.push(b'\n');
@@ -396,7 +407,21 @@ fn capture(
         )
     })?;
     if value["ok"] == false {
-        let code = match value["error"]["code"].as_str().unwrap_or("") {
+        return Err(worker_error(&value["error"]));
+    }
+    if !status.success() || value["ok"] != true {
+        return Err(error(
+            "WORKER_FAILED",
+            "Speech process/result status mismatch",
+        ));
+    }
+    Ok(value["result"].clone())
+}
+
+/// The engine error for a worker-reported failure.
+fn worker_error(reported: &Value) -> crate::Error {
+    {
+        let code = match reported["code"].as_str().unwrap_or("") {
             "WORKER_TIMEOUT" => "WORKER_TIMEOUT",
             "OWNER_GONE" => "OWNER_GONE",
             "MODEL_UNAVAILABLE" => "MODEL_UNAVAILABLE",
@@ -411,22 +436,17 @@ fn capture(
             "INVALID_ALIGNMENT" => "INVALID_ALIGNMENT",
             "UNSUPPORTED_ALIGNMENT_TEXT" => "UNSUPPORTED_ALIGNMENT_TEXT",
             "WORKER_CHANGED" => "WORKER_CHANGED",
+            "UNSUPPORTED_AUDIO" => "UNSUPPORTED_AUDIO",
+            "INPUT_LIMIT" => "INPUT_LIMIT",
             _ => "TRANSCRIPTION_FAILED",
         };
-        return Err(error(
+        error(
             code,
-            value["error"]["message"]
+            reported["message"]
                 .as_str()
                 .unwrap_or("Speech worker failed"),
-        ));
+        )
     }
-    if !status.success() || value["ok"] != true {
-        return Err(error(
-            "WORKER_FAILED",
-            "Speech process/result status mismatch",
-        ));
-    }
-    Ok(value["result"].clone())
 }
 
 #[derive(Deserialize)]
@@ -456,12 +476,25 @@ pub fn run(request: &Transcribe) -> Result<Value> {
     run_controlled(request, &media::Uncontrolled)
 }
 pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Result<Value> {
-    if !cfg!(windows) {
-        return Err(error(
-            "UNSUPPORTED_PLATFORM",
-            "This optional speech profile uses Windows with explicitly configured WSL/CUDA",
-        ));
-    }
+    run_many(std::slice::from_ref(request), control)?
+        .pop()
+        .expect("one outcome per request")
+}
+
+/// One analysis made ready for a worker launch.
+struct Prepared {
+    file: String,
+    analysis_hash: String,
+    bytes: usize,
+    count: u64,
+    start: u64,
+    length: u64,
+    partial_padding: u64,
+    given: Option<Vec<String>>,
+}
+
+/// The checked known text of a request, or None to recognize.
+fn validate(request: &Transcribe) -> Result<Option<Vec<String>>> {
     crate::tracks::id(&request.id)?;
     let start = exact(request.start)?;
     let length = exact(request.duration)?;
@@ -476,9 +509,191 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
             "Analysis requires 25 ms..120 s inside the source and an explicit 1..600 s deadline",
         ));
     }
-    let runtime = &request.runtime;
+    request.text.as_deref().map(text_words).transpose()
+}
+
+/// Several analyses with one runtime and language. A worker launch takes up to 16 of them,
+/// within the 64 KiB request and 600 s deadline bounds, so its models load once per launch
+/// rather than once per analysis. Each request keeps its own outcome; a failure of the shared
+/// runtime or model fails them all.
+pub fn run_many(
+    requests: &[Transcribe],
+    control: &dyn media::Control,
+) -> Result<Vec<Result<Value>>> {
+    if !cfg!(windows) {
+        return Err(error(
+            "UNSUPPORTED_PLATFORM",
+            "This optional speech profile uses Windows with explicitly configured WSL/CUDA",
+        ));
+    }
+    let first = requests
+        .first()
+        .ok_or_else(|| invalid("No analyses were requested"))?;
+    let runtime = &first.runtime;
+    let shared = serde_json::to_value(runtime)?;
+    if requests.iter().any(|r| {
+        r.language != first.language
+            || r.scratch_root != first.scratch_root
+            || serde_json::to_value(&r.runtime).ok().as_ref() != Some(&shared)
+    }) {
+        return Err(invalid(
+            "One batch of analyses shares its runtime, language and scratch root",
+        ));
+    }
+    let mut outcomes: Vec<Option<Result<Value>>> = requests.iter().map(|_| None).collect();
+    let mut checked = Vec::new();
+    for (index, request) in requests.iter().enumerate() {
+        match validate(request) {
+            Ok(given) => checked.push((index, given)),
+            Err(e) => outcomes[index] = Some(Err(e)),
+        }
+    }
+    if checked.is_empty() {
+        return Ok(outcomes
+            .into_iter()
+            .map(|o| o.expect("every request has an outcome"))
+            .collect());
+    }
     check_runtime(runtime)?;
-    let given = request.text.as_deref().map(text_words).transpose()?;
+    // Aligning known text needs no recognition model.
+    let model_path = if checked.iter().any(|(_, given)| given.is_none()) {
+        if fs::metadata(&runtime.model)?.len() != MODEL_BYTES
+            || media::file_hash_controlled(&runtime.model, control)? != MODEL_HASH
+        {
+            return Err(error(
+                "MODEL_CHANGED",
+                "Selected speech profile requires its pinned local model",
+            ));
+        }
+        Some(linux_path(&runtime.model)?)
+    } else {
+        None
+    };
+    let alignment_root = linux_path(&runtime.alignment_root)?;
+    let worker_hash = hash(WORKER.as_bytes());
+    // Groups that fit one launch: at most 16 items, a 64 KiB request and ten minutes of audio,
+    // which the profile analyses well inside its 600 s deadline (about a third of real time).
+    let mut groups: Vec<Vec<(usize, Option<Vec<String>>)>> = Vec::new();
+    let (mut bytes, mut samples) = (0usize, 0u64);
+    for (index, given) in checked {
+        let size = 512 + serde_json::to_vec(&given)?.len();
+        let length = exact(requests[index].duration)?;
+        let full = groups.last().is_none_or(|group| {
+            group.len() == BATCH || bytes + size > 60 * 1024 || samples + length > 600 * 48_000
+        });
+        if full {
+            groups.push(Vec::new());
+            (bytes, samples) = (0, 0);
+        }
+        bytes += size;
+        samples += length;
+        groups.last_mut().expect("group").push((index, given));
+    }
+    for group in groups {
+        // The supervisor removes its scratch directory when a launch ends, so each launch
+        // gets its own.
+        let scratch = Scratch::new(&first.scratch_root)?;
+        let root = linux_path(&scratch.0)?;
+        for (name, content) in [(FILES[1], WORKER), (FILES[2], SUPERVISOR)] {
+            let mut file = File::create_new(scratch.0.join(name))?;
+            file.write_all(content.as_bytes())?;
+        }
+        let mut prepared = Vec::new();
+        for (slot, (index, given)) in group.into_iter().enumerate() {
+            match prepare(&requests[index], given, &scratch, slot, control) {
+                Ok(item) => prepared.push((index, item)),
+                Err(e) => outcomes[index] = Some(Err(e)),
+            }
+        }
+        if prepared.is_empty() {
+            continue;
+        }
+        let items: Vec<Value> = prepared
+            .iter()
+            .map(|(_, p)| {
+                json!({"source_path":format!("{root}/{}", p.file),"source_sha256":p.analysis_hash,
+                "source_bytes":p.bytes,"sample_count":p.count,"text":p.given})
+            })
+            .collect();
+        let recognizing = prepared.iter().any(|(_, p)| p.given.is_none());
+        let payload = json!({"protocol":PROTOCOL,"items":items,"model_path":if recognizing { model_path.clone() } else { None },
+            "alignment_root":alignment_root,"language":first.language,"threads":runtime.threads});
+        let timeout = prepared
+            .iter()
+            .map(|(index, _)| requests[*index].timeout_seconds)
+            .sum::<u32>()
+            .min(600);
+        let args = vec![
+            "--distribution".into(),
+            runtime.distribution.clone(),
+            "--exec".into(),
+            "unshare".into(),
+            "-Urnpf".into(),
+            "--kill-child=KILL".into(),
+            "--mount-proc".into(),
+            "env".into(),
+            format!("PYTHONPATH={}", runtime.python_paths.join(":")),
+            "PYTHONDONTWRITEBYTECODE=1".into(),
+            runtime.python.clone(),
+            "-B".into(),
+            format!("{root}/transcribe_supervisor.py"),
+        ];
+        control.phase("transcription.recognition")?;
+        let launched = capture(
+            &args,
+            &json!({"request":payload,"worker_sha256":worker_hash,"timeout_seconds":timeout}),
+            timeout,
+            control,
+        );
+        let results = launched.and_then(|result| match result["items"].as_array() {
+            Some(items) if result["protocol"] == PROTOCOL && items.len() == prepared.len() => {
+                Ok(items.clone())
+            }
+            _ => Err(error(
+                "INVALID_RESULT",
+                "Speech results do not match the launched analyses",
+            )),
+        });
+        match results {
+            Ok(items) => {
+                for ((index, item), outcome) in prepared.iter().zip(items) {
+                    outcomes[*index] = Some(if outcome["ok"] == true {
+                        finish(
+                            &requests[*index],
+                            item,
+                            &outcome["result"],
+                            &worker_hash,
+                            control,
+                        )
+                    } else {
+                        Err(worker_error(&outcome["error"]))
+                    });
+                }
+            }
+            Err(e) => {
+                for (index, _) in &prepared {
+                    outcomes[*index] = Some(Err(error(e.code, e.message.clone())));
+                }
+            }
+        }
+    }
+    Ok(outcomes
+        .into_iter()
+        .map(|o| o.expect("every request has an outcome"))
+        .collect())
+}
+
+/// Check one request's source and write its 16 kHz mono analysis to the launch's `slot`.
+fn prepare(
+    request: &Transcribe,
+    given: Option<Vec<String>>,
+    scratch: &Scratch,
+    slot: usize,
+    control: &dyn media::Control,
+) -> Result<Prepared> {
+    let start = exact(request.start)?;
+    let length = exact(request.duration)?;
+    let source_samples = exact(request.source.duration)?;
     control.phase("transcription.source")?;
     let source = source_file(request, control)?;
     let actual = match request.format {
@@ -492,28 +707,6 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
             "MEDIA_DURATION_MISMATCH",
             "Declared transcription duration differs from actual source samples",
         ));
-    }
-    // Aligning known text needs no recognition model.
-    let model_path = match given {
-        Some(_) => None,
-        None => {
-            if fs::metadata(&runtime.model)?.len() != MODEL_BYTES
-                || media::file_hash_controlled(&runtime.model, control)? != MODEL_HASH
-            {
-                return Err(error(
-                    "MODEL_CHANGED",
-                    "Selected speech profile requires its pinned local model",
-                ));
-            }
-            Some(linux_path(&runtime.model)?)
-        }
-    };
-    let alignment_root = linux_path(&runtime.alignment_root)?;
-    let scratch = Scratch::new(&request.scratch_root)?;
-    let root = linux_path(&scratch.0)?;
-    for (name, content) in [(FILES[1], WORKER), (FILES[2], SUPERVISOR)] {
-        let mut file = File::create_new(scratch.0.join(name))?;
-        file.write_all(content.as_bytes())?;
     }
     control.phase("transcription.analysis")?;
     let channel = match request.channel {
@@ -565,7 +758,8 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
             "Resampled speech count differs from the declared clock",
         ));
     }
-    let analysis = scratch.0.join(FILES[0]);
+    let file = analysis_name(slot);
+    let analysis = scratch.0.join(&file);
     {
         let mut file = File::create_new(&analysis)?;
         let size = pcm.len() as u32;
@@ -584,32 +778,42 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         file.write_all(&pcm)?;
     }
     let analysis_hash = media::file_hash_controlled(&analysis, control)?;
-    let worker_hash = hash(WORKER.as_bytes());
-    let payload = json!({"protocol":PROTOCOL,"source_path":format!("{root}/analysis.wav"),"source_sha256":analysis_hash,
-        "source_bytes":pcm.len()+44,"sample_count":count,"model_path":model_path,"alignment_root":alignment_root,
-        "language":request.language,"threads":runtime.threads,"text":given});
-    let args = vec![
-        "--distribution".into(),
-        runtime.distribution.clone(),
-        "--exec".into(),
-        "unshare".into(),
-        "-Urnpf".into(),
-        "--kill-child=KILL".into(),
-        "--mount-proc".into(),
-        "env".into(),
-        format!("PYTHONPATH={}", runtime.python_paths.join(":")),
-        "PYTHONDONTWRITEBYTECODE=1".into(),
-        runtime.python.clone(),
-        "-B".into(),
-        format!("{root}/transcribe_supervisor.py"),
-    ];
-    control.phase("transcription.recognition")?;
-    let result = capture(
-        &args,
-        &json!({"request":payload,"worker_sha256":worker_hash,"timeout_seconds":request.timeout_seconds}),
-        request.timeout_seconds,
-        control,
-    )?;
+    Ok(Prepared {
+        file,
+        analysis_hash,
+        bytes: pcm.len() + 44,
+        count,
+        start,
+        length,
+        partial_padding,
+        given,
+    })
+}
+
+/// The transcript document and receipt of one analysis from its worker result.
+fn finish(
+    request: &Transcribe,
+    prepared: &Prepared,
+    result: &Value,
+    worker_hash: &str,
+    control: &dyn media::Control,
+) -> Result<Value> {
+    let Prepared {
+        analysis_hash,
+        count,
+        start,
+        length,
+        partial_padding,
+        given,
+        ..
+    } = prepared;
+    let (analysis_hash, count, start, length, partial_padding) = (
+        analysis_hash.clone(),
+        *count,
+        *start,
+        *length,
+        *partial_padding,
+    );
     let (profile, model_hash) = match given {
         Some(_) => (ALIGN_PROFILE, Value::Null),
         None => (PROFILE, json!(MODEL_HASH)),
@@ -722,7 +926,7 @@ pub fn run_controlled(request: &Transcribe, control: &dyn media::Control) -> Res
         recognition: transcript::Recognition {
             profile: profile.into(),
             model,
-            worker_sha256: worker_hash,
+            worker_sha256: worker_hash.to_owned(),
             supervisor_sha256: Some(hash(SUPERVISOR.as_bytes())),
             analysis_sha256: analysis_hash.clone(),
             versions: serde_json::from_value(result["versions"].clone())?,

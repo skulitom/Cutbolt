@@ -175,6 +175,36 @@ def run(root,setup):
         quality.append({'fixture':name,'mode':'given_text','words':len(words),'contextual_start':onsets})
         print(json.dumps(quality[-1]),flush=True);preserved()
     passed.append('transcription.known_text_alignment_keeps_spelling_and_word_clocks')
+    # Several files in one job: every window of every file goes to the speech runtime in one
+    # launch, so its models load once; each file's documents still bind to it and meet the gates.
+    english=[n for n in parents if speech[n]['language']=='en']
+    local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots']['en']
+    saved=output/'batch-en.json';started=clock.monotonic()
+    batch=call({'command':'media.transcribe','paths':[str(parents[n]['path']) for n in english],'input_root':str(sources),'output_root':str(output),
+                'output':str(saved),'runtime':local,'language':'en','timeout_seconds':300},timeout=1800)
+    batch_seconds=clock.monotonic()-started
+    docs=json.loads(saved.read_text(encoding='utf-8'))['transcripts']
+    assert batch['failed']==0 and len(batch['files'])==len(english) and batch['documents']==len(docs),batch
+    for n in english:
+        mine=[d for d in docs if d['source']['path']==parents[n]['path'].name]
+        assert mine and mine[0]['range_start']==time(0) and all(d['id'].startswith(parents[n]['path'].stem) for d in mine),(n,mine)
+        assert seconds(mine[-1]['range_start'])+seconds(mine[-1]['range_duration'])==F(parents[n]['count'],48000)
+        match=correspondence(speech[n]['reference'],[w for d in mine for w in d['words']])
+        assert not match['missing_reference_indices'] and not match['extra_word_indices'],(n,match)
+        assert n.startswith('isolated') or match['rate']<=.10,(n,match)
+    # Known texts per file in the same batch form.
+    saved=output/'batch-text.json'
+    call({'command':'media.transcribe','paths':[str(parents['pilot-en']['path'])],'texts':[speech['pilot-en']['text']],'input_root':str(sources),
+          'output_root':str(output),'output':str(saved),'runtime':local,'language':'en'},timeout=900)
+    aligned=json.loads(saved.read_text(encoding='utf-8'))['transcripts']
+    assert [w['text'] for d in aligned for w in d['words']]==speech['pilot-en']['text'].split()
+    assert all(d['recognition']['profile']=='local-en-el-align-v1' for d in aligned)
+    for fields in ({'path':str(parents['pilot-en']['path'])},{'texts':['one','two']},{'text':'words'},{'start':time(0)},{'paths':[]}):
+        call({'command':'media.transcribe','paths':[str(parents[n]['path']) for n in english],'input_root':str(sources),'output_root':str(output),
+              'output':str(output/'batch-bad.json'),'runtime':local,'language':'en',**fields},'INVALID_ARGUMENT')
+    quality.append({'fixture':'batch-en','files':len(english),'seconds':batch_seconds})
+    print(json.dumps(quality[-1]),flush=True);preserved()
+    passed.append('transcription.batch_recognizes_files_together')
 
     def decode(path,expected,label):
         nonlocal frames,samples

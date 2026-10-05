@@ -303,28 +303,44 @@ fn recognize(
     };
     // Each window's notes, kept between the middles of its overlaps with its neighbours.
     let mut notes: Vec<(u64, u64, Vec<Value>)> = Vec::new();
+    let mut plan = Vec::new();
     let mut start = 0;
-    let mut window = 0;
     while start < samples {
         let end = (start + WINDOW_SAMPLES).min(samples);
         if end - start < 1200 && start > 0 {
             break;
         }
-        let (from, to) = (Time::new(start, 48_000)?, Time::new(end - start, 48_000)?);
-        match transcribe::run(&transcribe::Transcribe {
-            id: format!("heard-{window}"),
-            source: source.clone(),
-            format: transcribe::Format::StereoWav,
-            start: from,
-            duration: to,
-            channel: transcribe::Channel::Mean,
-            language: settings.language,
-            input_root: folder.to_path_buf(),
-            scratch_root: std::env::temp_dir(),
-            runtime: settings.runtime.clone(),
-            timeout_seconds: 600,
-            text: None,
-        }) {
+        plan.push((start, end));
+        if end == samples {
+            break;
+        }
+        start = end - OVERLAP_SAMPLES;
+    }
+    // Every window in as few worker launches as possible: the models load once per launch.
+    let requests = plan
+        .iter()
+        .enumerate()
+        .map(|(window, &(start, end))| {
+            Ok(transcribe::Transcribe {
+                id: format!("heard-{window}"),
+                source: source.clone(),
+                format: transcribe::Format::StereoWav,
+                start: Time::new(start, 48_000)?,
+                duration: Time::new(end - start, 48_000)?,
+                channel: transcribe::Channel::Mean,
+                language: settings.language,
+                input_root: folder.to_path_buf(),
+                scratch_root: std::env::temp_dir(),
+                runtime: settings.runtime.clone(),
+                timeout_seconds: 600,
+                text: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let outcomes = transcribe::run_many(&requests, &crate::media::Uncontrolled)?;
+    for (&(start, end), outcome) in plan.iter().zip(outcomes) {
+        let from = Time::new(start, 48_000)?;
+        match outcome {
             Ok(result) => {
                 found
                     .documents
@@ -340,11 +356,6 @@ fn recognize(
             }
             Err(e) => return Err(e),
         }
-        window += 1;
-        if end == samples {
-            break;
-        }
-        start = end - OVERLAP_SAMPLES;
     }
     for (i, (start, end, listed)) in notes.iter().enumerate() {
         let low = match i.checked_sub(1).map(|j| &notes[j]) {

@@ -18,7 +18,14 @@ import time
 import unicodedata
 import wave
 
-PROTOCOL = 'cutbolt-transcription-v1'
+PROTOCOL = 'cutbolt-transcription-v2'
+# One launch analyses up to this many owned analysis files, each with its own outcome.
+MAX_ITEMS = 16
+RESULT_BYTES = 16 * 1048576
+ANALYSIS_NAMES = frozenset(['analysis.wav'] + [f'analysis-{n}.wav' for n in range(MAX_ITEMS)])
+# Failures of the shared setup or models end the whole launch; others belong to one item.
+FATAL = frozenset(['MODEL_FORMAT','MODEL_UNAVAILABLE','DEVICE_UNAVAILABLE','RESOURCE_LIMIT','NETWORK_DISABLED',
+    'ISOLATION_REQUIRED','RUNTIME_VERSION'])
 PROFILE = 'local-en-el-context-v1'
 ALIGN_PROFILE = 'local-en-el-align-v1'
 WEIGHTS = {'en':'model.safetensors','el':'pytorch_model.bin'}
@@ -234,11 +241,9 @@ def letters(text, vocab):
     return ''.join(output)
 
 
-def align(pcm, words, windows, files, language, given):
-    """Acoustic word intervals: CTC alignment of each window's words inside that window."""
-    import numpy as np
+def load_aligner(files, language):
+    """The acoustic alignment model, its feature extractor, vocabulary and configuration."""
     import torch
-    import torchaudio
     from transformers import Wav2Vec2Config, Wav2Vec2ForCTC, Wav2Vec2FeatureExtractor
     from safetensors.torch import load_file
     config = Wav2Vec2Config.from_dict(json.loads(files['config.json'].read_text(encoding='utf-8')))
@@ -255,6 +260,15 @@ def align(pcm, words, windows, files, language, given):
     aligner = aligner.eval().to('cuda')
     extractor = Wav2Vec2FeatureExtractor(**json.loads(files['preprocessor_config.json'].read_text(encoding='utf-8')))
     vocab = json.loads(files['vocab.json'].read_text(encoding='utf-8'))
+    return aligner, extractor, vocab, config
+
+
+def align(pcm, words, windows, loaded, given):
+    """Acoustic word intervals: CTC alignment of each window's words inside that window."""
+    import numpy as np
+    import torch
+    import torchaudio
+    aligner, extractor, vocab, config = loaded
     labels, ranges = [], []
     origin = 'Text' if given else 'Recognized'
     for word in words:
@@ -321,18 +335,26 @@ def align(pcm, words, windows, files, language, given):
     return output, blocks, alignment_windows
 
 
-def run(request):
-    started = time.monotonic()
-    fields(request, ['protocol','source_path','source_sha256','source_bytes','sample_count','model_path','alignment_root','language','threads','text'])
-    require(request['protocol'] == PROTOCOL, 'INVALID_PROTOCOL', 'Unsupported speech worker protocol')
-    given = request['text']
+def checked_item(item):
+    fields(item, ['source_path','source_sha256','source_bytes','sample_count','text'])
+    given = item['text']
     require(given is None or (type(given) is list and 0 < len(given) <= 2048 and all(type(t) is str and len(t.encode('utf-8')) <= 512
         and len(t.split()) == 1 and t == t.strip() for t in given)), 'INVALID_REQUEST', 'Text to align must be 1..2048 single words')
-    require((given is None) == (request['model_path'] is not None), 'INVALID_REQUEST', 'Recognition takes a model; text alignment does not')
+    require(type(item['sample_count']) is int and 400 <= item['sample_count'] <= 1920000, 'INPUT_LIMIT', 'Analysis requires 25 ms to 120 seconds')
+    require(type(item['source_bytes']) is int and 44 <= item['source_bytes'] <= 3840044, 'INPUT_LIMIT', 'Invalid analysis WAV size')
+
+
+def run(request):
+    started = time.monotonic()
+    fields(request, ['protocol','items','model_path','alignment_root','language','threads'])
+    require(request['protocol'] == PROTOCOL, 'INVALID_PROTOCOL', 'Unsupported speech worker protocol')
+    items = request['items']
+    require(type(items) is list and 1 <= len(items) <= MAX_ITEMS, 'INVALID_REQUEST', 'A launch analyses 1..16 items')
+    for item in items: checked_item(item)
+    recognizing = any(item['text'] is None for item in items)
+    require(recognizing == (request['model_path'] is not None), 'INVALID_REQUEST', 'Recognition takes a model; text alignment alone does not')
     require(request['language'] in ALIGNMENT, 'UNSUPPORTED_LANGUAGE', 'This profile supports en and el')
     require(type(request['threads']) is int and 1 <= request['threads'] <= 8, 'INVALID_REQUEST', 'Threads must be 1..8')
-    require(type(request['sample_count']) is int and 400 <= request['sample_count'] <= 1920000, 'INPUT_LIMIT', 'Analysis requires 25 ms to 120 seconds')
-    require(type(request['source_bytes']) is int and 44 <= request['source_bytes'] <= 3840044, 'INPUT_LIMIT', 'Invalid analysis WAV size')
     interfaces = [name for _,name in socket.if_nameindex()]
     require(interfaces == ['lo'] and os.readlink('/proc/1/ns/pid') == os.readlink('/proc/self/ns/pid'), 'ISOLATION_REQUIRED', 'Local speech requires its isolated network/PID namespace')
     network_attempts = []
@@ -348,74 +370,99 @@ def run(request):
     os.environ.update(HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',HF_HUB_DISABLE_TELEMETRY='1')
     versions = {name:metadata.version(name) for name in VERSIONS}
     require(versions == VERSIONS, 'RUNTIME_VERSION', 'Installed external speech runtime does not match the selected profile')
-    source = checked_file(request['source_path'], (request['source_bytes'],request['source_sha256']))
-    require(source.parent == Path(__file__).resolve().parent and source.name == 'analysis.wav', 'INVALID_PATH', 'Worker reads only its owned analysis file')
-    model_path = None if given is not None else checked_file(request['model_path'], MODEL)
+    model_path = checked_file(request['model_path'], MODEL) if recognizing else None
     root = Path(request['alignment_root'])
     require(root.is_absolute() and root.is_dir(), 'MODEL_UNAVAILABLE', 'Explicit local alignment root required')
     files = {name:checked_file(str(root/name),value) for name,value in ALIGNMENT[request['language']].items()}
-    with wave.open(str(source),'rb') as stream:
-        require((stream.getnchannels(),stream.getsampwidth(),stream.getframerate(),stream.getcomptype(),stream.getnframes()) == (1,2,16000,'NONE',request['sample_count']), 'UNSUPPORTED_AUDIO', 'Expected the bound mono PCM16 analysis file at 16 kHz')
-        pcm_bytes = stream.readframes(stream.getnframes())
-    require(len(pcm_bytes) == request['sample_count']*2, 'UNSUPPORTED_AUDIO', 'Truncated analysis data')
-    require(any(pcm_bytes), 'NO_WORDS', 'The selected analysis interval is digital silence')
     import numpy as np
     import torch
     torch.set_num_threads(request['threads']); torch.set_num_interop_threads(1)
     require(torch.cuda.is_available(), 'DEVICE_UNAVAILABLE', 'This selected profile requires a local CUDA device')
     torch.cuda.reset_peak_memory_stats()
-    pcm = np.frombuffer(pcm_bytes,dtype='<i2').astype(np.float32)/32768
-    count = len(pcm)
-    words=[];notes=[];recognition_windows=[]
-    if given is not None:
-        # Known text (a narration script): no recognition, one window over the whole analysis.
-        words=[{'word':text,'probability':None} for text in given]
-        recognition_windows.append({'start_sample':0,'end_sample':count,'end_policy':'given_text','first_word':0,'end_word':len(words)})
-    else:
-        import whisper
-        model = whisper.load_model(str(model_path),device='cuda')
-        def recognize(first,end):
-            if not np.any(pcm[first:end]):return []
-            result = model.transcribe(pcm[first:end],language=request['language'],task='transcribe',word_timestamps=True,
-                fp16=True,temperature=0.,beam_size=5,condition_on_previous_text=False,verbose=None)
-            return [word for segment in result['segments'] for word in segment['words']]
-        rms = energy(pcm,np) if count>480000 else None
-        first = 0
-        while first<count:
-            end,policy = (count,'source_end') if count<=480000 or count-first<=240000 else quiet_end(rms,first)
-            raw = None
-            if policy=='hard_12s':
-                # Recognize 14s, then cut between words; keep the words before the cut.
-                passed = recognize(first,first+224000)
-                cut = word_gap(passed,first)
-                if cut is not None:
-                    end,policy = cut,'word_gap'
-                    raw = [w for w in passed if sample(w['start'],first,first+224000)+sample(w['end'],first,first+224000)<2*cut]
-            if raw is None:raw = recognize(first,end)
-            kept,dropped = speech(raw,first,end)
-            recognition_windows.append({'start_sample':first,'end_sample':end,'end_policy':policy,
-                'first_word':len(words),'end_word':len(words)+len(kept)})
-            words.extend(kept);notes.extend(dropped);first = end
-        del model
-    require(len(words) <= 2048, 'RESULT_LIMIT', 'Recognition returns at most 2048 words')
-    gc.collect(); torch.cuda.empty_cache()
-    recognized = time.monotonic()
-    # Sound without speech, such as a music bed alone, gives an empty result with its notes.
-    output, blocks, alignment_windows = align(pcm,words,recognition_windows,files,request['language'],given is not None) if words else ([],[],[])
-    checked_file(str(source),(request['source_bytes'],request['source_sha256']))
+    # Each model is loaded at most once per launch and shared by every item.
+    loaded = {}
+    def recognizer():
+        if 'whisper' not in loaded:
+            import whisper
+            loaded['whisper'] = whisper.load_model(str(model_path),device='cuda')
+        return loaded['whisper']
+    def aligner():
+        if 'aligner' not in loaded:
+            loaded['aligner'] = load_aligner(files,request['language'])
+        return loaded['aligner']
+
+    def analyse(item):
+        item_started = time.monotonic()
+        given = item['text']
+        source = checked_file(item['source_path'], (item['source_bytes'],item['source_sha256']))
+        require(source.parent == Path(__file__).resolve().parent and source.name in ANALYSIS_NAMES, 'INVALID_PATH', 'Worker reads only its owned analysis files')
+        with wave.open(str(source),'rb') as stream:
+            require((stream.getnchannels(),stream.getsampwidth(),stream.getframerate(),stream.getcomptype(),stream.getnframes()) == (1,2,16000,'NONE',item['sample_count']), 'UNSUPPORTED_AUDIO', 'Expected the bound mono PCM16 analysis file at 16 kHz')
+            pcm_bytes = stream.readframes(stream.getnframes())
+        require(len(pcm_bytes) == item['sample_count']*2, 'UNSUPPORTED_AUDIO', 'Truncated analysis data')
+        require(any(pcm_bytes), 'NO_WORDS', 'The selected analysis interval is digital silence')
+        pcm = np.frombuffer(pcm_bytes,dtype='<i2').astype(np.float32)/32768
+        count = len(pcm)
+        words=[];notes=[];recognition_windows=[]
+        if given is not None:
+            # Known text (a narration script): no recognition, one window over the whole analysis.
+            words=[{'word':text,'probability':None} for text in given]
+            recognition_windows.append({'start_sample':0,'end_sample':count,'end_policy':'given_text','first_word':0,'end_word':len(words)})
+        else:
+            model = recognizer()
+            def recognize(first,end):
+                if not np.any(pcm[first:end]):return []
+                result = model.transcribe(pcm[first:end],language=request['language'],task='transcribe',word_timestamps=True,
+                    fp16=True,temperature=0.,beam_size=5,condition_on_previous_text=False,verbose=None)
+                return [word for segment in result['segments'] for word in segment['words']]
+            rms = energy(pcm,np) if count>480000 else None
+            first = 0
+            while first<count:
+                end,policy = (count,'source_end') if count<=480000 or count-first<=240000 else quiet_end(rms,first)
+                raw = None
+                if policy=='hard_12s':
+                    # Recognize 14s, then cut between words; keep the words before the cut.
+                    passed = recognize(first,first+224000)
+                    cut = word_gap(passed,first)
+                    if cut is not None:
+                        end,policy = cut,'word_gap'
+                        raw = [w for w in passed if sample(w['start'],first,first+224000)+sample(w['end'],first,first+224000)<2*cut]
+                if raw is None:raw = recognize(first,end)
+                kept,dropped = speech(raw,first,end)
+                recognition_windows.append({'start_sample':first,'end_sample':end,'end_policy':policy,
+                    'first_word':len(words),'end_word':len(words)+len(kept)})
+                words.extend(kept);notes.extend(dropped);first = end
+        require(len(words) <= 2048, 'RESULT_LIMIT', 'Recognition returns at most 2048 words')
+        gc.collect(); torch.cuda.empty_cache()
+        recognized = time.monotonic()
+        # Sound without speech, such as a music bed alone, gives an empty result with its notes.
+        output, blocks, alignment_windows = align(pcm,words,recognition_windows,aligner(),given is not None) if words else ([],[],[])
+        checked_file(str(source),(item['source_bytes'],item['source_sha256']))
+        return {'profile':PROFILE if given is None else ALIGN_PROFILE,'source_sha256':item['source_sha256'],'sample_count':count,
+            'words':output,'model_sha256':MODEL[1] if given is None else None,
+            'recognition_seconds':recognized-item_started,'item_seconds':time.monotonic()-item_started,
+            'alignment_blocks':blocks,'recognition_blocks':recognition_windows,
+            'alignment_windows':alignment_windows,'non_speech':notes}
+
+    outcomes = []
+    for item in items:
+        try:
+            outcomes.append({'ok':True,'result':analyse(item)})
+        except Failure as exc:
+            if exc.code in FATAL: raise
+            outcomes.append({'ok':False,'error':{'code':exc.code,'message':exc.message}})
+    loaded.clear(); gc.collect(); torch.cuda.empty_cache()
     if model_path is not None: checked_file(str(model_path),MODEL)
     for name,value in ALIGNMENT[request['language']].items(): checked_file(str(files[name]),value)
     peak_cpu = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024
     peak_gpu = torch.cuda.max_memory_allocated()
     require(peak_cpu <= 6*1024**3 and peak_gpu <= 8*1024**3, 'RESOURCE_LIMIT', 'Speech profile exceeded its memory gate')
-    return {'protocol':PROTOCOL,'profile':PROFILE if given is None else ALIGN_PROFILE,'source_sha256':request['source_sha256'],'sample_count':count,
-        'language':request['language'],'words':output,'versions':versions,'alignment_files':ALIGNMENT[request['language']],
-        'model_sha256':MODEL[1] if given is None else None,'network_interfaces':interfaces,'python_network_attempts':len(network_attempts),
-        'peak_cpu_bytes':peak_cpu,'peak_cuda_bytes':peak_gpu,'recognition_seconds':recognized-started,
-        'total_seconds':time.monotonic()-started,'alignment_blocks':blocks,
-        'recognition_blocks':recognition_windows,
-        'alignment_windows':alignment_windows,'non_speech':notes,
+    shared = {'protocol':PROTOCOL,'language':request['language'],'versions':versions,'alignment_files':ALIGNMENT[request['language']],
+        'network_interfaces':interfaces,'python_network_attempts':len(network_attempts),
+        'peak_cpu_bytes':peak_cpu,'peak_cuda_bytes':peak_gpu,'total_seconds':time.monotonic()-started,'items':len(items),
         'context_samples':{'leading':1280,'trailing':320},'review_required':True}
+    # Each item's result carries the launch's shared facts, so it reads like a launch of its own.
+    return {'protocol':PROTOCOL,'items':[{'ok':True,'result':{**shared,**o['result']}} if o['ok'] else o for o in outcomes]}
 
 
 if __name__ == '__main__':
@@ -424,7 +471,7 @@ if __name__ == '__main__':
         require(len(data) <= 65536,'REQUEST_LIMIT','Worker request exceeds 64 KiB')
         value = run(json.loads(data))
         encoded = json.dumps({'ok':True,'result':value},ensure_ascii=False,allow_nan=False).encode('utf-8')
-        require(len(encoded) <= 1048576,'RESULT_LIMIT','Worker response exceeds one MiB')
+        require(len(encoded) <= RESULT_BYTES,'RESULT_LIMIT','Worker response exceeds 16 MiB')
         sys.stdout.buffer.write(encoded+b'\n')
     except Failure as exc:
         print(json.dumps({'ok':False,'error':{'code':exc.code,'message':exc.message}}))

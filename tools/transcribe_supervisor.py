@@ -19,10 +19,15 @@ def error(code, message):
     return json.dumps({'ok':False,'error':{'code':code,'message':message}}).encode()+b'\n',1
 
 
+# Files this engine invocation can make: its worker, this supervisor and up to 16 analyses.
+OWNED = ['analysis.wav','transcribe_worker.py','transcribe_supervisor.py']+[f'analysis-{n}.wav' for n in range(16)]
+RESULT_BYTES = 16*1048576
+
+
 def cleanup(root):
-    # Only the three files made by this engine invocation; never recursive.
+    # Only the files made by this engine invocation; never recursive.
     if root.name.startswith('cutbolt-transcribe-') and root == Path(__file__).resolve().parent:
-        for name in ['analysis.wav','transcribe_worker.py','transcribe_supervisor.py']:
+        for name in OWNED:
             try: (root/name).unlink()
             except OSError: pass
         try: root.rmdir()
@@ -74,7 +79,7 @@ def run(root):
                 if not chunk:
                     selector.unregister(key.fileobj); ended.add(key.data); continue
                 chunks[key.data].extend(chunk)
-                if len(chunks[key.data]) > (1048576 if key.data == 'result' else 65536):
+                if len(chunks[key.data]) > (RESULT_BYTES if key.data == 'result' else 65536):
                     return error('RESULT_LIMIT','Speech worker exceeded its output bound')
         value = json.loads(chunks['result'])
         if type(value) is not dict or type(value.get('ok')) is not bool:

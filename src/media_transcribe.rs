@@ -22,9 +22,15 @@ const OVERLAP: u64 = 5 * 48_000;
 /// The transcription minimum: 25 ms.
 const SHORTEST: u64 = 1200;
 
-/// What to recognize and where to save it.
+/// Files one media.transcribe job may take.
+pub const MAX_FILES: usize = 64;
+
+/// What to recognize and where to save it: one `path`, or several whole files in `paths`.
 pub struct Request<'a> {
-    pub path: &'a Path,
+    pub path: Option<&'a Path>,
+    pub paths: &'a [PathBuf],
+    /// Known text of each file in `paths`, in order; empty to recognize them.
+    pub texts: &'a [String],
     pub input_root: &'a Path,
     pub output_root: &'a Path,
     pub output: &'a Path,
@@ -110,27 +116,31 @@ pub(crate) fn stitch(mut documents: Vec<Document>) -> Result<Vec<Document>> {
     Ok(documents)
 }
 
-/// Recognize a source file's speech into stitched transcript documents saved at `output`.
-pub fn run(request: &Request) -> Result<Value> {
-    crate::tracks::id(request.id)?;
-    if !(1..=600).contains(&request.timeout_seconds) {
-        return Err(error(
-            "INVALID_ARGUMENT",
-            "timeout_seconds must be 1-600 per window",
-        ));
-    }
-    if let Some(text) = request.text {
-        transcribe::text_words(text)?;
-    }
-    let path = media::allowed_file(request.path, request.input_root)?;
-    let output = crate::render::destination_extension(request.output, request.output_root, "json")?;
-    if output.try_exists()? {
-        return Err(error(
-            "OUTPUT_EXISTS",
-            format!("{} already exists", output.display()),
-        ));
-    }
-    let source = crate::identity::relative(&path, request.input_root)?;
+/// One file made ready: its audio extracted losslessly and cut into windows.
+struct Planned {
+    source: Value,
+    identity: Identity,
+    relative: PathBuf,
+    duration: Time,
+    scratch: Scratch,
+    wav_identity: Identity,
+    plan: Vec<(u64, u64)>,
+    prefix: String,
+    text: Option<String>,
+}
+
+/// Extract `path`'s audio as 48 kHz stereo PCM16 (word times are then source times) and plan
+/// its windows over `[start, start + duration)`.
+fn plan_file(
+    path: &Path,
+    input_root: &Path,
+    start: Option<Time>,
+    duration: Option<Time>,
+    text: Option<&str>,
+    prefix: String,
+) -> Result<Planned> {
+    let path = media::allowed_file(path, input_root)?;
+    let source = crate::identity::relative(&path, input_root)?;
     let identity = Identity {
         sha256: source["sha256"].as_str().unwrap_or_default().to_owned(),
         bytes: source["bytes"].as_u64().unwrap_or_default(),
@@ -144,7 +154,6 @@ pub fn run(request: &Request) -> Result<Value> {
         std::env::temp_dir().join(format!("cutbolt-transcribe-{}-{nonce}", std::process::id())),
     );
     fs::create_dir(&scratch.0)?;
-    // Lossless 48 kHz stereo PCM16 of the first audio stream: word times are source times.
     let wav = scratch.0.join("audio.wav");
     let mut args: Vec<String> = ["-nostdin", "-v", "error", "-n", "-i"]
         .map(str::to_owned)
@@ -177,11 +186,11 @@ pub fn run(request: &Request) -> Result<Value> {
     args.push(wav.to_string_lossy().into_owned());
     media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(4 * 3600))?;
     let (total, _, _) = crate::audio_processing::measure_wav(&wav, false)?;
-    let first = match request.start {
+    let first = match start {
         Some(start) => sample(start)?,
         None => 0,
     };
-    let last = match request.duration {
+    let last = match duration {
         Some(duration) => first + sample(duration)?,
         None => total,
     };
@@ -201,9 +210,8 @@ pub fn run(request: &Request) -> Result<Value> {
             bytes: value["bytes"].as_u64().unwrap_or_default(),
         }
     };
-    let duration = Time::new(total, 48_000)?;
     let plan = windows(first, last);
-    if request.text.is_some() && plan.len() > 1 {
+    if text.is_some() && plan.len() > 1 {
         return Err(error(
             "INVALID_RANGE",
             format!(
@@ -212,32 +220,35 @@ pub fn run(request: &Request) -> Result<Value> {
             ),
         ));
     }
-    let mut documents = Vec::with_capacity(plan.len());
+    Ok(Planned {
+        source,
+        identity,
+        relative,
+        duration: Time::new(total, 48_000)?,
+        scratch,
+        wav_identity,
+        plan,
+        prefix,
+        text: text.map(str::to_owned),
+    })
+}
+
+/// One file's stitched documents and notes from its windows' outcomes.
+struct Heard {
+    documents: Vec<Document>,
+    non_speech: Vec<Value>,
+    silent: Vec<Value>,
+}
+
+fn assemble(planned: &Planned, outcomes: Vec<Result<Value>>) -> Result<Heard> {
+    let mut documents = Vec::with_capacity(planned.plan.len());
     let mut notes = Vec::new();
     let mut silent = Vec::new();
-    for (index, &(from, to)) in plan.iter().enumerate() {
-        let attempt = transcribe::run(&transcribe::Transcribe {
-            id: format!("{}-{}", request.id, index + 1),
-            source: Source {
-                path: PathBuf::from("audio.wav"),
-                identity: wav_identity.clone(),
-                duration,
-            },
-            format: transcribe::Format::StereoWav,
-            start: Time::new(from, 48_000)?,
-            duration: Time::new(to - from, 48_000)?,
-            channel: request.channel,
-            language: request.language,
-            input_root: scratch.0.clone(),
-            scratch_root: scratch.0.clone(),
-            runtime: request.runtime.clone(),
-            timeout_seconds: request.timeout_seconds,
-            text: request.text.map(str::to_owned),
-        });
+    for (&(from, to), attempt) in planned.plan.iter().zip(outcomes) {
         let result = match attempt {
             Ok(result) => result,
             // Digital silence has nothing to recognize; other windows still do.
-            Err(e) if e.code == "NO_WORDS" && request.text.is_none() && plan.len() > 1 => {
+            Err(e) if e.code == "NO_WORDS" && planned.text.is_none() && planned.plan.len() > 1 => {
                 silent.push(json!({"start":Time::new(from, 48_000)?,"end":Time::new(to, 48_000)?}));
                 continue;
             }
@@ -249,9 +260,9 @@ pub fn run(request: &Request) -> Result<Value> {
         let mut document: Document = serde_json::from_value(result["document"].clone())?;
         // The extracted audio is the source's own audio, sample for sample.
         document.source = Source {
-            path: relative.clone(),
-            identity: identity.clone(),
-            duration,
+            path: planned.relative.clone(),
+            identity: planned.identity.clone(),
+            duration: planned.duration,
         };
         documents.push(document);
     }
@@ -262,7 +273,6 @@ pub fn run(request: &Request) -> Result<Value> {
         ));
     }
     let documents = stitch(documents)?;
-    let words: usize = documents.iter().map(|d| d.words.len()).sum();
     // Overlapping windows can both hear one sound; keep each note inside one document's range.
     let mut non_speech = Vec::new();
     for note in notes {
@@ -276,17 +286,179 @@ pub fn run(request: &Request) -> Result<Value> {
             non_speech.push(note);
         }
     }
+    Ok(Heard {
+        documents,
+        non_speech,
+        silent,
+    })
+}
+
+/// Recognize source files' speech into stitched transcript documents saved at `output`. Every
+/// window of every file goes to the speech runtime in as few launches as possible, so its
+/// models load once per launch rather than once per window.
+pub fn run(request: &Request) -> Result<Value> {
+    crate::tracks::id(request.id)?;
+    if !(1..=600).contains(&request.timeout_seconds) {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            "timeout_seconds must be 1-600 per window",
+        ));
+    }
+    if let Some(text) = request.text {
+        transcribe::text_words(text)?;
+    }
+    for text in request.texts {
+        transcribe::text_words(text)?;
+    }
+    // (path, known text, document ID prefix) of each file.
+    let files: Vec<(PathBuf, Option<&str>, String)> = match (request.path, request.paths) {
+        (Some(path), []) if request.texts.is_empty() => {
+            vec![(path.to_path_buf(), request.text, request.id.to_owned())]
+        }
+        (None, paths) if !paths.is_empty() => {
+            if paths.len() > MAX_FILES
+                || request.start.is_some()
+                || request.duration.is_some()
+                || request.text.is_some()
+                || !(request.texts.is_empty() || request.texts.len() == paths.len())
+            {
+                return Err(error(
+                    "INVALID_ARGUMENT",
+                    "paths takes 1-64 whole files, with texts (one per file) instead of text, and no start or duration",
+                ));
+            }
+            // Document IDs from the file names, made unique within the batch.
+            let mut used = std::collections::BTreeSet::new();
+            let mut files = Vec::new();
+            for (i, path) in paths.iter().enumerate() {
+                let stem = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .filter(|s| crate::tracks::id(s).is_ok() && s.len() <= 100)
+                    .unwrap_or_else(|| request.id.to_owned());
+                let mut prefix = stem.clone();
+                let mut n = 2;
+                while !used.insert(prefix.clone()) {
+                    prefix = format!("{stem}-{n}");
+                    n += 1;
+                }
+                let path = if path.is_relative() {
+                    request.input_root.join(path)
+                } else {
+                    path.clone()
+                };
+                files.push((path, request.texts.get(i).map(String::as_str), prefix));
+            }
+            files
+        }
+        _ => {
+            return Err(error(
+                "INVALID_ARGUMENT",
+                "Give path (with an optional text) or paths (with optional texts), not both",
+            ));
+        }
+    };
+    let output = crate::render::destination_extension(request.output, request.output_root, "json")?;
+    if output.try_exists()? {
+        return Err(error(
+            "OUTPUT_EXISTS",
+            format!("{} already exists", output.display()),
+        ));
+    }
+    let single = request.path.is_some();
+    let mut planned = Vec::new();
+    let mut reports: Vec<Value> = Vec::new();
+    for (path, text, prefix) in files {
+        match plan_file(
+            &path,
+            request.input_root,
+            request.start,
+            request.duration,
+            text,
+            prefix,
+        ) {
+            Ok(file) => planned.push(file),
+            Err(e) if !single => {
+                reports.push(json!({"path":path,"error":{"code":e.code,"message":e.message}}))
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    let mut requests = Vec::new();
+    for file in &planned {
+        for (index, &(from, to)) in file.plan.iter().enumerate() {
+            requests.push(transcribe::Transcribe {
+                id: format!("{}-{}", file.prefix, index + 1),
+                source: Source {
+                    path: PathBuf::from("audio.wav"),
+                    identity: file.wav_identity.clone(),
+                    duration: file.duration,
+                },
+                format: transcribe::Format::StereoWav,
+                start: Time::new(from, 48_000)?,
+                duration: Time::new(to - from, 48_000)?,
+                channel: request.channel,
+                language: request.language,
+                input_root: file.scratch.0.clone(),
+                scratch_root: std::env::temp_dir(),
+                runtime: request.runtime.clone(),
+                timeout_seconds: request.timeout_seconds,
+                text: file.text.clone(),
+            });
+        }
+    }
+    let mut outcomes = if requests.is_empty() {
+        Vec::new()
+    } else {
+        transcribe::run_many(&requests, &media::Uncontrolled)?
+    }
+    .into_iter();
+    let mut documents = Vec::new();
+    let mut non_speech = Vec::new();
+    for file in &planned {
+        let mine: Vec<Result<Value>> = outcomes.by_ref().take(file.plan.len()).collect();
+        match assemble(file, mine) {
+            Ok(heard) => {
+                let words: usize = heard.documents.iter().map(|d| d.words.len()).sum();
+                reports.push(json!({"source":file.source,"documents":heard.documents.len(),"words":words,
+                    "ranges":heard.documents.iter().map(|d| json!({"id":d.id,"start":d.range_start,"duration":d.range_duration,"words":d.words.len()})).collect::<Vec<_>>(),
+                    "non_speech":heard.non_speech.len(),"silent_windows":heard.silent,"duration":file.duration}));
+                documents.extend(heard.documents);
+                non_speech.extend(heard.non_speech);
+            }
+            Err(e) if !single => reports
+                .push(json!({"source":file.source,"error":{"code":e.code,"message":e.message}})),
+            Err(e) => return Err(e),
+        }
+    }
+    if documents.is_empty() {
+        return Err(error(
+            "NO_WORDS",
+            format!("No file gave a transcript: {}", json!(reports)),
+        ));
+    }
+    let words: usize = documents.iter().map(|d| d.words.len()).sum();
     let saved = json!({"transcripts":documents,"non_speech":non_speech});
     let mut file = fs::File::create_new(&output)?;
     file.write_all(&serde_json::to_vec_pretty(&saved)?)?;
     file.sync_all()?;
+    let aligned = request.text.is_some() || !request.texts.is_empty();
+    let next = "pass the file's transcripts (with a workspace, {\"file\": output, \"select\": \"transcripts\"}) to timeline.outline, captions.draft, export.review or transcript.plan";
+    if single {
+        let report = &reports[0];
+        return Ok(
+            json!({"output":output,"source":report["source"],"duration":report["duration"],"documents":documents.len(),"words":words,
+            "ranges":report["ranges"],
+            "non_speech":{"count":non_speech.len(),"listed":non_speech.iter().take(50).collect::<Vec<_>>()},
+            "silent_windows":report["silent_windows"],"aligned_text":aligned,
+            "review_required":true,"next":next}),
+        );
+    }
+    let failed = reports.iter().filter(|r| r.get("error").is_some()).count();
     Ok(
-        json!({"output":output,"source":source,"duration":duration,"documents":documents.len(),"words":words,
-        "ranges":documents.iter().map(|d| json!({"id":d.id,"start":d.range_start,"duration":d.range_duration,"words":d.words.len()})).collect::<Vec<_>>(),
+        json!({"output":output,"files":reports,"failed":failed,"documents":documents.len(),"words":words,
         "non_speech":{"count":non_speech.len(),"listed":non_speech.iter().take(50).collect::<Vec<_>>()},
-        "silent_windows":silent,"aligned_text":request.text.is_some(),
-        "review_required":true,
-        "next":"pass the file's transcripts (with a workspace, {\"file\": output, \"select\": \"transcripts\"}) to timeline.outline, captions.draft, export.review or transcript.plan"}),
+        "aligned_text":aligned,"review_required":true,"next":next}),
     )
 }
 
