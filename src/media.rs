@@ -16,10 +16,15 @@ pub fn tool(name: &str) -> String {
 }
 
 /// The selected encoder's version-3 slice grid corrupts sub-four-pixel dimensions.
-/// Version 1 preserves those narrow frames; normal frames use version 3/four slices.
+/// Version 1 preserves those narrow frames; normal frames use version 3/four slices, and frames
+/// of 640x360 and larger 16 slices. Slices are the unit of FFV1's parallel encoding and decoding,
+/// so four capped every 1080p encode and verification at about four threads; decoded values are
+/// the same with any slice count.
 pub(crate) fn ffv1_encoding(width: u32, height: u32) -> (&'static str, &'static str) {
     if width < 4 || height < 4 {
         ("1", "1")
+    } else if width >= 64 && height >= 64 && u64::from(width) * u64::from(height) >= 640 * 360 {
+        ("3", "16")
     } else {
         ("3", "4")
     }
@@ -621,8 +626,16 @@ pub fn probe_controlled(path: &Path, control: &dyn Control) -> Result<Value> {
 pub fn frame_info(path: &Path, selector: &str) -> Result<Value> {
     frame_info_controlled(path, selector, &Uncontrolled)
 }
+/// Decoded frame timing; decoders may use 16 threads (FFV1 slices, PNG frames), which changes
+/// only the speed, never the decoded frames.
 pub fn frame_info_controlled(path: &Path, selector: &str, control: &dyn Control) -> Result<Value> {
-    frame_info_with_budget(path, selector, None, Duration::from_secs(120), control)
+    frame_info_with_budget(
+        path,
+        selector,
+        Some("16"),
+        Duration::from_secs(120),
+        control,
+    )
 }
 
 /// Stream/format metadata and packet timing from one `ffprobe` run that decodes nothing.

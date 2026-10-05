@@ -437,6 +437,11 @@ impl<'a> Processor<'a> {
             });
         encoded_byte(value)
     }
+    /// The per-channel tables of a chain without per-pixel stages: `pixel` maps a straight
+    /// pixel with nonzero alpha channel by channel through them.
+    pub(crate) fn tables(&self) -> Option<&[[u8; 256]; 3]> {
+        (!self.per_pixel).then_some(&self.tables)
+    }
     pub(crate) fn pixel(
         &self,
         rgba: &[u8],

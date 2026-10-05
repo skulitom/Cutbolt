@@ -365,6 +365,19 @@ struct Prepared {
     tiles: Vec<Option<Vec<Vec<Option<usize>>>>>,
     samples_per_frame: usize,
     geometry: Option<crate::geometry::Prepared>,
+    /// Composite of the unchanging bottom layers, made once per render (see `static_base`).
+    base: Option<Base>,
+    /// Source images with constant effects already applied, by layer and frame index (see
+    /// `processed_sources`).
+    processed: HashMap<(usize, usize), Pixels>,
+}
+
+/// The first `layers` layers composited over the backdrop: color, and for transparent scenes the
+/// matte pass.
+struct Base {
+    layers: usize,
+    color: Vec<u8>,
+    matte: Option<Vec<u8>>,
 }
 
 impl Prepared {
@@ -1120,6 +1133,8 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         tiles: tile_selections,
         samples_per_frame: exposure.samples,
         geometry,
+        base: None,
+        processed: HashMap::new(),
     })
 }
 
@@ -1343,8 +1358,46 @@ fn compose_sample(
                 .repeat((scene.width * scene.height) as usize)
         });
     }
-    let mut rgb = backdrop.repeat((scene.width * scene.height) as usize);
-    for (layer_index, layer) in scene.layers.iter().enumerate() {
+    match &prepared.base {
+        Some(base) => {
+            let start = if matte {
+                base.matte
+                    .as_ref()
+                    .expect("transparent scenes keep a matte base")
+            } else {
+                &base.color
+            };
+            compose_layers(
+                scene,
+                prepared,
+                sample,
+                matte,
+                base.layers..scene.layers.len(),
+                start.clone(),
+            )
+        }
+        None => compose_layers(
+            scene,
+            prepared,
+            sample,
+            matte,
+            0..scene.layers.len(),
+            backdrop.repeat((scene.width * scene.height) as usize),
+        ),
+    }
+}
+
+/// Composites `layers` of one exposure sample over `rgb`, in order.
+fn compose_layers(
+    scene: &Scene,
+    prepared: &Prepared,
+    sample: usize,
+    matte: bool,
+    layers: std::ops::Range<usize>,
+    mut rgb: Vec<u8>,
+) -> Result<Vec<u8>> {
+    for layer_index in layers {
+        let layer = &scene.layers[layer_index];
         let Some(index) = prepared.selected[layer_index][sample] else {
             continue;
         };
@@ -1363,7 +1416,13 @@ fn compose_sample(
         let parameters = prepared.parameters[layer_index][sample]
             .as_ref()
             .expect("selected layer has parameters");
-        let processor = crate::effects::Processor::new(&layer.effects, &parameters.effects);
+        let (image, processor) = match prepared.processed.get(&(layer_index, index)) {
+            Some(processed) => (processed, None),
+            None => (
+                image,
+                crate::effects::Processor::new(&layer.effects, &parameters.effects),
+            ),
+        };
         if let (Some(spec), Some(mapping)) = (&t.spatial, &parameters.spatial) {
             crate::spatial::draw(
                 &mut rgb,
@@ -1424,7 +1483,7 @@ fn compose_sample(
         // Iterate only the destination rectangle the transformed crop can cover (clipped to the
         // canvas), so off-canvas scales cannot cause unbounded work and small layers stay cheap.
         // Pixels outside it never reach a source pixel, so the result is unchanged.
-        let (span_x, span_y) = if t.quarter_turns % 2 == 0 {
+        let (span_x, span_y) = if t.quarter_turns.is_multiple_of(2) {
             (cw as i64 * scale, ch as i64 * scale)
         } else {
             (ch as i64 * scale, cw as i64 * scale)
@@ -1433,14 +1492,89 @@ fn compose_sample(
         let x1 = (left + span_x).clamp(0, scene.width as i64) as u32;
         let y0 = top.clamp(0, scene.height as i64) as u32;
         let y1 = (top + span_y).clamp(0, scene.height as i64) as u32;
-        for dy in y0..y1 {
-            for dx in x0..x1 {
-                let rx = dx as i64 - left;
-                let ry = dy as i64 - top;
-                if rx < 0 || ry < 0 {
-                    continue;
+        if parameters.opacity == 0 {
+            // Zero coverage leaves every destination value unchanged in each blend mode.
+            continue;
+        }
+        // Scaled source offsets of each destination column and row, divided once per layer and
+        // row rather than per pixel. -1 marks a position before the layer, as no source pixel.
+        if (processor.is_none() || layer.alpha_mode.is_straight())
+            && layer.mask.is_none()
+            && layer.blend_mode.is_normal()
+            && scale == 1
+            && t.quarter_turns == 0
+        {
+            // Unscaled, unrotated, unmasked normal layers (most sprites, cards and stage layers):
+            // each destination row reads one contiguous source run. Effects run once per source
+            // pixel of the run, as the general path runs them once per destination pixel; a
+            // straight pixel they leave unchanged stays straight, so the row is all straight.
+            let mut processed = Vec::new();
+            let (ox, oy) = (offset[0] as i64, offset[1] as i64);
+            // Source-canvas columns rx + cx must lie in the crop and in the image placed at offset.
+            let rx0 = 0.max(ox - cx as i64).max(x0 as i64 - left);
+            let rx1 = (cw as i64)
+                .min(image.width as i64 + ox - cx as i64)
+                .min(x1 as i64 - left);
+            let ry0 = 0.max(oy - cy as i64).max(y0 as i64 - top);
+            let ry1 = (ch as i64)
+                .min(image.height as i64 + oy - cy as i64)
+                .min(y1 as i64 - top);
+            for ry in ry0..ry1.max(ry0) {
+                if rx1 <= rx0 {
+                    break;
                 }
-                let (rx, ry) = (rx / scale, ry / scale);
+                let dy = (ry + top) as usize;
+                let iy = (ry + cy as i64 - oy) as usize;
+                let ix = (rx0 + cx as i64 - ox) as usize;
+                let width = (rx1 - rx0) as usize;
+                let dest = (dy * scene.width as usize + (rx0 + left) as usize) * 3;
+                let source = (iy * image.width as usize + ix) * 4;
+                let run = &image.rgba[source..source + width * 4];
+                let row = match &processor {
+                    None => run,
+                    Some(processor) => {
+                        processed.clear();
+                        if let Some([r, g, b]) = processor.tables() {
+                            // Zero alpha composites nothing, so its table values are harmless.
+                            for p in run.as_chunks::<4>().0 {
+                                processed.extend_from_slice(&[
+                                    r[p[0] as usize],
+                                    g[p[1] as usize],
+                                    b[p[2] as usize],
+                                    p[3],
+                                ]);
+                            }
+                        } else {
+                            let y = ry + cy as i64;
+                            for (i, p) in run.as_chunks::<4>().0.iter().enumerate() {
+                                let position = [rx0 + cx as i64 + i as i64, y];
+                                processed.extend_from_slice(
+                                    &processor
+                                        .pixel(p, AlphaMode::Straight, position)
+                                        .unwrap_or(*p),
+                                );
+                            }
+                        }
+                        &processed
+                    }
+                };
+                composite::normal_row(
+                    &mut rgb[dest..dest + width * 3],
+                    row,
+                    parameters.opacity,
+                    layer.alpha_mode,
+                    matte,
+                );
+            }
+            continue;
+        }
+        let unscale = |r: i64| if r < 0 { -1 } else { r / scale };
+        let columns = (x0..x1)
+            .map(|dx| unscale(dx as i64 - left))
+            .collect::<Vec<_>>();
+        for dy in y0..y1 {
+            let ry = unscale(dy as i64 - top);
+            for (dx, &rx) in (x0..x1).zip(&columns) {
                 let (sx, sy) = match t.quarter_turns {
                     0 => (rx, ry),
                     1 => (ry, ch as i64 - 1 - rx),
@@ -1479,6 +1613,10 @@ fn compose_sample(
                 } else {
                     (p, layer.alpha_mode)
                 };
+                if p[3] == 0 {
+                    // Zero alpha (premultiplied RGB is then zero too) leaves the backdrop exact.
+                    continue;
+                }
                 let (p, alpha_mode) = if matte {
                     white = [255, 255, 255, p[3]];
                     (white.as_slice(), AlphaMode::Straight)
@@ -1669,6 +1807,226 @@ fn compose_geometry(
 }
 
 /// One output frame: RGB, or straight RGBA for a transparent scene.
+/// The bottom layers that look the same at every exposure sample (same frame, tile frames and
+/// sampled parameters), composited once. Compositing is sequential, rounding after each layer, and
+/// each layer reads only its own inputs and the destination, so every frame that continues from
+/// this base gets exactly the values of compositing all layers. 3D scenes composite per sample.
+fn static_base(scene: &Scene, prepared: &Prepared) -> Result<Option<Base>> {
+    if prepared.geometry.is_some() {
+        return Ok(None);
+    }
+    let unchanging = |index: usize| -> Result<bool> {
+        let selected = &prepared.selected[index];
+        if selected.iter().any(|s| *s != selected[0]) {
+            return Ok(false);
+        }
+        if let Some(tiles) = &prepared.tiles[index]
+            && tiles.iter().any(|t| t.iter().any(|s| *s != t[0]))
+        {
+            return Ok(false);
+        }
+        let parameters = &prepared.parameters[index];
+        let first = serde_json::to_vec(&parameters[0])?;
+        for p in &parameters[1..] {
+            if serde_json::to_vec(p)? != first {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    };
+    let mut layers = 0;
+    while layers < scene.layers.len() && unchanging(layers)? {
+        layers += 1;
+    }
+    if layers == 0 {
+        return Ok(None);
+    }
+    let backdrop = if scene.transparent {
+        [0, 0, 0]
+    } else {
+        scene.background
+    };
+    let blank = backdrop.repeat((scene.width * scene.height) as usize);
+    let color = compose_layers(scene, prepared, 0, false, 0..layers, blank.clone())?;
+    let matte = if scene.transparent {
+        Some(compose_layers(scene, prepared, 0, true, 0..layers, blank)?)
+    } else {
+        None
+    };
+    Ok(Some(Base {
+        layers,
+        color,
+        matte,
+    }))
+}
+
+/// Source images of layers above the base whose effects sample the same values at every exposure
+/// sample, with the chain applied once per render instead of once per frame. Effects read only a
+/// source pixel and its source-canvas position, so compositing the processed image without
+/// effects gives the same values. Straight layers only: a pixel the chain leaves unchanged keeps
+/// its straight encoding. Processed images total at most `MAX_DECODED_PIXELS`; layers beyond that
+/// apply their effects per frame.
+fn processed_sources(
+    scene: &Scene,
+    prepared: &Prepared,
+) -> Result<HashMap<(usize, usize), Pixels>> {
+    let mut processed = HashMap::new();
+    if prepared.geometry.is_some() {
+        return Ok(processed);
+    }
+    let first_layer = prepared.base.as_ref().map_or(0, |b| b.layers);
+    let mut budget = MAX_DECODED_PIXELS;
+    for (layer_index, layer) in scene.layers.iter().enumerate().skip(first_layer) {
+        if layer.effects.is_empty() || !layer.alpha_mode.is_straight() || layer.tilemap.is_some() {
+            continue;
+        }
+        let mut sampled = prepared.parameters[layer_index].iter().flatten();
+        let Some(first) = sampled.next() else {
+            continue;
+        };
+        let effects = serde_json::to_vec(&first.effects)?;
+        let mut constant = true;
+        for parameters in sampled {
+            if serde_json::to_vec(&parameters.effects)? != effects {
+                constant = false;
+                break;
+            }
+        }
+        if !constant {
+            continue;
+        }
+        let Some(processor) = crate::effects::Processor::new(&layer.effects, &first.effects) else {
+            continue;
+        };
+        let indices = prepared.selected[layer_index]
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        for index in indices {
+            let (image, offset) = if layer.graphics.is_some() {
+                let (image, offset) = &prepared.graphics[&layer.id];
+                (image, *offset)
+            } else {
+                let frame = &layer.frames[index];
+                (prepared.frame_pixels(frame), frame.offset)
+            };
+            let Some(left) = budget.checked_sub(image.rgba.len() / 4) else {
+                return Ok(processed);
+            };
+            budget = left;
+            processed.insert(
+                (layer_index, index),
+                process_image(image, offset, &processor),
+            );
+        }
+    }
+    Ok(processed)
+}
+
+/// `image` (straight RGBA placed at `offset` in its source canvas) through an effect chain, in
+/// parallel row bands.
+fn process_image(
+    image: &Pixels,
+    offset: [u32; 2],
+    processor: &crate::effects::Processor,
+) -> Pixels {
+    let mut rgba = image.rgba.clone();
+    let width = image.width as usize;
+    if width > 0 && !rgba.is_empty() {
+        let workers = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .clamp(1, 64);
+        let rows = (rgba.len() / 4 / width).div_ceil(workers).max(1);
+        std::thread::scope(|scope| {
+            for (band, chunk) in rgba.chunks_mut(rows * width * 4).enumerate() {
+                scope.spawn(move || {
+                    for (i, p) in chunk.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                        let x = (i % width) as i64 + i64::from(offset[0]);
+                        let y = (band * rows + i / width) as i64 + i64::from(offset[1]);
+                        if let Some(q) = processor.pixel(p, AlphaMode::Straight, [x, y]) {
+                            *p = q;
+                        }
+                    }
+                });
+            }
+        });
+    }
+    Pixels {
+        width: image.width,
+        height: image.height,
+        rgba,
+    }
+}
+
+/// Composes frames 0..`frames` on `workers` threads and writes them strictly in order. Workers
+/// take frames in order and never run more than `window` frames ahead of the writer, which bounds
+/// memory; a slow frame no longer holds the other threads idle as a fixed batch did.
+fn write_ordered(
+    frames: u64,
+    workers: usize,
+    window: u64,
+    compose: &(dyn Fn(u64) -> Result<Vec<u8>> + Sync),
+    write: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    use std::sync::{
+        Condvar, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    };
+    let next = AtomicU64::new(0);
+    // Frames written so far, and whether the writer has stopped.
+    let progress = (Mutex::new((0u64, false)), Condvar::new());
+    std::thread::scope(|scope| {
+        let (sender, receiver) = mpsc::channel::<(u64, Result<Vec<u8>>)>();
+        for _ in 0..workers {
+            let sender = sender.clone();
+            let (next, progress) = (&next, &progress);
+            scope.spawn(move || {
+                loop {
+                    let n = next.fetch_add(1, Ordering::Relaxed);
+                    if n >= frames {
+                        return;
+                    }
+                    {
+                        let (lock, ready) = progress;
+                        let mut state = lock.lock().expect("progress lock");
+                        while !state.1 && n >= state.0 + window {
+                            state = ready.wait(state).expect("progress lock");
+                        }
+                        if state.1 {
+                            return;
+                        }
+                    }
+                    if sender.send((n, compose(n))).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        let outcome = (|| {
+            let mut pending = std::collections::BTreeMap::new();
+            let mut written = 0u64;
+            for (n, frame) in receiver.iter() {
+                pending.insert(n, frame?);
+                while let Some(frame) = pending.remove(&written) {
+                    write(&frame)?;
+                    written += 1;
+                    progress.0.lock().expect("progress lock").0 = written;
+                    progress.1.notify_all();
+                }
+            }
+            Ok(())
+        })();
+        // Release waiting workers and refuse further frames, whatever the outcome.
+        progress.0.lock().expect("progress lock").1 = true;
+        progress.1.notify_all();
+        drop(receiver);
+        outcome
+    })
+}
+
 fn compose(scene: &Scene, prepared: &Prepared, frame: u64) -> Result<Vec<u8>> {
     if !scene.transparent {
         return compose_plane(scene, prepared, frame, false);
@@ -1757,7 +2115,9 @@ pub fn inspect(scene: &Scene, root: &Path) -> Result<Value> {
 
 pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Result<Value> {
     let output = render::destination(output, output_root)?;
-    let prepared = prepare(scene, root)?;
+    let mut prepared = prepare(scene, root)?;
+    prepared.base = static_base(scene, &prepared)?;
+    prepared.processed = processed_sources(scene, &prepared)?;
     let scratch = Scratch::new(output.parent().expect("validated parent"))?;
     let rate = scene.clock()?;
     let frames = scene.duration.units(rate)?;
@@ -1842,29 +2202,21 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
     let workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
-        .clamp(1, 16) as u64;
+        .clamp(1, 64);
+    // At least one frame per worker may wait for the writer, up to two within about 256 MiB.
+    let frame_bytes = u64::from(scene.width) * u64::from(scene.height) * 4;
+    let window = ((256u64 << 20) / frame_bytes).clamp(workers as u64, 2 * workers as u64);
     let shared = &prepared;
     media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, |stdin| {
-        // Compose frames in parallel batches; write them strictly in order. Composition is a pure
-        // function of the prepared scene, so output is identical for any worker count.
-        let mut next = 0u64;
-        while next < frames {
-            let batch = workers.min(frames - next);
-            let composed = std::thread::scope(|scope| {
-                let handles = (next..next + batch)
-                    .map(|n| scope.spawn(move || compose(scene, shared, n)))
-                    .collect::<Vec<_>>();
-                handles
-                    .into_iter()
-                    .map(|h| h.join().expect("composition thread"))
-                    .collect::<Result<Vec<_>>>()
-            })?;
-            for rgb in composed {
-                stdin.write_all(&rgb)?;
-            }
-            next += batch;
-        }
-        Ok(())
+        // Composition is a pure function of the prepared scene, so output is identical for any
+        // worker count; frames are written strictly in order.
+        write_ordered(
+            frames,
+            workers,
+            window,
+            &|n| compose(scene, shared, n),
+            &mut |rgb| Ok(stdin.write_all(rgb)?),
+        )
     })?;
     let (out_w, out_h) = (
         scene.width * scene.output_scale,
@@ -2039,6 +2391,107 @@ mod tests {
 
     fn frames(n: u64, rate: Time) -> Time {
         Time::new(n * rate.den, rate.num).unwrap()
+    }
+
+    #[test]
+    fn cached_bottom_layers_and_processed_sources_composite_identically() {
+        let mut scene = panel_scene();
+        let panel = scene.layers[0].clone();
+        let effect =
+            |value: Value| -> crate::effects::Effect { serde_json::from_value(value).unwrap() };
+        let grade = effect(
+            json!({"kind":"grade","exposure_milli":400,"contrast_milli":1200,"white_balance_milli":[1100,1000,900]}),
+        );
+        let key = json!({"kind":"chroma_key","key_rgb":[28,56,89],"inner_milli":60,"outer_milli":300,"strength_milli":700,"unmix_milli":500,"spill":{"channel":"blue","strength_milli":500}});
+        let mut fading_key = key.clone();
+        fading_key["strength_curve"] = json!({"keys":[{"time":{"num":0,"den":1},"value":0,"interpolation":"linear"},{"time":{"num":3,"den":1},"value":1000,"interpolation":"hold"}]});
+        let curve = |property: &str, to: i32| -> Option<Animation> {
+            Some(serde_json::from_value(json!({property:{"keys":[{"time":{"num":0,"den":1},"value":0,"interpolation":"linear"},{"time":{"num":3,"den":1},"value":to,"interpolation":"hold"}]}})).unwrap())
+        };
+        let layer =
+            |id: &str, effects: Vec<crate::effects::Effect>, animation: Option<Animation>| Layer {
+                id: id.into(),
+                effects,
+                animation,
+                ..panel.clone()
+            };
+        scene.layers = vec![
+            layer("still", vec![], None),
+            layer("graded", vec![grade.clone()], None),
+            layer("moving-graded", vec![grade], curve("position_x", 40)),
+            layer("moving-keyed", vec![effect(key)], curve("position_y", -30)),
+            layer("fading-key", vec![effect(fading_key)], None),
+            layer("fading", vec![], curve("opacity", 255)),
+        ];
+        for transparent in [false, true] {
+            scene.transparent = transparent;
+            let frames = scene.validate().unwrap();
+            let root = std::env::temp_dir();
+            let plain = prepare(&scene, &root).unwrap();
+            let mut cached = prepare(&scene, &root).unwrap();
+            cached.base = static_base(&scene, &cached).unwrap();
+            cached.processed = processed_sources(&scene, &cached).unwrap();
+            // The two unchanging layers form the base; the moving layers' constant chains are
+            // applied once; the animated key strength and the fade stay per frame.
+            assert_eq!(cached.base.as_ref().unwrap().layers, 2);
+            let mut processed = cached.processed.keys().map(|k| k.0).collect::<Vec<_>>();
+            processed.sort();
+            assert_eq!(processed, [2, 3]);
+            for n in 0..frames {
+                assert_eq!(
+                    compose(&scene, &cached, n).unwrap(),
+                    compose(&scene, &plain, n).unwrap(),
+                    "frame {n}, transparent {transparent}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ordered_frames_arrive_in_order_and_stop_on_failure() {
+        let mut written = Vec::new();
+        write_ordered(
+            200,
+            8,
+            8,
+            &|n| {
+                // Uneven work makes later frames finish first.
+                std::thread::sleep(std::time::Duration::from_micros((n % 7) * 300));
+                Ok(n.to_le_bytes().to_vec())
+            },
+            &mut |frame| {
+                written.push(u64::from_le_bytes(frame.try_into().unwrap()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(written, (0..200).collect::<Vec<_>>());
+        let failed = write_ordered(
+            200,
+            8,
+            8,
+            &|n| {
+                if n == 50 {
+                    Err(error("TEST", "frame 50"))
+                } else {
+                    Ok(vec![0])
+                }
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(failed.code, "TEST");
+        let mut count = 0;
+        let stopped = write_ordered(200, 8, 8, &|_| Ok(vec![0]), &mut |_| {
+            count += 1;
+            if count == 20 {
+                Err(error("WRITE", "pipe closed"))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!((stopped.code, count), ("WRITE", 20));
     }
 
     #[test]

@@ -83,15 +83,52 @@ pub(crate) fn masked_channel(
         AlphaMode::Straight => s * a * o,
         AlphaMode::Premultiplied => s * 255 * o,
     } * mask as u64;
-    let (numerator, denominator) = match mode {
-        BlendMode::Normal => (weighted + d * (65025 * unit - coverage), 65025 * unit),
-        BlendMode::Multiply => (
-            d * weighted + 255 * d * (65025 * unit - coverage),
-            16581375 * unit,
-        ),
-        BlendMode::Screen => (d * 16581375 * unit + (255 - d) * weighted, 16581375 * unit),
-    };
-    ((numerator + denominator / 2) / denominator) as u8
+    // Each arm divides by its own constant, which compiles to a multiplication instead of a
+    // 64-bit division by a run-time denominator for every channel.
+    const NORMAL: u64 = 65025 * MASK_WEIGHT as u64;
+    const PRODUCT: u64 = 16581375 * MASK_WEIGHT as u64;
+    (match mode {
+        BlendMode::Normal => (weighted + d * (NORMAL - coverage) + NORMAL / 2) / NORMAL,
+        BlendMode::Multiply => {
+            (d * weighted + 255 * d * (65025 * unit - coverage) + PRODUCT / 2) / PRODUCT
+        }
+        BlendMode::Screen => (d * PRODUCT + (255 - d) * weighted + PRODUCT / 2) / PRODUCT,
+    }) as u8
+}
+
+/// Normal blend of an RGBA source row over an opaque RGB row at full mask coverage, with the
+/// values of `channel`: with k = alpha x opacity and X = source x k + dest x (65025 - k), the
+/// reference rounds (X x 65536 + 65025 x 32768) / (65025 x 65536), which is (X + 32512) / 65025
+/// because 65025 is odd. Zero alpha keeps the destination exactly, so no pixel is skipped and the
+/// 32-bit loop vectorizes. `white` blends opaque white with the source alpha (a matte pass).
+pub(crate) fn normal_row(
+    dest: &mut [u8],
+    source: &[u8],
+    opacity: u8,
+    encoding: AlphaMode,
+    white: bool,
+) {
+    let o = u32::from(opacity);
+    let premultiplied = matches!(encoding, AlphaMode::Premultiplied) && !white;
+    for (d, s) in dest
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(source.as_chunks::<4>().0)
+    {
+        let k = u32::from(s[3]) * o;
+        let rest = 65025 - k;
+        for c in 0..3 {
+            let weighted = if white {
+                255 * k
+            } else if premultiplied {
+                u32::from(s[c]) * 255 * o
+            } else {
+                u32::from(s[c]) * k
+            };
+            d[c] = ((weighted + u32::from(d[c]) * rest + 32512) / 65025) as u8;
+        }
+    }
 }
 
 /// Rectangle limiting layer opacity, in source-canvas pixels before crop and transform.
@@ -291,6 +328,49 @@ mod tests {
         assert!(validate_alpha(&[1, 0, 0, 0], AlphaMode::Premultiplied).is_err());
         assert!(validate_alpha(&[50, 0, 0, 49], AlphaMode::Premultiplied).is_err());
         assert!(validate_alpha(&[200, 30, 0, 0], AlphaMode::Straight).is_ok());
+    }
+
+    #[test]
+    fn normal_rows_match_the_reference_channel() {
+        let alphas: Vec<u8> = (0..=255).collect();
+        for opacity in [0u8, 1, 2, 77, 128, 200, 254, 255] {
+            for dest in 0..=255u8 {
+                for source in [0u8, 1, 2, 63, 127, 128, 200, 254, 255] {
+                    for (encoding, white) in [
+                        (AlphaMode::Straight, false),
+                        (AlphaMode::Premultiplied, false),
+                        (AlphaMode::Straight, true),
+                    ] {
+                        let pixels: Vec<u8> = alphas
+                            .iter()
+                            .flat_map(|&a| {
+                                // Premultiplied channels never exceed alpha.
+                                let s = if matches!(encoding, AlphaMode::Premultiplied) {
+                                    source.min(a)
+                                } else {
+                                    source
+                                };
+                                [s, s / 2, 255 - s, a]
+                            })
+                            .collect();
+                        let mut row = vec![dest; alphas.len() * 3];
+                        normal_row(&mut row, &pixels, opacity, encoding, white);
+                        for (d, p) in row.chunks(3).zip(pixels.chunks(4)) {
+                            for c in 0..3 {
+                                let s = if white { 255 } else { p[c] };
+                                let mode = if white { AlphaMode::Straight } else { encoding };
+                                assert_eq!(
+                                    d[c],
+                                    channel(dest, s, p[3], opacity, BlendMode::Normal, mode),
+                                    "dest {dest} source {s} alpha {} opacity {opacity}",
+                                    p[3]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -217,7 +217,7 @@ Expected result: the slowest correctness fixtures fall to 1–2 minutes and the 
    - Or the same settings on dev itself, at 13 s per incremental build.
 
    Debug assertions and overflow checks stay on. Engine-heavy work runs about 2× faster, with identical decoded output.
-2. **Scale FFV1 slices with frame size,** for example 16 at 1080p and above, while keeping the documented narrow-frame exception. 4K encode becomes 2.3× faster, the 30-minute 4K fixture render drops by roughly 10 minutes, and user renders gain the same. Receipts that report slice counts must be updated, and fixtures that assert them.
+2. **Scale FFV1 slices with frame size,** for example 16 at 1080p and above, while keeping the documented narrow-frame exception. 4K encode becomes 2.3× faster, the 30-minute 4K fixture render drops by roughly 10 minutes, and user renders gain the same. Receipts that report slice counts must be updated, and fixtures that assert them. **Done 5 October 2026:** frames of 640 x 360 and larger get 16 slices, and strict output verification decodes with 16 threads at every size.
 3. **Real-time capture robustness.** Run the capture and fixture source threads under MMCSS "Pro Audio" priority and measure the gap rate. This hardens real user recordings against busy desktops, not just the test.
 
 ### Phase 4: workflow and environment

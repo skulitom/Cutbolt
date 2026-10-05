@@ -52,6 +52,63 @@ Follow-ups:
 - A track compressor, the issue's optional part, is not implemented; the limiter alone reached the target here.
 - Limiters inside nested sequences.
 - Headroom that knows the delivery codec.
+## 5 October 2026: scene compositing four to twelve times faster
+
+A visual-effects stress test (`C:\DEV\CutboltData\vfx-stress-20261005`) rendered 10 s 1080p25 scenes. They covered:
+- 1 to 64 full-frame layers, both static and animated;
+- grades, selective grades, chroma keys and 8-effect chains;
+- Ken Burns zooms and rotations, feathered masks and 40 caption cues;
+- 60 fps, 120 s and transparent output.
+
+Most of the time went into avoidable work:
+- **Verification:** strict output verification decoded every frame on one ffprobe thread below 8 MP. A 10 s scene spent 27 s verifying after 6 s of rendering; a 120 s scene spent about 190 s of its 286 s.
+- **FFV1 slices:** 1080p was encoded with four FFV1 slices, which caps both encoding and decoding at about four threads.
+- **Per-pixel cost:** a full-frame layer cost about 33 ms per frame per core. Every channel did a 64-bit division by a run-time denominator, and every pixel did two scale divisions and closure calls.
+- **Repeated work:**
+  - Unchanging layers were composited again in every frame.
+  - Effects with fixed settings ran per pixel per frame: a 1080p chroma key cost about 590 ms per frame, a selective grade about 320 ms.
+- **Batching:** frames were composed in batches of at most 16 threads, each batch joined before being written.
+
+The changes. Decoded frames and audio stay identical:
+- **Verification and slices.** Strict verification decodes with 16 threads at every size. FFV1 writers use 16 slices for frames of 640 x 360 and larger (DEVELOPMENT_LOOP phase 3, item 2).
+- **Static base.** The bottom layers that look the same in every frame (same source frame, tile frames and sampled values) are composited once per render. Each frame continues from that result.
+- **Processed sources.** Layers above that base whose effects sample the same values throughout have their straight source images processed once per render, in parallel, within the decoded-pixel budget. Animated effects still run per frame.
+- **Row kernel.** Unscaled, unrotated, unmasked normal-blend straight layers (and premultiplied layers without effects) blend whole rows in 32-bit arithmetic. (X + 32512) / 65025 equals the reference rounding because 65025 is odd.
+- **Constant divisors.** The general blend divides by a constant per mode. Spatial blending shifts out its 2^48 factor and then divides 64-bit values by a constant.
+- **Worker pool.** One worker per logical processor (at most 64) takes the next frame. Workers run at most two frames each, within about 256 MiB, ahead of an in-order writer.
+
+Release builds of `d3c9140` (before) and this change, run back to back on the same machine while other sessions were working. "Compositing" is the engine's own CPU time. Every row's decoded video and audio hashes match.
+
+| 10 s 1080p25 scene | Before | After | Compositing CPU |
+| --- | ---: | ---: | ---: |
+| 1 opaque layer | 35.1 s | 6.0 s | 11 s → 1.6 s |
+| 64 static full-frame layers | 52.1 s | 4.2 s | 557 s → 1.7 s |
+| 33 animated full-frame layers | 33.5 s | 7.6 s | 279 s → 78 s |
+| Stage: 7 static layers, 12 moving sprites, 4 timed cards | 32.7 s | 6.9 s | 82 s → 6.5 s |
+| 8 transparent layers | 25.3 s | 3.8 s | 145 s → 5.4 s |
+| 8 selective grades on animated layers | 90.6 s | 7.7 s | 682 s → 25 s |
+| One full-frame chroma key on a moving layer | 36.4 s | 4.3 s | 157 s → 3.7 s |
+| Bilinear Ken Burns zoom of one full-frame layer | 39.1 s | 10.8 s | 47 s → 42 s |
+| 9 animated layers with feathered moving masks | 38.9 s | 9.5 s | 101 s → 76 s |
+
+Unit tests cover:
+- the row kernel against the reference channel for every alpha, destination and a range of sources and opacities;
+- cached and uncached composition producing identical frames (opaque and transparent, with graded, keyed, moving and fading layers);
+- the ordered writer under uneven work, a frame error and a write error.
+
+The scene, compositing, effect, spatial, temporal, geometry, graphics, caption, overlay and FFV1 fixtures are run with this change. These are speed improvements only and earn no capability points.
+
+**Still slow or limited (open):**
+- **Per-pixel cost:**
+  - Spatial layers cost about 166 ms per full-frame 1080p frame.
+  - Masked layers and animated per-pixel effects still take the general per-pixel path.
+- **The work budget counts static layers in every frame.** 11 static full-frame layers for 120 s are rejected, although they now composite once.
+- **Feature caps that bind at 1080p:**
+  - shutter sampling: 1 s at 1080p is rejected;
+  - 3D geometry: one plane for 1 s at 1080p is rejected;
+  - expressions: 25 nodes over 120 s are rejected;
+  - tracking and stabilization read sources at 512 px or less.
+- **Encoding and verification** now take most of a scene's wall time: about 25 CPU-seconds each per 10 s of 1080p.
 
 ## 5 October 2026: fast overlay exports, stoppable queued commands, cached source checks
 

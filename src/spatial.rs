@@ -12,6 +12,8 @@ use serde_json::{Value, json};
 const Q: i64 = 65536;
 const WEIGHT: u128 = (Q as u128) * (Q as u128);
 const TOTAL: u128 = WEIGHT * crate::composite::MASK_WEIGHT as u128;
+const TOTAL_BITS: u32 = TOTAL.trailing_zeros();
+const _: () = assert!(TOTAL == 1 << TOTAL_BITS);
 
 /// Source sampling filter: `nearest` (containing source pixel) or `bilinear` (four neighboring pixel centers).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -438,20 +440,22 @@ pub(crate) fn draw(
             }
             let remaining = 65025 * TOTAL - alpha * opacity as u128;
             let dest = ((y * dimensions[0] + x) * 3) as usize;
+            // round(n / (den * TOTAL)) with TOTAL = 2^48: floor(floor(x / 2^48) / den) equals
+            // floor(x / (den * 2^48)), and the shifted value fits in u64, so each channel costs a
+            // shift and a 64-bit division by a constant instead of a 128-bit division.
+            let round = |n: u128, den: u64| {
+                (((n + den as u128 * TOTAL / 2) >> TOTAL_BITS) as u64 / den) as u8
+            };
             for i in 0..3 {
                 let old = rgb[dest + i] as u128;
                 let weighted = color[i] * opacity as u128;
-                let (n, den) = match blend {
-                    BlendMode::Normal => (weighted + old * remaining, 65025 * TOTAL),
-                    BlendMode::Multiply => {
-                        (old * weighted + 255 * old * remaining, 16581375 * TOTAL)
+                rgb[dest + i] = match blend {
+                    BlendMode::Normal => round(weighted + old * remaining, 65025),
+                    BlendMode::Multiply => round(old * weighted + 255 * old * remaining, 16581375),
+                    BlendMode::Screen => {
+                        round(old * 16581375 * TOTAL + (255 - old) * weighted, 16581375)
                     }
-                    BlendMode::Screen => (
-                        old * 16581375 * TOTAL + (255 - old) * weighted,
-                        16581375 * TOTAL,
-                    ),
                 };
-                rgb[dest + i] = ((n + den / 2) / den) as u8;
             }
         }
     }
