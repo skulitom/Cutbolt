@@ -1,5 +1,26 @@
 # Progress history
 
+## 5 October 2026: the MCP catalog regains 16 % headroom
+
+With a workspace, the full MCP catalog was 261,499 bytes against the 262,144-byte budget of `tool_listings_fit_agent_context` (99.8 %), so the next feature adding schema text would have failed it. The evening research (`C:\DEV\CutboltData\demo-progress2-20261005\research\RESEARCH.md`, C3) measured where the bytes went: 30 tools each carried the saved-project reference as two definitions (820 bytes), five caption tools each carried the whole caption document (about 2.6 KB), and schemars adds a numeric `format` and `"default": null` to most fields.
+
+Listings changed; `schema` lookups still return the full definitions:
+- A `project` input is one described object: a full snapshot, or `{"project_id", "revision"}` naming a saved revision, with where `store_root` defaults.
+- The caption document is a seventh abbreviated shared type, `captions` (definition `CaptionDocument`), like `transcript`: the caption commands return it and agents pass it on.
+- Numeric `format` widths and `"default": null` are left out of listings, along with any definitions nothing references any more.
+- Shorter wording: the deferred-type stubs, the `save_as` property and the file identity fields.
+
+Measured with `research/mcp_surface.py` on debug builds of `83de4ca` and of this change:
+
+| `tools/list` | Before | After |
+| --- | ---: | ---: |
+| Full catalog | 253,961 B | 214,352 B |
+| Full, with a workspace | 261,499 B (99.8 % of budget) | 220,464 B (84.1 %) |
+| Core (`--tools core`) | 73,979 B | 63,427 B |
+| Core, with a workspace | 77,112 B | 65,957 B |
+
+The core catalog with a workspace is about 20k tokens instead of 23k. A unit test checks that listings no longer carry the reference definitions or the dropped keywords, and that lookups still return them. No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: H.264 exports stream straight from the timeline
 
 On main `d3c9140`, the progress demo's final cut (`pip-explainer` revision 13: 80.64 s of 1080p25, 14 FFV1 scene shots, 7 narration clips and a ducked music bed) exported to H.264 in 127 s. Revision 10, with a caption overlay and a picture-in-picture clip, took 112 s warm. Export was the slowest single step of a new video. A logging shim on FFmpeg timed revision 13's warm export:

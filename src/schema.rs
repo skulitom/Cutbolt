@@ -5,13 +5,14 @@ use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, sync::OnceLock};
 
 /// Shared types abbreviated in tool listings, by public lookup name and definition name.
-pub const DEFERRED: [(&str, &str); 6] = [
+pub const DEFERRED: [(&str, &str); 7] = [
     ("project", "Project"),
     ("operation", "Operation"),
     ("scene", "Scene"),
     ("template", "Template"),
     ("audio_routing", "Routing"),
     ("transcript", "Document"),
+    ("captions", "CaptionDocument"),
 ];
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -143,12 +144,12 @@ fn stub(public: &str, name: &str, reference: &Map<String, Value>) -> Value {
         .and_then(Value::as_str)
         .unwrap_or_default();
     let mut stub = json!({"type":"object","description":format!(
-        "{summary} Abbreviated here; cutbolt_schema {{\"name\":\"{public}\"}} returns the complete schema."
+        "{summary} Abbreviated; cutbolt_schema {{\"name\":\"{public}\"}} returns it."
     ).trim_start().to_owned()});
     if let Some((tag, values)) = discriminator(definition) {
         stub["required"] = json!([tag]);
         stub["properties"] = json!({tag:{"type":"string","enum":values,
-            "description":"Variant tag; the complete schema lists each variant's fields."}});
+            "description":"Variant tag; cutbolt_schema with select returns a variant's fields."}});
     }
     stub
 }
@@ -520,6 +521,90 @@ pub(crate) fn context_properties(command: &str, context: &str, object: &Value) -
         .as_object()
         .map(|p| p.keys().cloned().collect())
         .unwrap_or_default()
+}
+
+/// Integer and float widths that `type`, `minimum` and `maximum` already bound.
+const NUMERIC_FORMATS: [&str; 10] = [
+    "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "float", "double",
+];
+
+/// What a tool listing shows of a command's arguments. The saved-project input becomes one
+/// described object instead of two definitions, numeric `format` widths and `default: null` are
+/// left out (`type`, `minimum` and `required` say the same), and definitions nothing references
+/// any more are dropped. `schema` lookups keep everything.
+pub fn listing(schema: &mut Value, workspace: bool) {
+    let saved = if workspace {
+        "A full snapshot (cutbolt_schema {\"name\":\"project\"}), or {\"project_id\", \"revision\"} to load a saved revision (default the head; store_root defaults to the workspace store)."
+    } else {
+        "A full snapshot (cutbolt_schema {\"name\":\"project\"}), or {\"project_id\", \"revision\", \"store_root\"} to load a saved revision (default the head)."
+    };
+    trim(schema, saved);
+    let Some(Value::Object(definitions)) = schema.get("$defs") else {
+        return;
+    };
+    let mut used = std::collections::BTreeSet::new();
+    let mut pending: Vec<String> = schema
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(key, _)| *key != "$defs")
+        .flat_map(|(_, value)| references(value))
+        .collect();
+    while let Some(name) = pending.pop() {
+        if let Some(definition) = definitions.get(&name)
+            && used.insert(name)
+        {
+            pending.extend(references(definition));
+        }
+    }
+    let object = schema.as_object_mut().expect("object schema");
+    if let Some(Value::Object(definitions)) = object.get_mut("$defs") {
+        definitions.retain(|name, _| used.contains(name));
+        if definitions.is_empty() {
+            object.remove("$defs");
+        }
+    }
+}
+
+fn trim(schema: &mut Value, saved: &str) {
+    match schema {
+        Value::Object(object) => {
+            if object.get("$ref").and_then(Value::as_str) == Some("#/$defs/ProjectInput") {
+                let own = object
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                *schema =
+                    json!({"type":"object","description":format!("{own} {saved}").trim_start()});
+                return;
+            }
+            if object.get("default").is_some_and(Value::is_null) {
+                object.remove("default");
+            }
+            if object
+                .get("format")
+                .and_then(Value::as_str)
+                .is_some_and(|f| NUMERIC_FORMATS.contains(&f))
+            {
+                object.remove("format");
+            }
+            for (key, value) in object.iter_mut() {
+                match key.as_str() {
+                    // Maps of named subschemas: the names are not keywords.
+                    "properties" | "$defs" | "patternProperties" => {
+                        if let Value::Object(named) = value {
+                            named.values_mut().for_each(|v| trim(v, saved));
+                        }
+                    }
+                    // Literal values, not schemas.
+                    "enum" | "const" | "default" | "examples" => {}
+                    _ => trim(value, saved),
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| trim(v, saved)),
+        _ => {}
+    }
 }
 
 /// With a workspace, the roots it supplies become optional and say where they default.

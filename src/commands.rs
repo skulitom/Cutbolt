@@ -867,7 +867,7 @@ pub enum Request {
     },
     #[serde(rename = "schema")]
     Schema {
-        /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template`, `audio_routing` or `transcript`.
+        /// A command such as `scene.render` or its MCP tool name, or a shared type: `project`, `operation`, `scene`, `template`, `audio_routing`, `transcript` or `captions`.
         name: String,
         /// One part to return: a variant tag such as `clip.append`, or a definition name such as `Layer`. Omit for the whole schema, or an outline of it when it is large.
         #[serde(default)]

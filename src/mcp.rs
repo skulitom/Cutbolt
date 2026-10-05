@@ -238,7 +238,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
         }
         "schema" => {
-            "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template, audio_routing or transcript. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
+            "Return the JSON Schema for one command's arguments, including CLI-only commands, or for a shared type that tool listings abbreviate: project, operation, scene, template, audio_routing, transcript or captions. Large schemas come back as an outline of variants and definitions; pass select (for example operation + clip.append, or scene + Layer) for one part with everything it references. Read-only."
         }
         "image.sequence.compile" => {
             "Compile a validated numbered PNG recipe into a transparent lossless movie or an explicitly flattened native editing asset at an unused output path. Blocking CLI/library command."
@@ -437,10 +437,11 @@ pub(crate) fn exposed(command: &str) -> bool {
 pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
     crate::schema::commands().filter(|c| exposed(c)).map(|command| {
         let mut input = crate::schema::arguments(command, true).expect("command schema");
+        crate::schema::listing(&mut input, workspace.is_some());
         if workspace.is_some() {
             crate::schema::relax_roots(&mut input);
             if DOCUMENTS.contains(&command) {
-                input["properties"]["save_as"] = json!({"type":"string","description":"Write the result to this new .json workspace file and return a summary; later arguments read it as {\"file\": path, \"select\": field or dotted.path}."});
+                input["properties"]["save_as"] = json!({"type":"string","description":"Write the result to this new workspace .json file and return a summary; pass it on as {\"file\": path, \"select\": field}."});
             }
         }
         let read_only=matches!(command,"timeline.check"|"transcript.assemble"|"transcript.fillers"|"audio.beats"|"captions.draft"|"audio.tighten"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
@@ -615,7 +616,7 @@ impl Server {
             "Review your work: timeline.check lists likely mistakes without rendering; timeline.outline reads the whole cut as text, one line per clip, with what is said in it when given transcripts; preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
             "A whole narrated pixel-art explainer (script, one visual beat per scene, palette, music) is one local command outside the engine: python tools/production.py build <manifest> --root <folder> in the Cutbolt repository drives PixelForge, the Qwen narration worker and these tools with resumable stage receipts; see docs/PRODUCTION.md. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
-            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template, audio_routing and transcript schemas; ",
+            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template, audio_routing, transcript and captions schemas; ",
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
         )
         .to_owned();
@@ -929,6 +930,38 @@ mod tests {
             check_catalog(&tools(Some(&workspace)))
         );
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// Listings describe the saved-project input in one object and leave out what type, minimum
+    /// and required already say; `schema` lookups keep the full definitions.
+    #[test]
+    fn listings_trim_what_lookups_keep() {
+        let catalog = tools(None);
+        let frame = catalog
+            .iter()
+            .find(|t| t["name"] == "cutbolt_preview_frame")
+            .unwrap();
+        let project = &frame["inputSchema"]["properties"]["project"];
+        assert_eq!(project["type"], "object");
+        assert!(
+            project["description"]
+                .as_str()
+                .unwrap()
+                .contains("project_id")
+        );
+        let text = Value::Array(catalog.clone()).to_string();
+        for absent in [
+            "#/$defs/ProjectInput",
+            "SavedProject",
+            "\"uint64\"",
+            "\"default\":null",
+        ] {
+            assert!(!text.contains(absent), "listings still contain {absent}");
+        }
+        let looked = crate::schema::lookup("preview.frame", None, true).unwrap();
+        assert!(looked["schema"]["$defs"]["SavedProject"].is_object());
+        let captions = crate::schema::lookup("captions", None, true).unwrap();
+        assert!(captions["schema"]["$defs"]["Cue"].is_object());
     }
 
     #[test]

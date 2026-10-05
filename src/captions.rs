@@ -69,6 +69,7 @@ pub struct Cue {
 /// Native caption document: styles and time-ordered cues, edited immutably by captions.apply.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "CaptionDocument")]
 pub struct Document {
     /// Document format version; must be 1.
     pub schema_version: u32,

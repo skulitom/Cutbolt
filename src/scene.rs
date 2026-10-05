@@ -57,16 +57,16 @@ pub(crate) fn limits() -> Value {
         "encoding":"streamed_rgb24_frames_parallel_composition_deterministic_order"})
 }
 
-/// Content identity of a source file: a path inside the input root plus its SHA-256 and size.
+/// A source file inside the input root, pinned by its SHA-256 and size.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Identity {
-    /// Relative path of normal components inside `input_root`; no `..`, drive or absolute parts.
+    /// Path relative to `input_root`; no `..`, drive or absolute parts.
     pub path: PathBuf,
-    /// Lowercase hex SHA-256 of the file contents (64 characters). Omit it, with or without `bytes`, to have the file hashed when the request runs.
+    /// Lowercase hex SHA-256 of the contents. When omitted, the file is hashed as the request runs.
     #[serde(default)]
     pub sha256: String,
-    /// Exact nonzero file size in bytes; checked against the file before use. Omitted values are read from the file.
+    /// Nonzero size in bytes, checked before use; read from the file when omitted.
     #[serde(default)]
     pub bytes: u64,
 }
