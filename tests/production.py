@@ -327,6 +327,8 @@ def check_offline(out, passed):
     # 8. Order: alignment needs only the voice assets, so it starts while the music is still being prepared; captions
     #    wait for the audio timeline and the alignment. The stages are stubs: nothing runs, no receipt is written.
     order, aligning = [], threading.Event()
+    # The build reads these fields between stages (music-length and codec warnings), so the stubs return their shapes.
+    music_stub, timing_stub, mixed_stub = {"duration": "8/1"}, {"result": {"total": "8/1"}}, {"result": {"report": {}}}
 
     class Stubbed(Production):
         def stage_inputs(self):
@@ -339,7 +341,7 @@ def check_offline(out, passed):
             return {"one": "take"}
 
         def stage_timing(self, takes):
-            return "timing"
+            return timing_stub
 
         def stage_prepare_voice(self, takes):
             order.append("voice")
@@ -349,7 +351,7 @@ def check_offline(out, passed):
             order.append("music started")
             assert aligning.wait(30), "alignment waited for the music"
             order.append("music done")
-            return "music"
+            return music_stub
 
         def stage_align(self, voice):
             assert voice == {"one": "voice asset"}, voice
@@ -362,15 +364,15 @@ def check_offline(out, passed):
             return {"timing": timing, "voice": voice, "music": music}
 
         def stage_mix(self, audio):
-            return "mixed"
+            return mixed_stub
 
         def stage_captions(self, audio, aligned):
-            assert audio["music"] == "music" and aligned == {"one": "aligned"}, (audio, aligned)
+            assert audio["music"] is music_stub and aligned == {"one": "aligned"}, (audio, aligned)
             order.append("captions")
             return "captions"
 
         def stage_scenes(self, timing, aligned, captions, art, inputs):
-            assert (timing, captions, art) == ("timing", "captions", "art")
+            assert (timing, captions, art) == (timing_stub, "captions", "art")
             order.append("scenes")
             return "scenes"
 
