@@ -274,6 +274,18 @@ Clips that share a level share one `clip_audio` operation. Apply them with `sess
 
 These commands let an agent check its own work from text, still images and numbers.
 
+- **`timeline.check`** lists likely mistakes without rendering, errors first, then warnings, then notes, each with times and clip IDs. `ok` is true when there are no warnings or errors.
+  - **Errors.** Missing or changed media, with `input_root`; changed means a bound identity no longer matches.
+  - **Warnings.**
+    - Black stretches with no opaque video clip.
+    - Flash frames: picture clips shorter than `min_clip_frames` (default 3).
+    - Picture and sound of one source that play together, unlinked, at different source times. It reports which is late and by how much.
+    - Words cut by clip edges, with `transcripts`.
+  - **Notes.**
+    - Clips on disabled tracks.
+    - Stretches with no audio clip.
+    - Jump cuts between touching clips of one source that skip or repeat less than `jump_window` (default 10 s); deliberate in jump-cut editing.
+    - Unused assets.
 - **`timeline.outline`** reads a timeline as compact text without rendering anything:
   - **Header.** It gives the canvas, frame rate, duration and assets.
   - **Clip lines.** Each track lists one line per clip, in time order: timeline span, clip ID, asset (or `seq:` and a child sequence), source span, link, and any gain, fades or picture-in-picture transform. A transition gets its own bracketed line after its outgoing clip.

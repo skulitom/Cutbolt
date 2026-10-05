@@ -1,5 +1,16 @@
 # Progress history
 
+## 5 October 2026: static timeline check
+
+Several kinds of mistake only showed up in a render, or not at all: a two-frame flash clip, unlinked sound placed a few frames off its picture, a missing file. The read-only `timeline.check` now reports them without rendering:
+- errors: missing or changed media;
+- warnings: black stretches, flash frames, unlinked picture and sound of one source out of sync (with which is late and by how much), and words cut by clip edges;
+- notes: clips on disabled tracks, stretches with no audio, jump cuts within one source, and unused assets.
+
+Findings come errors first, with a short text summary.
+
+The transcripts fixture builds a project with one of each mistake and asserts the exact findings with their times, offsets and IDs. The clean paper edit reports only its deliberate jump cut. It also covers MCP and the argument rejection. No scoring changed.
+
 ## 5 October 2026: paper edits
 
 Building a rough cut from transcripts meant converting word times to frame-aligned source ranges by hand for every selection. The read-only `transcript.assemble` takes word runs (transcript, first word, last word) and returns `clip.append` operations in order. Each covers its words plus optional padding, widened to whole frames so no word is clipped, with fresh clip IDs. The batch is checked to apply.

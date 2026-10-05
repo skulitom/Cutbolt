@@ -770,6 +770,42 @@ def run(root):
                                  (restored, {}, 'UNSUPPORTED_TIMELINE'), (bare, {}, 'MISSING_ASSET')):
             client.call('transcript.assemble', code, **{'project':p_, 'transcripts':[document], 'selections':selections, **fields})
         passed.append('transcript.paper_edit_assembles_exactly')
+        # Static check: a project with one of each mistake reports exactly those findings.
+        lint = call({'command':'project.create', 'id':'lint', 'width':W, 'height':H, 'frame_rate':time(25)})
+        lint = apply(lint, [{'op':'media.add', 'asset':asset}, {'op':'media.add', 'asset':{**asset, 'id':'spare'}},
+            {'op':'media.add', 'asset':{'id':'gone', 'path':'missing.mkv', 'duration':time(4)}},
+            {'op':'media.add', 'asset':{**asset, 'id':'changed', 'identity':{**identity, 'sha256':'f'*64}}},
+            edit('create', duration=time(60, 25)), edit('add', track=track('v', 'video')), edit('add', track=track('a', 'audio')),
+            edit('add', track={**track('off', 'audio'), 'enabled':False}),
+            edit('place', track_id='v', clip=placement('v1', 'voice', 0, 20, 0), collision='reject'),
+            edit('place', track_id='v', clip=placement('v2', 'voice', 20, 2, 40), collision='reject'),
+            edit('place', track_id='v', clip=placement('v3', 'voice', 22, 18, 42), collision='reject'),
+            edit('place', track_id='v', clip=placement('v4', 'voice', 50, 10, 70), collision='reject'),
+            edit('place', track_id='a', clip=placement('a1', 'voice', 0, 21, 2), collision='reject'),
+            edit('place', track_id='a', clip=placement('a2', 'voice', 50, 10, 70), collision='reject'),
+            edit('place', track_id='off', clip=placement('o1', 'voice', 0, 10, 0), collision='reject'),
+            edit('link', id='tail', clip_ids=['v4', 'a2'])])
+        checked = client.call('timeline.check', project=lint, input_root=str(source), transcripts=[document])
+        kinds = [(f['severity'], f['kind']) for f in checked['findings']['listed']]
+        assert kinds == [('error', 'missing_media'), ('error', 'changed_media'), ('warning', 'black'), ('warning', 'flash_frame'),
+                         ('warning', 'out_of_sync'), ('warning', 'out_of_sync'), ('warning', 'cut_word'), ('info', 'disabled_track'),
+                         ('info', 'no_audio'), ('info', 'jump_cut'), ('info', 'unused_asset'), ('info', 'unused_asset'), ('info', 'unused_asset')], kinds
+        found = checked['findings']['listed']
+        of = lambda kind:[f for f in found if f['kind'] == kind]
+        assert (of('black')[0]['start'], of('black')[0]['end']) == (time(40, 25), time(50, 25)) and (of('no_audio')[0]['start'], of('no_audio')[0]['end']) == (time(21, 25), time(50, 25))
+        assert of('flash_frame')[0]['clip_id'] == 'v2' and of('jump_cut')[0]['source_jump'] == time(20, 25) and not of('jump_cut')[0]['backward']
+        sync = of('out_of_sync')
+        assert (sync[0]['picture_id'], sync[0]['sound_id'], sync[0]['offset'], sync[0]['late']) == ('v1', 'a1', time(2, 25), 'picture')
+        assert (sync[1]['picture_id'], sync[1]['offset'], sync[1]['late']) == ('v2', time(18, 25), 'sound')
+        assert [f['asset_id'] for f in of('unused_asset')] == ['spare', 'gone', 'changed'] and of('cut_word')[0]['word'] == 'square'
+        assert (checked['errors'], checked['warnings'], checked['notes'], checked['ok']) == (2, 5, 6, False)
+        assert checked['summary'].startswith('check of lint rev 1: 2 errors, 5 warnings, 6 notes\n')
+        assert call({'command':'timeline.check', 'project':lint, 'input_root':str(source), 'transcripts':[document]}) == checked
+        clean = client.call('timeline.check', project=assembled, input_root=str(source))
+        assert clean['ok'] and [f['kind'] for f in clean['findings']['listed']] == ['jump_cut'] and clean['findings']['listed'][0]['backward']
+        assert next(t for t in catalog if t['name'] == 'cutbolt_timeline_check')['annotations']['readOnlyHint']
+        client.call('timeline.check', 'INVALID_ARGUMENT', project=lint, min_clip_frames=0)
+        passed.append('transcript.timeline_check_finds_each_mistake')
     finally:
         client.close()
 

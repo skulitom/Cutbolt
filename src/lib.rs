@@ -10,6 +10,7 @@ pub mod cache;
 mod cache_store;
 pub mod caption_overlay;
 pub mod captions;
+pub mod check;
 pub mod color;
 pub mod commands;
 pub mod composite;

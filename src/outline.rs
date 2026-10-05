@@ -273,7 +273,11 @@ fn extras(clip: &TrackClip, kind: Kind, clock: &mut Clock) -> String {
 }
 
 /// Intervals of `[from, to)` that no span covers.
-fn holes(mut spans: Vec<(Time, Time)>, from: Time, to: Time) -> Result<Vec<(Time, Time)>> {
+pub(crate) fn holes(
+    mut spans: Vec<(Time, Time)>,
+    from: Time,
+    to: Time,
+) -> Result<Vec<(Time, Time)>> {
     spans.sort_by(|a, b| a.0.compare(b.0).unwrap_or(Ordering::Equal));
     let mut found = Vec::new();
     let mut at = from;
