@@ -170,7 +170,23 @@ onset=pcm.copy();onset[12800:14400]=.3*np.sin(2*np.pi*220*t[12800:14400])
 assert uncovered(onset,best,letter,1,names,[(5,15),(45,49)],raw,np)==found
 assert reading([2,2,0,2,1,1,3,0],letter,1,names)=='UU M' and reading([4]*70,letter,1,names)=='A'
 long=reading([4,0]*70,letter,1,names);assert len(long)==64 and long[:63]=='A'*63
-print(json.dumps({'uncovered':found}))
+# Numerals align as the English words they are read as (the shared table), other words exactly as
+# before; the Greek profile and number signs other than digits reject, naming the word.
+spoken,labels_of,Failure=(worker[k] for k in ('spoken','labels_of','Failure'))
+table=json.loads(open(sys.argv[3],encoding='utf-8').read())
+for text,words in table.items():assert spoken(text)==words,(text,spoken(text),words)
+english={c:i for i,c in enumerate("|'ABCDEFGHIJKLMNOPQRSTUVWXYZ")};named={i:c for c,i in english.items()}
+read=lambda labels:''.join(named[n] for n in labels)
+assert read(labels_of('80-second,',english,'en',False))=='EIGHTY|SECOND' and read(labels_of('170',english,'en',True))=='ONE|HUNDRED|SEVENTY'
+assert read(labels_of('9:00',english,'en',False))=="NINE|O'CLOCK" and read(labels_of('Caf\\u00e9,',english,'en',False))=='CAFE'
+greek={c:i for i,c in enumerate('|\\u0391\\u0393\\u03a4')}
+assert labels_of('\\u03b3\\u03ac\\u03c4\\u03b1',greek,'el',True)==[greek[c] for c in '\\u0393\\u0391\\u03a4\\u0391']
+for text,vocab,language,given,needle in (('80',greek,'el',False,'known text'),('3',greek,'el',True,'Greek words'),
+  ('1\\u00bd',english,'en',False,'\\u00bd'),('m\\u00b2',english,'en',True,'\\u00b2')):
+ try:labels_of(text,vocab,language,given)
+ except Failure as error:assert error.code=='UNSUPPORTED_ALIGNMENT_TEXT' and repr(text)[1:-1] in error.message and needle in error.message,error.message
+ else:raise AssertionError(text)
+print(json.dumps({'uncovered':found,'spoken_numbers':len(table)}))
 """
 
 
@@ -179,7 +195,8 @@ def vocabulary_and_uncovered(root,runtime,call):
     script leaves out) is reported as an uncovered sound, never as a word, which transcript.fillers
     lists and, when asked, cuts between its neighbours."""
     root.mkdir()
-    rules=wsl(runtime,WORKER_RULES,linux(ROOT/'tools/transcribe_worker.py'),json.dumps(runtime['python_paths']))
+    rules=wsl(runtime,WORKER_RULES,linux(ROOT/'tools/transcribe_worker.py'),json.dumps(runtime['python_paths']),
+        linux(ROOT/'tests/support/spoken_numbers.json'))
     spoken=lines(root/'speech',{'names':NAMES,'filler':FILLER})
     local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots']['en']
     def transcribe(name,label,**fields):
@@ -220,6 +237,56 @@ def vocabulary_and_uncovered(root,runtime,call):
     assert seconds(words['circle,']['end'])<=seconds(span['start'])<seconds(span['end'])<=seconds(words['and']['start']),(span,words)
     record={'rules':rules,'names':{'terms':terms,'without_vocabulary':' '.join(w['text'] for d in plain_docs for w in d['words']),
         'with_vocabulary':' '.join(heard)},'filler':{'script':script,'uncovered':sound,'events':events,'cut':span}}
+    print(json.dumps(record,ensure_ascii=False),flush=True)
+    return record
+
+
+NUMBERS='This morning, an eighty second video took over two hours and a hundred and seventy tool calls.'
+NUMERALS='This morning, an 80-second video took over 2 hours and 170 tool calls.'
+NUMBER_WORDS=set('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen '
+    'eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million'.split())
+
+
+def spoken_numbers(root,runtime,call):
+    """Narration with numbers keeps its speech check (the part-two demo's line). Recognition writes
+    numerals such as "80" and aligns them as the words they are read as, known text with digits
+    aligns word for word, and export.review matches the numerals it hears with the numbers the
+    script spells out."""
+    root.mkdir()
+    spoken=lines(root/'speech',{'numbers':NUMBERS})
+    path=spoken['numbers']['path'];starts=[e['start'] for e in spoken['numbers']['events']]
+    local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots']['en']
+    def transcribe(label,**fields):
+        saved=root/(label+'.json')
+        call({'command':'media.transcribe','path':str(path),'input_root':str(root/'speech'),'output_root':str(root),
+            'output':str(saved),'runtime':local,'language':'en','id':label,**fields},timeout=600)
+        return json.loads(saved.read_text(encoding='utf-8'))['transcripts']
+    near=lambda word:min(abs(float(seconds(word['start']))-s) for s in starts)<=.25
+    digits=lambda text:any(c.isdigit() for c in text)
+    # Known text with digits keeps its spelling, each word near a word the synthesizer spoke.
+    aligned=[w for d in transcribe('known-numerals',text=NUMERALS) for w in d['words']]
+    assert [w['text'] for w in aligned]==NUMERALS.split() and all(near(w) for w in aligned),(aligned,starts)
+    script=transcribe('script',text=NUMBERS)
+    # The production speech check: review the line against its spelled-out script, recognizing it.
+    frames=int(seconds(script[0]['source']['duration'])*25)
+    project=call({'command':'project.create','id':'numbers','width':16,'height':12,'frame_rate':time(25)})
+    project=call({'command':'timeline.apply','project':project,'expected_revision':0,'operations':[
+        {'op':'media.add','asset':{'id':'line','path':path.name,'duration':time(frames,25)}},
+        {'op':'clip.append','clip':{'id':'c','asset_id':'line','source_in':time(0),'duration':time(frames,25)}}]})
+    review=call({'command':'export.review','path':str(path),'input_root':str(root/'speech'),'output_root':str(root),
+        'output':str(root/'review'),'project':project,'transcripts':script,'runtime':local,'language':'en','rendition_height':0},timeout=900)
+    speech=review['speech'];comparison=speech['comparison']
+    assert speech['recognition']['ok'],speech
+    heard=[w for d in json.loads((root/'review'/'transcripts.json').read_text(encoding='utf-8'))['transcripts'] for w in d['words']]
+    numerals=[w for w in heard if digits(w['text'])]
+    assert numerals,('Recognition spelled every number out, so this case tests no numeral',heard)
+    assert all(near(w) for w in numerals),(numerals,starts)
+    number=lambda text:digits(text) or bool(NUMBER_WORDS & set(re.findall('[a-z]+',text.lower())))
+    assert comparison['number_matches']>=len(numerals),comparison
+    assert not [d for d in comparison['differences']['listed'] if number(d['expected']) or number(d['heard'])],comparison
+    record={'script':NUMBERS,'known_text':NUMERALS,'heard':' '.join(w['text'] for w in heard),
+        'numerals':[{'text':w['text'],'start':w['start'],'end':w['end']} for w in numerals],
+        'comparison':{k:comparison[k] for k in ('expected_words','heard_words','matched','number_matches','joined_matches','differences')}}
     print(json.dumps(record,ensure_ascii=False),flush=True)
     return record
 

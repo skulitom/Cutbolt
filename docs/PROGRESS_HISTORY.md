@@ -177,6 +177,30 @@ The demo's scarf was re-made with the control in `C:\DEV\CutboltData\demo-progre
 - The old recipe renders identically on the new engine, and the whole 384-frame scene rendered in 4.3-7.4 s on the shared machine. `out/scarf-before-after.png` compares the two stills at 15 s; the folder's README.md tabulates the colors.
 
 This extends C02/C03 controls without new capability points: no criteria, weights or scoring changed. Evidence stays stale until the next thorough run.
+## 5 October 2026: numbers in narration keep the speech check
+
+The part-two progress demo (`C:\DEV\CutboltData\demo-progress2-20261005`, ISSUES.md) lost its whole speech check. Recognition wrote "This morning, an eighty second video took over two hours and a hundred and seventy tool calls" with the token "80", and the worker rejected any word with a digit: `UNSUPPORTED_ALIGNMENT_TEXT: Recognized word '80' uses digits; this acoustic profile aligns numbers spelled out`. Any narration with a year, count, price or "10-second" failed the same way.
+
+The changes:
+- **English numerals align as they are read.** The worker reads a word's numerals as English words and aligns those letters, with the word separator between spoken words: 80 as EIGHTY, 170 as ONE|HUNDRED|SEVENTY, 10-second as TEN|SECOND. It covers:
+  - counts up to 15 digits, with or without grouping commas;
+  - years read in pairs (1100-1999 and 2010-2099), ordinals and decades;
+  - decimals, clock times, $, £ and € amounts, percentages and signs.
+
+  A leading zero or more than 15 digits is read digit by digit. The word keeps the text the recognizer wrote. Words without digits get exactly the labels they had.
+- **Known text** with digits is read the same way and keeps its spelling. This was chosen over rejecting it.
+- **Greek still rejects digits.** Greek number words agree with the noun they count and have spelling variants, so a numeral does not determine the letters to align. The message now says so and says to write the number in Greek words. Number signs other than 0-9, such as ½ or ², still reject and are named.
+- **Review matching** in `export.review`, and so the production speech check, compares numbers as well as letters. Number phrases, written or spoken, become their values: `a hundred and seventy`, `one hundred seventy` and `170` are all 170. Years read in pairs, and an "and" before a number is ignored. One side may now join up to eight words (was four), and a group is near when the middles of the two whole spans are within the tolerance (was the first words' middles). The comparison counts `number_matches`.
+- `src/numerals.rs` reads numerals exactly as the worker does. Both pass the shared table `tests/support/spoken_numbers.json` (79 tokens).
+
+Tests:
+- Rust unit tests cover the shared table and number keys. In `cut_review`, the demo's sentence matches 17 of 17 words with 3 number matches; a year spoken in six words matches, and a wrong number does not.
+- The worker's pure checks (`WORKER_RULES`) cover the table, labels, unchanged labels of other words, and the Greek and number-sign rejections. They pass here, under Python 3.11 and NumPy 2.4 outside the pinned runtime.
+- The `transcripts` fixture's independent reading of the matching rule follows the new rule. A new case reviews a spelled-out script against heard numerals, and against a wrong number. It ran in a scratch copy on Linux with FFmpeg 6.1, where every review assertion passed. That copy skips the decoded-sample comparison, because this FFmpeg differs from the pinned 7.0, and it stops at `job.start`, which requires Windows.
+- The `transcription` fixture gains `transcription.numerals_align_and_match_their_spoken_words`: the fixture voice speaks the demo's line, which is recognized, aligned to the same script with digits, and reviewed by `export.review` with recognition. A Greek text with a digit must reject. **Neither has run yet:** this session had no speech runtime, WSL, CUDA or `pwsh`.
+- `cargo test` passes here except two Windows-path unit tests, which fail the same way on the parent commit under Linux.
+
+The demo's speech check has not been re-run; its data is on the development machine. No scoring changed. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: H.264 exports stream straight from the timeline
 

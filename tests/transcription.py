@@ -21,7 +21,7 @@ from PIL import Image
 from agents import Client
 from tracks import time, seconds, edit, placement, track
 from transcription_speech import generate
-from transcription_runtime import maximum, failures, music_bed, vocabulary_and_uncovered
+from transcription_runtime import maximum, failures, music_bed, vocabulary_and_uncovered, spoken_numbers
 from transcription_guard import run as guard_checks
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -178,6 +178,8 @@ def run(root,setup):
         assert onsets['maximum_ms']<=250 and onsets['p95_ms']<=150,(name,onsets)
         quality.append({'fixture':name,'mode':'given_text','words':len(words),'contextual_start':onsets})
         print(json.dumps(quality[-1]),flush=True);preserved()
+    # The Greek profile does not read numbers out: digits in Greek text reject, naming the word.
+    call({**requests['pilot-el'],'id':'pilot-el-digits','text':'Η γάτα κάθεται 3 φορές.'},error='UNSUPPORTED_ALIGNMENT_TEXT');preserved()
     passed.append('transcription.known_text_alignment_keeps_spelling_and_word_clocks')
     # Several files in one job: every window of every file goes to the speech runtime in one
     # launch, so its models load once; each file's documents still bind to it and meet the gates.
@@ -211,6 +213,8 @@ def run(root,setup):
     passed.append('transcription.batch_recognizes_files_together')
     vocabulary=vocabulary_and_uncovered(root/'vocabulary',runtime,call)
     passed.append('transcription.vocabulary_names_and_uncovered_fillers')
+    numerals=spoken_numbers(root/'numbers',runtime,call)
+    passed.append('transcription.numerals_align_and_match_their_spoken_words')
 
     def decode(path,expected,label):
         nonlocal frames,samples
@@ -301,11 +305,11 @@ def run(root,setup):
     passed.append('transcription.supervisor_protocol_and_detached_descendants')
     preserved()
     report={'passed':passed,'quality':quality,'frames_compared':frames,'stereo_sample_frames_compared':samples,'previews':previews,'rejected_cases':rejected,
-        'maximum_inputs':long_cases,'music_bed':bed_case,'vocabulary':vocabulary,'native_failures':failure_cases,'supervisor':guard,
+        'maximum_inputs':long_cases,'music_bed':bed_case,'vocabulary':vocabulary,'numerals':numerals,'native_failures':failure_cases,'supervisor':guard,
         'gates':{'contextual_onset_max_ms':250,'contextual_onset_p95_ms':150,'isolated_end_max_ms':150,'isolated_end_p95_ms':100},
         'scope':'Pinned optional WSL/CUDA English/Greek profile, six short fixtures, full 120-second WAV parents, native movies, explicit contextual intervals and reviewed corrections; raw phonetic timing and arbitrary natural speech accuracy are not claimed'}
     (root/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','native_failures','supervisor','vocabulary']},indent=2))
+    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','native_failures','supervisor','vocabulary','numerals']},indent=2))
     return report
 
 

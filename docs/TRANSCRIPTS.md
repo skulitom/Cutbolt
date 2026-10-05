@@ -16,7 +16,7 @@ Recognition retains one source window up to 30 seconds. Longer input uses disjoi
 
 Recognizers also write down sound that is not speech. Bracketed annotations such as `[Music]` or `(upbeat music)`, up to eight tokens long, and tokens made of music symbols such as `♪` are removed before alignment. They are returned as `non_speech` notes with their `kind` (`annotation` or `music`), text and source times. A token with no letter or digit, such as the `-` of a word cut off mid-way, joins the word it is written against. When there is no such word it becomes a `symbols` note. Word text never keeps the recognizer's surrounding whitespace. Audio in which recognition finds no speech, such as a music bed alone, returns a document with no words plus its notes. Digital silence still returns `NO_WORDS` before inference.
 
-Acoustic alignment longer than 30 seconds uses 24-second acoustic tiles with one second of context on each side and exact retained convolution-frame indices. The profile bounds targets to 16,384 acoustic labels, results to 2,048 words, worker output to one MiB, post-inference CPU peak memory to 6 GiB and allocated CUDA memory to 8 GiB. These are checked result gates, not OS-enforced memory reservations. Digital silence returns `NO_WORDS` before inference. A letter the acoustic vocabulary lacks is aligned as its base letter when that exists, so `café` aligns as `CAFE`. Numeric word spellings and other unsupported characters reject explicitly, naming the word; the profile does not invent timings for them. Every result requires review, and the cut planner rejects estimates unless `allow_reported` is explicit. Recognition can substitute, omit or insert words; caller corrections remain necessary.
+Acoustic alignment longer than 30 seconds uses 24-second acoustic tiles with one second of context on each side and exact retained convolution-frame indices. The profile bounds targets to 16,384 acoustic labels, results to 2,048 words, worker output to one MiB, post-inference CPU peak memory to 6 GiB and allocated CUDA memory to 8 GiB. These are checked result gates, not OS-enforced memory reservations. Digital silence returns `NO_WORDS` before inference. A letter the acoustic vocabulary lacks is aligned as its base letter when that exists, so `café` aligns as `CAFE`. English numerals are aligned as the words they are read as (see [numbers](#numbers)). Greek numerals, number signs other than the digits 0–9 and other unsupported characters reject explicitly, naming the word; the profile does not invent timings for them. Every result requires review, and the cut planner rejects estimates unless `allow_reported` is explicit. Recognition can substitute, omit or insert words; caller corrections remain necessary.
 
 The original supervisor is namespace PID 1 with no external network interface. It runs a fixed content-checked worker, enforces the explicit 1–600 second analysis deadline, and treats closure of the native owner's input pipe as cancellation. Exiting that PID namespace terminates detached descendants too. Only the three known files in the invocation's owned scratch directory are removed; cleanup never traverses arbitrary directories. This is a process/network boundary, not a filesystem sandbox. A hard exit before the supervisor starts, or forcefully killing the WSL bridge itself, can leave the three known scratch files. The bridge-kill fixture observes this limitation and verifies that no worker or detached descendant survives. Such files are not a published transcript or changed source. Ordinary error, deadline and owner-pipe cancellation use the cleanup path.
 
@@ -37,11 +37,32 @@ Documents are `<id>-1`, `<id>-2` and so on, and their words remain estimates tha
 
 When the words are already known, for example the script given to a speech synthesizer, pass them as `text` to `transcript.transcribe` or `media.transcribe`. No recognition runs: the given words are aligned to the audio with the same acoustic model, clock and contextual intervals. Names keep their spelling (`PixelForge` stays one word), and a disfluency written in the script (`um,`) gets its own interval instead of stretching its neighbour.
 
-- **Words.** The text splits at whitespace. A token without a letter or digit, such as a dash between spaces, joins the word before it, or the next word at the start. Write numbers out in words.
+- **Words.** The text splits at whitespace. A token without a letter or digit, such as a dash between spaces, joins the word before it, or the next word at the start. English digits keep their spelling and are aligned as they are read (see [numbers](#numbers)); write Greek numbers out in words.
 - **Limits.** At most 32 KiB and 2,048 words, and one range of at most 120 s. `media.transcribe` with `text` rejects a longer range; give `start` and `duration` for the part the text covers.
 - **Result.** The document's profile is `local-en-el-align-v1`, and its model identity is the acoustic alignment weights. Words are `estimated`, with acoustic evidence and no recognizer confidence (`probability_milli` is null). The recognition window reports `given_text`.
 
 Alignment is forced: it does not check that the text was actually said. If the audio says something else, the word times are wrong. Review the result as for recognition. Speech the text leaves out, such as an "um" a narrator added, is reported as [uncovered speech](#uncovered-speech).
+
+## Numbers
+
+Recognizers write many numbers as numerals. In the part-two demo, the narration "an eighty second video took over two hours and a hundred and seventy tool calls" came back with "80". The English profile aligns such a word by how it is read, and the word keeps the text the recognizer wrote:
+
+- **Counts** up to 15 digits, with or without grouping commas: 80 is read eighty, 170 one hundred seventy, 1,500 one thousand five hundred. No "and" is read.
+- **Years.** Four digits from 1100 to 1999 and from 2010 to 2099 are read in pairs: 1990 nineteen ninety, 1905 nineteen oh five, 1900 nineteen hundred, 2026 twenty twenty six. 2000 to 2009 read two thousand five, and a grouping comma (1,990) reads a count.
+- **Ordinals and decades:** 21st twenty first, 100th one hundredth, 1990s nineteen nineties, '90s nineties.
+- **Decimals, times, money and signs:** 3.5 three point five, 9:05 nine oh five, 9:00 nine o'clock, $5 five dollars, $3.50 three dollars fifty cents, £2.99 two pounds ninety nine pence, 50% fifty percent, -4 minus four.
+- **Digit strings.** A leading zero or more than 15 digits is read digit by digit: 007 zero zero seven.
+- **Letters around a number** are read as their own words: 10-second ten second, COVID-19 COVID nineteen, mp4 mp four.
+
+Several spoken words are aligned with the acoustic word separator between them, and the word's interval spans them all. The reading is a guess at what was said. A narrator may say "a hundred and seventy" or "fifteen hundred" where the profile reads one hundred seventy or one thousand five hundred. Forced alignment still places the word over its number, but review its edges as for any estimate. Number signs other than the digits 0–9, such as ½ or ², still reject as `UNSUPPORTED_ALIGNMENT_TEXT`, naming the word.
+
+**Known text** with digits is read the same way and keeps its spelling. A script saying "an 80-second video" is aligned as eighty second, and the document's word is `80-second`.
+
+**Greek.** The Greek profile does not read numbers out. Greek number words agree with the noun they count (τρία παιδιά, τρεις γάτες, μία ώρα) and have spelling variants (επτά and εφτά), so a numeral alone does not say which letters to align. A recognized or given Greek word with digits rejects as `UNSUPPORTED_ALIGNMENT_TEXT`. In known text, write Greek numbers out in words. Recognition of Greek speech that writes a numeral still fails, and so does the speech check of an `export.review` that recognizes it.
+
+**Review.** `export.review` treats a numeral and the number it is spoken as alike: "80" matches "eighty" and "170" matches "a hundred and seventy". See [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
+
+The worker and the engine read numerals with two original implementations of the same rules. Both are checked against the table in `tests/support/spoken_numbers.json`.
 
 ## Vocabulary
 
@@ -139,7 +160,7 @@ With `uncovered: true`, each filler-like sound is cut like a filler word between
 
 ## Reading a cut against its transcripts
 
-`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). `captions.draft` turns the same words into caption cues for the timeline. After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file, prompting recognition with the names the transcripts spell; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
+`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). `captions.draft` turns the same words into caption cues for the timeline. After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file. It prompts recognition with the names the transcripts spell and matches a numeral with the number it is spoken as; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
 
 ## Saved operations and stale data
 
@@ -157,8 +178,9 @@ The quick-tier recognition fixture also checks the [vocabulary](#vocabulary) and
 - **Names.** A synthesized "PixelForge … Cutbolt" line comes back with both names whole and the terms recorded. Without the vocabulary, the recognizer heard "Pyxel Forge" and "cut bolt".
 - **A left-out filler.** A line aligned to a script that leaves out its "um" reports exactly one uncovered sound that reads like a filler. It lies inside the synthesizer's own clock for the "um", between "circle," and "and", and `transcript.fillers` cuts it between those words.
 - **No false alarms.** The six clean English and Greek fixtures report no uncovered sounds.
+- **Numbers.** The fixture voice speaks the demo's line about an "eighty second video" and "a hundred and seventy tool calls". Recognition must write at least one numeral and align it near the spoken number. The same line with digits in its script aligns word for word, and `export.review` against the spelled-out script may list no difference involving a number. Greek text with a digit rejects. This case was added on 5 October and has not yet run on the speech runtime.
 
-Pure checks cover respelling, prompts, readings, and onsets left to their words. These are quick-tier results; the thorough evidence above predates them.
+Pure checks cover respelling, prompts, readings, onsets left to their words, and the numeral table, labels and rejections. These are quick-tier results; the thorough evidence above predates them.
 
 ## External verification setup
 

@@ -5,6 +5,7 @@
 use crate::{
     Result, error, media,
     model::Project,
+    numerals,
     outline::{Clock, Said},
     registry::Identity,
     time::Time,
@@ -442,54 +443,112 @@ fn recognize(
 }
 
 /// The letters and digits of `count` consecutive words from `first`, run together.
-fn joined(words: &[Said], first: usize, count: usize) -> Option<String> {
-    let group = words.get(first..first + count)?;
-    Some(group.iter().map(|w| normalized(&w.text)).collect())
+fn joined(words: &[Said], first: usize, count: usize) -> String {
+    words[first..first + count]
+        .iter()
+        .map(|w| normalized(&w.text))
+        .collect()
 }
 
-/// Match expected and heard words in order: a heard word matches when its text is the same and
-/// its middle lies within `tolerance` of the expected word's middle. A name split in one list
-/// and whole in the other ("pixel forge" and "PixelForge") also matches, as two to four words run
-/// together. Unmatched words between two matches form one difference.
+/// Most words one side of a match may join: a name split in two to four words, or a number
+/// spoken in up to eight ("one thousand nine hundred and ninety").
+const MAX_JOINED: usize = 8;
+
+/// The words of one list as review matching reads them: each word's letter-and-digit runs with
+/// numerals read out, and whether it can take part in a number.
+struct Reading<'a> {
+    words: &'a [Said],
+    runs: Vec<Vec<String>>,
+    numeric: Vec<bool>,
+}
+impl<'a> Reading<'a> {
+    fn new(words: &'a [Said]) -> Self {
+        let runs: Vec<Vec<String>> = words.iter().map(|w| numerals::runs(&w.text)).collect();
+        let numeric = words
+            .iter()
+            .zip(&runs)
+            .map(|(w, r)| numerals::numeric(&w.text, r))
+            .collect();
+        Reading {
+            words,
+            runs,
+            numeric,
+        }
+    }
+    /// The middle of the span of `count` words from `first`.
+    fn middle(&self, first: usize, count: usize) -> Result<Time> {
+        self.words[first]
+            .start
+            .plus(self.words[first + count - 1].end)?
+            .times(Time::new(1, 2)?)
+    }
+    fn numeric(&self, first: usize, count: usize) -> bool {
+        self.numeric[first..first + count].iter().any(|n| *n)
+    }
+    fn key(&self, first: usize, count: usize) -> Vec<numerals::Atom> {
+        numerals::key(self.runs[first..first + count].iter().flatten())
+    }
+}
+
+/// Match expected and heard words in order. A group of expected words matches a group of heard
+/// words when the middles of their spans lie within `tolerance` and they say the same thing: the
+/// same letters and digits, ignoring case and punctuation, or the same numbers. One side is a
+/// single word; the other is one word or up to `MAX_JOINED` words run together, so a name split in
+/// one list and whole in the other ("pixel forge" and "PixelForge") matches, and so does a numeral
+/// and its spoken words ("80" and "eighty", "170" and "a hundred and seventy"). Unmatched words
+/// between two matches form one difference.
 fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value, Vec<Value>)> {
+    let (wanted_words, heard_words) = (Reading::new(expected), Reading::new(heard));
     let mut matched_expected = vec![false; expected.len()];
     let mut matched_heard = vec![false; heard.len()];
     let mut next = 0;
     let mut matches = 0;
     let mut joins = 0;
+    let mut numbers = 0;
     let mut i = 0;
     while i < expected.len() {
-        let middle = expected[i].middle()?;
-        let text = normalized(&expected[i].text);
+        // A heard word whose middle is later than this cannot start a match of expected word i.
+        let reach = expected[(i + MAX_JOINED - 1).min(expected.len() - 1)]
+            .middle()?
+            .plus(tolerance)?;
         let mut k = next;
         let mut step = 1;
         while k < heard.len() {
-            let candidate = heard[k].middle()?;
-            if candidate.compare(middle.plus(tolerance)?)?.is_gt() {
+            if heard[k].middle()?.compare(reach)?.is_gt() {
                 break;
             }
-            let near = middle.compare(candidate.plus(tolerance)?)?.is_le();
-            let heard_text = normalized(&heard[k].text);
-            // (expected words, heard words) that match here.
-            let found = if !near {
-                None
-            } else if heard_text == text {
-                Some((1, 1))
-            } else {
-                (2..=4)
-                    .find(|&n| joined(heard, k, n).is_some_and(|j| j == text))
-                    .map(|n| (1, n))
-                    .or_else(|| {
-                        (2..=4)
-                            .find(|&n| joined(expected, i, n).is_some_and(|j| j == heard_text))
-                            .map(|n| (n, 1))
-                    })
-            };
-            if let Some((wanted, got)) = found {
+            // (expected words, heard words, matched as numbers) that match here.
+            let mut found = None;
+            let shapes = std::iter::once((1, 1))
+                .chain((2..=MAX_JOINED).map(|n| (1, n)))
+                .chain((2..=MAX_JOINED).map(|n| (n, 1)));
+            for (wanted, got) in shapes {
+                if i + wanted > expected.len() || k + got > heard.len() {
+                    continue;
+                }
+                let a = wanted_words.middle(i, wanted)?;
+                let b = heard_words.middle(k, got)?;
+                if a.compare(b.plus(tolerance)?)?.is_gt() || b.compare(a.plus(tolerance)?)?.is_gt()
+                {
+                    continue;
+                }
+                if joined(expected, i, wanted) == joined(heard, k, got) {
+                    found = Some((wanted, got, false));
+                    break;
+                }
+                if (wanted_words.numeric(i, wanted) || heard_words.numeric(k, got))
+                    && wanted_words.key(i, wanted) == heard_words.key(k, got)
+                {
+                    found = Some((wanted, got, true));
+                    break;
+                }
+            }
+            if let Some((wanted, got, number)) = found {
                 matched_expected[i..i + wanted].fill(true);
                 matched_heard[k..k + got].fill(true);
                 matches += wanted;
                 joins += usize::from(wanted + got > 2);
+                numbers += usize::from(number);
                 next = k + got;
                 step = wanted;
                 break;
@@ -550,7 +609,7 @@ fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value,
         |n: usize, d: usize| (d > 0).then(|| (n as f64 / d as f64 * 1000.0).round() / 1000.0);
     Ok((
         json!({"expected_words":expected.len(),"heard_words":heard.len(),"matched":matches,
-            "match_ratio":ratio(matches, expected.len()),"tolerance":tolerance,"joined_matches":joins,
+            "match_ratio":ratio(matches, expected.len()),"tolerance":tolerance,"joined_matches":joins,"number_matches":numbers,
             "differences":{"count":differences.len(),"listed":differences.iter().take(MAX_LISTED).collect::<Vec<_>>()}}),
         differences,
     ))
@@ -1156,6 +1215,75 @@ mod tests {
         );
         assert_eq!(differences[0]["expected"], "PixelForge,");
         assert_eq!(differences[0]["heard"], "pixel forged");
+    }
+
+    #[test]
+    fn spoken_numbers_match_their_numerals() {
+        let tolerance = Time::new(1, 2).unwrap();
+        // The part-two demo's narration against what recognition wrote down.
+        let expected = said(&[
+            (0, "This"),
+            (2, "morning,"),
+            (4, "an"),
+            (6, "eighty"),
+            (8, "second"),
+            (10, "video"),
+            (12, "took"),
+            (14, "over"),
+            (16, "two"),
+            (18, "hours"),
+            (20, "and"),
+            (22, "a"),
+            (24, "hundred"),
+            (26, "and"),
+            (28, "seventy"),
+            (30, "tool"),
+            (32, "calls."),
+        ]);
+        let heard = said(&[
+            (0, "This"),
+            (2, "morning,"),
+            (4, "an"),
+            (6, "80"),
+            (8, "second"),
+            (10, "video"),
+            (12, "took"),
+            (14, "over"),
+            (16, "2"),
+            (18, "hours"),
+            (20, "and"),
+            (25, "170"),
+            (30, "tool"),
+            (32, "calls."),
+        ]);
+        let (comparison, differences) = compare(&expected, &heard, tolerance).unwrap();
+        assert!(differences.is_empty(), "{differences:?}");
+        assert_eq!(comparison["matched"], 17);
+        assert_eq!(comparison["number_matches"], 3);
+        assert_eq!(comparison["joined_matches"], 1);
+        // Either side may be the numeral, and a number spoken over many words still matches by the
+        // middle of its whole span.
+        let (comparison, differences) = compare(&heard, &expected, tolerance).unwrap();
+        assert!(differences.is_empty(), "{differences:?}");
+        assert_eq!(comparison["matched"], 14);
+        let long = said(&[
+            (0, "in"),
+            (2, "one"),
+            (4, "thousand"),
+            (6, "nine"),
+            (8, "hundred"),
+            (10, "and"),
+            (12, "ninety."),
+        ]);
+        let short = said(&[(0, "in"), (7, "1990.")]);
+        let (comparison, differences) = compare(&long, &short, tolerance).unwrap();
+        assert!(differences.is_empty(), "{differences:?}");
+        assert_eq!(comparison["matched"], 7);
+        // A different number is a difference.
+        let wrong = said(&[(0, "in"), (7, "1999.")]);
+        let (comparison, differences) = compare(&long, &wrong, tolerance).unwrap();
+        assert_eq!(comparison["matched"], 1);
+        assert_eq!(differences[0]["heard"], "1999.");
     }
 
     #[test]

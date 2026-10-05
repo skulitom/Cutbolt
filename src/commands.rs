@@ -280,7 +280,7 @@ pub enum Request {
         /// Height of the small H.264/AAC copy, 120-1080 pixels and never above the source; default 360. 0 skips it.
         #[serde(default)]
         rendition_height: Option<u32>,
-        /// Largest time between an expected and a heard word that still match, in rational seconds; default 1/2, at most 5.
+        /// Largest time between the middles of expected and heard words that still match (of the whole span when one side is several words, as a number spoken in words against its numeral), in rational seconds; default 1/2, at most 5.
         #[serde(default)]
         tolerance: Option<Time>,
     },
@@ -320,7 +320,7 @@ pub enum Request {
         /// Deadline per 120 s window in seconds, 1-600; default 600.
         #[serde(default)]
         timeout_seconds: Option<u32>,
-        /// Known spoken text, such as the script of a synthesized narration: its words are aligned to the audio instead of recognized, so names and spelling stay as written and nothing is misheard. The range must be at most 120 s. Words split at whitespace; write numbers out in words. At most 32 KiB.
+        /// Known spoken text, such as the script of a synthesized narration: its words are aligned to the audio instead of recognized, so names and spelling stay as written and nothing is misheard. The range must be at most 120 s. Words split at whitespace. In English a word with digits keeps its text and is aligned as it is read ("80-second" as eighty second); in Greek write numbers out in words. At most 32 KiB.
         #[serde(default)]
         text: Option<String>,
         /// Names the speech may contain, spelled as wanted (PixelForge): recognition is prompted with them and respells split words to them. Add um and uh to keep fillers. Up to 32; not with text.

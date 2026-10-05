@@ -108,7 +108,8 @@ pub struct Transcribe {
     pub timeout_seconds: u32,
     /// Known spoken text, such as a narration script: its words are aligned to the audio
     /// instead of recognized, so names and spelling stay exactly as given. Words split at
-    /// whitespace; write numbers out in words. At most 32 KiB.
+    /// whitespace. In English a word with digits keeps its text and is aligned as it is read
+    /// ("80-second" as eighty second); in Greek write numbers out in words. At most 32 KiB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// Names and terms the speech may contain, spelled as wanted (PixelForge): the recognizer is

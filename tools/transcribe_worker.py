@@ -362,6 +362,105 @@ def letters(text, vocab):
     return ''.join(output)
 
 
+ONES = ('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen '
+    'seventeen eighteen nineteen').split()
+TENS = '- - twenty thirty forty fifty sixty seventy eighty ninety'.split()
+SCALES = ((10**12,'trillion'),(10**9,'billion'),(10**6,'million'),(1000,'thousand'))
+ORDINALS = {'one':'first','two':'second','three':'third','five':'fifth','eight':'eighth','nine':'ninth','twelve':'twelfth'}
+CURRENCIES = {'$':('dollar','dollars','cent','cents'),'£':('pound','pounds','penny','pence'),'€':('euro','euros','cent','cents')}
+DIGITS = frozenset('0123456789')
+APOSTROPHES = "'’"
+
+
+def cardinal(n):
+    """English words of 0 <= n < 10**15, without "and": 170 is one hundred seventy."""
+    if n < 20: return [ONES[n]]
+    if n < 100: return [TENS[n//10]]+([ONES[n%10]] if n%10 else [])
+    if n < 1000: return [ONES[n//100],'hundred']+(cardinal(n%100) if n%100 else [])
+    value, name = next(s for s in SCALES if n >= s[0])
+    return cardinal(n//value)+[name]+(cardinal(n%value) if n%value else [])
+
+
+def year(n):
+    """Four digits read in pairs: nineteen ninety, nineteen oh five, nineteen hundred, twenty twenty six."""
+    high, low = divmod(n, 100)
+    return cardinal(high)+(['hundred'] if not low else ['oh',ONES[low]] if low < 10 else cardinal(low))
+
+
+def numeral(text, i):
+    """The number written from text[i], a digit: its words without any decimal fraction, its whole
+    value, the fraction's digits and the index after it."""
+    j = i
+    while j < len(text) and text[j] in DIGITS: j += 1
+    digits, grouped, fraction, minutes, suffix = text[i:j], False, '', None, None
+    group = lambda k: len(text[k:k+3]) == 3 and all(c in DIGITS for c in text[k:k+3]) and text[k+3:k+4] not in DIGITS
+    while len(digits) <= 3 or grouped:
+        if not (text[j:j+1] == ',' and group(j+1)): break
+        digits, j, grouped = digits+text[j+1:j+4], j+4, True
+    if text[j:j+1] == '.' and text[j+1:j+2] in DIGITS:
+        k = j+1
+        while k < len(text) and text[k] in DIGITS: k += 1
+        fraction, j = text[j+1:k], k
+    elif not grouped and len(digits) <= 2 and text[j:j+1] == ':' and len(text[j+1:j+3]) == 2 and all(c in DIGITS for c in text[j+1:j+3]) \
+            and text[j+3:j+4] not in DIGITS:
+        minutes, j = int(text[j+1:j+3]), j+3
+    elif text[j:j+2].lower() in ('st','nd','rd','th') and not text[j+2:j+3].isalpha():
+        suffix, j = 'ordinal', j+2
+    elif text[j:j+1] == 's' and not text[j+1:j+2].isalpha():
+        suffix, j = 'plural', j+1
+    elif text[j:j+1] in APOSTROPHES and text[j+1:j+2] == 's' and not text[j+2:j+3].isalpha():
+        suffix, j = 'plural', j+2
+    value = int(digits)
+    if (len(digits) > 1 and digits[0] == '0') or len(digits) > 15: words = [ONES[int(c)] for c in digits]
+    elif not grouped and suffix != 'ordinal' and len(digits) == 4 and (1100 <= value <= 1999 or 2010 <= value <= 2099): words = year(value)
+    else: words = cardinal(value)
+    if minutes is not None: words += ["o'clock"] if not minutes else ['oh',ONES[minutes]] if minutes < 10 else cardinal(minutes)
+    if suffix:
+        last = words[-1]
+        if suffix == 'ordinal': last = ORDINALS.get(last) or (last[:-1]+'ieth' if last.endswith('y') else last+'th')
+        else: last = last[:-1]+'ies' if last.endswith('y') else last+'es' if last.endswith('x') else last+'s'
+        words[-1] = last
+    return words, value, fraction, j
+
+
+def spoken(text):
+    """The words a token is read as for alignment. A token without digits is read as written.
+
+    Numbers are read in English: 80 eighty, 170 one hundred seventy, 1,500 one thousand five hundred,
+    3.5 three point five, 21st twenty first, 1990s nineteen nineties, 9:05 nine oh five, $5 five
+    dollars, $3.50 three dollars fifty cents, 50% fifty percent, -4 minus four. Four digits from 1100 to 1999 and 2010 to 2099 are read
+    as a year (1990 nineteen ninety, 2026 twenty twenty six); a leading zero or more than 15 digits
+    are read digit by digit. The letters around a number are read as their own words, so 10-second
+    is ten second and mp4 is mp four.
+    """
+    if not any(c in DIGITS for c in text): return [text]
+    words, start, i = [], 0, 0
+    def letters_of(run):
+        for part in ''.join(c if c.isalpha() or c in APOSTROPHES else ' ' for c in run).split():
+            if part.strip(APOSTROPHES): words.append(part.strip(APOSTROPHES))
+    while i < len(text):
+        if text[i] not in DIGITS:
+            i += 1; continue
+        k = i
+        currency = CURRENCIES.get(text[k-1]) if k else None
+        k -= bool(currency)
+        sign = k and text[k-1] in '+-−' and (k == 1 or not text[k-2].isalnum())
+        letters_of(text[start:k-sign])
+        if sign: words.append('plus' if text[k-1] == '+' else 'minus')
+        read, value, fraction, i = numeral(text, i)
+        if currency and len(fraction) == 2:
+            cents = int(fraction)
+            read = (read+[currency[value != 1]] if value or not cents else [])+(cardinal(cents)+[currency[2+(cents != 1)]] if cents else [])
+        else:
+            read += ['point']+[ONES[int(c)] for c in fraction] if fraction else []
+            if currency: read.append(currency[value != 1 or bool(fraction)])
+        words.extend(read)
+        if text[i:i+1] == '%': words.append('percent'); i += 1
+        start = i
+    letters_of(text[start:])
+    return words
+
+
 def load_aligner(files, language):
     """The acoustic alignment model, its feature extractor, vocabulary and configuration."""
     import torch
@@ -384,22 +483,38 @@ def load_aligner(files, language):
     return aligner, extractor, vocab, config
 
 
-def align(pcm, words, windows, loaded, given):
+def labels_of(text, vocab, language, given):
+    """The acoustic labels of one word. English numerals are aligned as the words they are read as
+    (80 as EIGHTY); several spoken words are separated by the word separator. The Greek profile does
+    not read numbers out: Greek number words agree with the noun they count, so digits reject."""
+    origin = 'Text' if given else 'Recognized'
+    sign = next((c for c in text if c.isnumeric() and c not in DIGITS), None)
+    require(sign is None, 'UNSUPPORTED_ALIGNMENT_TEXT', f'{origin} word {text[:64]!r} uses {sign!r}, which this acoustic profile does not read out; write it in words')
+    require(language == 'en' or not any(c in DIGITS for c in text), 'UNSUPPORTED_ALIGNMENT_TEXT',
+        f'{origin} word {text[:64]!r} uses digits; the Greek profile does not read numbers out, so '
+        +('write the number in Greek words' if given else 'align known text with the number written in Greek words'))
+    output = []
+    for part in spoken(text):
+        clean = letters(part,vocab)
+        require(clean and all(c in vocab for c in clean), 'UNSUPPORTED_ALIGNMENT_TEXT', f'{origin} word {text[:64]!r} has letters this acoustic profile cannot align; correct the text')
+        if output: output.append(vocab['|'])
+        output.extend(vocab[c] for c in clean)
+    return output
+
+
+def align(pcm, words, windows, loaded, given, language):
     """Acoustic word intervals: CTC alignment of each window's words inside that window."""
     import numpy as np
     import torch
     import torchaudio
     aligner, extractor, vocab, config = loaded
     labels, ranges = [], []
-    origin = 'Text' if given else 'Recognized'
     for word in words:
         text = word['word']
         require(type(text) is str and len(text.encode('utf-8')) <= 512 and len(text.split()) == 1 and not any(unicodedata.category(c) == 'Cc' for c in text), 'INVALID_ALIGNMENT', 'Invalid recognized word text')
-        require(not any(c.isnumeric() for c in text), 'UNSUPPORTED_ALIGNMENT_TEXT', f'{origin} word {text[:64]!r} uses digits; this acoustic profile aligns numbers spelled out')
-        clean = letters(text,vocab)
-        require(clean and all(c in vocab for c in clean), 'UNSUPPORTED_ALIGNMENT_TEXT', f'{origin} word {text[:64]!r} has letters this acoustic profile cannot align; correct the text')
+        clean = labels_of(text,vocab,language,given)
         if labels: labels.append(vocab['|'])
-        first = len(labels); labels.extend(vocab[c] for c in clean); ranges.append((first,len(labels)))
+        first = len(labels); labels.extend(clean); ranges.append((first,len(labels)))
     require(len(labels) <= 16384, 'RESULT_LIMIT', 'Acoustic target exceeds 16384 labels')
     stride, receptive = 1, 1
     for kernel, step in zip(config.conv_kernel,config.conv_stride):
@@ -577,7 +692,7 @@ def run(request):
         gc.collect(); torch.cuda.empty_cache()
         recognized = time.monotonic()
         # Sound without speech, such as a music bed alone, gives an empty result with its notes.
-        output, blocks, alignment_windows, found = align(pcm,words,recognition_windows,aligner(),given is not None) if words else ([],[],[],[])
+        output, blocks, alignment_windows, found = align(pcm,words,recognition_windows,aligner(),given is not None,request['language']) if words else ([],[],[],[])
         checked_file(str(source),(item['source_bytes'],item['source_sha256']))
         return {'profile':PROFILE if given is None else ALIGN_PROFILE,'source_sha256':item['source_sha256'],'sample_count':count,
             'words':output,'model_sha256':MODEL[1] if given is None else None,

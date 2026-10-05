@@ -174,27 +174,40 @@ def review_words(p, docs):
     return said, cut
 
 
+# Number phrases of the fixture, read independently; digits read as themselves.
+NUMBERS = {'eighty':80, 'a hundred and seventy':170}
+
+
 def review_compare(expected, heard, tolerance):
-    """Independent reading of the documented in-order matching rule, with names split on one
-    side and whole on the other matching as two to four words run together."""
+    """Independent reading of the documented in-order matching rule: one word on one side and one
+    to eight words on the other match when the middles of their spans are within the tolerance and
+    their letters and digits run together are the same, or they say the same number."""
     import math
     norm = lambda t:''.join(c for c in t if c.isalnum()).lower()
-    run = lambda words, a, n:''.join(norm(w[2]) for w in words[a:a+n]) if a+n <= len(words) else None
+    run = lambda words, a, n:''.join(norm(w[2]) for w in words[a:a+n])
+    middle = lambda words, a, n:(words[a][0]+words[a+n-1][1])/2
+    def number(words):
+        said = ' '.join(norm(w[2]) for w in words)
+        return int(said) if said.isdigit() else NUMBERS.get(said)
     heard = sorted(heard, key=lambda w:w[0])
-    me, mh, nxt, matched, joins, i = [False]*len(expected), [False]*len(heard), 0, 0, 0, 0
+    me, mh, nxt, matched, joins, numbers, i = [False]*len(expected), [False]*len(heard), 0, 0, 0, 0, 0
+    shapes = [(1, 1)]+[(1, n) for n in range(2, 9)]+[(n, 1) for n in range(2, 9)]
     while i < len(expected):
-        s, e, t = expected[i];mid = (s+e)/2;step = 1
+        reach = middle(expected, min(i+7, len(expected)-1), 1)+tolerance;step = 1
         for k in range(nxt, len(heard)):
-            hm = (heard[k][0]+heard[k][1])/2
-            if hm > mid+tolerance:break
-            if mid > hm+tolerance:continue
-            pair = (1, 1) if norm(heard[k][2]) == norm(t) else None
-            pair = pair or next(((1, n) for n in range(2, 5) if run(heard, k, n) == norm(t)), None)
-            pair = pair or next(((n, 1) for n in range(2, 5) if run(expected, i, n) == norm(heard[k][2])), None)
+            if middle(heard, k, 1) > reach:break
+            pair = None
+            for a, b in shapes:
+                if i+a > len(expected) or k+b > len(heard) or abs(middle(expected, i, a)-middle(heard, k, b)) > tolerance:continue
+                if run(expected, i, a) == run(heard, k, b):
+                    pair = (a, b, 0);break
+                value = number(expected[i:i+a])
+                if value is not None and value == number(heard[k:k+b]):
+                    pair = (a, b, 1);break
             if pair:
-                a, b = pair
+                a, b, n = pair
                 me[i:i+a] = [True]*a;mh[k:k+b] = [True]*b
-                matched += a;joins += a+b > 2;nxt = k+b;step = a;break
+                matched += a;joins += a+b > 2;numbers += n;nxt = k+b;step = a;break
         i += step
     groups = {}
     for words, flags, side in ((expected, me, 0), (heard, mh, 1)):
@@ -210,7 +223,8 @@ def review_compare(expected, heard, tolerance):
     differences.sort(key=lambda d:seconds(d['start']))
     ratio = math.floor(matched/len(expected)*1000+0.5)/1000 if expected else None
     return {'expected_words':len(expected), 'heard_words':len(heard), 'matched':matched, 'match_ratio':ratio,
-            'tolerance':time(tolerance), 'joined_matches':joins, 'differences':{'count':len(differences), 'listed':differences[:50]}}
+            'tolerance':time(tolerance), 'joined_matches':joins, 'number_matches':numbers,
+            'differences':{'count':len(differences), 'listed':differences[:50]}}
 
 
 def timeline_said(p, by_asset, track_ids=None):
@@ -612,6 +626,23 @@ def run(root):
             'letters':'AM', 'after':'circle', 'before':None}]}, joined['speech']
         assert 'uncovered speech (a left-in filler or a missed word): "AM" 3.4-3.5' in joined['summary'], joined['summary']
         assert 'uncovered' not in reviewed['speech']
+        # Numbers: the script spells them out and recognition wrote numerals, as in the part-two demo
+        # ("eighty" heard as "80", "a hundred and seventy" as "170"); they match, a different number does not.
+        spelled = {**document, 'id':'spelled', 'words':[{'id':f'n{i}', 'text':t, 'start':time(a, 25), 'end':time(b, 25), 'origin':'estimated',
+            'probability_milli':900} for i, (t, a, b) in enumerate([('eighty', 10, 14), ('square!', 21, 26), ('a', 30, 31), ('hundred', 31, 32),
+            ('and', 32, 33), ('seventy', 33, 34), ('blue', 40, 44), ('seconds.', 50, 54)])]}
+        spelled_words = review_words(restored, [spelled])[0]
+        assert [w[2] for w in spelled_words] == ['eighty', 'a', 'hundred', 'and', 'seventy', 'seconds.'], spelled_words
+        for number, (matched, differences) in (('170', (6, [])), ('171', (2, [('a hundred and seventy', '171')]))):
+            numeral_words = [(spelled_words[0][0], spelled_words[0][1], '80'), (spelled_words[1][0], spelled_words[4][1], number),
+                             (spelled_words[5][0], spelled_words[5][1], 'seconds')]
+            numeral_doc = {**heard_doc, 'id':'numerals', 'words':[{'id':f'h{i}', 'text':t, 'start':time(a), 'end':time(b), 'origin':'estimated',
+                'probability_milli':700} for i, (a, b, t) in enumerate(numeral_words)]}
+            counted = call({**reviewing, 'transcripts':[spelled], 'heard':[numeral_doc], 'output':str(output/f'review-{number}'), 'rendition_height':0})
+            comparison = counted['speech']['comparison']
+            assert comparison == review_compare(spelled_words, numeral_words, F(1, 2)), comparison
+            assert comparison['matched'] == matched and comparison['number_matches'] == (2 if number == '170' else 1), comparison
+            assert [(d['expected'], d['heard']) for d in comparison['differences']['listed']] == differences, comparison
         muted = apply(restored, [edit('clip_audio', clip_ids=[pieces[1][2]['id']], gain_milli=0)])
         quiet = call({**reviewing, 'output':str(output/'review-muted'), 'project':muted, 'rendition_height':0})
         assert quiet['speech']['comparison'] == review_compare(review_words(muted, [doc])[0], heard_words, F(1, 2))
