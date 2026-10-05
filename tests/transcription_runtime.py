@@ -135,6 +135,47 @@ def music_bed(root,speech,runtime,call,ff,correspondence):
     return record
 
 
+def music_tail(root,runtime,call,ff,correspondence):
+    """A named line that ends in 26 s of the steady bed, recognized with the names as a vocabulary.
+    Prompted with the terms, the recognizer writes them out over windows that hold only music
+    ("PixelForge, Cutbolt." in the part-two demo's end card). The acoustic model hears nothing
+    there, so those windows are not decoded: every word lies in the line, which keeps its names."""
+    root.mkdir();spoken=lines(root/'speech',{'names':NAMES})
+    up=ff(['-i',str(spoken['names']['path']),'-af','aresample=48000:resampler=swr:dither_method=none:filter_size=32:phase_shift=10','-f','s16le','-'])
+    voice=array('h',up);count=len(voice)+26*48000
+    step=[2*math.pi*f/48000 for f in (110,165)];pcm=array('h')
+    for v in voice:pcm.extend((v,v))
+    for n in range(count-len(voice)):
+        x=round(980*math.sin(step[0]*n)+980*math.sin(step[1]*n));pcm.extend((x,x))
+    source=root/'line then music.wav'
+    with wave.open(str(source),'wb') as stream:
+        stream.setparams((2,2,48000,count,'NONE','not compressed'));stream.writeframes(pcm.tobytes())
+    identity={'bytes':source.stat().st_size,'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}
+    scratch=root/'scratch';scratch.mkdir();terms=['PixelForge','Cutbolt']
+    local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots']['en']
+    request={'command':'transcript.transcribe','id':'tail','source':{'path':source.name,'identity':identity,'duration':time(count,48000)},
+        'format':{'type':'stereo_wav'},'start':time(0),'duration':time(count,48000),'channel':'mean','language':'en',
+        'input_root':str(root),'scratch_root':str(scratch),'runtime':local,'timeout_seconds':300,'vocabulary':terms}
+    started=clock.monotonic();result=call(request,timeout=340)
+    (root/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    words=result['document']['words'];windows=result['worker']['recognition_blocks'];end=len(voice)/48000
+    heard=' '.join(w['text'] for w in words)
+    assert all(seconds(w['start'])<end for w in words),('Words were recognized over music alone',heard,windows)
+    match=correspondence([{'text':e['text']} for e in spoken['names']['events']],words)
+    assert not match['extra_word_indices'] and match['rate']<=.10,(heard,match)
+    letters=lambda text:''.join(c for c in text.casefold() if c.isalnum())
+    assert {'pixelforge','cutbolt'}<={letters(w['text']) for w in words},heard
+    # The windows after the line were not decoded; the first one was.
+    music=[w for w in windows if w['start_sample']>=end*16000]
+    assert len(windows)>=2 and windows[0]['decoded'] and music and not any(w['decoded'] for w in music),windows
+    assert not [n for n in result['non_speech'] if n['kind']=='unheard'],result['non_speech']
+    assert not list(scratch.iterdir()) and hashlib.sha256(source.read_bytes()).hexdigest()==identity['sha256']
+    record={'seconds':clock.monotonic()-started,'line_seconds':end,'heard':heard,'recognition_blocks':windows,
+        'non_speech':result['non_speech'],'source_preserved':True,'scratch_removed':True}
+    print(json.dumps({k:v for k,v in record.items() if k!='recognition_blocks'},ensure_ascii=False),flush=True)
+    return record
+
+
 NAMES='This film was drawn with PixelForge, then cut and mixed by an agent using Cutbolt.'
 FILLER='Keep the blue circle, um, and remove the green triangle.'
 WORKER_RULES="""import json,runpy,sys
@@ -186,6 +227,21 @@ for text,vocab,language,given,needle in (('80',greek,'el',False,'known text'),('
  try:labels_of(text,vocab,language,given)
  except Failure as error:assert error.code=='UNSUPPORTED_ALIGNMENT_TEXT' and repr(text)[1:-1] in error.message and needle in error.message,error.message
  else:raise AssertionError(text)
+# Speech evidence: a frame hears speech when its most likely acoustic label is not the blank. Frames
+# are centred every 320 samples from sample 200. A segment none of whose words' CTC spans hears
+# speech (the prompt written over music) is dropped with an unheard note, and the windows' word
+# indices follow; a segment with one heard word is kept whole.
+frame_at,unheard=worker['frame_at'],worker['unheard']
+assert [frame_at(n,10) for n in (0,200,201,520,521,99999)]==[0,0,1,1,2,10]
+heard=np.zeros(40,dtype=bool);heard[2:6]=True;heard[30]=True
+said_at=lambda t,segment,a,b:{**w(t),'segment':segment,'at':(a,b)}
+words=[said_at('Hello',0,0,1600),said_at('there.',0,1600,3200),said_at('Pip,',1,16000,19200),said_at('PixelForge.',1,19200,24000),
+ said_at('Bye.',2,32000,35200)]
+windows=[{'start_sample':0,'end_sample':24000,'first_word':0,'end_word':4},{'start_sample':24000,'end_sample':40000,'first_word':4,'end_word':5}]
+kept,renumbered,notes=unheard(words,windows,[(2,4),(6,9),(10,14),(14,20),(28,32)],heard)
+assert said(kept)==['Hello','there.','Bye.'] and [(x['first_word'],x['end_word']) for x in renumbered]==[(0,2),(2,3)],(kept,renumbered)
+assert notes==[{'text':'Pip, PixelForge.','kind':'unheard','start_sample':16000,'end_sample':24000}],notes
+one=[{**windows[0],'end_word':2}];assert unheard(words[:2],one,[(2,4),(6,9)],heard)==(words[:2],one,[])
 print(json.dumps({'uncovered':found,'spoken_numbers':len(table)}))
 """
 

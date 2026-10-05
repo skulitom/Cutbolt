@@ -4,9 +4,11 @@ The fixed profile returns estimated acoustic evidence and explicit contextual cu
 intervals. Nothing here authenticates speech or substitutes for reviewing a cut.
 Run only through transcribe_supervisor.py in the selected Linux namespaces.
 """
+from bisect import bisect_left
 import gc
 import hashlib
 import importlib.metadata as metadata
+from itertools import count as numbering
 import json
 import math
 import os
@@ -483,6 +485,64 @@ def load_aligner(files, language):
     return aligner, extractor, vocab, config
 
 
+def frame_at(n, frames):
+    """The first 20 ms acoustic frame whose receptive field is centred at or after analysis sample n,
+    at most `frames`; the frames of samples [a, b) are frame_at(a) to frame_at(b)."""
+    return min(frames, max(0, (n-200+319)//320))
+
+
+def emissions(pcm, loaded):
+    """The acoustic model's label log-probabilities in every frame of the analysis, on its exact
+    convolution clock, and the blocks they were computed in. Inputs up to 30 s are one block;
+    longer ones are 24 s kept tiles with 1 s of context on either side."""
+    import torch
+    aligner, extractor, vocab, config = loaded
+    stride, receptive = 1, 1
+    for kernel, step in zip(config.conv_kernel,config.conv_stride):
+        receptive += (kernel-1)*stride; stride *= step
+    require((stride,receptive) == (320,400), 'MODEL_FORMAT', 'Unexpected acoustic convolution clock')
+    count = len(pcm); frame_count = (count-receptive)//stride+1
+    kept_tiles, blocks = [], []
+    tile = frame_count if count <= 480000 else 1200
+    for first in range(0,frame_count,tile):
+        end = min(first+tile,frame_count)
+        low = max(0,first*stride-16000)
+        high = min(count,(end-1)*stride+receptive+16000)
+        inputs = extractor(pcm[low:high],sampling_rate=16000,return_tensors='pt').to('cuda')
+        with torch.inference_mode():
+            logits = aligner(**inputs).logits.log_softmax(-1).cpu()
+        offset = first-low//stride
+        kept = logits[:,offset:offset+end-first].clone()
+        require(kept.shape[1] == end-first, 'INVALID_ALIGNMENT', 'Acoustic chunk clock mismatch')
+        kept_tiles.append(kept); blocks.append({'start_sample':low,'end_sample':high,'first_frame':first,'end_frame':end})
+        del logits, inputs
+    return torch.cat(kept_tiles,dim=1), blocks
+
+
+def unheard(words, windows, frames, heard):
+    """Drop recognized segments the acoustic model hears nothing of.
+
+    Over music or noise alone a prompted recognizer can still write text: the vocabulary prompt
+    itself ("Pip, PixelForge, Cutbolt.") or a stock phrase ("Thanks for watching!"). A frame hears
+    speech when its most likely acoustic label is not the blank. A segment, as the recognizer
+    returned it, is dropped when no frame of any of its words' CTC spans hears speech. Returns the
+    kept words, the windows' word indices renumbered to them, and one `unheard` note per dropped
+    segment with its words and the recognizer's times.
+    """
+    spoken = {w['segment'] for w, (a, b) in zip(words, frames) if heard[a:b].any()}
+    keep = [i for i, w in enumerate(words) if w['segment'] in spoken]
+    notes = []
+    for w in words:
+        if w['segment'] in spoken: continue
+        if notes and notes[-1][0] == w['segment']:
+            notes[-1][1].append(w)
+        else:
+            notes.append((w['segment'], [w]))
+    windows = [{**w, 'first_word':bisect_left(keep, w['first_word']), 'end_word':bisect_left(keep, w['end_word'])} for w in windows]
+    return [words[i] for i in keep], windows, [{'text':' '.join(w['word'] for w in dropped),'kind':'unheard',
+        'start_sample':dropped[0]['at'][0],'end_sample':max(w['at'][1] for w in dropped)} for _, dropped in notes]
+
+
 def labels_of(text, vocab, language, given):
     """The acoustic labels of one word. English numerals are aligned as the words they are read as
     (80 as EIGHTY); several spoken words are separated by the word separator. The Greek profile does
@@ -502,8 +562,9 @@ def labels_of(text, vocab, language, given):
     return output
 
 
-def align(pcm, words, windows, loaded, given, language):
-    """Acoustic word intervals: CTC alignment of each window's words inside that window."""
+def align(pcm, words, windows, loaded, given, language, emission):
+    """Acoustic word intervals: CTC alignment of each window's words inside that window. Also returns
+    each word's CTC span in acoustic frames."""
     import numpy as np
     import torch
     import torchaudio
@@ -516,28 +577,8 @@ def align(pcm, words, windows, loaded, given, language):
         if labels: labels.append(vocab['|'])
         first = len(labels); labels.extend(clean); ranges.append((first,len(labels)))
     require(len(labels) <= 16384, 'RESULT_LIMIT', 'Acoustic target exceeds 16384 labels')
-    stride, receptive = 1, 1
-    for kernel, step in zip(config.conv_kernel,config.conv_stride):
-        receptive += (kernel-1)*stride; stride *= step
-    require((stride,receptive) == (320,400), 'MODEL_FORMAT', 'Unexpected acoustic convolution clock')
-    count = len(pcm); frame_count = (count-receptive)//stride+1
-    emissions, blocks = [], []
-    # Preserve whole-fixture inference <=30s. Longer inputs have 24s kept tiles
-    # with 1s context on either side, aligned to the exact convolution clock.
-    tile = frame_count if count <= 480000 else 1200
-    for first in range(0,frame_count,tile):
-        end = min(first+tile,frame_count)
-        low = max(0,first*stride-16000)
-        high = min(count,(end-1)*stride+receptive+16000)
-        inputs = extractor(pcm[low:high],sampling_rate=16000,return_tensors='pt').to('cuda')
-        with torch.inference_mode():
-            logits = aligner(**inputs).logits.log_softmax(-1).cpu()
-        offset = first-low//stride
-        kept = logits[:,offset:offset+end-first].clone()
-        require(kept.shape[1] == end-first, 'INVALID_ALIGNMENT', 'Acoustic chunk clock mismatch')
-        emissions.append(kept); blocks.append({'start_sample':low,'end_sample':high,'first_frame':first,'end_frame':end})
-        del logits, inputs
-    emission = torch.cat(emissions,dim=1)
+    stride, receptive = 320, 400
+    count = len(pcm); frame_count = emission.shape[1]
     repeated = sum(a == b for a,b in zip(labels,labels[1:]))
     require(len(labels)+repeated <= frame_count, 'INVALID_ALIGNMENT', 'Too many acoustic labels for this source interval')
     raw, confidences, alignment_windows, frames = [], [], [], []
@@ -549,8 +590,7 @@ def align(pcm, words, windows, loaded, given, language):
         if word_first==word_end:continue
         label_first,label_end=ranges[word_first][0],ranges[word_end-1][1]
         target=labels[label_first:label_end]
-        first=max(0,(window['start_sample']-receptive//2+stride-1)//stride)
-        end=min(frame_count,(window['end_sample']-receptive//2+stride-1)//stride)
+        first,end=frame_at(window['start_sample'],frame_count),frame_at(window['end_sample'],frame_count)
         repeated=sum(a==b for a,b in zip(target,target[1:]))
         require(len(target)+repeated<=end-first,'INVALID_ALIGNMENT','Recognized window has too many labels for its acoustic clock')
         alignment,scores = torchaudio.functional.forced_align(emission[:,first:end],torch.tensor([target]),blank=config.pad_token_id)
@@ -575,7 +615,7 @@ def align(pcm, words, windows, loaded, given, language):
         'probability_milli':None if word['probability'] is None else milli(word['probability']),'ctc_start_sample':raw[i][0],'ctc_end_sample':raw[i][1],
         'acoustic_start_sample':acoustic[i][0],'acoustic_end_sample':acoustic[i][1],'alignment_score_milli':confidences[i]}
         for i,(word,(a,b)) in enumerate(zip(words,context))]
-    return output, blocks, alignment_windows, found
+    return output, alignment_windows, found, frames
 
 
 def checked_item(item):
@@ -651,6 +691,10 @@ def run(request):
         pcm = np.frombuffer(pcm_bytes,dtype='<i2').astype(np.float32)/32768
         count = len(pcm)
         words=[];notes=[];recognition_windows=[];respelled=0
+        # The acoustic model's reading of the whole analysis: alignment uses it, and recognition
+        # decodes only where it hears speech (a frame whose most likely label is not the blank).
+        emission, blocks = emissions(pcm,aligner())
+        heard = emission[0].argmax(-1).numpy() != aligner()[3].pad_token_id
         if given is not None:
             # Known text (a narration script): no recognition, one window over the whole analysis.
             words=[{'word':text,'probability':None} for text in given]
@@ -664,12 +708,17 @@ def run(request):
                 from whisper.tokenizer import get_tokenizer
                 tokens = get_tokenizer(model.is_multilingual,num_languages=model.num_languages,language=request['language'],task='transcribe').encode(' '+prompt)
                 require(len(tokens) <= model.dims.n_text_ctx//2-1, 'INPUT_LIMIT', f'The vocabulary takes {len(tokens)} recognizer tokens; at most {model.dims.n_text_ctx//2-1} fit')
+            segments = numbering()
             def recognize(first,end):
-                if not np.any(pcm[first:end]):return []
+                """Recognized words of [first, end), each with its segment, and whether it was decoded.
+                Without speech evidence a prompted recognizer writes the prompt itself or a stock phrase
+                over music alone, so a span the acoustic model hears nothing in is not decoded."""
+                if not np.any(pcm[first:end]) or not heard[frame_at(first,len(heard)):frame_at(end,len(heard))].any():
+                    return [],False
                 result = model.transcribe(pcm[first:end],language=request['language'],task='transcribe',word_timestamps=True,
                     fp16=True,temperature=0.,beam_size=5,condition_on_previous_text=False,verbose=None,
                     initial_prompt=prompt,carry_initial_prompt=prompt is not None)
-                return [word for segment in result['segments'] for word in segment['words']]
+                return [{**word,'segment':n} for segment,n in zip(result['segments'],segments) for word in segment['words']],True
             rms = energy(pcm,np) if count>480000 else None
             first = 0
             while first<count:
@@ -677,22 +726,29 @@ def run(request):
                 raw = None
                 if policy=='hard_12s':
                     # Recognize 14s, then cut between words; keep the words before the cut.
-                    passed = recognize(first,first+224000)
+                    passed,decoded = recognize(first,first+224000)
                     cut = word_gap(passed,first)
                     if cut is not None:
                         end,policy = cut,'word_gap'
                         raw = [w for w in passed if sample(w['start'],first,first+224000)+sample(w['end'],first,first+224000)<2*cut]
-                if raw is None:raw = recognize(first,end)
+                if raw is None:raw,decoded = recognize(first,end)
                 kept,dropped = speech(raw,first,end)
                 kept,changed = respell(kept,item['vocabulary']);respelled += changed
-                recognition_windows.append({'start_sample':first,'end_sample':end,'end_policy':policy,
+                kept = [{**w,'at':(sample(w['start'],first,end),sample(w['end'],first,end))} for w in kept]
+                recognition_windows.append({'start_sample':first,'end_sample':end,'end_policy':policy,'decoded':decoded,
                     'first_word':len(words),'end_word':len(words)+len(kept)})
                 words.extend(kept);notes.extend(dropped);first = end
         require(len(words) <= 2048, 'RESULT_LIMIT', 'Recognition returns at most 2048 words')
         gc.collect(); torch.cuda.empty_cache()
         recognized = time.monotonic()
-        # Sound without speech, such as a music bed alone, gives an empty result with its notes.
-        output, blocks, alignment_windows, found = align(pcm,words,recognition_windows,aligner(),given is not None,request['language']) if words else ([],[],[],[])
+        # Sound without speech, such as a music bed alone, gives an empty result.
+        output, alignment_windows, found, frames = align(pcm,words,recognition_windows,aligner(),given is not None,request['language'],emission) if words else ([],[],[],[])
+        if given is None and words:
+            # Segments the acoustic model hears nothing of are dropped and the rest aligned again.
+            words, recognition_windows, written = unheard(words,recognition_windows,frames,heard)
+            if written:
+                notes = sorted(notes+written,key=lambda note:note['start_sample'])
+                output, alignment_windows, found, frames = align(pcm,words,recognition_windows,aligner(),False,request['language'],emission) if words else ([],[],[],[])
         checked_file(str(source),(item['source_bytes'],item['source_sha256']))
         return {'profile':PROFILE if given is None else ALIGN_PROFILE,'source_sha256':item['source_sha256'],'sample_count':count,
             'words':output,'model_sha256':MODEL[1] if given is None else None,

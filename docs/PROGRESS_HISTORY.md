@@ -1,5 +1,40 @@
 # Progress history
 
+## 6 October 2026: recognition decodes only where the acoustic model hears speech
+
+The part-two demo's speech check (`demo-progress2-20261005`, ISSUES.md item 11) heard `Pip, PixelForge, Cutbolt.` over the film's music-only end card (89–91 s). That text is the vocabulary prompt (fe807a1). Prompted with `carry_initial_prompt`, Whisper writes the prompt back over audio without speech. The check counted three extra words: 150 heard, and 145 of the 149 expected words matched.
+
+Measured first, with the worker's own functions in a scratch harness on both demos' review audio:
+- **The phantom words.** They had recognizer probability 0 and acoustic alignment score 0. In their CTC spans, the acoustic model's most likely label was the blank in every 20 ms frame. The same held for the whole last recognition window (89.27–96 s) and for the other music-only stretches of both demos.
+- **The narration.** Every narrated word in both demos had at least one frame that was not blank. The weakest, a spoken "we", was read only as a word separator.
+- **Synthetic tails.** Two-tone, chord, arpeggio and band tails followed the fixture voice. While a tail shared a window with speech, recognition with a vocabulary invented nothing. Windows of music alone gave:
+  - the prompt (`Pipe, PixelForge, Cutbolt.`, `PixelForge.com`);
+  - or stock phrases (`Thanks for watching!`, "Oh, oh, oh").
+
+  Matching the text against the prompt would have missed several of these, so the rule is acoustic.
+
+The changes, in `tools/transcribe_worker.py`, apply with or without a vocabulary:
+- **One acoustic reading.** The acoustic model reads the whole analysis once, before recognition, and alignment reuses that reading.
+- **Windows.** A frame hears speech when its most likely label is a letter or the word separator. A recognition window, or the 14 s pass that looks for a cut, is decoded only if one of its frames hears speech. Otherwise it gives no words and no notes, as digital silence does, and its receipt window reports `decoded: false`.
+- **Segments.** After alignment, a recognized segment none of whose words' CTC spans hears speech is dropped. It becomes a `non_speech` note of kind `unheard`, and the remaining words are aligned again. The `export.review` summary marks such notes `(no speech heard)`.
+
+Results, with a release build of this change on main `dbd6ffe`:
+- **The same audio before and after.** The worker's `run()` ran in WSL outside the supervisor on:
+  - the six fixture recordings in English and Greek, and both two-minute repeats (240 and 234 words);
+  - the isolated words over the bed;
+  - the new fixture's tail;
+  - both demos, with and without their vocabularies.
+
+  Every word and time was identical except the phantoms over music alone. Part two lost `Pip, PixelForge, Cutbolt.` (and "You" without its vocabulary); the fixture tail lost `PixelForge, Cutbolt.` (and two "You"). The segment rule never fired: every phantom lay in a window that was not decoded.
+- **Part two rebuilt.** It was rebuilt into `C:\DEV\CutboltData\demo-progress2-20261005\unheard-rebuild`, from copies of the manifest and of `production-config.json` with `engine` set to this build. The speech check now hears 147 words, not 150, and matches 145 of 149 as before (97.3%; the ratio counts expected words). It lists six differences instead of seven, all inside the narration. The end card's window was not decoded. The build took 137.0 s.
+- **The morning demo.** `pip-explainer` revision 13 was reviewed with `remeasure.py`'s last step (`unheard-rebuild/morning_review.py`). It still hears 138 of 138, with 0 differences and the same uncovered "AM".
+
+Tests:
+- **Worker pure checks** in the fixture's `WORKER_RULES`: the acoustic frame clock, dropping unheard segments and renumbering windows' words.
+- **`transcription`**: a music-only tail with a vocabulary. The fixture voice's named line is followed by 26 s of the steady bed. Before the change the engine heard `PixelForge, Cutbolt.` in the window at 11–25 s, and the case failed. Now the windows after the line are not decoded, every word lies in the line, and both names are whole.
+
+These fixtures pass in quick mode: transcription (718 s, with the speech runtime). Its numbers case, added on 5 October, ran on the speech runtime for the first time and passed. No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: normalizing renders the mix twice instead of up to eleven times
 
 The part-two research (`demo-progress2-20261005/research/RESEARCH.md`, E2 and E3) found that `audio.normalize` took 34 s of the 96 s film's 142 s build, and the cut waited 14 s for it. Normalize measured the mix up to 11 times:

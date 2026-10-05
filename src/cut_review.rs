@@ -953,8 +953,14 @@ pub fn review(request: &Request) -> Result<Value> {
                                 .iter()
                                 .take(SUMMARY_RUNS)
                                 .map(|n| format!(
-                                    "{} {}",
+                                    "{}{} {}",
                                     n["text"].as_str().unwrap_or_default(),
+                                    // Text the recognizer wrote where the acoustic model heard no speech.
+                                    if n["kind"] == "unheard" {
+                                        " (no speech heard)"
+                                    } else {
+                                        ""
+                                    },
                                     clock.span(time_of(&n["start"]), time_of(&n["end"]))
                                 ))
                                 .collect::<Vec<_>>()

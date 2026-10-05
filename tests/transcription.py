@@ -21,7 +21,7 @@ from PIL import Image
 from agents import Client
 from tracks import time, seconds, edit, placement, track
 from transcription_speech import generate
-from transcription_runtime import maximum, failures, music_bed, vocabulary_and_uncovered, spoken_numbers
+from transcription_runtime import maximum, failures, music_bed, music_tail, vocabulary_and_uncovered, spoken_numbers
 from transcription_guard import run as guard_checks
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -299,17 +299,19 @@ def run(root,setup):
     passed.append('transcription.maximum_channels_resources_and_exact_clock')
     bed_case=music_bed(root/'music bed',speech,runtime,call,ff,correspondence)
     passed.append('transcription.music_bed_windows_cut_between_words')
+    tail_case=music_tail(root/'music tail',runtime,call,ff,correspondence)
+    passed.append('transcription.vocabulary_not_heard_over_music_alone')
     failure_cases=failures(root/'failures',requests['holdout-en'],runtime,call,preserved)
     passed.append('transcription.native_rejection_cancellation_and_owner_lifetime')
     guard=guard_checks(root/'guard',runtime)
     passed.append('transcription.supervisor_protocol_and_detached_descendants')
     preserved()
     report={'passed':passed,'quality':quality,'frames_compared':frames,'stereo_sample_frames_compared':samples,'previews':previews,'rejected_cases':rejected,
-        'maximum_inputs':long_cases,'music_bed':bed_case,'vocabulary':vocabulary,'numerals':numerals,'native_failures':failure_cases,'supervisor':guard,
+        'maximum_inputs':long_cases,'music_bed':bed_case,'music_tail':tail_case,'vocabulary':vocabulary,'numerals':numerals,'native_failures':failure_cases,'supervisor':guard,
         'gates':{'contextual_onset_max_ms':250,'contextual_onset_p95_ms':150,'isolated_end_max_ms':150,'isolated_end_p95_ms':100},
         'scope':'Pinned optional WSL/CUDA English/Greek profile, six short fixtures, full 120-second WAV parents, native movies, explicit contextual intervals and reviewed corrections; raw phonetic timing and arbitrary natural speech accuracy are not claimed'}
     (root/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','native_failures','supervisor','vocabulary','numerals']},indent=2))
+    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','music_tail','native_failures','supervisor','vocabulary','numerals']},indent=2))
     return report
 
 
