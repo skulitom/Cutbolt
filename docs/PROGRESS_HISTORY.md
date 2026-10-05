@@ -93,6 +93,7 @@ Measured with `research/mcp_surface.py` on debug builds of `83de4ca` and of this
 | Core, with a workspace | 77,112 B | 65,957 B |
 
 The core catalog with a workspace is about 20k tokens instead of 23k. A unit test checks that listings no longer carry the reference definitions or the dropped keywords, and that lookups still return them. No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: hue and saturation in grades, and `cutbolt --version`
 
 The part-two progress demo (main `83de4ca`, `C:\DEV\CutboltData\demo-progress2-20261005`, ISSUES.md 5 and 6) found two gaps.
@@ -116,12 +117,12 @@ Verification:
 - **A/B.** `scripts/ab.py` in `C:\DEV\CutboltData\vfx-stress-20261005` rendered nine existing 10 s 1080p effect scenes on release builds of `83de4ca` and of this change, back to back, with the machine 10-100 % busy. Grades, animated grades, selective grades, keys, an eight-effect chain and spatial layers all decoded identically. Engine CPU was at parity, for example 189.9 s and 188.8 s for nine animated selective layers.
   - The first build of this change cost those per-pixel selective layers about 5-7 % more engine CPU, in three interleaved rounds. Moving the hue path out of line, so the per-channel loop inlines as before, removed it: 182.6-184.3 s against 183.3-185.1 s.
   - New hue scenes, added to `perf_scenes()`, show the per-pixel cost. A constant hue grade on eight full-frame layers is processed once per source: 24 engine CPU-s, against 21 for the same grade without hue. Animating that hue costs 891 CPU-s (47 s wall), against 31 for an animated plain grade, about 0.2 µs per pixel for nine transfer evaluations. Animated selective hue turns on eight layers took 313 CPU-s, against 189 without the turn. Like the animated selective grades and keys noted after `83de4ca`, this stays open.
-- **Catalog.** The MCP catalog is unchanged in size, 267,135 bytes (274,707 with a workspace): grades live in the abbreviated `scene` stub.
+- **Catalog.** Grades live in the abbreviated `scene` stub, so the listings do not grow: `tools/list` measured the same on `83de4ca` with and without this change. On main after the catalog trim, the unit test measures 214,257 bytes (220,369 with a workspace).
 
 The demo's scarf was re-made with the control in `C:\DEV\CutboltData\demo-progress2-20261005\hue-remake` (`remake.py`). It keeps the qualifier and mix curve and replaces the gains with `hue_shift_mdeg: 55000` and `saturation_milli: 1100`, a turn computed from the measured scarf hues of 353.4 and 347.3 degrees.
 - **Before.** The gains put the two scarf shades at different hues: `[255,201,100]` at 39 degrees, clipped to full saturation, and an orange `[225,134,78]` at 23 degrees, lifting both lightnesses.
 - **After.** The turn gives golds `[231,200,72]` at 48 degrees and `[169,132,44]` at 42 degrees, at the original lightness of 0.594 and 0.418, so the shading survives.
-- The old recipe renders identically on the new engine, and the whole scene rendered in 7.4 s. `out/scarf-before-after.png` compares the two stills at 15 s.
+- The old recipe renders identically on the new engine, and the whole 384-frame scene rendered in 4.3-7.4 s on the shared machine. `out/scarf-before-after.png` compares the two stills at 15 s; the folder's README.md tabulates the colors.
 
 This extends C02/C03 controls without new capability points: no criteria, weights or scoring changed. Evidence stays stale until the next thorough run.
 
