@@ -221,6 +221,68 @@ fn normalized(text: &str) -> String {
         .collect()
 }
 
+/// Terms to prompt recognition of the cut with, up to 32: the source transcripts' own vocabularies,
+/// then expected words that look like names, spelled as the transcripts spell them. A name has a
+/// capital after its first letter (PixelForge) or a capital first letter away from a sentence
+/// start (Cutbolt in "using Cutbolt."); "I" and its contractions are not names.
+fn known_terms(documents: &[Document], expected: &[Said]) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    let mut add = |term: &str| {
+        if terms.len() < transcript::MAX_TERMS
+            && transcript::term_ok(term)
+            && !terms.iter().any(|t| t == term)
+        {
+            terms.push(term.to_owned());
+        }
+    };
+    for document in documents {
+        document.recognition.vocabulary.iter().for_each(|t| add(t));
+    }
+    let mut sentence_start = true;
+    for word in expected {
+        let core = word.text.trim_matches(|c: char| !c.is_alphanumeric());
+        let capital = core.chars().next().is_some_and(char::is_uppercase);
+        let inner =
+            core.chars().skip(1).any(char::is_uppercase) && core.chars().any(char::is_lowercase);
+        let pronoun = core == "I" || core.starts_with("I'");
+        if (inner || capital && !sentence_start && !pronoun)
+            && core.chars().any(char::is_alphabetic)
+        {
+            add(core);
+        }
+        sentence_start = word.text.ends_with(['.', '!', '?', ':']);
+    }
+    terms
+}
+
+/// The uncovered sounds of transcripts of the cut, listed for the review. Overlapping transcripts
+/// split their overlap at its middle, as their words do, so a sound near a seam is listed once.
+fn heard_uncovered(documents: &[Document]) -> Result<Value> {
+    let mut sorted = documents.to_vec();
+    sorted.sort_by(|a, b| a.range_start.compare(b.range_start).expect("valid times"));
+    let half = Time::new(1, 2)?;
+    for i in 1..sorted.len() {
+        let previous_end = sorted[i - 1]
+            .range_start
+            .plus(sorted[i - 1].range_duration)?;
+        if !sorted[i].range_start.compare(previous_end)?.is_lt() {
+            continue;
+        }
+        let seam = sorted[i].range_start.plus(previous_end)?.times(half)?;
+        for (document, before) in [(i - 1, true), (i, false)] {
+            let mut kept = Vec::new();
+            for sound in sorted[document].uncovered.drain(..) {
+                let middle = sound.start.plus(sound.end)?.times(half)?;
+                if middle.compare(seam)?.is_lt() == before {
+                    kept.push(sound);
+                }
+            }
+            sorted[document].uncovered = kept;
+        }
+    }
+    transcript::uncovered_listing(&sorted, MAX_LISTED)
+}
+
 /// Words heard in transcripts of the cut itself. Overlapping transcripts split their overlap at
 /// its middle, so a word near a seam is counted once.
 fn heard(documents: &[Document], identity: &Identity) -> Result<Vec<Said>> {
@@ -290,6 +352,7 @@ fn recognize(
     samples: u64,
     identity: &Identity,
     settings: &Recognize,
+    vocabulary: &[String],
 ) -> Result<Recognized> {
     let source = transcript::Source {
         path: PathBuf::from("audio.wav"),
@@ -334,6 +397,7 @@ fn recognize(
                 runtime: settings.runtime.clone(),
                 timeout_seconds: 600,
                 text: None,
+                vocabulary: vocabulary.to_vec(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -377,33 +441,62 @@ fn recognize(
     Ok(found)
 }
 
+/// The letters and digits of `count` consecutive words from `first`, run together.
+fn joined(words: &[Said], first: usize, count: usize) -> Option<String> {
+    let group = words.get(first..first + count)?;
+    Some(group.iter().map(|w| normalized(&w.text)).collect())
+}
+
 /// Match expected and heard words in order: a heard word matches when its text is the same and
-/// its middle lies within `tolerance` of the expected word's middle. Unmatched words between two
-/// matches form one difference.
+/// its middle lies within `tolerance` of the expected word's middle. A name split in one list
+/// and whole in the other ("pixel forge" and "PixelForge") also matches, as two to four words run
+/// together. Unmatched words between two matches form one difference.
 fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value, Vec<Value>)> {
     let mut matched_expected = vec![false; expected.len()];
     let mut matched_heard = vec![false; heard.len()];
     let mut next = 0;
     let mut matches = 0;
-    for (i, word) in expected.iter().enumerate() {
-        let middle = word.middle()?;
-        let text = normalized(&word.text);
+    let mut joins = 0;
+    let mut i = 0;
+    while i < expected.len() {
+        let middle = expected[i].middle()?;
+        let text = normalized(&expected[i].text);
         let mut k = next;
+        let mut step = 1;
         while k < heard.len() {
             let candidate = heard[k].middle()?;
             if candidate.compare(middle.plus(tolerance)?)?.is_gt() {
                 break;
             }
             let near = middle.compare(candidate.plus(tolerance)?)?.is_le();
-            if near && normalized(&heard[k].text) == text {
-                matched_expected[i] = true;
-                matched_heard[k] = true;
-                matches += 1;
-                next = k + 1;
+            let heard_text = normalized(&heard[k].text);
+            // (expected words, heard words) that match here.
+            let found = if !near {
+                None
+            } else if heard_text == text {
+                Some((1, 1))
+            } else {
+                (2..=4)
+                    .find(|&n| joined(heard, k, n).is_some_and(|j| j == text))
+                    .map(|n| (1, n))
+                    .or_else(|| {
+                        (2..=4)
+                            .find(|&n| joined(expected, i, n).is_some_and(|j| j == heard_text))
+                            .map(|n| (n, 1))
+                    })
+            };
+            if let Some((wanted, got)) = found {
+                matched_expected[i..i + wanted].fill(true);
+                matched_heard[k..k + got].fill(true);
+                matches += wanted;
+                joins += usize::from(wanted + got > 2);
+                next = k + got;
+                step = wanted;
                 break;
             }
             k += 1;
         }
+        i += step;
     }
     // Group unmatched words by how many matches precede them; matching is in order, so equal
     // counts sit between the same two matches in both lists.
@@ -457,7 +550,7 @@ fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value,
         |n: usize, d: usize| (d > 0).then(|| (n as f64 / d as f64 * 1000.0).round() / 1000.0);
     Ok((
         json!({"expected_words":expected.len(),"heard_words":heard.len(),"matched":matches,
-            "match_ratio":ratio(matches, expected.len()),"tolerance":tolerance,
+            "match_ratio":ratio(matches, expected.len()),"tolerance":tolerance,"joined_matches":joins,
             "differences":{"count":differences.len(),"listed":differences.iter().take(MAX_LISTED).collect::<Vec<_>>()}}),
         differences,
     ))
@@ -771,6 +864,7 @@ pub fn review(request: &Request) -> Result<Value> {
     let mut speech = Value::Null;
     let mut recognition = Value::Null;
     let mut failure = None;
+    let mut heard_documents: Vec<Document> = request.heard.to_vec();
     let recognized = match (request.recognize, samples) {
         (Some(settings), Some(count)) => {
             let value = crate::identity::relative(&wav, &dir)?;
@@ -778,7 +872,11 @@ pub fn review(request: &Request) -> Result<Value> {
                 sha256: value["sha256"].as_str().unwrap_or_default().to_owned(),
                 bytes: value["bytes"].as_u64().unwrap_or_default(),
             };
-            match recognize(&dir, count, &wav_identity, settings) {
+            let vocabulary = known_terms(
+                request.transcripts,
+                script.as_ref().map_or(&[][..], |s| &s.0[..]),
+            );
+            match recognize(&dir, count, &wav_identity, settings, &vocabulary) {
                 Ok(found) => {
                     fs::write(
                         dir.join("transcripts.json"),
@@ -805,10 +903,11 @@ pub fn review(request: &Request) -> Result<Value> {
                             more(found.non_speech.len())
                         ));
                     }
-                    recognition = json!({"ok":true,"documents":found.documents.len(),
+                    recognition = json!({"ok":true,"documents":found.documents.len(),"vocabulary":vocabulary,
                         "non_speech":{"count":found.non_speech.len(),
                             "listed":found.non_speech.iter().take(MAX_LISTED).collect::<Vec<_>>()},
                         "silent_windows":found.silent});
+                    heard_documents = found.documents.clone();
                     Some(heard(&found.documents, &wav_identity)?)
                 }
                 Err(e) => {
@@ -893,6 +992,27 @@ pub fn review(request: &Request) -> Result<Value> {
         if !recognition.is_null() {
             section["recognition"] = recognition;
         }
+        // Sounds no heard word covers: a filler left in the cut, or a word recognition missed.
+        let uncovered = heard_uncovered(&heard_documents)?;
+        if let Some(listed) = uncovered["listed"].as_array().filter(|l| !l.is_empty()) {
+            lines.push(format!(
+                "uncovered speech (a left-in filler or a missed word): {}{}",
+                listed
+                    .iter()
+                    .take(SUMMARY_RUNS)
+                    .map(|u| format!(
+                        "\"{}\" {}",
+                        u["letters"].as_str().unwrap_or_default(),
+                        clock.span(time_of(&u["start"]), time_of(&u["end"]))
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                more(uncovered["count"].as_u64().unwrap_or_default() as usize)
+            ));
+        }
+        if uncovered["count"] != 0 {
+            section["uncovered"] = uncovered;
+        }
         if !cut.is_empty() {
             lines.push(format!(
                 "cut words: {}",
@@ -952,4 +1072,120 @@ pub fn review(request: &Request) -> Result<Value> {
     }
     result["details"] = json!("review.json");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn said(words: &[(u64, &str)]) -> Vec<Said> {
+        words
+            .iter()
+            .map(|&(at, text)| Said {
+                start: Time::new(at, 10).unwrap(),
+                end: Time::new(at + 2, 10).unwrap(),
+                text: text.into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn names_from_the_expected_words_prompt_recognition() {
+        let mut document = crate::transcript::tests::fixture();
+        document.recognition.vocabulary = vec!["um".into(), "Cutbolt".into()];
+        let expected = said(&[
+            (0, "Drawn"),
+            (2, "with"),
+            (4, "PixelForge,"),
+            (6, "then"),
+            (8, "cut."),
+            (10, "I"),
+            (12, "used"),
+            (14, "Cutbolt"),
+            (16, "and"),
+            (18, "Greek."),
+            (20, "Then"),
+            (22, "I'm"),
+            (24, "done."),
+        ]);
+        assert_eq!(
+            known_terms(&[document], &expected),
+            ["um", "Cutbolt", "PixelForge", "Greek"]
+        );
+        assert!(known_terms(&[], &said(&[(0, "Plain"), (2, "words.")])).is_empty());
+    }
+
+    #[test]
+    fn split_and_joined_names_still_match() {
+        let tolerance = Time::new(1, 2).unwrap();
+        let expected = said(&[
+            (0, "drawn"),
+            (2, "with"),
+            (4, "PixelForge,"),
+            (8, "using"),
+            (10, "cut"),
+            (12, "bolt."),
+        ]);
+        let heard = said(&[
+            (0, "drawn"),
+            (2, "with"),
+            (4, "pixel"),
+            (6, "forge"),
+            (8, "using"),
+            (11, "Cutbolt"),
+        ]);
+        let (comparison, differences) = compare(&expected, &heard, tolerance).unwrap();
+        assert_eq!(comparison["matched"], 6);
+        assert_eq!(comparison["joined_matches"], 2);
+        assert!(differences.is_empty(), "{differences:?}");
+        // A join still needs the right letters.
+        let heard = said(&[
+            (0, "drawn"),
+            (2, "with"),
+            (4, "pixel"),
+            (6, "forged"),
+            (8, "using"),
+        ]);
+        let (comparison, differences) = compare(&expected, &heard, tolerance).unwrap();
+        assert_eq!(
+            (
+                comparison["matched"].as_u64(),
+                comparison["joined_matches"].as_u64()
+            ),
+            (Some(3), Some(0))
+        );
+        assert_eq!(differences[0]["expected"], "PixelForge,");
+        assert_eq!(differences[0]["heard"], "pixel forged");
+    }
+
+    #[test]
+    fn overlapping_heard_transcripts_list_a_sound_once() {
+        let t = |s: u64| Time::new(s, 1).unwrap();
+        let sound = |a: u64| crate::transcript::Uncovered {
+            start: t(a),
+            end: t(a + 1),
+            letters: "AM".into(),
+        };
+        let window = |start: u64, sounds: Vec<crate::transcript::Uncovered>| {
+            let mut document = crate::transcript::tests::fixture();
+            document.source.duration = t(300);
+            document.range_start = t(start);
+            document.range_duration = t(120);
+            document.words.clear();
+            document.uncovered = sounds;
+            document
+        };
+        // Windows of 0-120 s and 115-235 s meet at 117.5 s; both heard the sound across it.
+        let later = window(115, vec![sound(117), sound(130)]);
+        let earlier = window(0, vec![sound(100), sound(117)]);
+        let listing = heard_uncovered(&[later, earlier]).unwrap();
+        let starts: Vec<&Value> = listing["listed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| &s["start"])
+            .collect();
+        assert_eq!(listing["count"], 3);
+        assert_eq!(starts, [&json!(t(100)), &json!(t(117)), &json!(t(130))]);
+    }
 }

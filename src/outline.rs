@@ -76,6 +76,8 @@ fn min(a: Time, b: Time) -> Result<Time> {
 pub(crate) struct Spoken<'a> {
     pub(crate) ranges: Vec<(Time, Time)>,
     pub(crate) words: Vec<&'a Word>,
+    /// Sounds no word covers, from the documents' `uncovered` lists.
+    pub(crate) uncovered: Vec<&'a crate::transcript::Uncovered>,
 }
 
 fn normalized(path: &str) -> String {
@@ -146,9 +148,11 @@ pub(crate) fn spoken<'a>(
             let entry = by_asset.entry(asset.clone()).or_insert(Spoken {
                 ranges: Vec::new(),
                 words: Vec::new(),
+                uncovered: Vec::new(),
             });
             entry.ranges.push((document.range_start, end));
             entry.words.extend(document.words.iter());
+            entry.uncovered.extend(document.uncovered.iter());
         }
         by_document.insert(&document.id, assets);
     }
@@ -608,6 +612,9 @@ pub(crate) struct TimelineWords {
     pub(crate) cut: Vec<Value>,
     /// Transcripts that matched no asset, with the reason.
     pub(crate) unused: Vec<Value>,
+    /// Uncovered sounds wholly inside audible audio clips, on the timeline clock, in time order;
+    /// their text is the letters the acoustic model read.
+    pub(crate) uncovered: Vec<Said>,
 }
 
 /// Words the timeline says: every whole transcript word inside an audible audio clip (on an
@@ -684,11 +691,21 @@ pub(crate) fn timeline_words(
     }
     let mut said = Vec::new();
     let mut cut = Vec::new();
+    let mut uncovered = Vec::new();
     for (id, start, source_in, duration, asset) in clips {
         let Some(spoken) = matches.by_asset.get(asset) else {
             continue;
         };
         let source_end = source_in.plus(duration)?;
+        for sound in &spoken.uncovered {
+            if !sound.start.compare(source_in)?.is_lt() && !sound.end.compare(source_end)?.is_gt() {
+                uncovered.push(Said {
+                    start: start.plus(sound.start.minus(source_in)?)?,
+                    end: start.plus(sound.end.minus(source_in)?)?,
+                    text: sound.letters.clone(),
+                });
+            }
+        }
         for word in &spoken.words {
             if !word.start.compare(source_end)?.is_lt() || !source_in.compare(word.end)?.is_lt() {
                 continue;
@@ -707,9 +724,11 @@ pub(crate) fn timeline_words(
         }
     }
     said.sort_by(|a, b| a.start.compare(b.start).expect("valid times"));
+    uncovered.sort_by(|a, b| a.start.compare(b.start).expect("valid times"));
     Ok(TimelineWords {
         said,
         cut,
         unused: matches.unused,
+        uncovered,
     })
 }

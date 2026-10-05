@@ -43,6 +43,8 @@ pub struct Request<'a> {
     pub timeout_seconds: u32,
     /// Known spoken text to align instead of recognizing.
     pub text: Option<&'a str>,
+    /// Terms to prompt recognition with and respell to; empty for none.
+    pub vocabulary: &'a [String],
 }
 
 /// Owned scratch folder; removed afterwards.
@@ -76,7 +78,8 @@ fn sample(time: Time) -> Result<u64> {
 /// Make consecutive documents meet instead of overlapping. Where one ends inside the next, the
 /// seam starts at the overlap's middle (on the sample grid): the earlier document keeps its words
 /// whose middle lies before it, the seam moves to the end of its last kept word if that is later,
-/// and the later document keeps its words starting at or after the seam.
+/// and the later document keeps its words starting at or after the seam. Uncovered sounds go to the
+/// document holding their middle, clipped to its range.
 pub(crate) fn stitch(mut documents: Vec<Document>) -> Result<Vec<Document>> {
     for i in 1..documents.len() {
         let (before, after) = documents.split_at_mut(i);
@@ -106,6 +109,27 @@ pub(crate) fn stitch(mut documents: Vec<Document>) -> Result<Vec<Document>> {
             }
         }
         right.words = kept;
+        let at = Time::new(seam, 48_000)?;
+        let mut kept = Vec::new();
+        for mut sound in left.uncovered.drain(..) {
+            if sample(sound.start)? + sample(sound.end)? < 2 * seam {
+                if sound.end.compare(at)?.is_gt() {
+                    sound.end = at;
+                }
+                kept.push(sound);
+            }
+        }
+        left.uncovered = kept;
+        let mut kept = Vec::new();
+        for mut sound in right.uncovered.drain(..) {
+            if sample(sound.start)? + sample(sound.end)? >= 2 * seam {
+                if sound.start.compare(at)?.is_lt() {
+                    sound.start = at;
+                }
+                kept.push(sound);
+            }
+        }
+        right.uncovered = kept;
         left.range_duration = Time::new(seam - sample(left.range_start)?, 48_000)?;
         right.range_start = Time::new(seam, 48_000)?;
         right.range_duration = Time::new(right_end - seam, 48_000)?;
@@ -310,6 +334,10 @@ pub fn run(request: &Request) -> Result<Value> {
     for text in request.texts {
         transcribe::text_words(text)?;
     }
+    transcribe::check_vocabulary(
+        request.vocabulary,
+        request.text.is_some() || !request.texts.is_empty(),
+    )?;
     // (path, known text, document ID prefix) of each file.
     let files: Vec<(PathBuf, Option<&str>, String)> = match (request.path, request.paths) {
         (Some(path), []) if request.texts.is_empty() => {
@@ -404,6 +432,7 @@ pub fn run(request: &Request) -> Result<Value> {
                 runtime: request.runtime.clone(),
                 timeout_seconds: request.timeout_seconds,
                 text: file.text.clone(),
+                vocabulary: request.vocabulary.to_vec(),
             });
         }
     }
@@ -420,7 +449,8 @@ pub fn run(request: &Request) -> Result<Value> {
         match assemble(file, mine) {
             Ok(heard) => {
                 let words: usize = heard.documents.iter().map(|d| d.words.len()).sum();
-                reports.push(json!({"source":file.source,"documents":heard.documents.len(),"words":words,
+                let uncovered: usize = heard.documents.iter().map(|d| d.uncovered.len()).sum();
+                reports.push(json!({"source":file.source,"documents":heard.documents.len(),"words":words,"uncovered":uncovered,
                     "ranges":heard.documents.iter().map(|d| json!({"id":d.id,"start":d.range_start,"duration":d.range_duration,"words":d.words.len()})).collect::<Vec<_>>(),
                     "non_speech":heard.non_speech.len(),"silent_windows":heard.silent,"duration":file.duration}));
                 documents.extend(heard.documents);
@@ -443,14 +473,16 @@ pub fn run(request: &Request) -> Result<Value> {
     file.write_all(&serde_json::to_vec_pretty(&saved)?)?;
     file.sync_all()?;
     let aligned = request.text.is_some() || !request.texts.is_empty();
-    let next = "pass the file's transcripts (with a workspace, {\"file\": output, \"select\": \"transcripts\"}) to timeline.outline, captions.draft, export.review or transcript.plan";
+    let next = "pass the file's transcripts (with a workspace, {\"file\": output, \"select\": \"transcripts\"}) to timeline.outline, captions.draft, export.review or transcript.plan; uncovered lists sounds no word covers, such as a left-out um (transcript.fillers cuts filler-like ones with uncovered: true)";
+    let uncovered = crate::transcript::uncovered_listing(&documents, 50)?;
     if single {
         let report = &reports[0];
         return Ok(
             json!({"output":output,"source":report["source"],"duration":report["duration"],"documents":documents.len(),"words":words,
             "ranges":report["ranges"],
             "non_speech":{"count":non_speech.len(),"listed":non_speech.iter().take(50).collect::<Vec<_>>()},
-            "silent_windows":report["silent_windows"],"aligned_text":aligned,
+            "silent_windows":report["silent_windows"],"aligned_text":aligned,"uncovered":uncovered,
+            "vocabulary":request.vocabulary,
             "review_required":true,"next":next}),
         );
     }
@@ -458,7 +490,7 @@ pub fn run(request: &Request) -> Result<Value> {
     Ok(
         json!({"output":output,"files":reports,"failed":failed,"documents":documents.len(),"words":words,
         "non_speech":{"count":non_speech.len(),"listed":non_speech.iter().take(50).collect::<Vec<_>>()},
-        "aligned_text":aligned,"review_required":true,"next":next}),
+        "aligned_text":aligned,"uncovered":uncovered,"vocabulary":request.vocabulary,"review_required":true,"next":next}),
     )
 }
 
@@ -543,5 +575,32 @@ mod tests {
         .unwrap();
         assert_eq!(apart[0].range_duration, Time::new(10, 1).unwrap());
         assert_eq!(apart[1].words.len(), 1);
+    }
+
+    #[test]
+    fn stitching_gives_each_uncovered_sound_to_one_document() {
+        let s = 48_000;
+        let t = |n: u64| Time::new(n, 48_000).unwrap();
+        let sound = |a: u64, b: u64| crate::transcript::Uncovered {
+            start: t(a),
+            end: t(b),
+            letters: "AM".into(),
+        };
+        // The seam is the overlap's middle, 117.5 s. Both windows heard two sounds across it: the
+        // one whose middle lies before the seam stays left, clipped there, and the other right.
+        let (across, after) = (
+            sound(117 * s, 117 * s + 3 * s / 4),
+            sound(117 * s + 4 * s / 5, 118 * s + 4 * s / 5),
+        );
+        let mut left = document("l", 0, 120 * s, vec![word("a", 100 * s, 101 * s)]);
+        left.uncovered = vec![sound(110 * s, 111 * s), across.clone(), after.clone()];
+        let mut right = document("r", 115 * s, 235 * s, vec![word("b", 130 * s, 131 * s)]);
+        right.uncovered = vec![across, after.clone(), sound(125 * s, 126 * s)];
+        let stitched = stitch(vec![left, right]).unwrap();
+        assert_eq!(
+            stitched[0].uncovered,
+            [sound(110 * s, 111 * s), sound(117 * s, 117 * s + s / 2)]
+        );
+        assert_eq!(stitched[1].uncovered, [after, sound(125 * s, 126 * s)]);
     }
 }

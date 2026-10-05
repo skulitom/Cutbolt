@@ -111,6 +111,11 @@ pub struct Transcribe {
     /// whitespace; write numbers out in words. At most 32 KiB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Names and terms the speech may contain, spelled as wanted (PixelForge): the recognizer is
+    /// prompted with them, and words it splits or spells differently become them. Include um and
+    /// uh to have fillers written down. 1-32 terms of 1-64 bytes; not with `text`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vocabulary: Vec<String>,
 }
 fn invalid(message: &str) -> crate::Error {
     error("INVALID_TRANSCRIPTION", message)
@@ -145,6 +150,26 @@ pub(crate) fn text_words(text: &str) -> Result<Vec<String>> {
         ));
     }
     Ok(words)
+}
+/// Check a recognition vocabulary: 1-32 terms of 1-64 bytes, for recognition only. Its prompt
+/// must also fit the recognizer's context, which the worker checks with the recognizer's tokens.
+pub(crate) fn check_vocabulary(vocabulary: &[String], aligning: bool) -> Result<()> {
+    if vocabulary.is_empty() {
+        return Ok(());
+    }
+    if aligning {
+        return Err(invalid(
+            "vocabulary guides recognition; known text is aligned exactly as given, so give one or the other",
+        ));
+    }
+    if vocabulary.len() > transcript::MAX_TERMS
+        || !vocabulary.iter().all(|t| transcript::term_ok(t))
+    {
+        return Err(invalid(
+            "vocabulary takes 1-32 terms of 1-64 bytes, without control characters or surrounding spaces",
+        ));
+    }
+    Ok(())
 }
 /// Cheap checks of a runtime configuration, before any media work.
 pub(crate) fn check_runtime(runtime: &Runtime) -> Result<()> {
@@ -463,6 +488,22 @@ struct Word {
     acoustic_end_sample: u64,
     alignment_score_milli: u16,
 }
+/// Speech no word covers, on the analysis clock, with the letters the acoustic model read there.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Sound {
+    start_sample: u64,
+    end_sample: u64,
+    letters: String,
+}
+/// A request's vocabulary as the worker takes and echoes it: null when there is none.
+fn vocabulary(request: &Transcribe) -> Value {
+    if request.vocabulary.is_empty() {
+        Value::Null
+    } else {
+        json!(request.vocabulary)
+    }
+}
 /// Recognized text that is not speech, such as "[Music]", on the analysis clock.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -509,6 +550,7 @@ fn validate(request: &Transcribe) -> Result<Option<Vec<String>>> {
             "Analysis requires 25 ms..120 s inside the source and an explicit 1..600 s deadline",
         ));
     }
+    check_vocabulary(&request.vocabulary, request.text.is_some())?;
     request.text.as_deref().map(text_words).transpose()
 }
 
@@ -578,7 +620,9 @@ pub fn run_many(
     let mut groups: Vec<Vec<(usize, Option<Vec<String>>)>> = Vec::new();
     let (mut bytes, mut samples) = (0usize, 0u64);
     for (index, given) in checked {
-        let size = 512 + serde_json::to_vec(&given)?.len();
+        let size = 512
+            + serde_json::to_vec(&given)?.len()
+            + serde_json::to_vec(&requests[index].vocabulary)?.len();
         let length = exact(requests[index].duration)?;
         let full = groups.last().is_none_or(|group| {
             group.len() == BATCH || bytes + size > 60 * 1024 || samples + length > 600 * 48_000
@@ -612,9 +656,10 @@ pub fn run_many(
         }
         let items: Vec<Value> = prepared
             .iter()
-            .map(|(_, p)| {
+            .map(|(index, p)| {
                 json!({"source_path":format!("{root}/{}", p.file),"source_sha256":p.analysis_hash,
-                "source_bytes":p.bytes,"sample_count":p.count,"text":p.given})
+                "source_bytes":p.bytes,"sample_count":p.count,"text":p.given,
+                "vocabulary":vocabulary(&requests[*index])})
             })
             .collect();
         let recognizing = prepared.iter().any(|(_, p)| p.given.is_none());
@@ -831,6 +876,7 @@ fn finish(
         || result["python_network_attempts"] != 0
         || result["context_samples"] != json!({"leading":1280,"trailing":320})
         || result["review_required"] != true
+        || result["vocabulary"] != vocabulary(request)
     {
         return Err(error(
             "INVALID_RESULT",
@@ -892,6 +938,17 @@ fn finish(
                 "start":source_time(note.start_sample)?,"end":source_time(note.end_sample)?}))
         })
         .collect::<Result<Vec<_>>>()?;
+    let sounds: Vec<Sound> = serde_json::from_value(result["uncovered"].clone())?;
+    let uncovered = sounds
+        .into_iter()
+        .map(|sound| {
+            Ok(transcript::Uncovered {
+                start: source_time(sound.start_sample)?,
+                end: source_time(sound.end_sample)?,
+                letters: sound.letters,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let reported: BTreeMap<String, (u64, String)> =
         serde_json::from_value(result["alignment_files"].clone())?;
     let files: BTreeMap<String, Identity> = reported
@@ -934,8 +991,10 @@ fn finish(
             analysis_sha256: analysis_hash.clone(),
             versions: serde_json::from_value(result["versions"].clone())?,
             alignment: Some(alignment),
+            vocabulary: request.vocabulary.clone(),
         },
         words,
+        uncovered,
     };
     document.validate()?;
     source_file(request, control)?;
@@ -979,5 +1038,28 @@ mod tests {
         assert!(text_words(&"x".repeat(513)).is_err());
         assert!(text_words(&"a ".repeat(2049)).is_err());
         assert_eq!(text_words(&"a ".repeat(2048)).unwrap().len(), 2048);
+    }
+
+    #[test]
+    fn a_vocabulary_guides_recognition_within_its_bounds() {
+        let terms = |list: &[&str]| list.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        check_vocabulary(&[], true).unwrap();
+        check_vocabulary(&terms(&["PixelForge", "Cutbolt", "um", "New York"]), false).unwrap();
+        check_vocabulary(&terms(&[&"x".repeat(64)]), false).unwrap();
+        let many: Vec<String> = (0..33).map(|n| format!("t{n}")).collect();
+        for (bad, aligning) in [
+            (terms(&["PixelForge"]), true),
+            (terms(&[""]), false),
+            (terms(&["um "]), false),
+            (terms(&[&"x".repeat(65)]), false),
+            (terms(&["a\u{7}"]), false),
+            (many, false),
+        ] {
+            assert_eq!(
+                check_vocabulary(&bad, aligning).unwrap_err().code,
+                "INVALID_TRANSCRIPTION",
+                "{bad:?}"
+            );
+        }
     }
 }

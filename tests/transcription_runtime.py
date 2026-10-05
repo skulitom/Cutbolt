@@ -7,11 +7,13 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import subprocess
 import time as clock
 import wave
 from tracks import time, seconds
 from transcription_guard import linux, processes, no_namespaces, wsl
+from transcription_speech import lines
 
 ROOT=Path(__file__).resolve().parents[1]
 EXE=ENGINE
@@ -130,6 +132,95 @@ def music_bed(root,speech,runtime,call,ff,correspondence):
     record={'seconds':clock.monotonic()-started,'words':len(words),'reference_words':len(reference),'word_error_rate':match['rate'],
         'recognition_blocks':windows,'source_preserved':True,'scratch_removed':True}
     print(json.dumps({k:v for k,v in record.items() if k!='recognition_blocks'}),flush=True)
+    return record
+
+
+NAMES='This film was drawn with PixelForge, then cut and mixed by an agent using Cutbolt.'
+FILLER='Keep the blue circle, um, and remove the green triangle.'
+WORKER_RULES="""import json,runpy,sys
+sys.path[:0]=json.loads(sys.argv[2])
+import numpy as np
+worker=runpy.run_path(sys.argv[1])
+respell,prompt_of,reading,uncovered=(worker[k] for k in ('respell','prompt_of','reading','uncovered'))
+w=lambda t,a=0.,b=.1,p=.9:{'word':t,'start':a,'end':b,'probability':p}
+said=lambda words:[x['word'] for x in words]
+assert prompt_of(None) is None and prompt_of(['um','uh','PixelForge'])=='um, uh, PixelForge.'
+# Split and differently spelled names become the term, keeping the outer punctuation.
+out,n=respell([w('with'),w('pixel',1.,1.2,.8),w('forge,',1.2,1.5,.6),w('using'),w('cut-bolt.')],['PixelForge','Cutbolt'])
+assert said(out)==['with','PixelForge,','using','Cutbolt.'] and n==2,out
+assert (out[1]['start'],out[1]['end'],out[1]['probability'])==(1.,1.5,.6),out
+assert said(respell([w('"Pixel'),w('Forge"')],['PixelForge'])[0])==['"PixelForge"']
+# Punctuation between tokens, other letters, many-word terms and a capitalized um stay as heard.
+for words,terms in (([w('pixel,'),w('forge')],['PixelForge']),([w('cut'),w('bolts')],['Cutbolt']),([w('new'),w('york')],['New York']),([w('Um,')],['um'])):
+ assert respell(words,terms)==(words,0),(words,terms)
+assert said(respell([w('UM')],['um'])[0])==['um'] and said(respell([w('cut'),w('bolt'),w('cutters')],['Cutbolt'])[0])==['Cutbolt','cutters']
+# A filler between two words: letters the acoustic model reads where no word is, grown over
+# its voiced audio. A quiet murmur is background, covered letters belong to a word, and a sound
+# that runs on into a word without a dip is left to it as its onset.
+names={0:'<pad>',1:'|',2:'U',3:'M',4:'A',5:'B'};letter=np.array([False,False,True,True,True,True])
+pcm=np.zeros(16000,dtype=np.float32);t=np.arange(16000)/16000
+for a,b,level in ((.1,.3,.3),(.5,.7,.3),(.8,.85,.01),(.9,.98,.3)):
+ pcm[int(a*16000):int(b*16000)]=level*np.sin(2*np.pi*220*t[int(a*16000):int(b*16000)])
+best=np.zeros(49,dtype=np.int64);best[5:15]=4;best[45:49]=5;best[26:29]=2;best[31:34]=3;best[41]=4;best[24]=1
+raw=[(1600,4880),(14400,15760)]
+found=uncovered(pcm,best,letter,1,names,[(5,15),(45,49)],raw,np)
+assert found==[{'start_sample':8000,'end_sample':11200,'letters':'UM'}],found
+assert uncovered(pcm,best,letter,1,names,[(5,15),(24,35),(45,49)],raw,np)==[]
+onset=pcm.copy();onset[12800:14400]=.3*np.sin(2*np.pi*220*t[12800:14400])
+assert uncovered(onset,best,letter,1,names,[(5,15),(45,49)],raw,np)==found
+assert reading([2,2,0,2,1,1,3,0],letter,1,names)=='UU M' and reading([4]*70,letter,1,names)=='A'
+long=reading([4,0]*70,letter,1,names);assert len(long)==64 and long[:63]=='A'*63
+print(json.dumps({'uncovered':found}))
+"""
+
+
+def vocabulary_and_uncovered(root,runtime,call):
+    """A vocabulary makes the recognizer spell names whole, and speech no word covers (an "um" the
+    script leaves out) is reported as an uncovered sound, never as a word, which transcript.fillers
+    lists and, when asked, cuts between its neighbours."""
+    root.mkdir()
+    rules=wsl(runtime,WORKER_RULES,linux(ROOT/'tools/transcribe_worker.py'),json.dumps(runtime['python_paths']))
+    spoken=lines(root/'speech',{'names':NAMES,'filler':FILLER})
+    local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots']['en']
+    def transcribe(name,label,**fields):
+        saved=root/(label+'.json')
+        result=call({'command':'media.transcribe','path':str(spoken[name]['path']),'input_root':str(root/'speech'),'output_root':str(root),
+            'output':str(saved),'runtime':local,'language':'en','id':name,**fields},timeout=600)
+        return result,json.loads(saved.read_text(encoding='utf-8'))['transcripts']
+    letters=lambda text:''.join(c for c in text.casefold() if c.isalnum())
+    terms=['PixelForge','Cutbolt']
+    plain,plain_docs=transcribe('names','names-plain')
+    named,named_docs=transcribe('names','names-vocabulary',vocabulary=terms)
+    heard=[w['text'] for d in named_docs for w in d['words']]
+    assert {'pixelforge','cutbolt'}<={letters(t) for t in heard},heard
+    assert all(d['recognition']['vocabulary']==terms for d in named_docs) and named['vocabulary']==terms,named
+    assert all('vocabulary' not in d['recognition'] for d in plain_docs) and plain['vocabulary']==[]
+    # The script without its "um": the aligned words skip it, and the sound is left uncovered.
+    script=FILLER.replace(' um,','')
+    aligned,docs=transcribe('filler','filler-script',text=script)
+    doc=docs[0];words={w['text']:w for w in doc['words']}
+    assert [w['text'] for w in doc['words']]==script.split() and len(doc.get('uncovered',[]))==1,doc
+    sound=doc['uncovered'][0];read=sound['letters'].replace(' ','')
+    events={letters(e['text']):e['start'] for e in spoken['filler']['events']}
+    assert re.fullmatch('[AEU]+H?[MR]*|H?M+',read),sound
+    assert events['um']-.15<=seconds(sound['start'])<seconds(sound['end'])<=events['and']+.05,(sound,events)
+    assert seconds(words['circle,']['end'])<=seconds(sound['start']) and seconds(sound['end'])<=seconds(words['and']['start']),(sound,words)
+    assert aligned['uncovered']=={'count':1,'listed':[{'document':doc['id'],'start':sound['start'],'end':sound['end'],
+        'letters':sound['letters'],'after':'circle,','before':'and'}]},aligned
+    frames=int(seconds(doc['source']['duration'])*25)
+    project=call({'command':'project.create','id':'filler','width':16,'height':12,'frame_rate':time(25)})
+    project=call({'command':'timeline.apply','project':project,'expected_revision':0,'operations':[
+        {'op':'media.add','asset':{'id':'take','path':'filler.wav','duration':time(frames,25)}},
+        {'op':'clip.append','clip':{'id':'c','asset_id':'take','source_in':time(0),'duration':time(frames,25)}}]})
+    listed=call({'command':'transcript.fillers','project':project,'transcripts':docs})
+    assert listed['operations']==[] and listed['fillers']['count']==0 and listed['uncovered']['filler_like']==1,listed
+    cut=call({'command':'transcript.fillers','project':project,'transcripts':docs,'uncovered':True})
+    span=cut['uncovered']['listed'][0]['cut']
+    assert cut['uncovered']['cuts']==1 and len(cut['operations'])==1,cut
+    assert seconds(words['circle,']['end'])<=seconds(span['start'])<seconds(span['end'])<=seconds(words['and']['start']),(span,words)
+    record={'rules':rules,'names':{'terms':terms,'without_vocabulary':' '.join(w['text'] for d in plain_docs for w in d['words']),
+        'with_vocabulary':' '.join(heard)},'filler':{'script':script,'uncovered':sound,'events':events,'cut':span}}
+    print(json.dumps(record,ensure_ascii=False),flush=True)
     return record
 
 

@@ -30,6 +30,30 @@ def generate(root):
             cases.append({'id':('pilot' if i==0 else 'holdout')+'-'+language,'language':language,'voice':VOICES[language],'rate':i-1,'text':text})
         for i,text in enumerate(WORDS[language]):
             cases.append({'id':f'word-{language}-{i}','language':language,'voice':VOICES[language],'rate':-1,'text':text})
+    receipt=synthesize(root,cases)
+    fixtures={}
+    for item in receipt['cases']:
+        path=root/(item['id']+'.wav')
+        item['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+        if not item['id'].startswith('word-'):
+            fixtures[item['id']]={'path':path,'language':item['language'],'pcm':read_wave(path),'text':item['text'],
+                'reference':[{'text':w['text'],'start':w['ticks']/1e7} for w in item['events']]}
+    return isolated(root,receipt,fixtures)
+
+
+def lines(root,texts):
+    """English lines spoken by the fixture voice: {id: {path, text, events}}, each event a spoken
+    word and its start in seconds."""
+    root=Path(root).resolve();root.mkdir()
+    receipt=synthesize(root,[{'id':key,'language':'en','voice':VOICES['en'],'rate':-1,'text':text} for key,text in texts.items()])
+    (root/'receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    return {item['id']:{'path':root/(item['id']+'.wav'),'text':item['text'],
+        'events':[{'text':w['text'],'start':w['ticks']/1e7} for w in item['events']]} for item in receipt['cases']}
+
+
+def synthesize(root,cases):
+    """Speak each case to <root>/<id>.wav (16 kHz mono) with the local voices; returns the receipt
+    with each case's word events."""
     (root/'cases.json').write_text(json.dumps(cases,ensure_ascii=False),encoding='utf-8')
     script=r'''param([string]$FixtureRoot)
 $ErrorActionPreference='Stop'
@@ -65,14 +89,11 @@ $records=@(foreach($item in $items) {
 '''
     path=root/'generate.ps1';path.write_text(script,encoding='utf-8')
     subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(path),'-FixtureRoot',str(root)],check=True,capture_output=True,timeout=90)
-    receipt=json.loads((root/'synthesis.json').read_text(encoding='utf-8-sig'))
-    fixtures={}
-    for item in receipt['cases']:
-        path=root/(item['id']+'.wav')
-        item['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
-        if not item['id'].startswith('word-'):
-            fixtures[item['id']]={'path':path,'language':item['language'],'pcm':read_wave(path),'text':item['text'],
-                'reference':[{'text':w['text'],'start':w['ticks']/1e7} for w in item['events']]}
+    return json.loads((root/'synthesis.json').read_text(encoding='utf-8-sig'))
+
+
+def isolated(root,receipt,fixtures):
+    """Each language's isolated words, joined with 400 ms of digital silence between them."""
     for language in WORDS:
         pcm=array('h',[0]*6400);reference=[]
         for i,text in enumerate(WORDS[language]):

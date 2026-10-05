@@ -230,6 +230,127 @@ def speech(raw, first, end):
     return kept,notes
 
 
+def prompt_of(vocabulary):
+    """The recognizer prompt of a vocabulary: its terms as one comma-separated line."""
+    return ', '.join(vocabulary)+'.' if vocabulary else None
+
+
+def core(text):
+    """A token's letters and digits, case-folded, so "Forge," and "forge" compare equal."""
+    return ''.join(c for c in text.casefold() if c.isalnum())
+
+
+def respell(words, vocabulary):
+    """Respell recognized tokens as the vocabulary's one-word terms.
+
+    Two to four consecutive tokens whose letters and digits run together into a term become that
+    term ("pixel forge" for PixelForge), keeping the first token's leading and the last token's
+    trailing punctuation; tokens with punctuation between them are not joined. A single token
+    spelled differently takes the term's spelling, except that an all-lowercase term ("um") leaves
+    a token that differs only by a capital first letter. Returns the words and the count changed.
+    """
+    terms = {}
+    for term in vocabulary or []:
+        if len(term.split()) == 1 and core(term):
+            terms.setdefault(core(term), term)
+    output, i, changed = [], 0, 0
+    while i < len(words):
+        for n in (4, 3, 2, 1):
+            group = words[i:i+n]
+            texts = [w['word'] for w in group]
+            term = terms.get(''.join(core(t) for t in texts)) if len(group) == n else None
+            if term is None or any(not t[-1].isalnum() for t in texts[:-1]) or any(not t[0].isalnum() for t in texts[1:]):
+                continue
+            first = next(k for k,c in enumerate(texts[0]) if c.isalnum())
+            last = next(k for k,c in reversed(list(enumerate(texts[-1]))) if c.isalnum())
+            lead, trail = texts[0][:first], texts[-1][last+1:]
+            spelled = texts[0][first:last+1] if n == 1 else None
+            if n == 1 and (spelled == term or (term == term.lower() and spelled[1:] == term[1:])):
+                output.append(group[0])
+            else:
+                output.append({**group[0],'word':lead+term+trail,'end':group[-1]['end'],
+                    'probability':min(w['probability'] for w in group)})
+                changed += 1
+            i += n
+            break
+        else:
+            output.append(words[i]); i += 1
+    return output, changed
+
+
+def reading(labels, letter, separator, names):
+    """The letters of a greedy acoustic label path: repeats collapse, blanks drop, and word
+    separators become spaces; at most 64 characters, the 64th then being an ellipsis."""
+    text, previous = [], None
+    for label in labels:
+        if label != previous:
+            if letter[label]: text.append(names[label])
+            elif label == separator: text.append(' ')
+        previous = label
+    text = ' '.join(''.join(text).split())
+    return text if len(text) <= 64 else text[:63]+'…'
+
+
+def grow(rms, lo, hi, low, high, threshold):
+    """Extend 5 ms frames [lo, hi) over frames at or above threshold, across holes of at most four
+    frames, within [low, high)."""
+    while lo > low:
+        j = lo-1
+        while j >= low and lo-j <= 4 and rms[j] < threshold: j -= 1
+        if j < low or rms[j] < threshold: break
+        lo = j
+    while hi < high:
+        j = hi
+        while j < high and j-hi < 4 and rms[j] < threshold: j += 1
+        if j >= high or rms[j] < threshold: break
+        hi = j+1
+    return lo, hi
+
+
+def uncovered(pcm, best, letter, separator, names, frames, raw, np):
+    """Speech that no word covers, for review, such as a filler the recognizer left out.
+
+    Frames whose most likely acoustic label is a letter, more than two frames from every word's
+    CTC span, form groups when at most five frames apart. Each group grows over the voiced audio
+    around it (5 ms RMS within 14 dB of its peak, holes up to 20 ms); groups that end up
+    overlapping merge. A group whose sound runs on into a word's CTC span without such a dip is
+    left to that word: it cannot be told from the word's own onset or ending, which the aligner
+    can place a little late or early. A group whose peak is more than 14 dB below the median
+    level inside the words is background and left out too. Each reports the letters the acoustic
+    model read there, never a word.
+    """
+    count = len(pcm)
+    covered = np.zeros(len(best), dtype=bool)
+    for a, b in frames: covered[max(0,a-2):b+2] = True
+    found = np.flatnonzero(letter[best] & ~covered)
+    if not len(found) or not raw: return []
+    rms = energy(pcm, np)
+    level = float(np.median(np.concatenate([rms[a//80:(b+79)//80] for a, b in raw])))
+    groups = []
+    for f in found.tolist():
+        if groups and f-groups[-1][1] < 5 and not covered[groups[-1][1]:f].any(): groups[-1][1] = f+1
+        else: groups.append([f, f+1])
+    output = []
+    for g0, g1 in groups:
+        start, end = g0*320, min(count, (g1-1)*320+400)
+        low = max([b for a, b in raw if b <= start], default=None)
+        high = min([a for a, b in raw if a >= end], default=None)
+        floor, ceiling = (0 if low is None else (low+79)//80), (count//80 if high is None else high//80)
+        lo, hi = start//80, (end+79)//80
+        peak = float(rms[lo:hi].max())
+        if peak < .2*level: continue
+        lo, hi = grow(rms, lo, hi, floor, ceiling, max(.002, peak*.2))
+        if (low is not None and lo <= floor) or (high is not None and hi >= ceiling): continue
+        item = {'start_sample':lo*80,'end_sample':min(count, hi*80),'letters':reading(best[g0:g1], letter, separator, names)}
+        if output and item['start_sample'] < output[-1]['end_sample']:
+            first = output[-1]['first_frame']
+            output[-1] = {**output[-1],'end_sample':max(output[-1]['end_sample'], item['end_sample']),
+                'letters':reading(best[first:g1], letter, separator, names)}
+        else:
+            output.append({**item,'first_frame':g0})
+    return [{k:v for k,v in item.items() if k != 'first_frame'} for item in output]
+
+
 def letters(text, vocab):
     """Acoustic labels of a word: its letters and apostrophes in upper case. A letter
     the vocabulary lacks falls back to its base letter (É to E) when that one exists."""
@@ -304,7 +425,7 @@ def align(pcm, words, windows, loaded, given):
     emission = torch.cat(emissions,dim=1)
     repeated = sum(a == b for a,b in zip(labels,labels[1:]))
     require(len(labels)+repeated <= frame_count, 'INVALID_ALIGNMENT', 'Too many acoustic labels for this source interval')
-    raw, confidences, alignment_windows = [], [], []
+    raw, confidences, alignment_windows, frames = [], [], [], []
     # Keep acoustic words in the disjoint source window that actually produced
     # them. Repeated text must not allow a global CTC path to shift a recognized
     # phrase into another window after the recognizer omits a word or phrase.
@@ -323,23 +444,34 @@ def align(pcm, words, windows, loaded, given):
         alignment_windows.append({'first_frame':first,'end_frame':end,'first_word':word_first,'end_word':word_end})
         for i in range(word_first,word_end):
             a,b=ranges[i];selected=spans[a-label_first:b-label_first]
+            frames.append((first+selected[0].start,first+selected[-1].end))
             raw.append([max(window['start_sample'],(first+selected[0].start)*stride),
                 min(window['end_sample'],(first+selected[-1].end-1)*stride+receptive)])
             confidences.append(milli(sum(s.score*(s.end-s.start) for s in selected)/sum(s.end-s.start for s in selected)))
+    names = {label:name for name,label in vocab.items()}
+    letter = np.zeros(emission.shape[-1],dtype=bool)
+    for name,label in vocab.items():
+        if len(name) == 1 and (name.isalpha() or name == "'") and label < len(letter): letter[label] = True
+    # Speech no word covers is reported beside the words; it leaves their intervals as they are.
+    found = uncovered(pcm,emission[0].argmax(-1).numpy(),letter,vocab.get('|'),names,frames,raw,np)
     acoustic = acoustic_edges(pcm,raw,np)
     context = contextual(acoustic,count)
     output = [{'id':f'w{i:04}','text':word['word'],'start_sample':a,'end_sample':b,
         'probability_milli':None if word['probability'] is None else milli(word['probability']),'ctc_start_sample':raw[i][0],'ctc_end_sample':raw[i][1],
         'acoustic_start_sample':acoustic[i][0],'acoustic_end_sample':acoustic[i][1],'alignment_score_milli':confidences[i]}
         for i,(word,(a,b)) in enumerate(zip(words,context))]
-    return output, blocks, alignment_windows
+    return output, blocks, alignment_windows, found
 
 
 def checked_item(item):
-    fields(item, ['source_path','source_sha256','source_bytes','sample_count','text'])
-    given = item['text']
+    fields(item, ['source_path','source_sha256','source_bytes','sample_count','text','vocabulary'])
+    given, vocabulary = item['text'], item['vocabulary']
     require(given is None or (type(given) is list and 0 < len(given) <= 2048 and all(type(t) is str and len(t.encode('utf-8')) <= 512
         and len(t.split()) == 1 and t == t.strip() for t in given)), 'INVALID_REQUEST', 'Text to align must be 1..2048 single words')
+    require(vocabulary is None or (given is None and type(vocabulary) is list and 0 < len(vocabulary) <= 32
+        and all(type(t) is str and 0 < len(t.encode('utf-8')) <= 64 and t == t.strip()
+            and not any(unicodedata.category(c) == 'Cc' for c in t) for t in vocabulary)),
+        'INVALID_REQUEST', 'A vocabulary is 1..32 terms of 1..64 bytes and guides recognition only')
     require(type(item['sample_count']) is int and 400 <= item['sample_count'] <= 1920000, 'INPUT_LIMIT', 'Analysis requires 25 ms to 120 seconds')
     require(type(item['source_bytes']) is int and 44 <= item['source_bytes'] <= 3840044, 'INPUT_LIMIT', 'Invalid analysis WAV size')
 
@@ -403,17 +535,25 @@ def run(request):
         require(any(pcm_bytes), 'NO_WORDS', 'The selected analysis interval is digital silence')
         pcm = np.frombuffer(pcm_bytes,dtype='<i2').astype(np.float32)/32768
         count = len(pcm)
-        words=[];notes=[];recognition_windows=[]
+        words=[];notes=[];recognition_windows=[];respelled=0
         if given is not None:
             # Known text (a narration script): no recognition, one window over the whole analysis.
             words=[{'word':text,'probability':None} for text in given]
             recognition_windows.append({'start_sample':0,'end_sample':count,'end_policy':'given_text','first_word':0,'end_word':len(words)})
         else:
             model = recognizer()
+            # The vocabulary prompts every decode of every window; the prompt must fit the
+            # recognizer's context whole, or its first terms would be dropped unseen.
+            prompt = prompt_of(item['vocabulary'])
+            if prompt is not None:
+                from whisper.tokenizer import get_tokenizer
+                tokens = get_tokenizer(model.is_multilingual,num_languages=model.num_languages,language=request['language'],task='transcribe').encode(' '+prompt)
+                require(len(tokens) <= model.dims.n_text_ctx//2-1, 'INPUT_LIMIT', f'The vocabulary takes {len(tokens)} recognizer tokens; at most {model.dims.n_text_ctx//2-1} fit')
             def recognize(first,end):
                 if not np.any(pcm[first:end]):return []
                 result = model.transcribe(pcm[first:end],language=request['language'],task='transcribe',word_timestamps=True,
-                    fp16=True,temperature=0.,beam_size=5,condition_on_previous_text=False,verbose=None)
+                    fp16=True,temperature=0.,beam_size=5,condition_on_previous_text=False,verbose=None,
+                    initial_prompt=prompt,carry_initial_prompt=prompt is not None)
                 return [word for segment in result['segments'] for word in segment['words']]
             rms = energy(pcm,np) if count>480000 else None
             first = 0
@@ -429,6 +569,7 @@ def run(request):
                         raw = [w for w in passed if sample(w['start'],first,first+224000)+sample(w['end'],first,first+224000)<2*cut]
                 if raw is None:raw = recognize(first,end)
                 kept,dropped = speech(raw,first,end)
+                kept,changed = respell(kept,item['vocabulary']);respelled += changed
                 recognition_windows.append({'start_sample':first,'end_sample':end,'end_policy':policy,
                     'first_word':len(words),'end_word':len(words)+len(kept)})
                 words.extend(kept);notes.extend(dropped);first = end
@@ -436,13 +577,14 @@ def run(request):
         gc.collect(); torch.cuda.empty_cache()
         recognized = time.monotonic()
         # Sound without speech, such as a music bed alone, gives an empty result with its notes.
-        output, blocks, alignment_windows = align(pcm,words,recognition_windows,aligner(),given is not None) if words else ([],[],[])
+        output, blocks, alignment_windows, found = align(pcm,words,recognition_windows,aligner(),given is not None) if words else ([],[],[],[])
         checked_file(str(source),(item['source_bytes'],item['source_sha256']))
         return {'profile':PROFILE if given is None else ALIGN_PROFILE,'source_sha256':item['source_sha256'],'sample_count':count,
             'words':output,'model_sha256':MODEL[1] if given is None else None,
             'recognition_seconds':recognized-item_started,'item_seconds':time.monotonic()-item_started,
             'alignment_blocks':blocks,'recognition_blocks':recognition_windows,
-            'alignment_windows':alignment_windows,'non_speech':notes}
+            'alignment_windows':alignment_windows,'non_speech':notes,'uncovered':found,
+            'vocabulary':item['vocabulary'],'respelled':respelled}
 
     outcomes = []
     for item in items:

@@ -41,15 +41,44 @@ When the words are already known, for example the script given to a speech synth
 - **Limits.** At most 32 KiB and 2,048 words, and one range of at most 120 s. `media.transcribe` with `text` rejects a longer range; give `start` and `duration` for the part the text covers.
 - **Result.** The document's profile is `local-en-el-align-v1`, and its model identity is the acoustic alignment weights. Words are `estimated`, with acoustic evidence and no recognizer confidence (`probability_milli` is null). The recognition window reports `given_text`.
 
-Alignment is forced: it does not check that the text was actually said. If the audio says something else, the word times are wrong. Review the result as for recognition.
+Alignment is forced: it does not check that the text was actually said. If the audio says something else, the word times are wrong. Review the result as for recognition. Speech the text leaves out, such as an "um" a narrator added, is reported as [uncovered speech](#uncovered-speech).
+
+## Vocabulary
+
+Pass `vocabulary` to `transcript.transcribe` or `media.transcribe` for real recordings: terms the speech may contain, spelled as they should be written. Use it for names (`PixelForge`, `Cutbolt`) and, to keep hesitations, `um` and `uh`. It guides recognition only, so it is rejected together with `text`.
+
+- **Prompt.** The terms are joined with commas and end with a full stop (`um, uh, PixelForge, Cutbolt.`). They are given to the recognizer as preceding text for every decode of every window. A vocabulary holds at most 32 terms of 1–64 bytes. The prompt must also fit the recognizer's 223-token prompt context. The worker counts it with the recognizer's own tokenizer and rejects a longer one as `INPUT_LIMIT`, so no term is silently dropped.
+- **Respelling.** After recognition, two to four consecutive words whose letters and digits run together into a one-word term become that term, keeping the outer punctuation: `pixel forge,` becomes `PixelForge,`. Words with punctuation between them are not joined. A single word spelled differently takes the term's spelling. The exception is an all-lowercase term such as `um`, which leaves a capitalized `Um` at a sentence start. Terms with spaces only prompt.
+- **Provenance.** The document records the terms in `recognition.vocabulary`, and the worker's hash fixes how the prompt is built. Respelled words stay `estimated` and are aligned like any other word. The worker result counts them in `respelled`.
+- **Evidence.** In the 5 October demo narration, Whisper small heard "pixel forge" and "cut bolt". With `["PixelForge", "Cutbolt"]` it wrote both names whole. With `["um", "uh"]`, it kept the "um" it had dropped from "Play the frames in order and, um, the character moves". Neither vocabulary added or lost a word on the six other lines. The prompt is a hint, not a guarantee, so review still applies.
+
+## Uncovered speech
+
+Recognizers leave out hesitations, false starts and sometimes whole words, and the word beside them can stretch over the gap. Duration alone does not tell these apart. In the demo, the "and" before the dropped "um" lasted 0.73 s, and the "and" of the next sentence lasted 0.69 s with no filler after it.
+
+The acoustic model's own reading does tell them apart. After alignment, the worker takes the model's most likely label in every 20 ms frame:
+1. **Letters outside the words.** Frames whose label is a letter, more than two frames from every word's CTC span, form groups when at most five frames apart.
+2. **Voiced extent.** Each group grows over its voiced audio: 5 ms RMS frames within 14 dB of the group's peak, across holes of up to 20 ms. Groups that meet merge.
+3. **Separate sounds only.** A group that grows into a word's CTC span, with no such dip between, is left to that word. It cannot be told from the word's own onset or ending, which the aligner may place a little late or early. In the Greek "γάτα", for example, the aligner put the "Γ" at the vowel, and the model read the onset before it as "Χ".
+4. **Background.** A group more than 14 dB below the median level inside the words is left out.
+
+The rest are the document's `uncovered` list: `{start, end, letters}` in source time, such as `AM` for that "um" at 2.62–3.15 s. They are candidates for review, never words, and word intervals are computed as before. A word's context can reach into a sound beside it. Readers therefore pick a sound's neighbours by its middle, and a word over the middle covers the sound. A filler run on into a word without a pause, as in "and-um", is not reported. Known text is checked the same way: a script without the "um" leaves that sound uncovered.
+
+- `media.transcribe` lists the sounds with the words either side.
+- `transcript.fillers` lists those on the timeline and can cut them; see [removing filler words](#removing-filler-words).
+- `export.review` lists those heard in a delivered cut.
+- `transcript.correct` drops a sound once a word covers its middle, for example an inserted `um`.
+- Rebinding onto a conformed or prepared asset moves the sounds with the words.
+
+On the demo's seven narration lines, the only uncovered sound was that "um". In `export.review` of the demo's 80 s final cut, which has a music bed, it was again the only one, still in the cut at 29.74–30.30 s. With the names as known terms, the review heard all 138 expected words.
 
 ## Document contract
 
-A version-1 document contains an ID, revision, optional parent fingerprint, source identity/path/duration, an analysis range, explicit `en` or `el` language, recognition provenance and ordered words. Every word has a stable ID, one text unit, exact start/end times, an `estimated` or `corrected` origin and optional `probability_milli` from 0 to 1,000. Confidence is model output, not a factual probability of correctness. Corrected words have no model probability.
+A version-1 document contains an ID, revision, optional parent fingerprint, source identity/path/duration, an analysis range, explicit `en` or `el` language, recognition provenance, ordered words and optionally the ordered [uncovered sounds](#uncovered-speech) that no word covers. Every word has a stable ID, one text unit, exact start/end times, an `estimated` or `corrected` origin and optional `probability_milli` from 0 to 1,000. Confidence is model output, not a factual probability of correctness. Corrected words have no model probability.
 
 Times are **absolute source times**, represented as reduced nonnegative rationals on the 48 kHz sample clock. They are not relative to the analysis range or the clip's timeline placement. Intervals are positive, ordered, nonoverlapping and contained in the declared analysis range. The range may start after zero and is limited to 120 seconds; a document holds at most 2,048 words and 128 KiB of word text. Each word is at most 512 UTF-8 bytes. Punctuation and multibyte text are preserved; multiple whitespace-separated words in one record reject. Recognition and `transcript.correct` write word text without surrounding whitespace. Documents recognized by earlier versions keep the recognizer's leading space (`" tiny"`). Every reader ignores it (outline, captions, review, fillers and assembly), so their fingerprints stay as they are, and the next correction removes it.
 
-The source path is relative to an explicit absolute `input_root`. Inspection, correction and planning read the actual source and check its byte count and SHA-256 identity. Recognition provenance records a profile, model identity, worker/analysis hashes and version map. The speech command records its actual pinned files and worker/supervisor hashes. Manually supplied documents still carry caller-asserted metadata. Neither a document fingerprint nor an origin flag authenticates a recognizer or proves human review.
+The source path is relative to an explicit absolute `input_root`. Inspection, correction and planning read the actual source and check its byte count and SHA-256 identity. Recognition provenance records a profile, model identity, worker/analysis hashes, version map and any recognition vocabulary. Documents without uncovered sounds or a vocabulary serialize exactly as before, so their fingerprints are unchanged. The speech command records its actual pinned files and worker/supervisor hashes. Manually supplied documents still carry caller-asserted metadata. Neither a document fingerprint nor an origin flag authenticates a recognizer or proves human review.
 
 ## Correction
 
@@ -59,7 +88,7 @@ The source path is relative to an explicit absolute `input_root`. Inspection, co
 - `insert`: supply a fresh `word` and `before_id`, or `null` to append.
 - `remove`: supply the word `id`.
 
-Replacement and insertion mark the resulting word `corrected`, meaning its text and times were explicitly supplied by the caller. The batch preserves source and recognition provenance, increments the document revision and records the previous fingerprint as its parent. An invalid batch returns no candidate. IDs removed in a batch cannot be reused within that batch. Removing every word is permitted.
+Replacement and insertion mark the resulting word `corrected`, meaning its text and times were explicitly supplied by the caller. An uncovered sound whose middle a word now covers is dropped. The batch preserves source and recognition provenance, increments the document revision and records the previous fingerprint as its parent. An invalid batch returns no candidate. IDs removed in a batch cannot be reused within that batch. Removing every word is permitted.
 
 ## Cut planning
 
@@ -102,9 +131,15 @@ New clip IDs are `<clip_prefix><n>` (default `s1`, `s2`, …), skipping IDs the 
 3. **Snapping.** Cut ends go to the nearest grid point, or away from a neighbouring word when the nearest would enter it. The grid is whole frames that, on placed tracks, are also whole 48 kHz samples. A filler shorter than one grid step between its neighbours is reported and left.
 4. **Rippling.** As for `audio.tighten`, cuts ripple every track, split clips and links get new right-hand IDs, and each cut is tried on a working copy. Refused cuts are listed with the reason, so the returned batch applies.
 
+**Fillers the recognizer left out.** The result's `uncovered` lists the transcripts' [uncovered sounds](#uncovered-speech) that lie wholly inside the window and inside audible clips. Each entry gives its letters, timeline times and the words on either side. `filler_like` marks those that read like a hesitation, lasting at least 1/8 s, with at most four letters:
+- vowels (A, E or U), then an optional H and M or R, such as AM, UH, ER or ERM;
+- or M with an optional leading H, such as MM or HMM.
+
+With `uncovered: true`, each filler-like sound is cut like a filler word between its neighbours, with the same padding, snapping and rippling or lifting. Otherwise each sound is listed with the reason it was not cut, and `next` says how many could be. Review them first: an A or AM can also be a short word the recognizer missed, such as "a" or "am".
+
 ## Reading a cut against its transcripts
 
-`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). `captions.draft` turns the same words into caption cues for the timeline. After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
+`timeline.outline` takes the same documents and shows, on each audio clip of a cut, the words inside its source span. A word cut by a clip edge is marked `*`. Use it after a word cut to check that the timeline says what was intended. See [USAGE.md](USAGE.md#reviewing-edits-and-footage). `captions.draft` turns the same words into caption cues for the timeline. After delivery, `export.review` compares the words the cut should say with the words heard in the rendered file, prompting recognition with the names the transcripts spell; see [USAGE.md](USAGE.md#reviewing-a-delivered-cut).
 
 ## Saved operations and stale data
 
@@ -117,6 +152,13 @@ There is no global transcript database or automatic “latest document” pointe
 The original `tests/transcripts.py` fixture uses authored word anchors over coded pixels and stereo samples. It verifies corrected/estimated selections, nonzero source and placement offsets, a seven-sample linked offset, merged/separated cuts, saved preview/apply/retry/undo/restore, typed MCP, frame/range previews, malformed/stale records and source/output preservation. The retained focused run compares 666 decoded frames and 1,278,720 stereo sample frames exactly, plus eight still previews and 37 rejection cases. The maximum document/batch checks exercise 2,048 words, 128 corrections and 128 distinct sample-clock cuts; the latter produces 129 audio fragments and is an editing-only check beyond the current renderer clip bound. These are editing-contract results, **not speech-recognition accuracy evidence**.
 
 The complete native recognition fixture separately compares 663 decoded frames, 1,272,960 stereo sample frames and six previews from both estimated and corrected selections. Six short English/Greek cases pass the contextual onset gates; recognition errors remain visible (one substitution in each of the two short Greek pilot/isolated cases in the full run). Both two-minute inputs retain every reference word: 240 English and 234 Greek, with zero word-edit distance. Contextual onset maximum/95th-percentile errors are 150/80 ms and 135/125 ms. Full-run inference takes 48.6/69.5 seconds, with CPU peaks 2.41/4.17 GB and allocated GPU peaks 1.47/1.87 GB. Thirty rejected editing cases, 28 native failure cases, cancellation, owner termination and eleven supervisor cases also pass. This is fixture evidence within the declared runtime and media bounds, not universal speech accuracy. Research, downloaded weights and generated speech remain outside the repository.
+
+The quick-tier recognition fixture also checks the [vocabulary](#vocabulary) and [uncovered speech](#uncovered-speech):
+- **Names.** A synthesized "PixelForge … Cutbolt" line comes back with both names whole and the terms recorded. Without the vocabulary, the recognizer heard "Pyxel Forge" and "cut bolt".
+- **A left-out filler.** A line aligned to a script that leaves out its "um" reports exactly one uncovered sound that reads like a filler. It lies inside the synthesizer's own clock for the "um", between "circle," and "and", and `transcript.fillers` cuts it between those words.
+- **No false alarms.** The six clean English and Greek fixtures report no uncovered sounds.
+
+Pure checks cover respelling, prompts, readings, and onsets left to their words. These are quick-tier results; the thorough evidence above predates them.
 
 ## External verification setup
 

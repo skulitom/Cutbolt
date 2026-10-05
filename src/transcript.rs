@@ -15,6 +15,16 @@ pub(crate) const RATE: Time = Time {
 };
 pub(crate) const MAX_WORDS: usize = 2048;
 pub(crate) const MAX_RANGE: Time = Time { num: 120, den: 1 };
+/// Terms one recognition vocabulary may hold.
+pub(crate) const MAX_TERMS: usize = 32;
+
+/// A vocabulary term: 1-64 bytes, without control characters or surrounding whitespace.
+pub(crate) fn term_ok(term: &str) -> bool {
+    !term.is_empty()
+        && term.len() <= 64
+        && term.trim() == term
+        && !term.chars().any(char::is_control)
+}
 
 /// Spoken language: `en` (English) or `el` (Greek).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -62,6 +72,21 @@ pub struct Recognition {
     /// Optional acoustic alignment provenance; required for words carrying `alignment`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alignment: Option<AlignmentProfile>,
+    /// Terms the recognizer was prompted with and respelled to, up to 32 of 1-64 bytes; empty when it had none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vocabulary: Vec<String>,
+}
+/// Speech no word covers, as recognition found it: sound the acoustic model read as letters where
+/// no word is, such as a filler the recognizer left out. A candidate to review, never a word.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Uncovered {
+    /// Start of the voiced sound, absolute source time on the 48 kHz clock.
+    pub start: Time,
+    /// End of the voiced sound; after `start` and within the analysis range.
+    pub end: Time,
+    /// Letters the acoustic model read there, such as `AM`; spaces where it heard word breaks, at most 256 bytes.
+    pub letters: String,
 }
 /// Acoustic alignment models and the context added around estimated word intervals.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -140,6 +165,9 @@ pub struct Document {
     pub recognition: Recognition,
     /// Up to 2048 ordered, nonoverlapping words; at most 128 KiB of text in total.
     pub words: Vec<Word>,
+    /// Up to 2048 ordered, nonoverlapping sounds no word covers; candidates for review, such as left-out fillers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncovered: Vec<Uncovered>,
 }
 pub(crate) fn invalid(message: impl Into<String>) -> crate::Error {
     error("INVALID_TRANSCRIPT", message)
@@ -303,6 +331,33 @@ impl Document {
         if bytes > 128 * 1024 {
             return Err(invalid("Transcript text exceeds 128 KiB"));
         }
+        if self.recognition.vocabulary.len() > MAX_TERMS
+            || !self.recognition.vocabulary.iter().all(|t| term_ok(t))
+        {
+            return Err(invalid(
+                "A recognition vocabulary has at most 32 terms of 1-64 bytes, without control characters or surrounding spaces",
+            ));
+        }
+        let mut previous = self.range_start;
+        for sound in &self.uncovered {
+            exact(sound.start)?;
+            exact(sound.end)?;
+            sound.start.units(RATE)?;
+            sound.end.units(RATE)?;
+            if self.uncovered.len() > MAX_WORDS
+                || sound.start.compare(previous)?.is_lt()
+                || !sound.start.compare(sound.end)?.is_lt()
+                || sound.end.compare(end)?.is_gt()
+                || sound.letters.len() > 256
+                || !sound.letters.chars().any(char::is_alphabetic)
+                || sound.letters.chars().any(char::is_control)
+            {
+                return Err(invalid(
+                    "Uncovered sounds need at most 2048 ordered, nonoverlapping intervals within the analysis range, each with 1-256 bytes of letters",
+                ));
+            }
+            previous = sound.end;
+        }
         Ok(())
     }
     pub fn fingerprint(&self) -> Result<String> {
@@ -376,6 +431,16 @@ pub(crate) fn rebind(document: &Document, source: Source, offset: Time) -> Resul
         };
         next.words.push(moved);
     }
+    next.uncovered = Vec::new();
+    for sound in &document.uncovered {
+        if inside(sound.start, sound.end)? {
+            next.uncovered.push(Uncovered {
+                start: sound.start.minus(offset)?,
+                end: sound.end.minus(offset)?,
+                letters: sound.letters.clone(),
+            });
+        }
+    }
     next.source = source;
     next.range_start = start;
     next.range_duration = stop.minus(start)?;
@@ -386,6 +451,43 @@ pub(crate) fn rebind(document: &Document, source: Source, offset: Time) -> Resul
     next.parent_fingerprint = Some(parent);
     next.validate()?;
     Ok(next)
+}
+
+/// The words either side of an uncovered sound, by its middle: the last word ending by the
+/// middle and the first word starting after it. A word's context can reach into the sound; a
+/// word over the middle covers it and is neither.
+pub(crate) fn around<'a>(
+    words: impl IntoIterator<Item = &'a Word>,
+    sound: &Uncovered,
+) -> Result<(Option<&'a Word>, Option<&'a Word>)> {
+    let middle = sound.start.plus(sound.end)?.times(Time::new(1, 2)?)?;
+    let (mut after, mut before) = (None, None);
+    for word in words {
+        if !word.end.compare(middle)?.is_gt() {
+            after = Some(word);
+        } else if before.is_none() && word.start.compare(middle)?.is_gt() {
+            before = Some(word);
+        }
+    }
+    Ok((after, before))
+}
+
+/// The documents' uncovered sounds for a receipt: their count, and up to `limit` of them with
+/// the document and the words either side.
+pub(crate) fn uncovered_listing(documents: &[Document], limit: usize) -> Result<Value> {
+    let mut listed = Vec::new();
+    let mut count = 0;
+    for document in documents {
+        for sound in &document.uncovered {
+            count += 1;
+            if listed.len() < limit {
+                let (after, before) = around(&document.words, sound)?;
+                listed.push(json!({"document":document.id,"start":sound.start,"end":sound.end,"letters":sound.letters,
+                    "after":after.map(Word::said),"before":before.map(Word::said)}));
+            }
+        }
+    }
+    Ok(json!({"count":count,"listed":listed}))
 }
 
 pub fn inspect(document: &Document, input_root: &Path) -> Result<Value> {
@@ -409,7 +511,9 @@ pub fn capabilities() -> Value {
             "analysis_rate":16000,"source_clock":48000,"channel_selection":["left","right","mean"],
             "leading_context":{"num":2,"den":25},"trailing_context":{"num":1,"den":50},"review_required":true,
             "window_policies":["source_end","quiet_gap","word_gap","hard_12s"],"non_speech":"removed_before_alignment_and_reported",
-            "word_text":"no_surrounding_whitespace"},
+            "word_text":"no_surrounding_whitespace","vocabulary":{"field":"vocabulary","maximum_terms":MAX_TERMS,"maximum_term_bytes":64,
+                "use":"recognizer_prompt_and_one_word_respelling","recorded":"recognition.vocabulary"},
+            "uncovered":"acoustic_letters_outside_every_word_reported_for_review"},
         "text_alignment":{"field":"text","commands":["transcript.transcribe","media.transcribe"],"profile":"local-en-el-align-v1",
             "maximum_range_seconds":120,"maximum_bytes":32768,"maximum_words":2048,"numbers":"spelled_out_only"},"writes_state":false})
 }
@@ -462,6 +566,24 @@ pub enum Edit {
         id: String,
     },
 }
+/// Drop the uncovered sounds a word now covers, such as one an inserted "um" accounts for: those
+/// whose middle lies inside a word.
+fn drop_covered(document: &mut Document) -> Result<()> {
+    let mut kept = Vec::new();
+    for sound in document.uncovered.drain(..) {
+        let middle = sound.start.plus(sound.end)?.times(Time::new(1, 2)?)?;
+        let mut covered = false;
+        for word in &document.words {
+            covered |= !middle.compare(word.start)?.is_lt() && middle.compare(word.end)?.is_lt();
+        }
+        if !covered {
+            kept.push(sound);
+        }
+    }
+    document.uncovered = kept;
+    Ok(())
+}
+
 pub fn correct(
     document: &Document,
     expected_fingerprint: &str,
@@ -522,6 +644,7 @@ pub fn correct(
             word.text = word.said().to_owned();
         }
     }
+    drop_covered(&mut next)?;
     next.revision = next
         .revision
         .checked_add(1)
@@ -599,6 +722,7 @@ pub(crate) mod tests {
                 analysis_sha256: "d".repeat(64),
                 versions: BTreeMap::from([("fixture".into(), "1".into())]),
                 alignment: None,
+                vocabulary: Vec::new(),
             },
             words: vec![
                 Word {
@@ -620,6 +744,7 @@ pub(crate) mod tests {
                     alignment: None,
                 },
             ],
+            uncovered: Vec::new(),
         }
     }
     #[test]
@@ -656,6 +781,82 @@ pub(crate) mod tests {
             end: a.words[0].end,
         };
         assert_eq!(correction.word().text, "Uno");
+    }
+    #[test]
+    fn uncovered_sounds_and_vocabulary_are_bounded_and_follow_edits() {
+        let t = |n, d| Time::new(n, d).unwrap();
+        let sound = |a: Time, b: Time, letters: &str| Uncovered {
+            start: a,
+            end: b,
+            letters: letters.into(),
+        };
+        // Documents without them serialize, and so fingerprint, exactly as before.
+        let plain = serde_json::to_value(fixture()).unwrap();
+        assert!(
+            plain.get("uncovered").is_none() && plain["recognition"].get("vocabulary").is_none()
+        );
+        let mut a = fixture();
+        a.recognition.vocabulary = vec!["PixelForge".into(), "um".into()];
+        a.uncovered = vec![sound(t(8, 5), t(19, 10), "AM")];
+        a.validate().unwrap();
+        assert_ne!(a.fingerprint().unwrap(), fixture().fingerprint().unwrap());
+        let back: Document = serde_json::from_value(serde_json::to_value(&a).unwrap()).unwrap();
+        assert_eq!(back, a);
+        for bad in [
+            vec![sound(t(19, 10), t(8, 5), "AM")],
+            vec![sound(t(29, 10), t(31, 10), "AM")],
+            vec![sound(t(1, 2), t(11, 10), "AM")],
+            vec![
+                sound(t(8, 5), t(19, 10), "AM"),
+                sound(t(9, 5), t(39, 20), "UH"),
+            ],
+            vec![sound(t(8, 5), t(19, 10), "")],
+            vec![sound(t(8, 5), t(19, 10), "...")],
+            vec![sound(t(8, 5), t(19, 10), "A\u{7}M")],
+            vec![sound(t(8, 5), t(19, 10), &"M".repeat(257))],
+            vec![sound(t(8, 5), t(1, 7), "AM")],
+        ] {
+            let mut b = a.clone();
+            b.uncovered = bad;
+            assert!(b.validate().is_err(), "{:?}", b.uncovered);
+        }
+        for bad in [
+            vec![String::new()],
+            vec![" um".into()],
+            vec!["x".repeat(65)],
+            vec!["a\u{7}b".into()],
+            (0..33).map(|n| format!("t{n}")).collect(),
+        ] {
+            let mut b = a.clone();
+            b.recognition.vocabulary = bad;
+            assert!(b.validate().is_err(), "{:?}", b.recognition.vocabulary);
+        }
+        // A corrected word over a sound accounts for it; sounds elsewhere stay.
+        let mut b = a.clone();
+        b.uncovered.push(sound(t(13, 5), t(27, 10), "UH"));
+        b.words.insert(
+            1,
+            Correction {
+                id: "um".into(),
+                text: "um".into(),
+                start: t(3, 2),
+                end: t(2, 1),
+            }
+            .word(),
+        );
+        drop_covered(&mut b).unwrap();
+        assert_eq!(b.uncovered, [sound(t(13, 5), t(27, 10), "UH")]);
+        // Rebinding moves sounds with the words and drops those outside the new source.
+        let offset = t(17, 10);
+        let source = Source {
+            duration: a.source.duration.minus(offset).unwrap(),
+            ..a.source.clone()
+        };
+        let mut c = a.clone();
+        c.uncovered.push(sound(t(13, 5), t(27, 10), "UH"));
+        let moved = rebind(&c, source, offset).unwrap();
+        assert_eq!(moved.uncovered, [sound(t(9, 10), t(1, 1), "UH")]);
+        assert_eq!(moved.recognition.vocabulary, a.recognition.vocabulary);
     }
     #[test]
     fn invalid_intervals_duplicate_ids_and_hidden_fields_reject() {

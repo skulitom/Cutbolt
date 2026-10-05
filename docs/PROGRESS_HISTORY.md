@@ -1,5 +1,45 @@
 # Progress history
 
+## 5 October 2026: recognition vocabulary and uncovered speech
+
+Known-text alignment fixed two demo problems (ISSUES.md 5 and 6) for synthesized narration, but not for real recorded speech:
+- **Names.** Whisper small heard "PixelForge" as "pixel forge" and "Cutbolt" as "cut bolt". `export.review` of the final cut matched 136 of 138 words; the two misses were these names.
+- **Fillers.** It dropped the "um" from "Play the frames in order and, um, the character moves", so `transcript.fillers` had nothing to remove.
+
+The changes:
+- **Vocabulary.** `transcript.transcribe` and `media.transcribe` take `vocabulary`, up to 32 terms.
+  - The terms become the recognizer's prompt for every decode of every window. The worker checks the prompt against the recognizer's 223-token context with its own tokenizer.
+  - Two to four words that run together into a one-word term are respelled to it (`pixel forge,` becomes `PixelForge,`).
+  - Documents record the terms in `recognition.vocabulary`. Documents without a vocabulary serialize, and so fingerprint, as before.
+  - With `um` and `uh` in the vocabulary, the recognizer writes fillers down.
+- **Uncovered speech.** After alignment, the worker takes the acoustic model's own best label in every 20 ms frame.
+  - Letters outside every word's CTC span, grown over their voiced audio, become the document's new optional `uncovered` list, with the letters read (`AM`). They are never words.
+  - A sound that runs on into a word without a dip in level is left to that word, as its onset or ending. Word intervals are unchanged.
+  - A word's duration was tried as the signal and rejected: the two "and"s of that line last 0.73 s and 0.69 s, and only the first is followed by the filler.
+- **Readers.**
+  - `transcript.fillers` lists uncovered sounds with their neighbours and `filler_like`, and with `uncovered: true` cuts the filler-like ones like filler words.
+  - `transcript.correct` drops a sound once a word covers it, and rebinding moves sounds with the words.
+  - `media.transcribe` lists the sounds.
+  - `export.review` lists those heard in the cut. It prompts recognition with known terms: the source transcripts' vocabularies, then expected words that look like names. A name split on one side matches the whole name on the other (`joined_matches`).
+
+Measured on the demo with a release build. The machine was shared with other sessions, so the times are not comparable to earlier entries.
+- **Narration lines.** Recognized without a vocabulary, s3 left its "um" out, and it was the one uncovered sound: `AM` at 2.615–3.145 s, between "and" and "the". The other six lines had none. With `["um", "uh", "PixelForge", "Cutbolt"]`, s3 reads "and um," and s7 has both names whole; every line kept its other words, and none had uncovered sounds.
+- **Fillers on the final cut.** With the timeline's narration assets recognized without a vocabulary, `transcript.fillers` on revision 13 lists that `AM` at 29.735–30.265 s, between "and" and "the". With `uncovered: true` it proposes one ripple cut, 29.72–30.28 s (0.56 s).
+- **Review.** `export.review` of the `d3c9140` final cut prompted recognition with the names it found in the transcripts (`PixelForge`, `Cutbolt`). It heard all 138 expected words (136 before), and listed the "um" still in the cut as uncovered speech at 29.735–30.3 s.
+
+Fixture coverage:
+- `transcripts`:
+  - The review oracle reads the joined-match rule, and a split heard word and an uncovered sound are reviewed.
+  - A filler left out of a transcript is listed and then cut exactly as the word was.
+  - Words, short sounds and corrections are covered, and invalid vocabularies are rejected.
+- `transcription`:
+  - Pure checks of respelling, prompts, readings and uncovered sounds.
+  - SAPI speech of "PixelForge … Cutbolt" is recognized as "Pyxel Forge" and "cut bolt" without a vocabulary, and as both names with one.
+  - A script that leaves out its "um" leaves one uncovered `UM` between "circle," and "and", inside the synthesizer's word clock; `transcript.fillers` cuts it.
+  - The English and Greek passages report no uncovered sounds.
+
+Unit tests cover document bounds, stitching, known terms, joined matches and the review's seams. Both fixtures pass in the quick tier; no thorough run was made, so evidence and scoring are unchanged.
+
 ## 5 October 2026: independent jobs run at once in one job root
 
 The progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md item 15) rendered 16 scenes through `job.start` strictly one after another, about 3 s each. Every job reported "completed after 3.0 s" whatever its length, but there was no 3-second timer:

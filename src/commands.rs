@@ -322,6 +322,9 @@ pub enum Request {
         /// Known spoken text, such as the script of a synthesized narration: its words are aligned to the audio instead of recognized, so names and spelling stay as written and nothing is misheard. The range must be at most 120 s. Words split at whitespace; write numbers out in words. At most 32 KiB.
         #[serde(default)]
         text: Option<String>,
+        /// Names the speech may contain, spelled as wanted (PixelForge): recognition is prompted with them and respells split words to them. Add um and uh to keep fillers. Up to 32; not with text.
+        #[serde(default)]
+        vocabulary: Vec<String>,
     },
     #[serde(rename = "media.sheet")]
     MediaSheet {
@@ -580,6 +583,9 @@ pub enum Request {
         /// Silence the fillers on track_ids, moving nothing, instead of ripple-deleting them from every track (which also cuts music and picture).
         #[serde(default)]
         lift: bool,
+        /// Also cut the transcripts' uncovered sounds that read like a filler (AM, UH, ER, HMM), listed in the result either way. Review first: one can be a word recognition missed.
+        #[serde(default)]
+        uncovered: bool,
     },
     #[serde(rename = "captions.draft")]
     CaptionsDraft {
@@ -1397,6 +1403,7 @@ pub fn handle(request: Request) -> Result<Value> {
             duration,
             timeout_seconds,
             text,
+            vocabulary,
         } => crate::media_transcribe::run(&crate::media_transcribe::Request {
             path: path.as_deref(),
             paths: &paths,
@@ -1412,6 +1419,7 @@ pub fn handle(request: Request) -> Result<Value> {
             duration,
             timeout_seconds: timeout_seconds.unwrap_or(600),
             text: text.as_deref(),
+            vocabulary: &vocabulary,
         }),
         Request::MediaPrepare {
             path,
@@ -2010,6 +2018,7 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             end,
             lift,
+            uncovered,
         } => {
             let words =
                 words.unwrap_or_else(|| crate::fillers::DEFAULT_WORDS.map(str::to_owned).to_vec());
@@ -2022,6 +2031,7 @@ pub fn handle(request: Request) -> Result<Value> {
                 padding: padding.unwrap_or(Time::ZERO),
                 window: (start, end),
                 lift,
+                uncovered,
             })
         }
         Request::TranscriptAssemble {

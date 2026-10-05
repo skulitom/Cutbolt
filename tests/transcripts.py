@@ -175,18 +175,27 @@ def review_words(p, docs):
 
 
 def review_compare(expected, heard, tolerance):
-    """Independent reading of the documented in-order matching rule."""
+    """Independent reading of the documented in-order matching rule, with names split on one
+    side and whole on the other matching as two to four words run together."""
     import math
     norm = lambda t:''.join(c for c in t if c.isalnum()).lower()
+    run = lambda words, a, n:''.join(norm(w[2]) for w in words[a:a+n]) if a+n <= len(words) else None
     heard = sorted(heard, key=lambda w:w[0])
-    me, mh, nxt, matched = [False]*len(expected), [False]*len(heard), 0, 0
-    for i, (s, e, t) in enumerate(expected):
-        mid = (s+e)/2
+    me, mh, nxt, matched, joins, i = [False]*len(expected), [False]*len(heard), 0, 0, 0, 0
+    while i < len(expected):
+        s, e, t = expected[i];mid = (s+e)/2;step = 1
         for k in range(nxt, len(heard)):
             hm = (heard[k][0]+heard[k][1])/2
             if hm > mid+tolerance:break
-            if mid <= hm+tolerance and norm(heard[k][2]) == norm(t):
-                me[i] = mh[k] = True;matched += 1;nxt = k+1;break
+            if mid > hm+tolerance:continue
+            pair = (1, 1) if norm(heard[k][2]) == norm(t) else None
+            pair = pair or next(((1, n) for n in range(2, 5) if run(heard, k, n) == norm(t)), None)
+            pair = pair or next(((n, 1) for n in range(2, 5) if run(expected, i, n) == norm(heard[k][2])), None)
+            if pair:
+                a, b = pair
+                me[i:i+a] = [True]*a;mh[k:k+b] = [True]*b
+                matched += a;joins += a+b > 2;nxt = k+b;step = a;break
+        i += step
     groups = {}
     for words, flags, side in ((expected, me, 0), (heard, mh, 1)):
         seen = 0
@@ -201,7 +210,7 @@ def review_compare(expected, heard, tolerance):
     differences.sort(key=lambda d:seconds(d['start']))
     ratio = math.floor(matched/len(expected)*1000+0.5)/1000 if expected else None
     return {'expected_words':len(expected), 'heard_words':len(heard), 'matched':matched, 'match_ratio':ratio,
-            'tolerance':time(tolerance), 'differences':{'count':len(differences), 'listed':differences[:50]}}
+            'tolerance':time(tolerance), 'joined_matches':joins, 'differences':{'count':len(differences), 'listed':differences[:50]}}
 
 
 def timeline_said(p, by_asset, track_ids=None):
@@ -589,6 +598,20 @@ def run(root):
         strict = call({**reviewing, 'output':str(output/'review-strict'), 'tolerance':time(1, 50), 'rendition_height':0, 'frames':4})
         assert strict['speech']['comparison'] == review_compare(said, heard_words, F(1, 50))
         assert sorted(p.name for p in (output/'review-strict').iterdir()) == ['review.json', 'sheet.png']
+        # A name split by recognition ("κύκ λος") still matches, and a sound no heard word covers,
+        # such as a filler left in the cut, is listed with the words either side.
+        middle = (said[1][0]+said[1][1])/2
+        split_words = [(said[0][0], said[0][1], 'Red'), (said[1][0], middle, 'κύκ'), (middle, said[1][1], 'λος'), (said[2][0], said[2][1], 'circle')]
+        split_doc = {**heard_doc, 'id':'split', 'words':[{'id':f's{i}', 'text':t, 'start':time(a), 'end':time(b), 'origin':'estimated', 'probability_milli':700}
+                                                          for i, (a, b, t) in enumerate(split_words)],
+                     'uncovered':[{'start':time(17, 5), 'end':time(7, 2), 'letters':'AM'}]}
+        joined = call({**reviewing, 'heard':[split_doc], 'output':str(output/'review-split'), 'rendition_height':0})
+        assert joined['speech']['comparison'] == review_compare(said, split_words, F(1, 2)), joined['speech']
+        assert joined['speech']['comparison']['matched'] == 3 and joined['speech']['comparison']['joined_matches'] == 1
+        assert joined['speech']['uncovered'] == {'count':1, 'listed':[{'document':'split', 'start':time(17, 5), 'end':time(7, 2),
+            'letters':'AM', 'after':'circle', 'before':None}]}, joined['speech']
+        assert 'uncovered speech (a left-in filler or a missed word): "AM" 3.4-3.5' in joined['summary'], joined['summary']
+        assert 'uncovered' not in reviewed['speech']
         muted = apply(restored, [edit('clip_audio', clip_ids=[pieces[1][2]['id']], gain_milli=0)])
         quiet = call({**reviewing, 'output':str(output/'review-muted'), 'project':muted, 'rendition_height':0})
         assert quiet['speech']['comparison'] == review_compare(review_words(muted, [doc])[0], heard_words, F(1, 2))
@@ -727,7 +750,9 @@ def run(root):
         for fields, code in (({'output':str(output/'taken.json')}, 'OUTPUT_EXISTS'), ({'id':' '}, 'INVALID_ID'),
                              ({'timeout_seconds':0}, 'INVALID_ARGUMENT'), ({'start':time(4)}, 'INVALID_RANGE'),
                              ({'start':time(3), 'duration':time(2)}, 'INVALID_RANGE'), ({'output':str(output/'whole.txt')}, 'UNSUPPORTED_OUTPUT'),
-                             ({'text':' — … '}, 'INVALID_TRANSCRIPTION'), ({'text':'x'*(32*1024+1)}, 'INVALID_TRANSCRIPTION')):
+                             ({'text':' — … '}, 'INVALID_TRANSCRIPTION'), ({'text':'x'*(32*1024+1)}, 'INVALID_TRANSCRIPTION'),
+                             ({'text':'words', 'vocabulary':['um']}, 'INVALID_TRANSCRIPTION'), ({'vocabulary':['x'*65]}, 'INVALID_TRANSCRIPTION'),
+                             ({'vocabulary':[f't{n}' for n in range(33)]}, 'INVALID_TRANSCRIPTION'), ({'vocabulary':[' um']}, 'INVALID_TRANSCRIPTION')):
             call({**transcribing, **fields}, code)
         assert not (output/'whole.json').exists()
         passed.append('transcript.whole_file_recognition_rejections_leave_nothing')
@@ -742,6 +767,31 @@ def run(root):
         assert call({'command':'transcript.fillers', 'project':restored, 'transcripts':[filled]}) == proposal
         cleaned = apply(restored, operations)
         render(cleaned, (expected[0][:30*W*H*3]+expected[0][34*W*H*3:], expected[1][:30*1920*4]+expected[1][34*1920*4:]), 'fillers-removed')
+        # The same filler left out by the recognizer: no word, but an uncovered sound that reads like
+        # one where it was said. It is listed, and cut exactly as the word was when asked.
+        unsaid = copy.deepcopy(doc);gone = unsaid['words'].pop(2)
+        unsaid['uncovered'] = [{'start':gone['start'], 'end':gone['end'], 'letters':'AM'}]
+        um = said[1]
+        heard_um = {'letters':'AM', 'start':time(um[0]), 'end':time(um[1]), 'filler_like':True, 'after':'red,', 'before':'circle.'}
+        listed = call({'command':'transcript.fillers', 'project':restored, 'transcripts':[unsaid]})
+        assert listed['operations'] == [] and listed['fillers']['count'] == 0, listed
+        assert listed['uncovered'] == {'count':1, 'filler_like':1, 'cuts':0, 'listed':[{**heard_um, 'skipped':'not cut without uncovered: true'}]}, listed
+        assert 'pass uncovered: true' in listed['next']
+        taken = call({'command':'transcript.fillers', 'project':restored, 'transcripts':[unsaid], 'uncovered':True})
+        assert taken['operations'] == operations and taken['removed'] == proposal['removed'] and taken['fillers']['count'] == 0, taken
+        assert taken['uncovered'] == {'count':1, 'filler_like':1, 'cuts':1, 'listed':[{**heard_um, 'cut':{'start':time(30, 25), 'end':time(34, 25)}}]}, taken
+        # Letters that read like a word, or a sound too short to be a hesitation, are only listed.
+        for letters, end, skipped in (('THE', gone['end'], 'does not read like a filler'),
+                                      ('AM', time(seconds(gone['start'])+F(1, 10)), 'shorter than a hesitation (1/8 s)'), ('ERM', gone['end'], None)):
+            other = copy.deepcopy(unsaid);other['uncovered'][0].update(letters=letters, end=end)
+            found = call({'command':'transcript.fillers', 'project':restored, 'transcripts':[other], 'uncovered':True})
+            item = found['uncovered']['listed'][0]
+            assert (item['filler_like'], item.get('skipped'), bool(found['operations'])) == (skipped is None, skipped, skipped is None), (letters, found)
+        # A correction that writes the filler down accounts for the sound.
+        written = correct(unsaid, [{'op':'insert', 'before_id':'w3', 'word':{'id':'um', 'text':'um', 'start':gone['start'], 'end':gone['end']}}])
+        assert 'uncovered' not in written['document'] and written['document']['words'][2]['text'] == 'um'
+        kept = correct(unsaid, [{'op':'replace', 'word':{**{k:unsaid['words'][0][k] for k in ('id', 'start', 'end')}, 'text':'Red,'}}])
+        assert kept['document']['uncovered'] == unsaid['uncovered']
         # Transcripts follow a conversion: a two-second part of the source starting at 1 s carries the
         # three words inside it, moved 1 s earlier, so the part needs no recognition of its own.
         part = {'schema_version':1, 'id':'part', 'source':{'file':{'path':'voice.mkv'}, 'color':'encoded_rgb'}, 'source_in':time(1),

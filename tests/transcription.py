@@ -21,7 +21,7 @@ from PIL import Image
 from agents import Client
 from tracks import time, seconds, edit, placement, track
 from transcription_speech import generate
-from transcription_runtime import maximum, failures, music_bed
+from transcription_runtime import maximum, failures, music_bed, vocabulary_and_uncovered
 from transcription_guard import run as guard_checks
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -120,12 +120,16 @@ def run(root,setup):
         assert all(w['origin']=='estimated' and 'alignment' in w for w in words)
         # Word text drops the recognizer's leading space; non-speech notes are reported apart.
         assert all(w['text']==w['text'].strip() for w in words) and isinstance(result['non_speech'],list)
+        # These clean passages are recognized word for word, so nothing is left uncovered, not
+        # even a word's onset that the aligner places late.
+        assert not doc.get('uncovered'),(name,doc['uncovered'])
         match=correspondence(reference,words)
         assert not match['missing_reference_indices'] and not match['extra_word_indices'],match
         contextual_start=stats([abs(float(seconds(words[j]['start'])-origin)-reference[i]['start']) for i,j in match['pairs']])
         acoustic_start=stats([abs(float(seconds(words[j]['alignment']['acoustic_start'])-origin)-reference[i]['start']) for i,j in match['pairs']])
         assert contextual_start['maximum_ms']<=250 and contextual_start['p95_ms']<=150,(name,contextual_start)
         item={'fixture':name,'words':len(words),'word_errors':match,'contextual_start':contextual_start,'raw_acoustic_start':acoustic_start,
+            'uncovered':doc.get('uncovered',[]),
             'seconds':elapsed,'cpu_bytes':result['worker']['peak_cpu_bytes'],'cuda_bytes':result['worker']['peak_cuda_bytes']}
         if name.startswith('isolated'):
             end=stats([abs(float(seconds(words[j]['end'])-origin)-reference[i]['end']) for i,j in match['pairs']])
@@ -205,6 +209,8 @@ def run(root,setup):
     quality.append({'fixture':'batch-en','files':len(english),'seconds':batch_seconds})
     print(json.dumps(quality[-1]),flush=True);preserved()
     passed.append('transcription.batch_recognizes_files_together')
+    vocabulary=vocabulary_and_uncovered(root/'vocabulary',runtime,call)
+    passed.append('transcription.vocabulary_names_and_uncovered_fillers')
 
     def decode(path,expected,label):
         nonlocal frames,samples
@@ -295,11 +301,11 @@ def run(root,setup):
     passed.append('transcription.supervisor_protocol_and_detached_descendants')
     preserved()
     report={'passed':passed,'quality':quality,'frames_compared':frames,'stereo_sample_frames_compared':samples,'previews':previews,'rejected_cases':rejected,
-        'maximum_inputs':long_cases,'music_bed':bed_case,'native_failures':failure_cases,'supervisor':guard,
+        'maximum_inputs':long_cases,'music_bed':bed_case,'vocabulary':vocabulary,'native_failures':failure_cases,'supervisor':guard,
         'gates':{'contextual_onset_max_ms':250,'contextual_onset_p95_ms':150,'isolated_end_max_ms':150,'isolated_end_p95_ms':100},
         'scope':'Pinned optional WSL/CUDA English/Greek profile, six short fixtures, full 120-second WAV parents, native movies, explicit contextual intervals and reviewed corrections; raw phonetic timing and arbitrary natural speech accuracy are not claimed'}
     (root/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','native_failures','supervisor']},indent=2))
+    print(json.dumps({k:v for k,v in report.items() if k not in ['quality','maximum_inputs','music_bed','native_failures','supervisor','vocabulary']},indent=2))
     return report
 
 
