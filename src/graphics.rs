@@ -234,6 +234,35 @@ fn invalid(message: &str) -> crate::Error {
 /// while reporting `ymin` as a floor. When f32 scaling leaves bounds a hair from an integer, that offset
 /// approaches 1 and `ymin + height` sits one row below where the outline was drawn. Recompute the same
 /// offset with identical f32 operations and round the true top edge, so placement follows the drawing.
+/// TEXT_OVERFLOW for a whole line: its text, measured width and baseline against the box.
+pub(crate) fn overflow_error(
+    line: usize,
+    text: &str,
+    width: f32,
+    baseline: i32,
+    size: u16,
+    rect: [i32; 4],
+) -> crate::Error {
+    let shown: String = text.chars().take(60).collect();
+    let more = if text.chars().count() > 60 { "…" } else { "" };
+    let problem = if width > rect[2] as f32 {
+        format!("is {width:.2} px wide, beyond the box's {} px", rect[2])
+    } else {
+        format!(
+            "has its baseline at y {baseline} (size {size}), outside the box's rows {} to {}",
+            rect[1],
+            rect[1] + rect[3]
+        )
+    };
+    error(
+        "TEXT_OVERFLOW",
+        format!(
+            "Text line {} \"{shown}{more}\" {problem}; enlarge rect, shorten the text or set overflow to clip",
+            line + 1
+        ),
+    )
+}
+
 pub(crate) fn bitmap_top(m: &fontdue::Metrics) -> i32 {
     let fract = |v: f32| v - v.trunc();
     let mut offset = fract(1.0 - fract(m.bounds.height) - fract(m.bounds.ymin));
@@ -555,7 +584,8 @@ pub(crate) fn rasterize(
                         || baseline > rect[1] + rect[3]
                         || baseline - (*size as i32) < rect[1])
                 {
-                    return Err(error("TEXT_OVERFLOW", "Text line exceeds its declared box"));
+                    let text: String = line.iter().map(|g| g.c).collect();
+                    return Err(overflow_error(n, &text, widths[n], baseline, *size, *rect));
                 }
                 spans.push([
                     rect[0] + offset.round() as i32,
@@ -600,7 +630,15 @@ pub(crate) fn rasterize(
                                 if matches!(overflow, Overflow::Reject) {
                                     return Err(error(
                                         "TEXT_OVERFLOW",
-                                        "Glyph coverage exceeds its declared box",
+                                        format!(
+                                            "Glyph {:?} on text line {} draws outside its box [{}, {}, {}, {}]; enlarge rect or set overflow to clip",
+                                            glyph.c,
+                                            n + 1,
+                                            rect[0],
+                                            rect[1],
+                                            rect[2],
+                                            rect[3]
+                                        ),
                                     ));
                                 }
                                 continue;
@@ -625,7 +663,27 @@ pub fn capabilities() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::VAlign;
+    use super::{VAlign, overflow_error};
+
+    #[test]
+    fn overflow_names_the_line_and_its_measurements() {
+        let wide = overflow_error(
+            0,
+            "Made end to end by an agent",
+            1220.35,
+            84,
+            84,
+            [0, 0, 1220, 126],
+        );
+        assert_eq!(wide.code, "TEXT_OVERFLOW");
+        assert!(wide.message.contains("Text line 1 \"Made end to end by an agent\" is 1220.35 px wide, beyond the box's 1220 px"), "{}", wide.message);
+        let low = overflow_error(2, "C", 10.0, 150, 32, [0, 0, 100, 120]);
+        assert!(
+            low.message.contains("line 3") && low.message.contains("baseline at y 150"),
+            "{}",
+            low.message
+        );
+    }
 
     #[test]
     fn vertical_alignment_places_line_slots() {

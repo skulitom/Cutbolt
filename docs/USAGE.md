@@ -210,7 +210,7 @@ Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool exec
   - **Failures.** A file that fails is listed with its error code and message, and the others continue.
   - **Result.** It lists each file's outcome and returns the prepared assets as `media.add` `operations` for one `session.apply`.
 
-A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. Stills, audio-only files, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
+A 30 fps phone clip prepared for a 30 fps project keeps every frame. It then renders and delivers H.264 at 30 fps. A PCM16 WAV voice-over or music track, mono or stereo at 24, 44.1 or 48 kHz, needs the `project`: it becomes an asset with a silent black picture of the project's size and rate, ready for an audio track, its length the audio's whole frames. `media.inspect` proposes the same recipe at 1920x1080 and 25 fps. Stills, other audio-only formats, HDR sources and sources tagged with non-BT.709 color are refused with `UNSUPPORTED_MEDIA` and the reason. Use scenes for stills and `hdr.conform` for HDR. Stretching to a different aspect ratio is not avoided; give a project of the source's aspect, or convert explicitly with `media.conform` for other shapes.
 
 ## Ducking music under speech
 
@@ -287,11 +287,13 @@ These commands let an agent check its own work from text, still images and numbe
     - Flash frames: picture clips shorter than `min_clip_frames` (default 3).
     - Picture and sound of one source that play together, unlinked, at different source times. It reports which is late and by how much.
     - Words cut by clip edges, with `transcripts`.
+    - Transcripts were given but none matches an asset, so no words were checked.
   - **Notes.**
     - Clips on disabled tracks.
     - Stretches with no audio clip.
     - Jump cuts between touching clips of one source that skip or repeat less than `jump_window` (default 10 s); deliberate in jump-cut editing.
     - Unused assets.
+    - A given transcript that matches no asset while others do.
 - **`timeline.outline`** reads a timeline as compact text without rendering anything:
   - **Header.** It gives the canvas, frame rate, duration and assets.
   - **Clip lines.** Each track lists one line per clip, in time order: timeline span, clip ID, asset (or `seq:` and a child sequence), source span, link, and any gain, fades or picture-in-picture transform. A transition gets its own bracketed line after its outgoing clip.

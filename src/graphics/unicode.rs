@@ -490,7 +490,14 @@ pub(super) fn rasterize(
         if matches!(overflow, Overflow::Reject)
             && (delta < 0 || baseline > rect[1] + rect[3] || baseline - (*size as i32) < rect[1])
         {
-            return Err(error("TEXT_OVERFLOW", "Text line exceeds its declared box"));
+            return Err(super::overflow_error(
+                index,
+                &text[line.bytes.clone()],
+                line.width_64 as f32 / 64.0,
+                baseline,
+                *size,
+                *rect,
+            ));
         }
         spans.push([
             rect[0] + pixel(offset_128),
@@ -558,7 +565,15 @@ pub(super) fn rasterize(
                         if matches!(overflow, Overflow::Reject) {
                             return Err(error(
                                 "TEXT_OVERFLOW",
-                                "Glyph coverage exceeds its declared box",
+                                format!(
+                                    "A glyph of text line {} \"{}\" draws outside its box [{}, {}, {}, {}]; enlarge rect or set overflow to clip",
+                                    index + 1,
+                                    &text[line.bytes.clone()],
+                                    rect[0],
+                                    rect[1],
+                                    rect[2],
+                                    rect[3]
+                                ),
                             ));
                         }
                         continue;

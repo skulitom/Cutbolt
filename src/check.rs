@@ -291,6 +291,38 @@ pub fn check(request: &Request) -> Result<Value> {
     if !request.transcripts.is_empty() {
         let words =
             crate::outline::timeline_words(project, request.transcripts, request.input_root, None)?;
+        // A transcript that matches no asset cannot be checked; say so rather than pass silently.
+        let unmatched = |entry: &Value| {
+            format!(
+                "transcript {} matches no asset ({})",
+                entry["id"].as_str().unwrap_or_default(),
+                entry["reason"].as_str().unwrap_or_default()
+            )
+        };
+        if !words.unused.is_empty() && words.unused.len() == request.transcripts.len() {
+            find(
+                "warning",
+                "unmatched_transcripts",
+                format!(
+                    "no words were checked: {}{}",
+                    unmatched(&words.unused[0]),
+                    match words.unused.len() {
+                        1 => String::new(),
+                        n => format!(", and {} more", n - 1),
+                    }
+                ),
+                json!({"transcripts":words.unused}),
+            );
+        } else {
+            for entry in &words.unused {
+                find(
+                    "info",
+                    "unmatched_transcript",
+                    format!("{}; its words were not checked", unmatched(entry)),
+                    entry.clone(),
+                );
+            }
+        }
         for cut in &words.cut {
             let time: Time = serde_json::from_value(cut["time"].clone())?;
             find(

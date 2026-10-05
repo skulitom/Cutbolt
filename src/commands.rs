@@ -214,7 +214,7 @@ pub enum Request {
     },
     #[serde(rename = "media.prepare")]
     MediaPrepare {
-        /// Video file to prepare; any format FFmpeg decodes, such as a phone or camera MP4. Give this or `paths`.
+        /// File to prepare: any video FFmpeg decodes, such as a phone or camera MP4, or a PCM16 WAV voice-over or music track (with `project`; it gets a silent black picture for an audio track). Give this or `paths`.
         #[serde(default)]
         path: Option<PathBuf>,
         /// Several video files to prepare in one job, 1-200, absolute or relative to input_root. Each is prepared as `path` would be; asset IDs come from the file names, made unique, and the result includes `media.add` operations for the prepared assets.
@@ -1221,12 +1221,16 @@ fn prepare(
 /// Parse a request, naming the first field its schema rejects when it fails.
 fn parse(request: Value) -> Result<Request> {
     let located = crate::schema::locate(&request);
+    let original = located.as_ref().map(|_| request.clone());
     serde_json::from_value(request).map_err(|e| {
         // Tagged requests and operations lose serde's position, so name the field the schema
-        // rejects, such as operations[2].clip.duration.
-        match located {
-            Some(field) if !field.is_empty() => {
-                crate::error("INVALID_JSON", format!("{field}: {e}"))
+        // rejects, such as operations[2].clip.duration, and what was given there when serde's
+        // wording would mislead.
+        match (located, original) {
+            (Some(field), Some(original)) if !field.is_empty() => {
+                let message = e.to_string();
+                let note = crate::schema::given(&original, &field, &message).unwrap_or_default();
+                crate::error("INVALID_JSON", format!("{field}: {message}{note}"))
             }
             _ => crate::Error::from(e),
         }
@@ -2090,13 +2094,12 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
     let essentials = [
         "Timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio at the project size (the reference profile); convert other media with media.conform into editing assets.".to_owned(),
         format!(
-            "Sequential timelines run at {} fps; placed tracks, scenes, proxies and H.264 delivery use {} fps.",
-            rates.join(", "),
-            renderer["placed_track_frame_rate"]
+            "Timelines (sequential or placed tracks) run at {} fps; scenes, captions and H.264 delivery follow the timeline's rate, while proxies and camera groups stay at 25 fps.",
+            rates.join(", ")
         ),
         format!(
-            "Renders take 1 to {} clips and up to {} frames. render.start queues reference .mkv renders; job.start queues export.run (H.264/AAC or lossless delivery), media.conform, scene.render and the other long commands.",
-            renderer["maximum_clips"], renderer["maximum_sequential_frames"]
+            "Timelines hold up to 1000 clips and {} frames; a range with more than {} clips renders as exactly joined chunks. render.start queues reference .mkv renders; job.start queues export.run (H.264/AAC or lossless delivery), media.conform, scene.render and the other long commands.",
+            renderer["maximum_sequential_frames"], renderer["maximum_clips"]
         ),
         format!(
             "Scenes (titles, graphics, captions) last up to {} frames at {} fps, with up to {} layers and {} px per axis; scene.render compiles one into an editing asset.",

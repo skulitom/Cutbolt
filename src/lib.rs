@@ -18,6 +18,7 @@ pub mod composite;
 pub mod conform;
 pub mod cut_review;
 pub mod delivery;
+mod digest;
 pub mod documents;
 pub mod duck;
 pub mod effects;

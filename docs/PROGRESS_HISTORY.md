@@ -22,6 +22,17 @@ On the demo file the result is now:
 - 328 onsets, all on eighths.
 
 The audio-processing fixture now generates arranged music: that backbeat arrangement at 125 BPM, with intro and outro bars without drums, and four on the floor at 100 BPM after a 0.35 s lead-in. It checks exact beat times, frames, onsets and levels, a range, and a narrowed tempo range. The previous engine fails it at 62.5 BPM. Outside the fixture, a sweep of both arrangements from 72 to 174 BPM kept every beat within a hop of the reported level's true grid, and an hour of looped music took about 6 s in a debug build. No scoring changed.
+## 5 October 2026: fixes from the PixelForge progress demo
+
+The narrated pixel-art demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md) recorded 25 problems. Four are being fixed in their own sessions: overlay export speed and cancellation, caption spacing and music labels, beat detection, and the scene caps. This batch fixes several others:
+- **Capabilities.** The essentials no longer print "null fps" or the per-graph 64-clip limit as a timeline limit.
+- **`timeline.check`.** It warns when transcripts were given but none matches an asset, and notes each unmatched one. Before, it reported "0 warnings" and silently skipped its word check.
+- **`TEXT_OVERFLOW`.** The message names the line, its text, its measured width or baseline, and the box.
+- **Type errors.** A type error says what was actually given when serde's wording would mislead. For example, a `graphics` list instead of an object read "invalid type: map, expected variant identifier".
+- **Audio-only sources.** `media.inspect` proposes a silent-picture conform recipe for PCM16 WAV voice-overs and music, and `media.prepare` with a project runs it.
+- **Faster `media.conform`.** Decoded content is hashed in Rust (`digest.rs`) instead of by FFmpeg's hash muxer (39 s for 80 s of 1080p). Output timing comes from packets instead of an `ffprobe -show_frames` decode (23 s). Audio-only sources get their black picture from FFmpeg's color source. The demo's 80.64 s music bed converts in 27 s instead of 74 s.
+
+Fixtures: `transcripts` covers the unmatched-transcript findings, and `conform` covers WAV preparation and the proposed recipe, with each conversion identical to running its recipe through `media.conform`. Unit tests cover the overflow message, the type-error note, the audio recipe at 25 and 30000/1001 fps, and the zero-frame digests. No scoring changed.
 
 ## 5 October 2026: colour matching between cameras
 

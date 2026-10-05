@@ -322,6 +322,44 @@ pub(crate) fn locate(request: &Value) -> Option<String> {
     rejected(variant, request, String::new())
 }
 
+/// What a request holds at a located path such as `scene.layers[2].graphics`, in words, when
+/// serde's own description of it would mislead. A tagged enum given an array, for example, is
+/// reported by serde as "invalid type: map, expected variant identifier".
+pub(crate) fn given(request: &Value, path: &str, message: &str) -> Option<String> {
+    let reported = message
+        .strip_prefix("invalid type: ")?
+        .split([',', ' '])
+        .next()?;
+    let mut value = request;
+    for part in path.split('.').filter(|p| !p.is_empty()) {
+        let (key, indexes) = part.split_once('[').unwrap_or((part, ""));
+        if !key.is_empty() {
+            value = value.get(key)?;
+        }
+        for index in indexes.split('[').filter(|i| !i.is_empty()) {
+            value = value.get(index.trim_end_matches(']').parse::<usize>().ok()?)?;
+        }
+    }
+    let (kind, words) = match value {
+        Value::Array(items) => (
+            "sequence",
+            format!(
+                "an array of {} item{}",
+                items.len(),
+                if items.len() == 1 { "" } else { "s" }
+            ),
+        ),
+        Value::Object(_) => ("map", "an object".to_owned()),
+        Value::String(_) => ("string", "a string".to_owned()),
+        Value::Bool(_) => ("boolean", "a boolean".to_owned()),
+        Value::Null => ("null", "null".to_owned()),
+        Value::Number(n) if n.is_f64() => ("floating", "a number".to_owned()),
+        Value::Number(_) => ("integer", "a number".to_owned()),
+    };
+    (reported != kind && !(kind == "null" && reported == "unit"))
+        .then(|| format!(" (the value given there is {words})"))
+}
+
 fn field(path: &str, key: &str) -> String {
     if path.is_empty() {
         key.to_owned()
@@ -750,6 +788,31 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn misleading_type_errors_say_what_was_given() {
+        let request = json!({"scene":{"layers":[{},{},{"graphics":[{"kind":"text"}]}]}});
+        assert_eq!(
+            given(
+                &request,
+                "scene.layers[2].graphics",
+                "invalid type: map, expected variant identifier"
+            )
+            .as_deref(),
+            Some(" (the value given there is an array of 1 item)")
+        );
+        // serde already names the right kind, or the error is not a type error: nothing to add.
+        let request = json!({"width":"640"});
+        assert_eq!(
+            given(
+                &request,
+                "width",
+                "invalid type: string \"640\", expected u32"
+            ),
+            None
+        );
+        assert_eq!(given(&request, "width", "missing field `height`"), None);
     }
 
     #[test]

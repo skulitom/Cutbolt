@@ -801,6 +801,13 @@ def run(root):
         assert (checked['errors'], checked['warnings'], checked['notes'], checked['ok']) == (2, 5, 6, False)
         assert checked['summary'].startswith('check of lint rev 1: 2 errors, 5 warnings, 6 notes\n')
         assert call({'command':'timeline.check', 'project':lint, 'input_root':str(source), 'transcripts':[document]}) == checked
+        # Transcripts that match no asset are reported, not silently skipped.
+        stray = apply(call({'command':'project.create', 'id':'stray', 'width':W, 'height':H, 'frame_rate':time(25)}),
+            [{'op':'media.add', 'asset':{'id':'gone', 'path':'missing.mkv', 'duration':time(4)}}, edit('create', duration=time(25, 25)),
+             edit('add', track=track('a', 'audio')), edit('place', track_id='a', clip=placement('g1', 'gone', 0, 25, 0), collision='reject')])
+        unmatched = client.call('timeline.check', project=stray, transcripts=[document])
+        assert [(f['severity'], f['kind']) for f in unmatched['findings']['listed']] == [('warning', 'black'), ('warning', 'unmatched_transcripts')], unmatched
+        assert unmatched['findings']['listed'][1]['transcripts'][0]['id'] == document['id'] and not unmatched['ok']
         clean = client.call('timeline.check', project=assembled, input_root=str(source))
         assert clean['ok'] and [f['kind'] for f in clean['findings']['listed']] == ['jump_cut'] and clean['findings']['listed'][0]['backward']
         assert next(t for t in catalog if t['name'] == 'cutbolt_timeline_check')['annotations']['readOnlyHint']

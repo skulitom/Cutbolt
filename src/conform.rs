@@ -657,24 +657,20 @@ pub fn inspect(recipe: &Recipe, root: &Path) -> Result<Value> {
         .unwrap_or(Value::Null);
     Ok(result)
 }
-fn decoded_hash(path: &Path, video: bool, timeout: Duration) -> Result<String> {
+/// SHA-256 of the decoded RGB video or 48 kHz stereo PCM of `path`: `bytes` raw bytes, hashed in
+/// Rust (crate::digest) rather than by FFmpeg's much slower hash muxer.
+fn decoded_hash(path: &Path, video: bool, bytes: u64, timeout: Duration) -> Result<String> {
     let mut args = input_args(path);
     args.extend(
         if video {
-            vec!["-map", "0:v:0", "-pix_fmt", "rgb24", "-c:v", "rawvideo"]
+            vec!["-map", "0:v:0", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
         } else {
-            vec!["-map", "0:a:0", "-c:a", "pcm_s16le"]
+            vec!["-map", "0:a:0", "-c:a", "pcm_s16le", "-f", "s16le", "-"]
         }
         .into_iter()
         .map(str::to_owned),
     );
-    args.extend(["-f", "hash", "-hash", "sha256", "-"].map(str::to_owned));
-    let value = media::capture(&media::tool("ffmpeg"), &args, timeout)?;
-    String::from_utf8_lossy(&value)
-        .trim()
-        .strip_prefix("SHA256=")
-        .map(str::to_owned)
-        .ok_or_else(|| error("RENDER_VALIDATION_FAILED", "Decoded hash missing"))
+    crate::digest::raw_sha256(&args, bytes, timeout)
 }
 
 fn seconds(t: Time) -> f64 {
@@ -923,20 +919,35 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     }
     let temp = scratch.0.join("output.mkv");
     let (ffv1_level, ffv1_slices) = media::ffv1_encoding(recipe.width, recipe.height);
-    let mut args = vec![
-        "-v".into(),
-        "error".into(),
-        "-n".into(),
-        "-f".into(),
-        "rawvideo".into(),
-        "-pixel_format".into(),
-        "rgb24".into(),
-        "-video_size".into(),
-        format!("{}x{}", recipe.width, recipe.height),
-        "-framerate".into(),
-        format!("{}/{}", rate.num, rate.den),
-        "-i".into(),
-        "pipe:0".into(),
+    // An audio-only source gets its silent black picture from FFmpeg's color source instead of
+    // gigabytes of zero pixels through a pipe (an 80 s 1080p picture is 12.5 GB of RGB).
+    let silent = frames_in.is_none();
+    let mut args: Vec<String> = vec!["-v".into(), "error".into(), "-n".into()];
+    if silent {
+        args.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            format!(
+                "color=c=black:s={}x{}:r={}/{},format=rgb24",
+                recipe.width, recipe.height, rate.num, rate.den
+            ),
+        ]);
+    } else {
+        args.extend([
+            "-f".into(),
+            "rawvideo".into(),
+            "-pixel_format".into(),
+            "rgb24".into(),
+            "-video_size".into(),
+            format!("{}x{}", recipe.width, recipe.height),
+            "-framerate".into(),
+            format!("{}/{}", rate.num, rate.den),
+            "-i".into(),
+            "pipe:0".into(),
+        ]);
+    }
+    args.extend([
         "-f".into(),
         "s16le".into(),
         "-ar".into(),
@@ -963,7 +974,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         "-1".into(),
         "-f".into(),
         "matroska".into(),
-    ];
+    ]);
     if rate != FPS {
         // The rendering clock options: exact frame timestamps at fractional and high rates.
         args.extend([
@@ -990,113 +1001,132 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             .map(str::to_owned),
         );
     }
+    if silent {
+        args.extend(["-frames:v".into(), count.to_string()]);
+    }
     args.push(temp.to_string_lossy().into_owned());
     let source_size = source.width as usize * source.height as usize * 3;
     let mut video_hash = Sha256::new();
-    media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, |stdin| {
-        let mut first_pixels = vec![0u8; source_size];
-        let mut second_pixels = vec![0u8; source_size];
-        let mut first_index = None;
-        let mut second_index = None;
-        let mut native_pixels = vec![0u8; native_size];
-        let mut pixels = vec![0u8; recipe.width as usize * recipe.height as usize * 3];
-        for n in 0..count {
-            if let Some(frames_in) = &mut frames_in {
-                let sample = &selected.frames[n as usize];
-                let mut load = |index: usize, buffer: &mut [u8]| -> Result<()> {
-                    match frames_in {
-                        SourceFrames::Window { file, first } => {
-                            file.seek(SeekFrom::Start(
-                                (index - *first) as u64 * native_pixels.len() as u64,
-                            ))?;
-                            file.read_exact(&mut native_pixels)?;
-                        }
-                        SourceFrames::Stream { reader, next } => {
-                            let waiting = Instant::now();
-                            if index < *next {
-                                return Err(error(
-                                    "RENDER_VALIDATION_FAILED",
-                                    "Streamed source frames were requested out of order",
-                                ));
+    let frame_bytes = recipe.width as u64 * recipe.height as u64 * 3;
+    // The expected digest of a silent picture is that of all-zero frames, hashed while it encodes.
+    let mut silent_hash = None;
+    if silent {
+        let zeros = std::thread::spawn(move || crate::digest::zeros_sha256(frame_bytes, count));
+        media::capture(&media::tool("ffmpeg"), &args, timeout)?;
+        silent_hash = Some(
+            zeros
+                .join()
+                .map_err(|_| error("TOOL_FAILED", "Digest thread failed"))?,
+        );
+    } else {
+        media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, |stdin| {
+            let mut first_pixels = vec![0u8; source_size];
+            let mut second_pixels = vec![0u8; source_size];
+            let mut first_index = None;
+            let mut second_index = None;
+            let mut native_pixels = vec![0u8; native_size];
+            let mut pixels = vec![0u8; recipe.width as usize * recipe.height as usize * 3];
+            for n in 0..count {
+                if let Some(frames_in) = &mut frames_in {
+                    let sample = &selected.frames[n as usize];
+                    let mut load = |index: usize, buffer: &mut [u8]| -> Result<()> {
+                        match frames_in {
+                            SourceFrames::Window { file, first } => {
+                                file.seek(SeekFrom::Start(
+                                    (index - *first) as u64 * native_pixels.len() as u64,
+                                ))?;
+                                file.read_exact(&mut native_pixels)?;
                             }
-                            while *next <= index {
-                                reader.read_exact(&mut native_pixels)?;
-                                *next += 1;
+                            SourceFrames::Stream { reader, next } => {
+                                let waiting = Instant::now();
+                                if index < *next {
+                                    return Err(error(
+                                        "RENDER_VALIDATION_FAILED",
+                                        "Streamed source frames were requested out of order",
+                                    ));
+                                }
+                                while *next <= index {
+                                    reader.read_exact(&mut native_pixels)?;
+                                    *next += 1;
+                                }
+                                decode_video_micros += waiting.elapsed().as_micros();
                             }
-                            decode_video_micros += waiting.elapsed().as_micros();
+                        }
+                        if let Some(layout) = source.layout {
+                            recipe.source.sdr.expect("checked SDR").convert(
+                                layout,
+                                source.width,
+                                source.height,
+                                &native_pixels,
+                                recipe.working_transfer.expect("checked working transfer"),
+                                buffer,
+                            );
+                        } else {
+                            buffer.copy_from_slice(&native_pixels);
+                        }
+                        if let Some(lut) = &lut {
+                            lut.apply_rgb(buffer)?;
+                        }
+                        Ok(())
+                    };
+                    if first_index != Some(sample.first) {
+                        if second_index == Some(sample.first) {
+                            std::mem::swap(&mut first_pixels, &mut second_pixels);
+                            std::mem::swap(&mut first_index, &mut second_index);
+                        } else {
+                            load(sample.first, &mut first_pixels)?;
+                            first_index = Some(sample.first);
                         }
                     }
-                    if let Some(layout) = source.layout {
-                        recipe.source.sdr.expect("checked SDR").convert(
-                            layout,
-                            source.width,
-                            source.height,
-                            &native_pixels,
-                            recipe.working_transfer.expect("checked working transfer"),
-                            buffer,
-                        );
-                    } else {
-                        buffer.copy_from_slice(&native_pixels);
+                    if sample.second != sample.first && second_index != Some(sample.second) {
+                        load(sample.second, &mut second_pixels)?;
+                        second_index = Some(sample.second);
                     }
-                    if let Some(lut) = &lut {
-                        lut.apply_rgb(buffer)?;
-                    }
-                    Ok(())
-                };
-                if first_index != Some(sample.first) {
-                    if second_index == Some(sample.first) {
-                        std::mem::swap(&mut first_pixels, &mut second_pixels);
-                        std::mem::swap(&mut first_index, &mut second_index);
-                    } else {
-                        load(sample.first, &mut first_pixels)?;
-                        first_index = Some(sample.first);
-                    }
-                }
-                if sample.second != sample.first && second_index != Some(sample.second) {
-                    load(sample.second, &mut second_pixels)?;
-                    second_index = Some(sample.second);
-                }
-                let weight = sample.second_weight;
-                for y in 0..recipe.height as usize {
-                    for x in 0..recipe.width as usize {
-                        let p = ((y * source.height as usize / recipe.height as usize)
-                            * source.width as usize
-                            + x * source.width as usize / recipe.width as usize)
-                            * 3;
-                        let out = (y * recipe.width as usize + x) * 3;
-                        for c in 0..3 {
-                            pixels[out + c] = if weight.num == 0 {
-                                first_pixels[p + c]
-                            } else {
-                                let sum = first_pixels[p + c] as u128
-                                    * (weight.den - weight.num) as u128
-                                    + second_pixels[p + c] as u128 * weight.num as u128;
-                                ((sum + weight.den as u128 / 2) / weight.den as u128) as u8
-                            };
+                    let weight = sample.second_weight;
+                    for y in 0..recipe.height as usize {
+                        for x in 0..recipe.width as usize {
+                            let p = ((y * source.height as usize / recipe.height as usize)
+                                * source.width as usize
+                                + x * source.width as usize / recipe.width as usize)
+                                * 3;
+                            let out = (y * recipe.width as usize + x) * 3;
+                            for c in 0..3 {
+                                pixels[out + c] = if weight.num == 0 {
+                                    first_pixels[p + c]
+                                } else {
+                                    let sum = first_pixels[p + c] as u128
+                                        * (weight.den - weight.num) as u128
+                                        + second_pixels[p + c] as u128 * weight.num as u128;
+                                    ((sum + weight.den as u128 / 2) / weight.den as u128) as u8
+                                };
+                            }
                         }
                     }
                 }
+                video_hash.update(&pixels);
+                stdin.write_all(&pixels)?;
             }
-            video_hash.update(&pixels);
-            stdin.write_all(&pixels)?;
-        }
-        Ok(())
-    })?;
+            Ok(())
+        })?;
+    }
     if let Some(SourceFrames::Stream { reader, .. }) = frames_in {
         reader.finish()?;
     }
-    let video_hash = format!("{:x}", video_hash.finalize());
-    let verified = render::inspect_reference_at(
+    let video_hash = silent_hash.unwrap_or_else(|| format!("{:x}", video_hash.finalize()));
+    // Frame timing from FFV1 packets: the decoded-content digests below decode every frame and
+    // check its exact byte count, so a second full decode for timestamps would add nothing.
+    let verified = render::inspect_reference_audio(
         &temp,
         recipe.width,
         recipe.height,
         rate,
         &media::Uncontrolled,
     )?;
+    let samples = recipe.duration.units(Time::new(48000, 1)?)?;
     if verified.frames != count
-        || verified.samples != recipe.duration.units(Time::new(48000, 1)?)?
-        || decoded_hash(&temp, true, timeout)? != video_hash
-        || decoded_hash(&temp, false, timeout)? != media::file_hash(&raw_audio)?
+        || verified.samples != samples
+        || decoded_hash(&temp, true, frame_bytes * count, timeout)? != video_hash
+        || decoded_hash(&temp, false, samples * 4, timeout)? != media::file_hash(&raw_audio)?
     {
         return Err(error(
             "RENDER_VALIDATION_FAILED",

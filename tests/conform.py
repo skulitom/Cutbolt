@@ -167,7 +167,14 @@ def run(root):
         again=render(prepared["recipe"],label+"-explicit")
         assert frame_digests(output/(label+".mkv"))==frame_digests(output/(label+"-explicit.mkv")) and again["frames"]==prepared["frames"]
     assert prepare("fractional.mp4")["converted"] and (output/"fractional-prepared.mkv").exists()
+    # Audio-only WAV needs the project, whose size and rate its silent picture takes.
     prepare("audio-48000-2.wav",error="UNSUPPORTED_MEDIA")
+    voice=prepare("audio-48000-2.wav","prepared-wav",p25)
+    assert voice["converted"] and voice["recipe"]["source"]["color"] is None and voice["recipe"]["width"]==W and voice["frame_rate"]==time(25),voice
+    again=render(voice["recipe"],"prepared-wav-explicit")
+    assert frame_digests(output/"prepared-wav.mkv")==frame_digests(output/"prepared-wav-explicit.mkv") and again["frames"]==voice["frames"]
+    proposed=request({"command":"media.inspect","path":str(sources/"audio-48000-2.wav"),"input_root":str(sources)})["timeline"]["conform"]
+    assert proposed["recipe"]["source"]["color"] is None and proposed["recipe"]["duration"]==voice["recipe"]["duration"] and "media.prepare" in proposed["next"],proposed
     prepare("hdr.mkv",error="UNSUPPORTED_MEDIA")
     passed.append("conform.one_step_preparation")
     # Batch preparation: one job for several files, IDs unique within the batch and the project,
