@@ -99,7 +99,7 @@ A score of 1/2 means the basic checkpoint is verified; the broader checkpoint re
 - [x] Durable project store
 - [x] Durable idempotent retries
 - [x] Persistent undo/history
-- [x] Asynchronous job control — Durable local queue; status/phase and frame progress; queued and running cancellation; no output overwrites; worker interruption detection. Windows backend, one render per root.
+- [x] Asynchronous job control — Durable local queue; status/phase and frame progress; queued and running cancellation; no output overwrites; worker interruption detection. Windows backend; one worker per root runs a bounded pool of independent jobs.
 - [x] MCP stdio adapter — Version negotiation, discoverable typed tools, structured results/errors, shared saved-session semantics, clean stdio framing/EOF and official Python SDK interoperability; no listening service.
 
 ## Updating this tracker

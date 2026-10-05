@@ -157,7 +157,7 @@ SQLite commits the snapshot, head/undo pointer and request receipt in one immedi
 
 Use a trusted local filesystem that honors SQLite locking and flushes. Keep the database and any recovery journal together, and never delete a journal to clear a lock. Use `session.backup` for a checked consistent copy during live editing. Network/shared-drive storage is unsupported. Do not manually edit database contents. Snapshot, receipt and revision-metadata checksums detect accidental corruption; they are not tamper authentication or a repair system. Unrelated databases and unknown store versions reject. Version-1 stores remain readable; run `session.migrate` explicitly before new writes. `session.check`, `session.backup` and `session.recover` preserve the checked history contract; see [portable projects](PORTABLE_PROJECTS.md).
 
-Snapshots/history are stored in full, without compaction, encryption, automatic backup or bounded total database size. Session recovery is separate from render jobs. Background jobs retain submission tickets and status, support cancellation, and detect worker interruption. Optional `render.retry.max_attempts` enables bounded retries and [checked publication recovery](RENDER_RECOVERY.md); omission retains one attempt. Source paths are preserved as supplied; automatic relative-path relocation/relinking is future work.
+Snapshots/history are stored in full, without compaction, encryption, automatic backup or bounded total database size. Session recovery is separate from render jobs. Background jobs retain submission tickets and status, support cancellation, detect worker interruption, and run independent jobs at once ([background jobs](#background-jobs)). Optional `render.retry.max_attempts` enables bounded retries and [checked publication recovery](RENDER_RECOVERY.md); omission retains one attempt. Source paths are preserved as supplied; automatic relative-path relocation/relinking is future work.
 
 ## Camera groups and synchronization
 
@@ -199,6 +199,19 @@ Rendering is synchronous, with a 10-minute encoding timeout. Probing has separat
 Output is written to a temporary file in the destination directory, verified, and published with an atomic hard link that refuses to replace an existing filename. The target filesystem must support hard links (the tested NTFS filesystem does). A failed publication returns an error; there is no unsafe overwrite fallback. Normal failure paths remove the temporary file. Forced process termination can leave a `.partial.mkv` file; automatic crash cleanup is future work.
 
 Use `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to select alternative local tool executables. Dependencies are never downloaded at engine runtime. Only `file` and `pipe` media protocols are allowed when inspecting/reading inputs.
+
+### Background jobs
+
+`job.start` queues a long-running command and `render.start` a reference render. Both return a ticket at once, and `job.wait` returns when the job finishes. One hidden worker per job root runs independent jobs at the same time, so queue every scene render or prepare before waiting on any:
+
+- **Pool size.** At most `CUTBOLT_JOB_WORKERS` jobs run at once, 1 to 32. The default is a quarter of the logical processors, from 1 to 8: eight on a 32-thread machine, where one 1080p scene render keeps about three cores busy. The worker reads the setting when it starts, from the environment of the CLI or MCP server that queued the job; values out of range are ignored.
+- **Heavy jobs.** `export.run`, `export.review`, `captions.render`, `media.prepare`, `media.conform`, `hdr.conform`, `proxy.generate`, `image.sequence.compile`, `preview.range`, `cache.run` and `render.start` already run multi-threaded FFmpeg or Rust compositing. Each holds half the pool, rounded up, so at most two run at once. Light jobs (`scene.render`, `audio.render`, `audio.repair.render` and the speech commands) hold one place each.
+- **Speech.** `media.transcribe`, `transcript.transcribe`, and `export.review` with a `runtime`, load speech models, so they run one at a time.
+- **Order.** Jobs start in submission order as room allows. A job waiting for room holds back the jobs behind it, so a stream of light jobs never starves a heavy one.
+- **Shared outputs.** Jobs that write the same path run one at a time, in submission order, while independent jobs behind them still start. That covers the same file in another spelling or letter case, a path inside another job's output folder, and the same cache database. A `media.prepare` without `output` claims the `<id>-prepared.mkv` names it would write. Queued commands read saved projects as snapshots pinned at submission and never write a session, so session edits neither wait for jobs nor race with them.
+- **Latency.** The worker and `job.wait` wake on named events instead of polling. A job starts as soon as there is room, and `job.wait` returns within milliseconds of the job finishing. Each process hashes FFmpeg and ffprobe once, not once per submission.
+
+Replaying a `request_id` returns the original ticket, and `job.wait` on it returns the original result. If the worker dies, every job it was running is interrupted; `job.status`, `job.resume` or the next worker reconcile each of them, and opted-in retries requeue. Cancellation, the stall watchdog and the 12-hour deadline apply to each job separately. See [the job contract](AGENT_INTERFACE.md#local-background-renders).
 
 ## Preparing camera and phone files
 

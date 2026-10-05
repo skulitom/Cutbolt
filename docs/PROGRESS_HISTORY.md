@@ -1,5 +1,46 @@
 # Progress history
 
+## 5 October 2026: independent jobs run at once in one job root
+
+The progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md item 15) rendered 16 scenes through `job.start` strictly one after another, about 3 s each. Every job reported "completed after 3.0 s" whatever its length, but there was no 3-second timer:
+- The worker drained one row at a time, and the demo client also waited for each job before submitting the next.
+- In the first batch, 13 of the 15 scenes are 144 frames, and each took about 3 s of real work. The 96-frame and 192-frame scenes took 2.3 s and 3.8 s, and their captioned versions 2.5 s and 4.0-4.3 s.
+- Every wait ended on a 250 ms grid (3.026-3.032 s for 12 of the 13 144-frame scenes, 3.285 s for the other), because `job.wait` polled the store every 250 ms. The supervisor also slept 200 ms between checks, and the command process held its exit for up to 250 ms.
+- Each submission hashed FFmpeg and ffprobe (280 MB) inside the store's write transaction. For about 0.2 s, no other submission or progress write could proceed.
+
+The changes:
+- **A bounded pool per job root.** The worker runs up to `CUTBOLT_JOB_WORKERS` jobs at once, each on its own thread and store connection (`jobs/pool.rs`). The default is a quarter of the logical processors, 1 to 8. One 1080p scene render keeps about three cores busy (18.8 s of CPU in 6.3 s), so eight fill 32 threads.
+  - Heavy jobs (exports, conversions, reviews, caption overlays, cache tasks and reference renders) already run multi-threaded FFmpeg or Rust compositing. Each holds half the pool, so at most two run at once. Speech jobs run one at a time.
+  - Jobs start in submission order as room allows. A job waiting for room holds back the jobs behind it, so heavy jobs are never starved.
+  - Jobs claim the paths they write: their output file or folder, or their cache database. A `media.prepare` without `output` claims its `<id>-prepared.mkv` names, computed by the function that names them. Overlapping claims run in submission order and are compared case-insensitively; independent jobs behind them still start.
+  - Queued commands read saved projects as snapshots pinned at submission and never write a session.
+- **No polling granularity.**
+  - The worker sleeps on a named event, set by submissions, finished jobs and cancellations.
+  - `job.wait` sleeps on an event that the worker sets when its job ends. Both keep a timeout as a safety net.
+  - The supervisor wakes on each line from the command, and the command's progress reporter exits at once.
+- **Cheaper submission.** Tools are hashed outside the write transaction, side by side, and once per process for each path, size and modification time.
+- **Unchanged contracts.** `request_id` replay, output reservation, the 32-job limit, cancellation, the stall watchdog, the deadline and publication recovery all apply per job. Recovery reconciles every job a dead worker was running. Progress writes are best effort, so a store busy with other jobs never fails a job.
+- **Agent guidance.** The MCP instructions and the `job.start` description now say to queue independent jobs before waiting on any. The description also drops the stale "a running one finishes".
+
+Measured with release builds (`d3c9140` before) on the demo's 16 native 1080p scenes: 14 `-cap` scenes, `end-final` and `s5b-before`. They were submitted over MCP one after another and then waited for in order (`job.wait` with progress, as the demo client does), with outputs under `ws/remeasure/pool-*`. Other sessions loaded the machine throughout. "Busy" is the share of the 32 logical processors in use in the 3 s before each run; runs listed together ran back to back.
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| 16 scene jobs queued together, all finished | 98.1-132.7 s in 4 runs, median 107.5 s | 21.5-27.4 s in 5 runs and 51.5 s in one under heavier load, median 26.4 s |
+| Processors already busy before each run | 53-88 % | 71-100 % |
+| `job.start`, mean of the 16 submissions | 0.24-0.40 s | 0.06-0.15 s |
+
+Before and after runs alternated. Pools of 4, 8 and 16 took 30.8, 34.3 and 29.0 s (52-76 % busy): other work already saturated the processors, so the default stays at a quarter of them.
+
+Per-job overhead, from a one-frame 64x36 scene with a cold worker each time (median of 8): `job.start` took 0.22 s before and 0.025 s after. The queued job took 1.24 s before, always on the 250 ms grid (1.22-1.25 s), against a 0.58 s synchronous render. After, it took 1.07 s against 0.61 s. A cold worker's first job still pays a process launch and one hash of both tools (about 0.1 s side by side).
+
+Tests:
+- `queue_recovery` adds a pool case with real processes. A pool of four runs two reference renders at once, and a job writing the same file in another letter case waits for the first even with room free, while a later independent job overtakes it. Killing the worker interrupts both running jobs; recovery requeues each, and all complete with exact pixels and samples. The waiting duplicate then fails with `OUTPUT_EXISTS`, leaving the first output unchanged.
+- The 32-slot case, and the foundational job checks in `tests/agents.py`, pin `CUTBOLT_JOB_WORKERS=1`, because they check one worker's serial queue.
+- Rust tests cover the pool size, weights and first-come room, path claims (case, folders, prepare names), speech exclusivity, request classes, and reconciling several running rows.
+
+The "Asynchronous job control" acceptance text no longer says "one render per root". The new pool evidence is listed under E04's bounded concurrency. No scoring changed. Evidence stays stale until the next thorough run.
+
 ## 5 October 2026: timeline limiters, so normalizing reaches its target
 
 On the progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md item 17), `audio.normalize` was asked for -14 LKFS and stopped at -20.95 LKFS with `limited_by: "peak_ceiling"`. The Qwen3-TTS narration peaks near -2 dBFS while measuring about -21 LKFS, and timeline tracks had no limiter or compressor. The mix-recipe compressor (`audio.render`) would have meant rendering, conforming and swapping every line and binding its transcripts again.

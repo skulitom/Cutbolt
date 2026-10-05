@@ -168,8 +168,12 @@ def run(executable, fixture):
         assert condition, name
         passed.append(name)
 
+    # These checks cover one worker's serial queue (a second job waits while the first runs), so
+    # every client that may start the worker pins the pool to one job; queue_recovery covers the pool.
+    serial = {**os.environ, "CUTBOLT_JOB_WORKERS": "1"}
+
     def client(env=None):
-        value = Client(executable, env)
+        value = Client(executable, env or serial)
         clients.append(value)
         return value
 
@@ -360,7 +364,7 @@ def run(executable, fixture):
         def controlled(label):
             marker = root / (label + "-pids.json")
             gate = root / (label + "-release")
-            env = {**os.environ, "CUTBOLT_FFMPEG": str(fake), "CUTBOLT_TEST_REAL_FFMPEG": real_ffmpeg,
+            env = {**serial, "CUTBOLT_FFMPEG": str(fake), "CUTBOLT_TEST_REAL_FFMPEG": real_ffmpeg,
                    "CUTBOLT_TEST_MARKER": str(marker), "CUTBOLT_TEST_GATE": str(gate)}
             cli = client(env)
             cli.initialize()

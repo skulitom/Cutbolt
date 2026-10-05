@@ -212,7 +212,7 @@ pub fn prepare(
         let recipe: crate::conform::Recipe = serde_json::from_value(recipe)?;
         let output = match output {
             Some(output) => output.to_path_buf(),
-            None => output_root.join(format!("{}-prepared.mkv", asset_id(&relative))),
+            None => prepared_output(&path, output_root),
         };
         let receipt = crate::conform::run(&recipe, input_root, output_root, &output)?;
         return Ok(
@@ -247,7 +247,7 @@ pub fn prepare(
     let recipe: crate::conform::Recipe = serde_json::from_value(recipe)?;
     let output = match output {
         Some(output) => output.to_path_buf(),
-        None => output_root.join(format!("{}-prepared.mkv", asset_id(&relative))),
+        None => prepared_output(&path, output_root),
     };
     let receipt = crate::conform::run(&recipe, input_root, output_root, &output)?;
     Ok(
@@ -272,29 +272,13 @@ pub fn prepare_many(
     if paths.is_empty() || paths.len() > 200 {
         return Err(error("INVALID_ARGUMENT", "paths must list 1-200 files"));
     }
-    let mut used: std::collections::BTreeSet<String> = project
+    let used = project
         .map(|p| p.assets.iter().map(|a| a.id.clone()).collect())
         .unwrap_or_default();
     let mut results = Vec::new();
     let mut operations = Vec::new();
     let (mut converted, mut ready) = (0, 0);
-    for path in paths {
-        let path = if path.is_relative() {
-            input_root.join(path)
-        } else {
-            path.clone()
-        };
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let base = asset_id(&name);
-        let mut id = base.clone();
-        let mut n = 2;
-        while !used.insert(id.clone()) {
-            id = format!("{base}-{n}");
-            n += 1;
-        }
+    for (path, id) in batch_names(paths, input_root, used) {
         let output = output_root.join(format!("{id}-prepared.mkv"));
         match prepare(
             &path,
@@ -352,6 +336,47 @@ pub(crate) fn native_rate(video: &Value, metadata: &Value) -> Option<Time> {
 }
 
 /// A valid asset ID from the file name: its stem, at most 128 bytes.
+/// Each batch file resolved against `input_root`, with its asset ID: the file name's stem, kept
+/// unique against `used` (the project's assets) and earlier files. A conversion is written to
+/// `<id>-prepared.mkv`; the job queue claims those names before anything is probed.
+pub(crate) fn batch_names(
+    paths: &[std::path::PathBuf],
+    input_root: &Path,
+    mut used: std::collections::BTreeSet<String>,
+) -> Vec<(std::path::PathBuf, String)> {
+    paths
+        .iter()
+        .map(|path| {
+            let path = if path.is_relative() {
+                input_root.join(path)
+            } else {
+                path.clone()
+            };
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let base = asset_id(&name);
+            let mut id = base.clone();
+            let mut n = 2;
+            while !used.insert(id.clone()) {
+                id = format!("{base}-{n}");
+                n += 1;
+            }
+            (path, id)
+        })
+        .collect()
+}
+
+/// Where one file prepared without `output` is converted to.
+pub(crate) fn prepared_output(path: &Path, output_root: &Path) -> std::path::PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+    output_root.join(format!(
+        "{}-prepared.mkv",
+        asset_id(name.as_deref().unwrap_or_default())
+    ))
+}
+
 fn asset_id(relative: &str) -> String {
     let name = relative.rsplit('/').next().unwrap_or(relative);
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);

@@ -203,6 +203,53 @@ fn intent_crash_requeues_only_opted_in_and_cancellation_wins() {
 }
 
 #[test]
+fn reconcile_settles_every_running_row_a_pool_leaves() {
+    let fixture = Fixture::new();
+    let (connection, _) = seed(&fixture.0, 2);
+    // A pool's worker exits abruptly with three jobs running and one still queued.
+    for (id, maximum, status) in [
+        ("two", 2, "running"),
+        ("three", 1, "running"),
+        ("four", 2, "queued"),
+    ] {
+        let output = fixture.0.join(format!("{id}.mkv"));
+        connection.execute("INSERT INTO jobs(id,request_id,payload_hash,request,request_hash,ticket,output,status,phase,total_frames,attempt,max_attempts)
+            SELECT ?1,?1,payload_hash,request,request_hash,ticket,?2,?3,?3,total_frames,?4,?5 FROM jobs WHERE id='one'",
+            params![id, output.to_string_lossy(), status, i64::from(status == "running"), maximum]).unwrap();
+        if status == "running" {
+            begin_attempt(&connection, id).unwrap();
+        }
+    }
+    reconcile(&connection).unwrap();
+    for (id, status, current) in [
+        ("one", "queued", 1),
+        ("two", "queued", 1),
+        ("three", "interrupted", 1),
+        ("four", "queued", 0),
+    ] {
+        let value = state(&connection, id).unwrap();
+        assert_eq!(
+            (
+                value["status"].as_str(),
+                value["attempts"]["current"].as_i64()
+            ),
+            (Some(status), Some(current)),
+            "{id}"
+        );
+        if current == 1 {
+            assert_eq!(value["attempts"]["history"][0]["status"], "interrupted");
+            assert_eq!(value["error"]["code"], "WORKER_INTERRUPTED");
+        }
+    }
+    // Reconciling again changes nothing.
+    reconcile(&connection).unwrap();
+    assert_eq!(
+        state(&connection, "three").unwrap()["status"],
+        "interrupted"
+    );
+}
+
+#[test]
 fn publication_conflicts_and_corrupt_receipts_are_preserved_and_reject() {
     for corrupt_receipt in [false, true] {
         let fixture = Fixture::new();

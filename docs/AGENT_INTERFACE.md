@@ -53,7 +53,9 @@ Fetch a saved project with `session.get` at an explicit receipt revision to rend
 
 ### Scheduling, progress and cancellation
 
-Jobs persist before a detached, hidden worker starts. They survive the submitting CLI or MCP connection closing. There is at most one render per job root and up to 32 queued/running jobs per root. Additional submissions return `QUEUE_FULL`; an already committed request can still be replayed. Different roots have separate queues. Brief duplicate worker starts can occur after retries; an OS file lock grants only one ownership of the queue.
+Jobs persist before a detached, hidden worker starts. They survive the submitting CLI or MCP connection closing. Up to 32 jobs per root may be queued or running. Additional submissions return `QUEUE_FULL`; an already committed request can still be replayed. Different roots have separate queues. Each submission also wakes the root's worker through a named event, and starts a standby worker that exits within 2 s when one is already running; an OS file lock grants only one ownership of the queue.
+
+The worker runs independent jobs at once, up to `CUTBOLT_JOB_WORKERS` (default a quarter of the logical processors, 1 to 8), each on its own thread and store connection. Heavy jobs (exports, conversions, reviews, caption overlays, reference renders) hold half the pool, speech jobs run one at a time, and jobs that write the same path keep their submission order. [USAGE.md](USAGE.md#background-jobs) gives the rules. Status of concurrent jobs shows the same `worker_pid`.
 
 ```mermaid
 stateDiagram-v2
@@ -79,7 +81,7 @@ Publication and cancellation serialize through the job-store writer transaction.
 - An active job reserves its output within the root. No-overwrite publication also protects outputs across roots and against unrelated writers.
 - Add `retry: {"max_attempts": 2}` inside `render` to allow up to two attempts including the first; the accepted range is 1–3 and omission means one. Only transient tool failure/timeout or worker interruption can retry. Cancellation, changed media/tools and publication conflicts stop the job.
 - If worker launch fails after saving, replay the same submission or use `job.resume`. The hidden worker inherits no caller handles, so a CLI reader can receive its ticket and EOF before the render finishes.
-- `job.status`, `job.cancel`, a new worker and `job.resume` reconcile abandoned running work. Eligible interrupted jobs become queued; `job.resume` starts a worker. Status inspection itself starts no worker. Completed, cancelled and exhausted jobs do not rerun.
+- `job.status`, `job.wait`, `job.cancel`, a new worker and `job.resume` reconcile abandoned running work: every job a dead worker was running, not just one. Eligible interrupted jobs become queued; `job.resume` starts a worker. Status inspection itself starts no worker. Completed, cancelled and exhausted jobs do not rerun.
 - Before publication, a durable validated receipt records the expected output. Recovery accepts an existing file only when its content and saved receipt agree. A mismatch rejects and retains the file; a matching completed output can win simultaneous cancellation. See [the full recovery contract](RENDER_RECOVERY.md).
 - A crash can leave `.cutbolt-job-<id>.partial.mkv` files. Later attempts use a different `.attempt-<number>.partial.mkv` suffix. Normal failure/cancellation cleans its own scratch file. Crash partials are retained; no orphan cleanup, mid-codec resume, job-history pruning or power-loss guarantee is provided.
 - The background worker backend supports Windows only. Other platforms receive `UNSUPPORTED_PLATFORM`; synchronous rendering remains separate.

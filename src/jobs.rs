@@ -1,4 +1,5 @@
-//! Persisted local render queue. One worker owns a store's OS file lock.
+//! Persisted local render queue. One worker owns a store's OS file lock and runs a bounded pool
+//! of its jobs at once.
 use crate::{
     Result, error,
     media::{self, Control},
@@ -17,6 +18,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+mod pool;
 mod recovery;
 
 /// Retry policy for a queued render.
@@ -228,12 +230,100 @@ fn resolve_tool(name: &str) -> Result<String> {
         ),
     ))
 }
+/// A media tool's SHA-256, hashed once per process for each path, size and modification time.
+/// Jobs pin their tools at submission and check them before running; a 140 MB FFmpeg build takes
+/// about 0.1 s to hash, which a burst of submissions would otherwise pay every time.
+fn tool_hash(path: &str) -> Result<String> {
+    use std::{collections::HashMap, sync::Mutex, sync::OnceLock};
+    type Known = Mutex<HashMap<(PathBuf, u64, u128), String>>;
+    static KNOWN: OnceLock<Known> = OnceLock::new();
+    let path = Path::new(path);
+    let metadata = std::fs::metadata(path)?;
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let slot = (path.to_path_buf(), metadata.len(), modified);
+    let known = KNOWN.get_or_init(Default::default);
+    if let Some(hash) = known.lock().expect("tool hashes").get(&slot) {
+        return Ok(hash.clone());
+    }
+    let hash = media::file_hash(path)?;
+    known
+        .lock()
+        .expect("tool hashes")
+        .insert(slot, hash.clone());
+    Ok(hash)
+}
+/// The hashes of FFmpeg and ffprobe, computed side by side.
+fn tool_hashes(ffmpeg: &str, ffprobe: &str) -> Result<(String, String)> {
+    thread::scope(|scope| {
+        let probe = scope.spawn(|| tool_hash(ffprobe));
+        let ffmpeg = tool_hash(ffmpeg);
+        let ffprobe = probe.join().expect("tool hash thread");
+        Ok((ffmpeg?, ffprobe?))
+    })
+}
+/// The selected FFmpeg and ffprobe with their hashes: (ffmpeg, ffprobe, ffmpeg hash, ffprobe hash).
+fn pinned_tools() -> Result<(String, String, String, String)> {
+    let ffmpeg = resolve_tool("ffmpeg")?;
+    let ffprobe = resolve_tool("ffprobe")?;
+    let (ffmpeg_sha256, ffprobe_sha256) = tool_hashes(&ffmpeg, &ffprobe)?;
+    Ok((ffmpeg, ffprobe, ffmpeg_sha256, ffprobe_sha256))
+}
+/// Fail with TOOL_CHANGED unless both tools still have the hashes pinned at submission.
+fn check_tools(ffmpeg: &str, ffprobe: &str, expected: (&str, &str)) -> Result<()> {
+    let (ffmpeg, ffprobe) = tool_hashes(ffmpeg, ffprobe)?;
+    if (ffmpeg.as_str(), ffprobe.as_str()) != expected {
+        return Err(error(
+            "TOOL_CHANGED",
+            "A queued media tool changed after submission",
+        ));
+    }
+    Ok(())
+}
+/// The ticket of a request ID already in the queue, and whether that job still waits.
+fn replay(
+    connection: &Connection,
+    request_id: &str,
+    payload_hash: &str,
+) -> Result<Option<(Value, bool)>> {
+    let existing: Option<(String, String, String)> = connection
+        .query_row(
+            "SELECT payload_hash,ticket,status FROM jobs WHERE request_id=?1",
+            [request_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((hash, ticket, state)) = existing else {
+        return Ok(None);
+    };
+    if hash != payload_hash {
+        return Err(error(
+            "REQUEST_ID_CONFLICT",
+            "Job request ID was already used with different arguments",
+        ));
+    }
+    Ok(Some((serde_json::from_str(&ticket)?, state == "queued")))
+}
+fn replayed(root: &Path, (ticket, queued): (Value, bool)) -> Result<Value> {
+    if queued {
+        kick(root)?;
+    }
+    Ok(ticket)
+}
 fn kick(root: &Path) -> Result<()> {
     supported()?;
+    let root = root_path(root)?;
+    // A live worker admits the new job at once; the new process only covers a worker that is
+    // exiting, or none.
+    if let Some(signal) = pool::root_signal(&root) {
+        signal.set();
+    }
     let executable = std::env::var_os("CUTBOLT_EXECUTABLE")
         .map(PathBuf::from)
         .unwrap_or(std::env::current_exe()?);
-    launch_worker(&executable, &root_path(root)?).map_err(|e| {
+    launch_worker(&executable, &root).map_err(|e| {
         error(
             "JOB_LAUNCH_FAILED",
             format!("Queue saved; retry submission or job.resume: {e}"),
@@ -321,26 +411,8 @@ pub fn start(root: &Path, request_id: &str, request: RenderRequest) -> Result<Va
     }
     let payload_hash = digest(&serde_json::to_vec(&request)?);
     let mut connection = connect(root, true)?;
-    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let existing: Option<(String, String, String)> = tx
-        .query_row(
-            "SELECT payload_hash,ticket,status FROM jobs WHERE request_id=?1",
-            [request_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()?;
-    if let Some((hash, ticket, state)) = existing {
-        if hash != payload_hash {
-            return Err(error(
-                "REQUEST_ID_CONFLICT",
-                "Job request ID was already used with different arguments",
-            ));
-        }
-        tx.commit()?;
-        if state == "queued" {
-            kick(root)?;
-        }
-        return Ok(serde_json::from_str(&ticket)?);
+    if let Some(found) = replay(&connection, request_id, &payload_hash)? {
+        return replayed(root, found);
     }
     request.project.validate()?;
     if !request.input_root.is_absolute() || !request.input_root.is_dir() {
@@ -356,6 +428,14 @@ pub fn start(root: &Path, request_id: &str, request: RenderRequest) -> Result<Va
         .units(request.project.frame_rate)?;
     let total =
         i64::try_from(total).map_err(|_| error("LIMIT_EXCEEDED", "Frame count too large"))?;
+    // Tools are hashed before the write transaction, so submissions never wait on each other's
+    // hashing and the worker can record progress meanwhile.
+    let (ffmpeg, ffprobe, ffmpeg_sha256, ffprobe_sha256) = pinned_tools()?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if let Some(found) = replay(&tx, request_id, &payload_hash)? {
+        tx.commit()?;
+        return replayed(root, found);
+    }
     let active: i64 = tx.query_row(
         "SELECT count(*) FROM jobs WHERE status IN ('queued','running')",
         [],
@@ -384,12 +464,10 @@ pub fn start(root: &Path, request_id: &str, request: RenderRequest) -> Result<Va
     request.input_root = request.input_root.canonicalize()?;
     request.output_root = request.output_root.canonicalize()?;
     request.output = output.clone();
-    let ffmpeg = resolve_tool("ffmpeg")?;
-    let ffprobe = resolve_tool("ffprobe")?;
     let saved = SavedRequest {
         render: request,
-        ffmpeg_sha256: Some(media::file_hash(Path::new(&ffmpeg))?),
-        ffprobe_sha256: Some(media::file_hash(Path::new(&ffprobe))?),
+        ffmpeg_sha256: Some(ffmpeg_sha256),
+        ffprobe_sha256: Some(ffprobe_sha256),
         ffmpeg,
         ffprobe,
     };
@@ -420,26 +498,14 @@ pub fn start_command(root: &Path, request_id: &str, request: Value) -> Result<Va
     }
     let payload_hash = digest(&serde_json::to_vec(&request)?);
     let mut connection = connect(root, true)?;
+    if let Some(found) = replay(&connection, request_id, &payload_hash)? {
+        return replayed(root, found);
+    }
+    let (ffmpeg, ffprobe, ffmpeg_sha256, ffprobe_sha256) = pinned_tools()?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let existing: Option<(String, String, String)> = tx
-        .query_row(
-            "SELECT payload_hash,ticket,status FROM jobs WHERE request_id=?1",
-            [request_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()?;
-    if let Some((hash, ticket, state)) = existing {
-        if hash != payload_hash {
-            return Err(error(
-                "REQUEST_ID_CONFLICT",
-                "Job request ID was already used with different arguments",
-            ));
-        }
+    if let Some(found) = replay(&tx, request_id, &payload_hash)? {
         tx.commit()?;
-        if state == "queued" {
-            kick(root)?;
-        }
-        return Ok(serde_json::from_str(&ticket)?);
+        return replayed(root, found);
     }
     let id = digest(request_id.as_bytes());
     // Commands without an output file reserve their job instead.
@@ -469,12 +535,10 @@ pub fn start_command(root: &Path, request_id: &str, request: Value) -> Result<Va
         ));
     }
     let ticket = json!({"job_id":id,"command":command});
-    let ffmpeg = resolve_tool("ffmpeg")?;
-    let ffprobe = resolve_tool("ffprobe")?;
     let saved = SavedCommand {
         command: request,
-        ffmpeg_sha256: media::file_hash(Path::new(&ffmpeg))?,
-        ffprobe_sha256: media::file_hash(Path::new(&ffprobe))?,
+        ffmpeg_sha256,
+        ffprobe_sha256,
         ffmpeg,
         ffprobe,
     };
@@ -508,17 +572,11 @@ fn limit(name: &str, default: Duration) -> Duration {
 /// terminates every process it started; a watchdog does the same for a stuck or overlong run.
 fn run_command(connection: &Connection, id: &str, encoded: &str) -> Result<()> {
     let saved: SavedCommand = serde_json::from_str(encoded)?;
-    for (path, expected) in [
-        (&saved.ffmpeg, &saved.ffmpeg_sha256),
-        (&saved.ffprobe, &saved.ffprobe_sha256),
-    ] {
-        if media::file_hash(Path::new(path))? != *expected {
-            return Err(error(
-                "TOOL_CHANGED",
-                "A queued media tool changed after submission",
-            ));
-        }
-    }
+    check_tools(
+        &saved.ffmpeg,
+        &saved.ffprobe,
+        (&saved.ffmpeg_sha256, &saved.ffprobe_sha256),
+    )?;
     connection.execute("UPDATE jobs SET phase='running' WHERE id=?1", [id])?;
     let result = supervise(connection, id, &saved)?;
     let tx = connection.unchecked_transaction()?;
@@ -617,38 +675,58 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
     let mut stop: Option<(Stop, Instant)> = None;
     let mut terminated = false;
     let mut last: Option<Value> = None;
+    let mut shown: Option<(String, i64, i64)> = None;
     let mut relay = |line: &str,
                      stop: Option<(Stop, Instant)>,
-                     active: &mut (Instant, Option<Duration>)|
-     -> Result<()> {
+                     active: &mut (Instant, Option<Duration>)| {
         let Ok(message) = serde_json::from_str::<Value>(line) else {
-            return Ok(());
+            return;
         };
         if let Some(progress) = message.get("progress") {
             *active = (Instant::now(), containment.cpu());
-            if stop.is_none() {
-                connection.execute(
+            let now = (
+                progress["phase"].as_str().unwrap_or("running").to_owned(),
+                progress["frames"].as_i64().unwrap_or(0),
+                progress["total_frames"].as_i64().unwrap_or(0),
+            );
+            // Progress is advisory: record changes only, and let a busy store skip one rather
+            // than fail the job, since other jobs of the pool write to it too.
+            if stop.is_none() && shown.as_ref() != Some(&now) {
+                let _ = connection.execute(
                     "UPDATE jobs SET phase=?2,frames=?3,total_frames=?4 WHERE id=?1 AND status='running'",
-                    params![
-                        id,
-                        progress["phase"].as_str().unwrap_or("running"),
-                        progress["frames"].as_i64().unwrap_or(0),
-                        progress["total_frames"].as_i64().unwrap_or(0)
-                    ],
-                )?;
+                    params![id, now.0, now.1, now.2],
+                );
+                shown = Some(now);
             }
         } else if message.get("ok").is_some() {
             last = Some(message);
         }
-        Ok(())
     };
+    // Lines wake the loop at once, so a finished command is collected within milliseconds; the
+    // store is checked for cancellation, and the watchdog run, every 200 ms.
+    let mut checked = Instant::now() - Duration::from_secs(1);
     let status = loop {
+        match receiver.recv_timeout(Duration::from_millis(200)) {
+            Ok(line) => relay(&line, stop, &mut active),
+            // Output closed: the process is exiting.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                if let Some(status) = child.try_wait()? {
+                    break status;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
         for line in receiver.try_iter() {
-            relay(&line, stop, &mut active)?;
+            relay(&line, stop, &mut active);
         }
         if let Some(status) = child.try_wait()? {
             break status;
         }
+        if checked.elapsed() < Duration::from_millis(200) {
+            continue;
+        }
+        checked = Instant::now();
         let now = Instant::now();
         let cpu = containment.cpu();
         match (cpu, active.1) {
@@ -657,11 +735,12 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
         }
         match stop {
             None => {
-                let cancelled: bool = connection.query_row(
-                    "SELECT cancel_requested FROM jobs WHERE id=?1",
-                    [id],
-                    |r| r.get(0),
-                )?;
+                // A store busy with the pool's other jobs only delays this check.
+                let cancelled = connection
+                    .query_row("SELECT cancel_requested FROM jobs WHERE id=?1", [id], |r| {
+                        r.get::<_, bool>(0)
+                    })
+                    .unwrap_or(false);
                 let reason = if cancelled {
                     Some(Stop::Cancelled)
                 } else if started.elapsed() > deadline {
@@ -675,10 +754,10 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
                     // Any line asks the command to stop; it then cleans up its partial files.
                     let _ = stdin.write_all(b"stop\n");
                     let _ = stdin.flush();
-                    connection.execute(
+                    let _ = connection.execute(
                         "UPDATE jobs SET phase='stopping' WHERE id=?1 AND status='running'",
                         [id],
-                    )?;
+                    );
                     stop = Some((reason, now));
                 }
             }
@@ -688,12 +767,11 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
             }
             _ => {}
         }
-        thread::sleep(Duration::from_millis(200));
     };
     drop(stdin);
     let _ = reader.join();
     for line in receiver.try_iter() {
-        relay(&line, stop, &mut active)?;
+        relay(&line, stop, &mut active);
     }
     let diagnostics = errors.join().unwrap_or_default();
     match (last, stop.map(|(reason, _)| reason)) {
@@ -820,10 +898,7 @@ impl Drop for Containment {
 /// `{"ok": ...}` line go to stdout.
 pub fn command_process() -> Result<()> {
     use std::io::{BufRead, Write};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+    use std::sync::mpsc::{RecvTimeoutError, channel};
     let mut input = std::io::BufReader::new(std::io::stdin());
     let mut line = String::new();
     input.read_line(&mut line)?;
@@ -833,29 +908,30 @@ pub fn command_process() -> Result<()> {
         let _ = input.read_line(&mut rest);
         media::cancel_ambient();
     });
-    let finished = Arc::new(AtomicBool::new(false));
-    let reporter = {
-        let finished = finished.clone();
-        thread::spawn(move || {
-            loop {
-                let last = finished.load(Ordering::SeqCst);
-                if let Some(p) = media::ambient_progress() {
-                    let line = json!({"progress":{"phase":p.phase,"frames":p.frames,"total_frames":p.total}});
-                    let mut out = std::io::stdout().lock();
-                    let _ = writeln!(out, "{line}");
-                    let _ = out.flush();
-                }
-                if last {
-                    return;
-                }
-                thread::sleep(Duration::from_millis(250));
+    // Report every 250 ms, and once more as soon as the command returns.
+    let (finished, done) = channel::<()>();
+    let reporter = thread::spawn(move || {
+        loop {
+            let last = !matches!(
+                done.recv_timeout(Duration::from_millis(250)),
+                Err(RecvTimeoutError::Timeout)
+            );
+            if let Some(p) = media::ambient_progress() {
+                let line =
+                    json!({"progress":{"phase":p.phase,"frames":p.frames,"total_frames":p.total}});
+                let mut out = std::io::stdout().lock();
+                let _ = writeln!(out, "{line}");
+                let _ = out.flush();
             }
-        })
-    };
+            if last {
+                return;
+            }
+        }
+    });
     let outcome = serde_json::from_value(request)
         .map_err(crate::Error::from)
         .and_then(crate::commands::handle);
-    finished.store(true, Ordering::SeqCst);
+    drop(finished);
     let _ = reporter.join();
     let line = match outcome {
         Ok(result) => json!({"ok":true,"result":result}),
@@ -876,18 +952,30 @@ pub fn wait(root: &Path, id: &str, seconds: u32) -> Result<Value> {
         ));
     }
     let deadline = Instant::now() + Duration::from_secs(seconds.into());
+    let root = root_path(root)?;
+    let connection = connect(&root, false)?;
+    // The worker sets the job's event when it finishes, so the wait ends at once; the event is
+    // opened before the first look, so a finish in between is never missed. Without it, poll.
+    let signal = pool::job_signal(&root, id);
     loop {
-        let state = status(root, id)?;
+        if let Some(signal) = &signal {
+            signal.reset();
+        }
+        recover_if_idle(&root, &connection)?;
+        let mut state = state(&connection, id)?;
         let done = matches!(
             state["status"].as_str(),
             Some("completed" | "failed" | "cancelled" | "interrupted")
         );
-        if done || Instant::now() >= deadline {
-            let mut state = state;
+        let now = Instant::now();
+        if done || now >= deadline {
             state["finished"] = json!(done);
             return Ok(state);
         }
-        thread::sleep(Duration::from_millis(250));
+        match &signal {
+            Some(signal) => signal.wait((deadline - now).min(Duration::from_millis(500))),
+            None => thread::sleep((deadline - now).min(Duration::from_millis(50))),
+        }
     }
 }
 
@@ -950,6 +1038,10 @@ pub fn cancel(root: &Path, id: &str) -> Result<Value> {
     )?;
     let result = state(&tx, id)?;
     tx.commit()?;
+    // A cancelled queued job ends now: its waiters return, and jobs queued behind it may start.
+    if result["status"] == "cancelled" {
+        pool::notify(&root_path(root)?, id);
+    }
     Ok(result)
 }
 pub fn resume(root: &Path) -> Result<Value> {
@@ -1082,8 +1174,18 @@ fn contain_worker() -> Result<()> {
     supported()
 }
 
+/// A job the worker has started on its own thread.
+struct Running {
+    id: String,
+    class: pool::Class,
+}
+
+/// The queue worker (`cutbolt job-worker`). It owns the root's lock, runs up to the pool's size of
+/// queued jobs at once, each on its own thread and store connection, and exits once nothing is
+/// queued or running.
 pub fn worker(root: &Path) -> Result<()> {
-    let mut connection = connect(root, false)?;
+    let root = root_path(root)?;
+    let mut connection = connect(&root, false)?;
     if let Err(failure) = contain_worker() {
         connection.execute(
             "UPDATE jobs SET status='failed',phase='failed',failure=?1 WHERE status='queued'",
@@ -1091,79 +1193,176 @@ pub fn worker(root: &Path) -> Result<()> {
         )?;
         return Err(failure);
     }
-    let lock = lock_file(root)?;
+    let lock = lock_file(&root)?;
     let wait = Instant::now();
     while !try_lock(&lock)? {
-        // A live owner drains all queued work. Briefly waiting also closes the idle-exit race.
+        // A live owner runs all queued work. Briefly waiting also closes the idle-exit race.
         if wait.elapsed() > Duration::from_secs(2) {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(20));
     }
     reconcile(&connection)?;
+    let signal = pool::root_signal(&root);
+    let workers = pool::workers();
+    let (finished, outcomes) = std::sync::mpsc::channel::<(String, Result<()>)>();
+    let mut running: Vec<Running> = Vec::new();
+    let mut classes = std::collections::HashMap::new();
     loop {
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let row:Option<(String,String,String)>=tx.query_row("SELECT id,request,request_hash FROM jobs WHERE status='queued' ORDER BY sequence LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-        let Some((id, encoded, hash)) = row else {
-            return Ok(());
-        };
+        for (id, outcome) in outcomes.try_iter() {
+            running.retain(|job| job.id != id);
+            // The job's thread could not record its own outcome.
+            if let Err(failure) = outcome {
+                let _ = recovery::failed(&connection, &id, &failure);
+                pool::notify(&root, &id);
+            }
+        }
+        let queued = admit(
+            &mut connection,
+            &root,
+            workers,
+            &mut running,
+            &mut classes,
+            &finished,
+        );
+        match queued {
+            Ok(false) if running.is_empty() => return Ok(()),
+            Err(failure) if running.is_empty() => return Err(failure),
+            // A busy store is retried on the next pass.
+            _ => {}
+        }
+        // Woken when a job finishes, is queued or is cancelled; the timeout is a safety net.
+        match &signal {
+            Some(signal) => signal.wait(Duration::from_secs(1)),
+            None => thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
+/// Start every queued job the pool has room for (see `pool::schedule`), each on its own thread.
+/// Returns whether any job is queued.
+fn admit(
+    connection: &mut Connection,
+    root: &Path,
+    workers: u32,
+    running: &mut Vec<Running>,
+    classes: &mut std::collections::HashMap<String, pool::Class>,
+    finished: &std::sync::mpsc::Sender<(String, Result<()>)>,
+) -> Result<bool> {
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let ids = tx
+        .prepare("SELECT id FROM jobs WHERE status='queued' ORDER BY sequence")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if ids.is_empty() {
+        return Ok(false);
+    }
+    classes.retain(|id, _| ids.contains(id));
+    let mut queued = Vec::with_capacity(ids.len());
+    for id in ids {
+        if !classes.contains_key(&id) {
+            let encoded: String =
+                tx.query_row("SELECT request FROM jobs WHERE id=?1", [&id], |r| r.get(0))?;
+            // An unreadable request still starts, and then fails its checksum.
+            let class = serde_json::from_str::<Value>(&encoded)
+                .map(|saved| pool::class(&saved))
+                .unwrap_or_default();
+            classes.insert(id.clone(), class);
+        }
+        let class = classes[&id].clone();
+        queued.push((id, class));
+    }
+    let busy: Vec<&pool::Class> = running.iter().map(|job| &job.class).collect();
+    let started: Vec<String> = pool::schedule(workers, &busy, &queued)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    for id in &started {
         tx.execute(
             "UPDATE jobs SET status='running',phase='inspecting',worker_pid=?2,attempt=attempt+1,frames=0,failure=NULL WHERE id=?1",
             params![id, std::process::id()],
         )?;
-        recovery::begin_attempt(&tx, &id)?;
-        tx.commit()?;
-        let outcome = (|| {
-            if digest(encoded.as_bytes()) != hash {
-                return Err(error("STORE_CORRUPT", "Job request checksum mismatch"));
+        recovery::begin_attempt(&tx, id)?;
+    }
+    tx.commit()?;
+    for id in started {
+        let class = classes.remove(&id).unwrap_or_default();
+        let (job_root, job, finished) = (root.to_path_buf(), id.clone(), finished.clone());
+        let spawned = thread::Builder::new()
+            .name(format!("job-{}", &id[..id.len().min(12)]))
+            .spawn(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_job(&job_root, &job)
+                }))
+                .unwrap_or_else(|_| Err(error("WORKER_FAILED", "The job's thread panicked")));
+                let _ = finished.send((job.clone(), outcome));
+                pool::notify(&job_root, &job);
+            });
+        match spawned {
+            Ok(_) => running.push(Running { id, class }),
+            Err(e) => {
+                recovery::failed(connection, &id, &error("WORKER_FAILED", e.to_string()))?;
+                pool::notify(root, &id);
             }
-            if serde_json::from_str::<Value>(&encoded)?
-                .get("command")
-                .is_some()
-            {
-                return run_command(&connection, &id, &encoded).map(|()| Value::Null);
-            }
-            let saved: SavedRequest = serde_json::from_str(&encoded)?;
-            for (path, expected) in [
-                (&saved.ffmpeg, &saved.ffmpeg_sha256),
-                (&saved.ffprobe, &saved.ffprobe_sha256),
-            ] {
-                if let Some(expected) = expected
-                    && media::file_hash(Path::new(path))? != *expected
-                {
-                    return Err(error(
-                        "TOOL_CHANGED",
-                        "A queued media tool changed after submission",
-                    ));
-                }
-            }
-            let request = saved.render;
-            let control = JobControl {
-                connection: &connection,
-                id: &id,
-                checked: Cell::new(Instant::now() - Duration::from_secs(1)),
-                ffmpeg: &saved.ffmpeg,
-                ffprobe: &saved.ffprobe,
-            };
-            let attempt: i64 =
-                connection
-                    .query_row("SELECT attempt FROM jobs WHERE id=?1", [&id], |r| r.get(0))?;
-            let temp = request
-                .output
-                .with_file_name(recovery::partial_name(&id, attempt));
-            render::run_controlled(
-                &request.project,
-                &request.input_root,
-                &request.output_root,
-                &request.output,
-                Some(&temp),
-                &control,
-            )
-        })();
-        if let Err(failure) = outcome {
-            recovery::failed(&connection, &id, &failure)?;
         }
     }
+    Ok(true)
+}
+
+/// Run one started job on its own store connection and record its outcome. An error means the
+/// outcome could not be recorded, and the worker records the failure instead.
+fn run_job(root: &Path, id: &str) -> Result<()> {
+    let connection = connect(root, false)?;
+    // The pool's jobs share the store: wait for a busy writer rather than fail a job.
+    connection.busy_timeout(Duration::from_secs(30))?;
+    if let Err(failure) = execute(&connection, id) {
+        recovery::failed(&connection, id, &failure)?;
+    }
+    Ok(())
+}
+
+fn execute(connection: &Connection, id: &str) -> Result<()> {
+    let (encoded, hash): (String, String) = connection.query_row(
+        "SELECT request,request_hash FROM jobs WHERE id=?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if digest(encoded.as_bytes()) != hash {
+        return Err(error("STORE_CORRUPT", "Job request checksum mismatch"));
+    }
+    if serde_json::from_str::<Value>(&encoded)?
+        .get("command")
+        .is_some()
+    {
+        return run_command(connection, id, &encoded);
+    }
+    let saved: SavedRequest = serde_json::from_str(&encoded)?;
+    // Requests saved before tools were pinned carry no hashes.
+    if let (Some(ffmpeg), Some(ffprobe)) = (&saved.ffmpeg_sha256, &saved.ffprobe_sha256) {
+        check_tools(&saved.ffmpeg, &saved.ffprobe, (ffmpeg, ffprobe))?;
+    }
+    let request = saved.render;
+    let control = JobControl {
+        connection,
+        id,
+        checked: Cell::new(Instant::now() - Duration::from_secs(1)),
+        ffmpeg: &saved.ffmpeg,
+        ffprobe: &saved.ffprobe,
+    };
+    let attempt: i64 =
+        connection.query_row("SELECT attempt FROM jobs WHERE id=?1", [id], |r| r.get(0))?;
+    let temp = request
+        .output
+        .with_file_name(recovery::partial_name(id, attempt));
+    render::run_controlled(
+        &request.project,
+        &request.input_root,
+        &request.output_root,
+        &request.output,
+        Some(&temp),
+        &control,
+    )
+    .map(|_| ())
 }
 
 /// Each media subprocess gets a nested lifetime scope before the external tool starts.

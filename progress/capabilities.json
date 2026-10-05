@@ -778,6 +778,10 @@
         "recovery.attempt_exhaustion_and_source_pinning",
         "recovery.actual_worker_interruption_and_checked_rerender",
         "recovery.all_32_slots_single_worker_and_cancel_no_retry",
+        "recovery.parallel_pool_path_order_and_multi_job_interruption",
+        "rust:jobs::pool::tests::heavy_jobs_hold_half_the_pool_and_wait_first_come_first_served",
+        "rust:jobs::pool::tests::jobs_writing_the_same_path_keep_submission_order",
+        "rust:jobs::recovery::tests::reconcile_settles_every_running_row_a_pool_leaves",
         "rust:jobs::recovery::tests::published_crash_reconciles_without_reencoding_or_overwrite",
         "rust:jobs::recovery::tests::intent_crash_requeues_only_opted_in_and_cancellation_wins",
         "rust:jobs::recovery::tests::publication_conflicts_and_corrupt_receipts_are_preserved_and_reject",
@@ -1002,7 +1006,7 @@
     },
     {
       "name": "Asynchronous job control",
-      "acceptance": "Durable local queue; status/phase and frame progress; queued and running cancellation; no output overwrites; worker interruption detection. Windows backend, one render per root.",
+      "acceptance": "Durable local queue; status/phase and frame progress; queued and running cancellation; no output overwrites; worker interruption detection. Windows backend; one worker per root runs a bounded pool of independent jobs.",
       "evidence": [
         "jobs.durable_completion",
         "jobs.live_progress",
