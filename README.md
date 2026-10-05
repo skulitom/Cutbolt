@@ -116,6 +116,7 @@ The current renderer accepts FFV1/bgr0 video with matching dimensions and 48 kHz
 - [Research and publication boundaries](docs/RESEARCH.md)
 - [Percentage tracker](docs/PROGRESS.md) and [progress history](docs/PROGRESS_HISTORY.md)
 - [Competitive landscape and proposed USP](docs/COMPETITIVE_ANALYSIS.md)
+- [Strategy against HyperFrames and agent adoption priorities](docs/HYPERFRAMES_STRATEGY.md)
 
 The recommended path is an independently implemented timeline and execution engine, initially using a separately installed, reviewed FFmpeg build for media processing. Project compatibility remains a separate workstream with explicit acceptance criteria.
 

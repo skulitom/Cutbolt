@@ -1,5 +1,9 @@
 # Progress history
 
+## 5 October 2026: HyperFrames comparison and agent adoption strategy
+
+[HYPERFRAMES_STRATEGY.md](HYPERFRAMES_STRATEGY.md) compares Cutbolt with HyperFrames from public sources and recommends priorities for agent adoption. On Linux, MCP agents cannot run `job.start` (`UNSUPPORTED_PLATFORM`), so they cannot prepare media, compile scenes or export; the report makes cross-platform jobs and distribution the first priority. Documentation only: no code, criteria, evidence, weights, exclusions or denominators changed, and no points were awarded.
+
 ## 5 October 2026: fast overlay exports, stoppable queued commands, cached source checks
 
 The progress demo (`C:\DEV\CutboltData\demo-progress-20261005`, ISSUES.md items 18-21) could not export its 80.64 s 1080p25 timeline, which has a full-length caption overlay and one picture-in-picture clip:
