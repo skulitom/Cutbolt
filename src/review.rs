@@ -169,7 +169,7 @@ pub fn cut_sheet(
 }
 
 /// The probed video stream of `path`, its displayed size and its exact duration.
-fn video(path: &Path) -> Result<(Value, u32, u32, Time)> {
+pub(crate) fn video(path: &Path) -> Result<(Value, u32, u32, Time)> {
     let metadata = media::probe(path)?;
     let stream = metadata["streams"]
         .as_array()
@@ -210,7 +210,7 @@ fn seconds(time: Time) -> String {
 }
 
 /// One frame of `path` at `time`, scaled to `width` x `height` RGB, or None past the end.
-fn grab(path: &Path, time: Time, width: u32, height: u32) -> Result<Option<Vec<u8>>> {
+pub(crate) fn grab(path: &Path, time: Time, width: u32, height: u32) -> Result<Option<Vec<u8>>> {
     let arguments: Vec<String> = [
         "-v",
         "error",
@@ -271,7 +271,7 @@ fn write_sheet(
 }
 
 /// Times of `count` frames spread evenly through `duration`, at the middle of equal parts.
-fn spread(duration: Time, count: u64) -> Result<Vec<Time>> {
+pub(crate) fn spread(duration: Time, count: u64) -> Result<Vec<Time>> {
     (0..count)
         .map(|i| duration.times(Time::new(2 * i + 1, 2 * count)?))
         .collect()

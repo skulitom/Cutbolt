@@ -8,6 +8,7 @@ from functools import lru_cache
 import hashlib
 import itertools
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -187,6 +188,64 @@ def run(root):
         difference = max(abs(a - b) for a, b in zip(rgb, outputs[label])); assert difference <= 1, (label, difference)
         external.append({'case': label, 'maximum_rgb_error': difference})
     passed.append('lut.external_filter_agreement')
+
+    # Colour matching: the target is the reference with per-channel gain, offset and gamma errors.
+    # The LUT is recomputed here from the same sampled frames, and conforming with the returned
+    # recipe applies exactly that table to every target frame.
+    MW, MH, MN = 64, 36, 12
+    match_reference = bytes(v for n in range(MN) for y in range(MH) for x in range(MW) for v in ((x*4+n*7) % 256, (y*7+x+n*3) % 256, (x*y+n*11) % 256))
+    def distort(r, g, b):return (min(255, max(0, math.floor(0.8*r+10+.5))), min(255, max(0, math.floor(1.1*g-5+.5))), min(255, math.floor(255*(b/255)**1.3+.5)))
+    match_target = bytes(v for i in range(0, len(match_reference), 3) for v in distort(*match_reference[i:i+3]))
+    for name, data in (('match-reference', match_reference), ('match-target', match_target)):
+        (sources/(name+'.rgb')).write_bytes(data)
+        ff(['-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', f'{MW}x{MH}', '-framerate', '25', '-i', str(sources/(name+'.rgb')),
+            '-vf', 'setsar=1', '-c:v', 'ffv1', '-pix_fmt', 'bgr0', '-threads', '1', *tags, str(sources/(name+'.mkv'))])
+    def sampled(path):
+        counts = [[0]*256 for _ in range(3)]
+        for i in range(9):
+            t = F((2*i+1)*MN//18, 25);micros = t.numerator*1000000//t.denominator
+            frame = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-ss', f'{micros//1000000}.{micros % 1000000:06}', '-i', str(path), '-map', '0:v:0', '-frames:v', '1',
+                                    '-vf', f'scale={MW}:{MH}:flags=area,format=rgb24', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], capture_output=True, check=True).stdout
+            for j, v in enumerate(frame):counts[j % 3][v] += 1
+        return counts
+    def statistics(counts):
+        total = 0;weighted = 0.0
+        for v, n in enumerate(counts):total += n;weighted += v*n
+        mean = weighted/total;spread = 0.0
+        for v, n in enumerate(counts):spread += (v-mean)**2*n
+        return mean, math.sqrt(spread/total)
+    def table(target, reference, method):
+        if method == 'levels':
+            (mt, st), (mr, sr) = statistics(target), statistics(reference);gain = sr/st if st > 0 else 1.0
+            return [min(255, max(0, math.floor((v-mt)*gain+mr+.5))) for v in range(256)]
+        total_t, total_r = sum(target), sum(reference);cumulative = list(itertools.accumulate(reference));out = [];running = 0
+        for v in range(256):
+            running += target[v];out.append(next((r for r in range(256) if cumulative[r]*total_t >= running*total_r), 255))
+        return out
+    reference_counts, target_counts = sampled(sources/'match-reference.mkv'), sampled(sources/'match-target.mkv')
+    for method in ('levels', 'histogram'):
+        cube = sources/f'match-{method}.cube'
+        matched = call({'command':'color.match', 'reference':'match-reference.mkv', 'target':str(sources/'match-target.mkv'), 'input_root':str(sources),
+                        'output_root':str(sources), 'output':str(cube), 'method':method, 'transfer':'srgb'})
+        tables = [table(target_counts[c], reference_counts[c], method) for c in range(3)]
+        assert cube.read_text(encoding='ascii') == 'TITLE "cutbolt colour match"\nLUT_1D_SIZE 256\n'+''.join(f'{tables[0][v]/255:.6f} {tables[1][v]/255:.6f} {tables[2][v]/255:.6f}\n' for v in range(256)), method
+        assert matched['frames'] == {'reference':9, 'target':9} and matched['recipe']['lut'] == matched['lut'] == {'file':identity(cube, sources), 'interpolation':'linear'}, (matched['frames'], matched['lut'], identity(cube, sources))
+        assert matched['recipe']['source']['sdr'] == {'matrix':'rgb', 'range':'full', 'transfer':'srgb', 'missing_tags':'use_declared'} and matched['recipe']['working_transfer'] == 'srgb'
+        out = output/f'matched-{method}.mkv'
+        call({'command':'media.conform', 'recipe':matched['recipe'], 'input_root':str(sources), 'output_root':str(output), 'output':str(out)})
+        rgb = ff(['-i', str(out), '-an', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
+        assert rgb == bytes(tables[i % 3][v] for i, v in enumerate(match_target)), method
+        if method == 'levels':
+            for c in range(3):
+                assert abs(matched['matched'][c]['mean']-matched['reference'][c]['mean']) <= 1, (c, matched)
+    call({'command':'color.match', 'reference':'match-reference.mkv', 'target':'match-target.mkv', 'input_root':str(sources),
+          'output_root':str(sources), 'output':str(sources/'match-levels.cube')}, 'OUTPUT_EXISTS')
+    call({'command':'color.match', 'reference':'match-reference.mkv', 'target':'match-target.mkv', 'input_root':str(sources),
+          'output_root':str(output), 'output':str(output/'outside.cube')}, 'PATH_OUTSIDE_ROOT')
+    assert not (output/'outside.cube').exists()
+    call({'command':'color.match', 'reference':'match-reference.mkv', 'target':'match-target.mkv', 'input_root':str(sources), 'target_times':[],
+          'output_root':str(sources), 'output':str(sources/'match-empty.cube')}, 'INVALID_ARGUMENT')
+    passed.append('lut.colour_match_recomputed_and_applied')
 
     # Limit boundary tables are parsed and sampled without adding them to the repository.
     for kind, size, mode in [('identity1', 65536, 'linear'), ('identity3', 65, 'tetrahedral')]:

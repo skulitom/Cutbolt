@@ -12,6 +12,7 @@ pub mod caption_overlay;
 pub mod captions;
 pub mod check;
 pub mod color;
+pub mod color_match;
 pub mod commands;
 pub mod composite;
 pub mod conform;

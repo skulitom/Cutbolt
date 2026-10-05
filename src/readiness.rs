@@ -268,7 +268,7 @@ fn dimension(value: &Value) -> u32 {
 }
 
 /// The timeline rate this video stream declares, using the renderer's own rate test.
-fn native_rate(video: &Value, metadata: &Value) -> Option<Time> {
+pub(crate) fn native_rate(video: &Value, metadata: &Value) -> Option<Time> {
     RATES
         .iter()
         .map(|&(num, den)| Time { num, den })
@@ -330,7 +330,7 @@ fn sample_step(rate: Time) -> u64 {
 }
 
 /// A media.conform recipe for the whole source at 25 fps, from its tags, or why there is none.
-fn conform(
+pub(crate) fn conform(
     relative: &str,
     video: &Value,
     audio: Option<&Value>,

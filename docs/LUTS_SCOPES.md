@@ -4,6 +4,18 @@
 
 Both inspection commands are available through CLI/library calls and MCP stdio. Conversion remains a blocking CLI/library operation. These functions use original Rust arithmetic; there is no new runtime dependency, plugin loader, network request or bundled LUT.
 
+## Matching colour between cameras
+
+`color.match` builds a table that matches one shot's colour to another's. It works in four steps:
+1. **Sampling.** It samples `reference` and `target`, video files absolute or relative to `input_root`, at their `reference_times` and `target_times`. By default it takes nine frame starts spread evenly through each file. Prepared FFV1 RGB assets measure exactly; other files are measured through FFmpeg's RGB conversion.
+2. **Mapping.** It builds an 8-bit mapping per channel:
+   - `levels` (default) maps the target's mean and standard deviation onto the reference's with a straight line, rounded and clipped. This is robust when the shots differ in content.
+   - `histogram` maps each target code to the first reference code whose cumulative share reaches the target code's own, which is closer when both shots show the same scene.
+3. **Table.** The mapping is written to a new 256-entry 1D `.cube` at `output`. One entry per code means linear sampling lands exactly on entries. The table must lie inside `input_root`, so `media.conform` can read it.
+4. **Recipe.** The result holds the `lut` transform and a ready `media.conform` `recipe` for the target with that table. For an encoded RGB asset the recipe declares an identity normalization: RGB matrix, full range, and `transfer` (default `bt709`) as both declared and working transfer. Baking the table then changes each code exactly as the table says.
+
+The result also gives each channel's mean and deviation for the reference, the target, and the target after mapping. Run the recipe with `job.start` and `media.conform`, then `media.add` the matched asset and use it in place of the target.
+
 ## Table contract
 
 `transform` contains `file: {path, sha256, bytes}` and `interpolation`. The relative file path resolves under the explicit absolute `input_root`; links escaping the root, changed identities and oversized files fail. Tables are at most 8 MiB, use the `.cube` extension and contain printable ASCII, tabs and line endings. Each line is at most 4096 bytes. A `#` begins a comment outside a quoted title.

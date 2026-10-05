@@ -14,7 +14,7 @@ pub struct SavedProject {
     pub store_root: Option<PathBuf>,
     /// Saved project ID.
     pub project_id: String,
-    /// Saved revision; omit for the current head. Give one to pin a render or preview.
+    /// Saved revision; default the head.
     #[serde(default)]
     pub revision: Option<u64>,
 }

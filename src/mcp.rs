@@ -223,10 +223,10 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Measure a timeline range's loudness without exporting: sample peak, RMS and BS.1770 integrated loudness (LKFS) of the mix of enabled audio tracks and, by default, of each enabled audio track alone. Use it to set clip gain_milli against a target such as -14 LKFS. With curve, also loudness per second and the silent and clipped runs, to find dead air, music that buries speech, or distortion. Read-only; at most 4 hours per call."
         }
         "timeline.check" => {
-            "Check a project for mistakes without rendering: flash frames, picture and sound of one source playing out of sync, jump cuts within one source, black or audio-free stretches, clips on disabled tracks, unused assets, missing or changed media (with input_root) and words cut by clip edges (with transcripts). Returns a short text summary and findings with times and clip IDs; ok is true when there are no warnings or errors. Read-only."
+            "Find likely mistakes without rendering: flash frames, out-of-sync picture and sound, jump cuts, black or silent stretches, disabled-track clips, unused assets, missing or changed media (with input_root) and words cut by clip edges (with transcripts). Returns a text summary and findings; ok means no warnings or errors. Read-only."
         }
         "timeline.outline" => {
-            "Read a timeline as compact text, one line per clip: timeline span, clip ID, source and source span, link, levels and picture-in-picture, plus transitions, black stretches and stretches without audio. Give transcripts of the sources to see what is said in each audio clip, ending with a partial word marked *. Use it to understand or check a cut cheaply before previews; start and end page through long timelines. Read-only."
+            "Read a timeline as compact text, one line per clip (spans, ID, source, link, levels, picture-in-picture), plus transitions and black or silent stretches. With transcripts of the sources, each audio clip shows what is said, a cut word marked *. start and end page through long timelines. Read-only."
         }
         "files.list" => {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
@@ -256,7 +256,10 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Review a rendered cut into a new folder: a contact sheet, a small H.264 copy to watch, loudness over time with silence and clipping, black frames, the duration against the project, and the words the timeline should say (from source transcripts) against the words heard in the cut (from a speech runtime or given transcripts). Run it with job.start; the result's summary is a short text report."
         }
         "audio.tighten" => {
-            "Jump cuts: find the pauses in speech (the voice track alone, or a sequential timeline's whole program) and propose ripple deletions that remove each pause's middle, keeping some silence on either side, across every track so they stay in sync. Each cut is checked against a working copy; cuts the editor would refuse (inside a fade or transition, or splitting a link unevenly) are listed with the reason. Read-only; apply the operations with session.apply."
+            "Jump cuts: find pauses in speech (the voice track, or a sequential timeline's program) and propose ripple deletions of each pause's middle, keeping some silence, across every track. Each cut is checked on a working copy; refused cuts are listed with the reason. Read-only; apply the operations with session.apply."
+        }
+        "color.match" => {
+            "Match one camera's colour to another's: sample frames of a reference and a target shot, build a per-channel 1D LUT (levels: mean and spread; histogram: whole distributions), write it as a new .cube and return the media.conform recipe that bakes it into a new target asset, with channel statistics before and after."
         }
         "audio.beats" => {
             "Find the beat of a music file for cutting to it: onsets (sudden rises in 10 ms loudness), the tempo in BPM from their autocorrelation, and a beat grid aligned to the onsets, as exact file times and, with frame_rate, the nearest frame of each beat. Read-only."

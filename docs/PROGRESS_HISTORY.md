@@ -1,5 +1,16 @@
 # Progress history
 
+## 5 October 2026: colour matching between cameras
+
+Shots from two cameras rarely match, and grading applied only to scene layers, so an agent had no direct way to bring one camera's colour to another's. `color.match` samples frames of a reference and a target shot. It builds a per-channel 8-bit mapping, matching mean and spread or whole distributions, and writes it as a 256-entry `.cube`. It returns the `media.conform` recipe that bakes the table into a new target asset, with an identity normalization for encoded RGB assets.
+
+The LUT fixture builds a target with per-channel gain, offset and gamma errors. It checks both methods:
+- the table recomputed independently from the same sampled frames equals the written `.cube` byte for byte;
+- the conformed asset equals that table applied to every target frame;
+- with levels, the matched channel means land within one code of the reference's.
+
+It also covers the rejections. The first version sampled mid-part times, and the last one fell past the final frame; default samples are now frame starts. No scoring changed.
+
 ## 5 October 2026: proposals piped by file
 
 Proposals such as `audio.tighten` or `transcript.assemble` return `operations`, which an agent had to copy into `session.apply`. That spends output tokens on large batches and invites copying mistakes. Every command already accepted `save_as` in a workspace, but only document commands advertised it. Now the proposals and `job.wait` do too. A document reference's `select` can be a dotted path of fields and array indexes, such as `result.operations` inside a saved `job.wait` result. The MCP instructions tell agents to pass a saved proposal's `{"file", "select": "operations"}` to `session.apply`.
