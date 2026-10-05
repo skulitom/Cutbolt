@@ -1,6 +1,6 @@
 # Primary grading and ordered scene effects
 
-Scene layers accept up to eight ordered effects. The `grade` type provides primary correction; [selective grades](SELECTIVE_COLOR.md) restrict the same controls with color qualifiers and correction masks. Primary grades provide exposure, contrast, explicit RGB white-balance gains and master/channel curves, with optional animation of the five numerical controls. PNG sequences, text and shape layers use the same path. Use `scene.inspect` through CLI/library or MCP for validation and sampled values, then `scene.render` through CLI/library to compile a new asset for ordinary saved-session editing. Keep the editable scene recipe and external originals.
+Scene layers accept up to eight ordered effects. The `grade` type provides primary correction; [selective grades](SELECTIVE_COLOR.md) restrict the same controls with color qualifiers and correction masks. Primary grades provide exposure, contrast, explicit RGB white-balance gains, master/channel curves and an HSL hue rotation and saturation scale, with optional animation of the seven numerical controls. PNG sequences, text and shape layers use the same path. Use `scene.inspect` through CLI/library or MCP for validation and sampled values, then `scene.render` through CLI/library to compile a new asset for ordinary saved-session editing. Keep the editable scene recipe and external originals.
 
 This is the declared sRGB scene path. General video-track effect evaluation, camera/log/HDR processing, automatic white balance, imported LUT files and scopes remain separate work. [Chroma keying](KEYING.md) is a separate ordered effect that can reduce alpha. Floating-point grading and 16-bit curve coordinates do not make the existing 8-bit input/output pipeline high bit depth.
 
@@ -27,7 +27,7 @@ Add an optional `effects` list to an ordinary [scene layer](SCENES.md). Omission
 }
 ```
 
-The example's layer must last at least one second. Only `kind`, `exposure_milli`, `contrast_milli` and `white_balance_milli` are required. Curves and animation are optional; omitted curves are identity. Unknown effects, properties and unsupported numeric types fail explicitly.
+The example's layer must last at least one second. Only `kind`, `exposure_milli`, `contrast_milli` and `white_balance_milli` are required. Curves, hue, saturation and animation are optional; omitted curves are identity. Unknown effects, properties and unsupported numeric types fail explicitly.
 
 | Field | Allowed values | Meaning |
 | --- | --- | --- |
@@ -36,6 +36,8 @@ The example's layer must last at least one second. Only `kind`, `exposure_milli`
 | `white_balance_milli` | Three integers, each 100..4000 | Red, green and blue linear-light gains divided by 1000; `[1000,1000,1000]` is neutral |
 | `master_curve` | `{points: [[input,output], ...]}` | Apply one scalar tone curve equally to RGB |
 | `red_curve`, `green_curve`, `blue_curve` | Same curve shape | Apply a channel curve after the master curve |
+| `hue_shift_mdeg` | Integer -360000..360000; omitted means 0 | Rotate the [HSL hue](#hue-and-saturation) of the encoded color by this many millidegrees after the curves; whole turns are neutral |
+| `saturation_milli` | Integer 0..4000; omitted means 1000 | Multiply HSL saturation by this value divided by 1000, at most full saturation; 0 gives a gray of the same HSL lightness |
 | `animation` | One or more property curves below | Override static controls on the layer-local clock |
 
 Tone curves have 2-32 ordered knots. Both coordinates are integers 0..65535 representing normalized linear light 0..1. Input knots must be strictly increasing, with first input 0 and last input 65535. Output knots need not be monotonic: inversion and deliberate stylized curves are supported. The endpoints may lift black or lower white. Values between knots use straight-line interpolation. Duplicate, unsorted, missing-endpoint, empty and oversized curves fail. Curve points themselves are static in this version.
@@ -52,18 +54,33 @@ Decode each straight encoded channel to linear light using the standard sRGB tra
 2. Apply contrast around 0.18: `0.18 + (value - 0.18) * contrast_milli/1000`.
 3. Clamp to `[0,1]`.
 4. Apply the master tone curve, then the channel's tone curve.
+5. Unless the hue shift is a whole number of turns and saturation is 1000, apply the hue and saturation step below.
 
 Feed that linear result into the next grade in list order. No intermediate 8-bit encoding occurs between grades. Clipping happens inside every grade, so changing effect order can change the result. For example, brightening then darkening a clipped highlight cannot recover its original value; darkening first can avoid that clipping. Exposure and white balance retain intermediate headroom until the contrast clamp within the same grade.
 
 After the final grade, encode to sRGB and round to the nearest 8-bit level, with half ties upward. The resulting straight RGB and preserved alpha enter the existing crop/transform/mask/opacity/blend behavior. Layer blending still uses encoded sRGB over the opaque scene background; grading does not change the compositor to linear-light blending. Missing regions of trimmed images stay transparent, even when a curve lifts black.
 
-Calculations use bounded `f64` values. Straight 8-bit source channels use a per-frame table of all 256 exact input levels; premultiplied pixels retain their fractional unpremultiplied values through grading. Quantization to straight 8-bit before compositing can produce a one-level difference from ideal arithmetic, which the fixture bounds explicitly. A wholly neutral chain uses the original integer compositor exactly, including fractional stored premultiplied colors. Identity curves may contain any valid knots with equal input/output coordinates.
+Calculations use bounded `f64` values. Without a hue or saturation step, straight 8-bit source channels use a per-frame table of all 256 exact input levels; that step mixes channels, so such grades are evaluated per pixel. Premultiplied pixels retain their fractional unpremultiplied values through grading. Quantization to straight 8-bit before compositing can produce a one-level difference from ideal arithmetic, which the fixture bounds explicitly. A wholly neutral chain uses the original integer compositor exactly, including fractional stored premultiplied colors. Identity curves may contain any valid knots with equal input/output coordinates, and a hue shift of -360000, 0 or 360000 with saturation 1000 is neutral.
+
+### Hue and saturation
+
+This step works on HSL of the encoded sRGB color, the same space a [selective qualifier](SELECTIVE_COLOR.md#color-qualification) measures, so a measured hue difference converts directly into a shift. HSL follows the public definitions in [W3C CSS Color 4, sections 7 and 7.2](https://www.w3.org/TR/2026/CRD-css-color-4-20260930/#rgb-to-hsl); the reduction, saturation limit and quantization rules are original.
+
+1. Encode each linear channel, already within `[0,1]`, with the sRGB transfer, without rounding.
+2. Let `max` and `min` be the largest and smallest encoded channels, lightness `L = (max+min)/2` and chroma `C = max-min`. If `C` is 0 the color has no hue: return it unchanged.
+3. Reduce `hue_shift_mdeg` modulo 360000 in integers and add it, in degrees, to the HSL hue: `H' = (H + shift/1000) mod 360`.
+4. Scale saturation: `S = C/(1-|2L-1|)` and `S' = min(1, S*saturation_milli/1000)`. Lightness is kept.
+5. Rebuild RGB from `H'`, `S'` and `L` with the HSL-to-RGB definition, clamp each channel to `[0,1]` and decode it to linear light.
+
+A pure hue rotation keeps each pixel's largest and smallest encoded channels and moves only the middle one, so lightness and shading survive; a rotation of 120000 or 240000 permutes the channels. Saturation 0 leaves a gray at the mean of the largest and smallest channels. Animated hue shifts interpolate as plain integers: a curve from -360000 to 360000 spins two full turns. The encoded intermediate is not quantized. In exact arithmetic the step is rational, so a result can fall exactly halfway between two 8-bit levels; the `f64` transfer round trip may round such a tie either way.
+
+For example, a red scarf with colors `[224,79,95]` and `[163,50,74]` has HSL hues of about 353.4 and 347.3 degrees. To turn it gold, near 45 degrees, rotate it about 55 degrees: `"hue_shift_mdeg": 55000` gives `[224,196,79]` and `[163,130,50]`. Put the same control in a `selective_grade` with a red hue qualifier to recolor only the scarf.
 
 ## Animation and inspection
 
-Animation keys may target `exposure_milli`, `contrast_milli`, `red_balance_milli`, `green_balance_milli` or `blue_balance_milli`. A supplied property curve replaces that property's static value. Static values still must be valid. Every curve uses the same bounds as its property and the [ordinary exact-rational animation contract](SCENES.md): hold/linear/quadratic easing, nearest-integer parameter rounding, 1-128 keys, insertion-order independence, endpoint holds and optional delay/rate/reversal. The clock is relative to layer start and continues across looping or held source frames. Tone-curve knots are not keyframed.
+Animation keys may target `exposure_milli`, `contrast_milli`, `red_balance_milli`, `green_balance_milli`, `blue_balance_milli`, `hue_shift_mdeg` or `saturation_milli`. A supplied property curve replaces that property's static value. Static values still must be valid. Every curve uses the same bounds as its property and the [ordinary exact-rational animation contract](SCENES.md): hold/linear/quadratic easing, nearest-integer parameter rounding, 1-128 keys, insertion-order independence, endpoint holds and optional delay/rate/reversal. The clock is relative to layer start and continues across looping or held source frames. Tone-curve knots are not keyframed.
 
-The corresponding layer timing report contains the declared `effects`, its `effect_processing` policy, and an `effects` array inside each active frame's `sampled_parameters`. Each sampled grade reports its exposure, contrast and three white-balance gains. Inactive frames remain `null`; recipes without effects omit the extra fields. Curves are validated even on transparent or zero-opacity layers. Inspection does not write images or change the recipe.
+The corresponding layer timing report contains the declared `effects`, its `effect_processing` policy, and an `effects` array inside each active frame's `sampled_parameters`. Each sampled grade reports its exposure, contrast and three white-balance gains, plus `hue_shift_mdeg` and `saturation_milli` when the grade declares them, statically or in animation. Inactive frames remain `null`; recipes without effects omit the extra fields. Curves are validated even on transparent or zero-opacity layers. Inspection does not write images or change the recipe.
 
 The `capabilities` response exposes supported effect types, ranges, ordering, curve limits, working/output spaces and alpha behavior. There are no new MCP tools: effects are part of the shared scene schema. Templates can preserve and instantiate complete grade recipes; typed template bindings do not yet target grade parameters. Compiled graded assets retain ordinary saved-session trimming, retries and export behavior. Changing the editable recipe requires recompilation to a new output.
 
@@ -98,7 +115,7 @@ result = subprocess.run([r"C:\DEV\Cutbolt\target\debug\cutbolt.exe"],
 print(json.loads(result.stdout)["result"]["asset"])
 ```
 
-The acceptance fixture compares all **128 decoded frames and 245,760 silent stereo sample frames** across 24 scene renders and one saved-session cut. Its independent reference evaluates standard transfer and original grading equations with 48-digit Decimal arithmetic, uses analytical exposure/gray anchors, exact Fraction parameter clocks, original font/shape geometry and a forward image compositor. It covers full grayscale ramps, original RGB charts, corrected neutral patches, extrema, clipping, nonmonotonic/master/channel curves, eight-stage and reversed-order chains, low/zero/full alpha, stored premultiplied colors, neutral bypass, transparent trim regions, all blend modes, looped source frames, five animated controls, text/shapes, template reuse and MCP. Maximum allowed RGB error is one 8-bit level; neutral bypass is checked byte-for-byte. Audio must match exactly. Thirty rejected cases verify invalid controls/curves/alpha and source/output preservation.
+The acceptance fixture compares all **183 decoded frames and 351,360 silent stereo sample frames** across 35 scene renders and one saved-session cut. Its independent reference evaluates standard transfer and original grading equations with 48-digit Decimal arithmetic, and the hue and saturation step with the CSS Color 4 HSL equations rather than the engine's sextant rebuild. It uses analytical exposure/gray anchors, exact Fraction parameter clocks, original font/shape geometry and a forward image compositor. It covers full grayscale ramps, original RGB charts, corrected neutral patches, extrema, clipping, nonmonotonic/master/channel curves, eight-stage and reversed-order chains, low/zero/full alpha, stored premultiplied colors, neutral bypass, transparent trim regions, all blend modes, looped source frames, seven animated controls, text/shapes, template reuse and MCP. Maximum allowed RGB error is one 8-bit level; neutral bypass is checked byte-for-byte. Hue and saturation turns with neutral primary controls are rational in encoded sRGB, so every opaque chart pixel of those cases, over 25 animated frames, must equal the exact result rounded to the nearest level, either way only at an exact half tie. Third turns must permute channels exactly, whole turns and eight eighth-turns must equal the bypass byte for byte, and saturation 0 must give grays. Audio must match exactly. Thirty-seven rejected cases verify invalid controls/curves/alpha and source/output preservation.
 
 These checks earn C02 basic and extended only. They do not award general color management, LUT/scopes, HDR or keying points. Selective grading has its own [acceptance fixture](SELECTIVE_COLOR.md). The unchanged checklist continues to require those capabilities.
 

@@ -70,7 +70,7 @@ Explicit timeline gaps produce black video and silence, including in previews an
 
 [Local recording](docs/RECORDING.md) provides explicit Windows input selection, streamed PCM WAV capture and exact native audio-track placement through the existing saved-session workflow.
 
-[Primary grading](docs/GRADING.md) adds exposure, contrast, explicit RGB white balance and master/channel curves to scene layers. Ordered grades use linear-light sRGB, preserve alpha and support animated controls; inspection reports sampled values before compilation into ordinary editing assets. [Selective correction](docs/SELECTIVE_COLOR.md) adds HSL color bands, feathered masks and animated correction strength while preserving alpha and unselected pixels. [Chroma keying](docs/KEYING.md) removes screen colors with spill control, optional soft-edge color recovery and four editable green/blue presets.
+[Primary grading](docs/GRADING.md) adds exposure, contrast, explicit RGB white balance, master/channel curves and HSL hue rotation and saturation to scene layers. Ordered grades use linear-light sRGB, preserve alpha and support animated controls; inspection reports sampled values before compilation into ordinary editing assets. [Selective correction](docs/SELECTIVE_COLOR.md) adds HSL color bands, feathered masks and animated correction strength while preserving alpha and unselected pixels. [Chroma keying](docs/KEYING.md) removes screen colors with spill control, optional soft-edge color recovery and four editable green/blue presets.
 
 [Range and delivery exports](docs/EXPORT.md) select exact timeline intervals and audio-only, video-only or combined output. The fixed H.264/AAC preset validates timing, declared BT.709 conversion and decoded output; reference exports preserve exact decoded pixels and samples. Exports always use full-quality sources.
 
@@ -86,6 +86,7 @@ Requires Rust/Cargo with a C build toolchain for SQLite, Python 3 with the devel
 
 ```powershell
 cargo build --locked
+.\target\debug\cutbolt.exe --version
 .\target\debug\cutbolt.exe capabilities
 .\target\debug\cutbolt.exe examples/create-project.json
 python tools/verify.py                              # quick pre-commit check

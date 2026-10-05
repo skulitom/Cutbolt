@@ -2131,6 +2131,10 @@ fn all_capabilities() -> Value {
     "export":crate::delivery::capabilities(),
     "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
     "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
+    result["build"] = json!(
+        crate::BUILD_COMMIT
+            .map(|(commit, modified)| json!({"commit": commit, "sources_modified": modified}))
+    );
     result["expressions"] = crate::expressions::capabilities();
     result["temporal"] = crate::temporal::capabilities();
     result["geometry"] = crate::geometry::capabilities();
@@ -2153,7 +2157,7 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
         Some("all") => return Ok(all),
         Some(name) => {
             return match all.get(name) {
-                Some(value) if !matches!(name, "version" | "license" | "local_only") => {
+                Some(value) if !matches!(name, "version" | "build" | "license" | "local_only") => {
                     Ok(json!({ name: value }))
                 }
                 _ => Err(crate::error(
@@ -2196,7 +2200,7 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
         "Times are exact: 2.5, \"5/2\" or {num, den} seconds, on frame boundaries, and on whole 48 kHz samples for audio cuts.".to_owned(),
     ];
     Ok(
-        json!({"version":all["version"],"license":all["license"],"local_only":all["local_only"],
+        json!({"version":all["version"],"build":all["build"],"license":all["license"],"local_only":all["local_only"],
         "essentials":essentials,"commands":all["commands"],"operations":all["operations"],
         "sections":sections(&all),
         "note":"Pass section with one of these names for its details, or all for everything."}),
@@ -2204,7 +2208,14 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
 }
 
 fn sections(all: &Value) -> Vec<String> {
-    let summary = ["version", "license", "local_only", "commands", "operations"];
+    let summary = [
+        "version",
+        "build",
+        "license",
+        "local_only",
+        "commands",
+        "operations",
+    ];
     all.as_object()
         .into_iter()
         .flat_map(|o| o.keys())

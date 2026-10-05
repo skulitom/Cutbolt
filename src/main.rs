@@ -6,8 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-const USAGE: &str =
-    "Usage: cutbolt [--workspace DIR] [capabilities | mcp [--tools core|full] | request.json]";
+const USAGE: &str = "Usage: cutbolt --version | [--workspace DIR] [capabilities | mcp [--tools core|full] | request.json]";
 
 /// An optional leading `--workspace DIR`, else CUTBOLT_WORKSPACE.
 fn workspace(args: &mut Vec<OsString>) -> Result<Option<Workspace>> {
@@ -79,6 +78,10 @@ fn main() {
             eprintln!("{}: {}", e.code, e.message);
             exit(1);
         }
+        exit(0);
+    }
+    if args.len() == 1 && args[0] == "--version" {
+        println!("{}", cutbolt::version());
         exit(0);
     }
     if args.len() == 2 && args[0] == "job-worker" {

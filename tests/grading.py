@@ -31,22 +31,70 @@ def resolve(effect,clock):
     result=copy.deepcopy(effect)
     for key,curve in result.pop('animation',{}).items():
         value=sample(curve,clock)
-        if key in ('exposure_milli','contrast_milli'):result[key]=value
+        if key in ('exposure_milli','contrast_milli','hue_shift_mdeg','saturation_milli'):result[key]=value
         else:result['white_balance_milli'][('red_balance_milli','green_balance_milli','blue_balance_milli').index(key)]=value
     return result
 
+def turned(e):
+    return e.get('hue_shift_mdeg',0)%360000!=0 or e.get('saturation_milli',1000)!=1000
+
 def neutral(effects):
-    return all(e['exposure_milli']==0 and e['contrast_milli']==1000 and e['white_balance_milli']==[1000]*3
+    return all(e['exposure_milli']==0 and e['contrast_milli']==1000 and e['white_balance_milli']==[1000]*3 and not turned(e)
         and all(all(x==y for x,y in e[k]['points']) for k in ('master_curve','red_curve','green_curve','blue_curve') if e.get(k)) for e in effects)
+
+def sampled(e):
+    """The controls a sampled grade reports: hue and saturation only when declared."""
+    return {k:e[k] for k in ('exposure_milli','contrast_milli','white_balance_milli','hue_shift_mdeg','saturation_milli') if k in e}
 
 @lru_cache(maxsize=8192)
 def linear(value,denominator):
     v=D(value)/denominator
     return v/D('12.92') if v<=D('0.04045') else ((v+D('0.055'))/D('1.055'))**D('2.4')
 
+def encoding(value):
+    return D('12.92')*value if value<=D('0.0031308') else D('1.055')*value**(D(5)/12)-D('0.055')
+
+def decoding(v):
+    return v/D('12.92') if v<=D('0.04045') else ((v+D('0.055'))/D('1.055'))**D('2.4')
+
 def encoded(value):
-    v=D('12.92')*value if value<=D('0.0031308') else D('1.055')*value**(D(5)/12)-D('0.055')
-    return int((v*255).to_integral_value(rounding=ROUND_HALF_UP))
+    return int((encoding(value)*255).to_integral_value(rounding=ROUND_HALF_UP))
+
+def hue_saturation(color,e):
+    """Original hue/saturation step through the public CSS Color 4 RGB-to-HSL and HSL-to-RGB
+    equations on encoded sRGB, at 48 digits; the engine instead rebuilds the hue's sextant."""
+    if not turned(e):return color
+    shift=D(e.get('hue_shift_mdeg',0)%360000)/1000;scale=D(e.get('saturation_milli',1000))/1000
+    r,g,b=rgb=[encoding(v) for v in color];high,low=max(rgb),min(rgb)
+    if high==low:return color
+    light=(high+low)/2;chroma=high-low
+    saturation=min(D(1),(high-light)/min(light,1-light)*scale)
+    if high==r:hue=(g-b)/chroma+(6 if g<b else 0)
+    elif high==g:hue=(b-r)/chroma+2
+    else:hue=(r-g)/chroma+4
+    hue=(hue*60+shift)%360;a=saturation*min(light,1-light)
+    def f(n):
+        k=(n+hue/30)%12
+        return light-a*max(D(-1),min(k-3,9-k,D(1)))
+    return tuple(decoding(min(D(1),max(D(0),f(n)))) for n in (0,8,4))
+
+def exact_turn(rgb,shift,scale):
+    """The same CSS Color 4 turn of straight 8-bit RGB in exact rationals: with neutral primaries
+    the transfer round trip cancels, so this is the exact encoded result."""
+    r,g,b=v=[F(c,255) for c in rgb];high,low=max(v),min(v)
+    if high==low or (shift%360000==0 and scale==1000):return v
+    light=(high+low)/2;chroma=high-low
+    saturation=min(F(1),(high-light)/min(light,1-light)*F(scale,1000))
+    if high==r:hue=(g-b)/chroma+(6 if g<b else 0)
+    elif high==g:hue=(b-r)/chroma+2
+    else:hue=(r-g)/chroma+4
+    hue=(hue*60+F(shift%360000,1000))%360;a=saturation*min(light,1-light)
+    return [light-a*max(F(-1),min((n+hue/30)%12-3,9-(n+hue/30)%12,F(1))) for n in (0,8,4)]
+
+def levels(value):
+    """The 8-bit levels `value` may quantize to: the nearest, or both neighbours at an exact half tie."""
+    x=value*255;low=x.numerator//x.denominator
+    return {low,low+1} if x-low==F(1,2) else {int(x+F(1,2))}
 
 def tone(value,curve):
     if not curve:return value
@@ -55,16 +103,24 @@ def tone(value,curve):
     a,b=next((a,b) for a,b in zip(curve['points'],curve['points'][1:]) if a[0]<=x<=b[0])
     return (D(a[1])*(D(b[0])-x)+D(b[1])*(x-D(a[0])))/(D(b[0]-a[0])*65535)
 
+def primary(v,c,e):
+    # Original grading contract, evaluated at 48 digits, not the runtime's binary floats/LUTs.
+    gain=D(2)**(D(e['exposure_milli'])/1000)*D(e['white_balance_milli'][c])/1000
+    slope=D(e['contrast_milli'])/1000
+    v=min(D(1),max(D(0),v*gain*slope+D('0.18')*(1-slope)))
+    return tone(tone(v,e.get('master_curve')),e.get(('red_curve','green_curve','blue_curve')[c]))
+
 @lru_cache(maxsize=262144)
 def channel(value,denominator,c,chain):
     v=linear(value,denominator)
-    for e in json.loads(chain):
-        # Original grading contract, evaluated at 48 digits, not the runtime's binary floats/LUTs.
-        gain=D(2)**(D(e['exposure_milli'])/1000)*D(e['white_balance_milli'][c])/1000
-        slope=D(e['contrast_milli'])/1000
-        v=min(D(1),max(D(0),v*gain*slope+D('0.18')*(1-slope)))
-        v=tone(tone(v,e.get('master_curve')),e.get(('red_curve','green_curve','blue_curve')[c]))
+    for e in json.loads(chain):v=primary(v,c,e)
     return encoded(v)
+
+@lru_cache(maxsize=262144)
+def graded_pixel(rgb,denominator,chain):
+    color=tuple(linear(v,denominator) for v in rgb)
+    for e in json.loads(chain):color=hue_saturation(tuple(primary(v,c,e) for c,v in enumerate(color)),e)
+    return tuple(encoded(v) for v in color)
 
 def curve(entries,retime=None):
     result={'keys':[{'time':time(n,d),'value':v,'interpolation':mode} for n,d,v,mode in entries]}
@@ -126,8 +182,11 @@ def run(root):
             if not neutral(effects):
                 chain=json.dumps(effects,sort_keys=True);pixels=[]
                 premult=layer.get('alpha_mode')=='premultiplied'
+                mixing=any(turned(e) for e in effects)
                 for p in source.getdata():
-                    pixels.append(tuple(channel(p[c],p[3] if premult else 255,c,chain) for c in range(3))+(p[3],) if p[3] else (0,0,0,0))
+                    if not p[3]:pixels.append((0,0,0,0))
+                    elif mixing:pixels.append(graded_pixel(p[:3],p[3] if premult else 255,chain)+(p[3],))
+                    else:pixels.append(tuple(channel(p[c],p[3] if premult else 255,c,chain) for c in range(3))+(p[3],))
                 source.putdata(pixels);layer['alpha_mode']='straight'
             path=oracle/f'{name}-{n}-{i}.png';source.save(path)
             layer['frames'][index]['image']=identity(path,oracle)
@@ -150,7 +209,7 @@ def run(root):
             for n,parameters in enumerate(per_frame(report['sampled_parameters'])):
                 if parameters is None:continue
                 clock=F(n,25)-F(layer['start']['num'],layer['start']['den'])
-                expected=[{k:e[k] for k in ('kind','exposure_milli','contrast_milli','white_balance_milli')} for e in (resolve(e,clock) for e in layer.get('effects',[]))]
+                expected=[{'kind':e['kind'],**sampled(e)} for e in (resolve(e,clock) for e in layer.get('effects',[]))]
                 assert parameters.get('effects',[])==expected
         count=int(F(scene['duration']['num'],scene['duration']['den'])*25)
         expected=lru_cache(None)(lambda n:reference(scene,n,name))
@@ -187,6 +246,47 @@ def run(root):
     assert point(ab,63,3)==(188,188,188) and point(ba,63,3)==(255,255,255) and ab[-1]!=ba[-1]
     check(base([changed(exposure_milli=125),changed(contrast_milli=800)]*4),'eight-stages')
     passed.append('grading.curves_chain_order_and_clipping')
+
+    def turned_exactly(case,path):
+        """Every opaque chart pixel of a neutral-primary turn rounds its exact rational result."""
+        scene,info,raw=case[0],case[1],case[-1];source=Image.open(sources/path).convert('RGBA')
+        scale=scene['output_scale'];w=scene['width']*scale;stride=w*scene['height']*scale*3
+        for n,parameters in enumerate(per_frame(info['timing'][0]['sampled_parameters'])):
+            e=parameters['effects'][0]
+            for y in range(4,8):
+                for x in range(64):
+                    start=n*stride+(y*scale*w+x*scale)*3
+                    wanted=exact_turn(source.getpixel((x,y))[:3],e.get('hue_shift_mdeg',0),e.get('saturation_milli',1000))
+                    assert all(c in levels(v) for c,v in zip(raw[start:start+3],wanted)),(scene['id'],n,x,y,raw[start:start+3],wanted)
+    # Hue and saturation act on encoded-sRGB HSL after the curves. A third of a turn moves each
+    # opaque chart color's channels exactly (red to green); grays and whole turns stay exact.
+    third=check(base([changed(hue_shift_mdeg=120000)]),'hue-third-turn');turned_exactly(third,'chart.png')
+    chart=Image.open(sources/'chart.png').convert('RGBA')
+    for y in range(8):
+        for x in range(64):
+            r,g,b,_=chart.getpixel((x,y));assert point(third,x,y)==((b,r,g) if y>=4 else point(bypass,x,y)),(x,y)
+    assert check(base([changed(hue_shift_mdeg=-240000)]),'hue-minus-two-thirds')[-1]==third[-1]
+    assert check(base([changed(hue_shift_mdeg=-360000,saturation_milli=1000)]),'hue-whole-turn')[-1]==bypass[-1]
+    gray=check(base([changed(saturation_milli=0)]),'zero-saturation');turned_exactly(gray,'chart.png')
+    for y in range(4,8):
+        for x in range(64):
+            c=point(gray,x,y);p=chart.getpixel((x,y));assert c[0]==c[1]==c[2] and abs(2*c[0]-max(p[:3])-min(p[:3]))<=1,(x,y,c,p)
+    check(base([changed(exposure_milli=400,contrast_milli=1200,hue_shift_mdeg=-75000,saturation_milli=2500,master_curve=tone_curve,blue_curve=inverted)]),'hue-saturation-after-curves')
+    turned_exactly(check(base([changed(hue_shift_mdeg=200000,saturation_milli=4000)],'alternate.png'),'saturation-limit'),'alternate.png')
+    turned_exactly(check(base([changed(hue_shift_mdeg=-155000,saturation_milli=700)]),'hue-saturation-chart'),'chart.png')
+    # Eight eighths of a turn leave no rational trace; the binary round trips stay far from a tie.
+    assert check(base([changed(hue_shift_mdeg=45000)]*8),'eight-hue-stages')[-1]==bypass[-1]
+    check(base([changed(hue_shift_mdeg=30000),changed(exposure_milli=-600,saturation_milli=600)]),'hue-then-exposure')
+    s=base([changed(exposure_milli=300,hue_shift_mdeg=95000,saturation_milli=1500)],'premultiplied.png')
+    s['layers'][0].update(alpha_mode='premultiplied',blend_mode='screen');s['layers'][0]['transform']['opacity']=173
+    check(s,'premult-hue')
+    spin=base([changed(hue_shift_mdeg=0,saturation_milli=1000)],frames=25)
+    spin['layers'][0]['effects'][0]['animation']={'hue_shift_mdeg':curve([(0,1,-360000,'linear'),(24,25,360000,'hold')]),
+        'saturation_milli':curve([(0,1,0,'ease_in_out'),(12,25,1000,'linear'),(24,25,4000,'hold')])}
+    spun=check(spin,'animated-hue-saturation');turned_exactly(spun,'chart.png');stride=len(bypass[-1])//3
+    # Halfway the curves pass through neutral values, so that frame takes the exact bypass.
+    assert spun[-1][12*stride:13*stride]==bypass[-1][:stride] and spun[-1][11*stride:12*stride]!=bypass[-1][:stride]
+    passed.append('grading.hue_saturation_charts')
 
     for mode in ('normal','multiply','screen'):
         s=base([changed(exposure_milli=750,contrast_milli=800,white_balance_milli=[1500,800,1200],master_curve=tone_curve)],'premultiplied.png')
@@ -251,14 +351,16 @@ def run(root):
     invalid=[]
     def bad(effect,code='INVALID_EFFECT'):
         invalid.append((base([effect]),code))
-    for effect in [changed(exposure_milli=8001),changed(exposure_milli=-8001),changed(contrast_milli=4001),changed(white_balance_milli=[99,1000,1000]),changed(white_balance_milli=[1000,4001,1000]),changed(animation={})]:bad(effect)
+    for effect in [changed(exposure_milli=8001),changed(exposure_milli=-8001),changed(contrast_milli=4001),changed(white_balance_milli=[99,1000,1000]),changed(white_balance_milli=[1000,4001,1000]),changed(animation={}),
+                   changed(hue_shift_mdeg=360001),changed(hue_shift_mdeg=-360001),changed(saturation_milli=4001)]:bad(effect)
     for points in ([],[[0,0]],[[1,0],[65535,65535]],[[0,0],[65534,65535]],[[0,0],[0,10],[65535,65535]],[[0,0],[200,200],[100,100],[65535,65535]],[[i*100,i] for i in range(32)]+[[65535,65535]]):bad(changed(master_curve={'points':points}))
-    for field,value in [('exposure_milli',8001),('contrast_milli',-1),('red_balance_milli',99),('green_balance_milli',4001),('blue_balance_milli',0)]:
+    for field,value in [('exposure_milli',8001),('contrast_milli',-1),('red_balance_milli',99),('green_balance_milli',4001),('blue_balance_milli',0),('hue_shift_mdeg',-360001),('saturation_milli',4001)]:
         bad(changed(animation={field:curve([(0,1,value,'hold')])}),'INVALID_ANIMATION')
     bad(changed(animation={'exposure_milli':curve([(1,1,100,'hold')])}),'INVALID_ANIMATION')
     bad(changed(animation={'exposure_milli':curve([(0,1,0,'linear'),(0,2,100,'hold')])}),'INVALID_ANIMATION')
     bad(changed(animation={'exposure_milli':{'keys':[{'time':{'num':1,'den':0},'value':0,'interpolation':'hold'}]}}),'INVALID_TIME')
     bad(changed(contrast_milli=1.5),'INVALID_JSON');bad(changed(white_balance_milli=[1000,1000]),'INVALID_JSON')
+    bad(changed(hue_shift_mdeg=0.5),'INVALID_JSON');bad(changed(saturation_milli=-1),'INVALID_JSON')
     bad(changed(master_curve={'points':[[0,0],[65535,65536]]}),'INVALID_JSON')
     bad(changed(unknown=True),'INVALID_JSON');bad({'kind':'unknown'},'INVALID_JSON')
     invalid.append((base([grade()]*9),'INVALID_EFFECT'))
@@ -273,7 +375,7 @@ def run(root):
     passed.append('grading.validation_and_preservation')
     report={'passed':passed,'decoded_frames':decoded,'silent_stereo_sample_frames':decoded*1920,'render_cases':cases,'rejected_cases':len(invalid)+1,
             'maximum_rgb_error':maximum_error,'rgb_tolerance':1,'reference':'48-digit Decimal sRGB and original grading equations, explicit analytical anchors, Fraction property clocks and independent forward compositor',
-            'scope':'Eight ordered grades per scene layer, exposure/contrast/diagonal white balance/master and RGB curves, five animated controls, fixed linear-sRGB working space with explicit clipping; no C01/C03/C04/C05 or keying claim'}
+            'scope':'Eight ordered grades per scene layer, exposure/contrast/diagonal white balance/master and RGB curves, encoded-sRGB HSL hue rotation and saturation, seven animated controls, fixed linear-sRGB working space with explicit clipping; no C01/C03/C04/C05 or keying claim'}
     (root/'animated-scene.json').write_text(json.dumps(m[0],indent=2)+'\n',encoding='utf-8')
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(report))

@@ -44,7 +44,7 @@ impl ToneCurve {
     }
 }
 
-/// Primary grade in linear sRGB: exposure and white balance, contrast around 0.18, clamp to 0..1, then master and channel curves.
+/// Primary grade in linear sRGB: exposure and white balance, contrast around 0.18, clamp to 0..1, master and channel curves, then HSL hue and saturation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Grade {
@@ -66,6 +66,12 @@ pub struct Grade {
     /// Blue tone curve applied after the master curve; omit for identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blue_curve: Option<ToneCurve>,
+    /// Hue rotation in millidegrees of encoded-sRGB HSL, -360000..360000, after the curves; omit for 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hue_shift_mdeg: Option<i32>,
+    /// HSL saturation scale in thousandths, 0..4000, with the hue shift; omit for 1000 (neutral).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation_milli: Option<u16>,
     /// Optional curves overriding the numeric controls on the layer-local clock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<GradeAnimation>,
@@ -89,6 +95,12 @@ pub struct GradeAnimation {
     /// Curve for the blue white-balance gain, 100..4000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blue_balance_milli: Option<Curve>,
+    /// Curve for `hue_shift_mdeg`, -360000..360000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hue_shift_mdeg: Option<Curve>,
+    /// Curve for `saturation_milli`, 0..4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation_milli: Option<Curve>,
 }
 /// One ordered layer effect, tagged by `kind`. Effects run in list order on source pixels before compositing.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -145,11 +157,20 @@ pub enum Sample {
         exposure_milli: i32,
         contrast_milli: i32,
         white_balance_milli: [i32; 3],
+        /// Reported when the grade declares it, statically or animated.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hue_shift_mdeg: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        saturation_milli: Option<i32>,
     },
     SelectiveGrade {
         exposure_milli: i32,
         contrast_milli: i32,
         white_balance_milli: [i32; 3],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hue_shift_mdeg: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        saturation_milli: Option<i32>,
         mix_milli: i32,
         mask_rect: Option<[i32; 4]>,
     },
@@ -158,9 +179,13 @@ pub(crate) enum Sampler {
     Grade(Box<GradeSampler>),
     Key(Box<crate::keying::Sampler>),
 }
+/// Exposure, contrast, the three white-balance gains, hue shift and saturation.
+const CONTROLS: usize = 7;
 pub(crate) struct GradeSampler {
-    values: [i32; 5],
-    curves: [Option<CurveSampler>; 5],
+    values: [i32; CONTROLS],
+    curves: [Option<CurveSampler>; CONTROLS],
+    /// Whether the recipe declares the hue shift and saturation, which samples then report.
+    declared: [bool; 2],
     selection: Option<SelectionSampler>,
 }
 struct SelectionSampler {
@@ -192,27 +217,31 @@ pub(crate) fn prepare(effects: &[Effect], duration: Time) -> Result<Vec<Sampler>
             }
             Effect::ChromaKey(_) => unreachable!("key prepared above"),
         };
-        let values = [g.exposure_milli, g.contrast_milli as i32, g.white_balance_milli[0] as i32, g.white_balance_milli[1] as i32, g.white_balance_milli[2] as i32];
-        let bounds = [(-8000,8000),(0,4000),(100,4000),(100,4000),(100,4000)];
+        let values = [g.exposure_milli, g.contrast_milli as i32, g.white_balance_milli[0] as i32, g.white_balance_milli[1] as i32, g.white_balance_milli[2] as i32,
+            g.hue_shift_mdeg.unwrap_or(0), g.saturation_milli.map_or(1000, i32::from)];
+        let bounds = [(-8000,8000),(0,4000),(100,4000),(100,4000),(100,4000),(-360000,360000),(0,4000)];
         for (value,(minimum,maximum)) in values.iter().zip(bounds) {
             if !(minimum..=maximum).contains(value) {
-                return Err(invalid("Grade exposure must be -8000..8000, contrast 0..4000 and white-balance gains 100..4000"));
+                return Err(invalid("Grade exposure must be -8000..8000, contrast 0..4000, white-balance gains 100..4000, hue shift -360000..360000 and saturation 0..4000"));
             }
         }
         for curve in [&g.master_curve,&g.red_curve,&g.green_curve,&g.blue_curve].into_iter().flatten() {
             curve.validate()?;
         }
-        let mut curves = [None,None,None,None,None];
+        let mut curves = [const { None }; CONTROLS];
+        let mut declared = [g.hue_shift_mdeg.is_some(), g.saturation_milli.is_some()];
         if let Some(a) = &g.animation {
-            let inputs = [&a.exposure_milli,&a.contrast_milli,&a.red_balance_milli,&a.green_balance_milli,&a.blue_balance_milli];
+            let inputs = [&a.exposure_milli,&a.contrast_milli,&a.red_balance_milli,&a.green_balance_milli,&a.blue_balance_milli,&a.hue_shift_mdeg,&a.saturation_milli];
             if inputs.iter().all(|c| c.is_none()) {
                 return Err(invalid("Grade animation requires at least one property"));
             }
             for (i,input) in inputs.into_iter().enumerate() {
                 curves[i] = input.as_ref().map(|c| c.prepare(duration,bounds[i].0,bounds[i].1)).transpose()?;
             }
+            declared[0] |= a.hue_shift_mdeg.is_some();
+            declared[1] |= a.saturation_milli.is_some();
         }
-        Ok(Sampler::Grade(Box::new(GradeSampler { values, curves, selection })))
+        Ok(Sampler::Grade(Box::new(GradeSampler { values, curves, declared, selection })))
     }).collect()
 }
 impl Sampler {
@@ -231,11 +260,15 @@ impl GradeSampler {
                 *value = curve.sample(time)?;
             }
         }
+        let hue_shift_mdeg = self.declared[0].then_some(v[5]);
+        let saturation_milli = self.declared[1].then_some(v[6]);
         if let Some(s) = &self.selection {
             return Ok(Sample::SelectiveGrade {
                 exposure_milli: v[0],
                 contrast_milli: v[1],
                 white_balance_milli: [v[2], v[3], v[4]],
+                hue_shift_mdeg,
+                saturation_milli,
                 mix_milli: s
                     .mix_curve
                     .as_ref()
@@ -249,6 +282,8 @@ impl GradeSampler {
             exposure_milli: v[0],
             contrast_milli: v[1],
             white_balance_milli: [v[2], v[3], v[4]],
+            hue_shift_mdeg,
+            saturation_milli,
         })
     }
 }
@@ -266,7 +301,7 @@ impl Stage<'_> {
     }
     fn per_pixel(&self) -> bool {
         match self {
-            Self::Grade(g) => g.selection.is_some(),
+            Self::Grade(g) => g.selection.is_some() || g.hue_saturation.is_some(),
             Self::Key(_) => true,
         }
     }
@@ -275,6 +310,9 @@ struct GradeStage<'a> {
     grade: &'a Grade,
     multiplier: [f64; 3],
     contrast: f64,
+    /// The hue shift in sextants (60 degrees) within 0..6 and the saturation scale, unless both
+    /// are neutral; this step mixes channels, so it needs per-pixel processing.
+    hue_saturation: Option<(f64, f64)>,
     identity: bool,
     selection: Option<SelectionStage<'a>>,
 }
@@ -318,6 +356,64 @@ impl GradeStage<'_> {
         }
         value
     }
+    /// Blends linear `color` toward its whole grade by `weight`: `apply` on each channel, then
+    /// the hue and saturation. Without that step the channels stay independent, and this inlines
+    /// into the per-pixel loop as before the step existed.
+    #[inline(always)]
+    fn blend(&self, color: &mut [f64; 3], weight: f64) {
+        match self.hue_saturation {
+            None => {
+                for (c, value) in color.iter_mut().enumerate() {
+                    *value = *value * (1.0 - weight) + self.apply(*value, c) * weight;
+                }
+            }
+            Some((turn, scale)) => self.blend_turned(color, weight, turn, scale),
+        }
+    }
+    #[inline(never)]
+    fn blend_turned(&self, color: &mut [f64; 3], weight: f64, turn: f64, scale: f64) {
+        let graded = [0, 1, 2].map(|c| self.apply(color[c], c)).map(encoded);
+        for (value, graded) in color.iter_mut().zip(rotate(graded, turn, scale)) {
+            *value = *value * (1.0 - weight) + linear(graded) * weight;
+        }
+    }
+}
+/// Rotates the HSL hue of encoded sRGB `[r, g, b]` (each 0..1) by `turn` sextants and scales its
+/// HSL saturation by `scale`, limited to 1. Lightness, the mean of the largest and smallest
+/// channels, is kept. Achromatic colors are returned unchanged. The result is clamped to 0..1.
+fn rotate([r, g, b]: [f64; 3], turn: f64, scale: f64) -> [f64; 3] {
+    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+    let chroma = high - low;
+    if chroma <= 0.0 {
+        return [r, g, b];
+    }
+    let hue = if r == high {
+        ((g - b) / chroma).rem_euclid(6.0)
+    } else if g == high {
+        2.0 + (b - r) / chroma
+    } else {
+        4.0 + (r - g) / chroma
+    };
+    let hue = (hue + turn).rem_euclid(6.0);
+    let (high, low) = if scale == 1.0 {
+        (high, low)
+    } else {
+        // HSL saturation is chroma over the largest chroma this lightness allows.
+        let light = (high + low) / 2.0;
+        let chroma = (chroma * scale).min(1.0 - (2.0 * light - 1.0).abs());
+        (light + chroma / 2.0, light - chroma / 2.0)
+    };
+    // The channel between the largest and smallest rises and falls linearly across each sextant.
+    let middle = low + (high - low) * (1.0 - (hue % 2.0 - 1.0).abs());
+    let rgb = match hue as usize {
+        0 => [high, middle, low],
+        1 => [middle, high, low],
+        2 => [low, high, middle],
+        3 => [low, middle, high],
+        4 => [middle, low, high],
+        _ => [high, low, middle],
+    };
+    rgb.map(|v| v.clamp(0.0, 1.0))
 }
 // Standard sRGB transfer equations on the nonnegative, bounded display domain.
 fn linear(encoded: f64) -> f64 {
@@ -381,7 +477,7 @@ impl<'a> Processor<'a> {
                         mask_rect: *mask_rect,
                     });
                 }
-                let (grade, exposure_milli, contrast_milli, white_balance_milli, selection) =
+                let (grade, exposure_milli, contrast_milli, white_balance_milli, hue, selection) =
                     match (effect, sample) {
                         (
                             Effect::Grade(grade),
@@ -389,12 +485,15 @@ impl<'a> Processor<'a> {
                                 exposure_milli,
                                 contrast_milli,
                                 white_balance_milli,
+                                hue_shift_mdeg,
+                                saturation_milli,
                             },
                         ) => (
                             grade,
                             exposure_milli,
                             contrast_milli,
                             white_balance_milli,
+                            [hue_shift_mdeg, saturation_milli],
                             None,
                         ),
                         (
@@ -403,6 +502,8 @@ impl<'a> Processor<'a> {
                                 exposure_milli,
                                 contrast_milli,
                                 white_balance_milli,
+                                hue_shift_mdeg,
+                                saturation_milli,
                                 mix_milli,
                                 mask_rect,
                             },
@@ -411,6 +512,7 @@ impl<'a> Processor<'a> {
                             exposure_milli,
                             contrast_milli,
                             white_balance_milli,
+                            [hue_shift_mdeg, saturation_milli],
                             Some(SelectionStage {
                                 effect: s,
                                 mix: *mix_milli as f64 / 1000.0,
@@ -419,11 +521,17 @@ impl<'a> Processor<'a> {
                         ),
                         _ => unreachable!("effect and its prepared sample must have the same kind"),
                     };
+                // Whole turns are exactly neutral: rotate by the remainder only.
+                let turn = hue[0].unwrap_or(0).rem_euclid(360_000);
+                let scale = hue[1].unwrap_or(1000);
+                let hue_saturation = (turn != 0 || scale != 1000)
+                    .then(|| (turn as f64 / 60_000.0, scale as f64 / 1000.0));
                 let exposure = 2.0f64.powf(*exposure_milli as f64 / 1000.0);
                 let identity = (selection.as_ref().is_some_and(|s| s.mix == 0.0))
                     || (*exposure_milli == 0
                         && *contrast_milli == 1000
                         && *white_balance_milli == [1000; 3]
+                        && hue_saturation.is_none()
                         && [
                             &grade.master_curve,
                             &grade.red_curve,
@@ -437,6 +545,7 @@ impl<'a> Processor<'a> {
                     grade,
                     multiplier: white_balance_milli.map(|v| exposure * v as f64 / 1000.0),
                     contrast: *contrast_milli as f64 / 1000.0,
+                    hue_saturation,
                     identity,
                     selection,
                 })
@@ -466,8 +575,8 @@ impl<'a> Processor<'a> {
             .stages
             .iter()
             .fold(linear(value), |value, stage| match stage {
-                Stage::Grade(g) => g.apply(value, channel),
-                Stage::Key(_) => unreachable!("keys require per-pixel processing"),
+                Stage::Grade(g) if g.hue_saturation.is_none() => g.apply(value, channel),
+                _ => unreachable!("keys and hue/saturation require per-pixel processing"),
             });
         encoded_byte(value)
     }
@@ -547,9 +656,7 @@ impl<'a> Processor<'a> {
                 if weight <= 0.0 {
                     continue;
                 }
-                for (c, value) in color.iter_mut().enumerate() {
-                    *value = *value * (1.0 - weight) + stage.apply(*value, c) * weight;
-                }
+                stage.blend(&mut color, weight);
                 changed = true;
                 source = None;
             }
@@ -570,7 +677,7 @@ impl<'a> Processor<'a> {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"scope":"scene_layer","types":["grade","selective_grade","chroma_key"],"maximum_per_layer":8,"working_space":"linear_srgb_f64","output":"straight_srgb_u8_before_compositing","order":"exposure_and_white_balance_then_contrast_then_master_curve_then_channel_curve","contrast_pivot":0.18,"clipping":"after_contrast_in_each_grade","exposure_milli":[-8000,8000],"contrast_milli":[0,4000],"white_balance_milli":[100,4000],"tone_curve":{"domain":[0,65535],"maximum_points":32,"interpolation":"linear","animated_points":false},"animated_properties":["exposure_milli","contrast_milli","red_balance_milli","green_balance_milli","blue_balance_milli"],"clock":"layer_local","alpha":"unpremultiply_before_processing_grades_preserve_keys_reduce","neutral_chain":"exact_integer_bypass","keying":crate::keying::capabilities(),"selection":{"qualifier":"quantized_srgb8_hsl_integer","hue_unit":"millidegrees","hue_range":[0,359999],"saturation_lightness_unit":"thousandths","achromatic_hue":"excluded_before_inversion","combination":"product_then_qualifier_inversion_then_mask_then_mix","mask":"source_canvas_rectangle_inward_linear_feather","mask_maximum_feather":4096,"animated":["grade_controls","mix_milli","mask_rect"],"unselected_pixels":"preserve_original_alpha_encoding"}})
+    json!({"scope":"scene_layer","types":["grade","selective_grade","chroma_key"],"maximum_per_layer":8,"working_space":"linear_srgb_f64","output":"straight_srgb_u8_before_compositing","order":"exposure_and_white_balance_then_contrast_then_master_curve_then_channel_curve_then_hue_saturation","contrast_pivot":0.18,"clipping":"after_contrast_in_each_grade","exposure_milli":[-8000,8000],"contrast_milli":[0,4000],"white_balance_milli":[100,4000],"hue_shift_mdeg":[-360000,360000],"saturation_milli":[0,4000],"hue_saturation":"encoded_srgb_hsl_keeps_lightness_saturation_at_most_1","tone_curve":{"domain":[0,65535],"maximum_points":32,"interpolation":"linear","animated_points":false},"animated_properties":["exposure_milli","contrast_milli","red_balance_milli","green_balance_milli","blue_balance_milli","hue_shift_mdeg","saturation_milli"],"clock":"layer_local","alpha":"unpremultiply_before_processing_grades_preserve_keys_reduce","neutral_chain":"exact_integer_bypass","keying":crate::keying::capabilities(),"selection":{"qualifier":"quantized_srgb8_hsl_integer","hue_unit":"millidegrees","hue_range":[0,359999],"saturation_lightness_unit":"thousandths","achromatic_hue":"excluded_before_inversion","combination":"product_then_qualifier_inversion_then_mask_then_mix","mask":"source_canvas_rectangle_inward_linear_feather","mask_maximum_feather":4096,"animated":["grade_controls","mix_milli","mask_rect"],"unselected_pixels":"preserve_original_alpha_encoding"}})
 }
 
 #[cfg(test)]
@@ -630,9 +737,7 @@ mod tests {
                     if weight <= 0.0 {
                         continue;
                     }
-                    for (c, value) in color.iter_mut().enumerate() {
-                        *value = *value * (1.0 - weight) + stage.apply(*value, c) * weight;
-                    }
+                    stage.blend(&mut color, weight);
                     changed = true;
                 }
                 if !changed {
@@ -680,25 +785,34 @@ mod tests {
                 },
             )
         };
-        let grade = |exposure: i32| {
+        // `hue` adds that shift and a 1300 saturation scale.
+        let grade = |exposure: i32, hue: Option<i32>| {
+            let mut value = json!({"kind":"grade","exposure_milli":exposure,"contrast_milli":1150,"white_balance_milli":[1000,1050,900],
+                "master_curve":{"points":[[0,0],[20000,16000],[65535,65535]]}});
+            if let Some(hue) = hue {
+                value["hue_shift_mdeg"] = hue.into();
+                value["saturation_milli"] = 1300.into();
+            }
             (
-                effect(
-                    json!({"kind":"grade","exposure_milli":exposure,"contrast_milli":1150,"white_balance_milli":[1000,1050,900],
-                    "master_curve":{"points":[[0,0],[20000,16000],[65535,65535]]}}),
-                ),
+                effect(value),
                 Sample::Grade {
                     exposure_milli: exposure,
                     contrast_milli: 1150,
                     white_balance_milli: [1000, 1050, 900],
+                    hue_shift_mdeg: hue,
+                    saturation_milli: hue.map(|_| 1300),
                 },
             )
         };
-        let selective = |mix: i32, inverted: bool, mask: Value| {
+        let selective = |mix: i32, inverted: bool, mask: Value, hue: Option<i32>| {
             let mut value = json!({"kind":"selective_grade","grade":{"exposure_milli":600,"contrast_milli":900,
                 "white_balance_milli":[1100,1000,950]},"mix_milli":mix,"qualifier":{"hue":{"center":120000,"inner":30000,"outer":80000},
                 "saturation":{"low":150,"high":1000,"feather":120},"inverted":inverted}});
             if !mask.is_null() {
                 value["mask"] = mask;
+            }
+            if let Some(hue) = hue {
+                value["grade"]["hue_shift_mdeg"] = hue.into();
             }
             (
                 effect(value),
@@ -706,6 +820,8 @@ mod tests {
                     exposure_milli: 600,
                     contrast_milli: 900,
                     white_balance_milli: [1100, 1000, 950],
+                    hue_shift_mdeg: hue,
+                    saturation_milli: None,
                     mix_milli: mix,
                     mask_rect: Some([3, 2, 9, 7]),
                 },
@@ -716,21 +832,29 @@ mod tests {
         let chains = vec![
             vec![key([40, 200, 90], 1000, 0, Value::Null)],
             vec![key([40, 200, 90], 700, 500, mask.clone())],
-            vec![selective(800, false, Value::Null)],
-            vec![selective(350, true, selective_mask.clone())],
-            vec![key([20, 60, 230], 1000, 300, Value::Null), grade(400)],
-            vec![grade(-300), selective(1000, false, Value::Null)],
+            vec![selective(800, false, Value::Null, None)],
+            vec![selective(350, true, selective_mask.clone(), None)],
+            vec![key([20, 60, 230], 1000, 300, Value::Null), grade(400, None)],
+            vec![grade(-300, None), selective(1000, false, Value::Null, None)],
             vec![
                 key([40, 200, 90], 0, 0, Value::Null),
-                selective(600, false, Value::Null),
+                selective(600, false, Value::Null, None),
             ],
             vec![
-                selective(0, false, Value::Null),
+                selective(0, false, Value::Null, None),
                 key([200, 40, 60], 900, 0, Value::Null),
             ],
             vec![
                 key([40, 200, 90], 600, 0, Value::Null),
                 key([30, 220, 70], 1000, 800, mask),
+            ],
+            vec![grade(0, Some(55_000))],
+            vec![grade(300, Some(-200_000)), grade(-200, None)],
+            vec![selective(700, false, selective_mask, Some(120_000))],
+            vec![
+                key([40, 200, 90], 800, 300, Value::Null),
+                grade(100, Some(360_000)),
+                selective(1000, false, Value::Null, Some(-30_000)),
             ],
         ];
         for chain in chains {
@@ -758,6 +882,75 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn hue_rotation_keeps_extremes_and_lightness() {
+        // 120 degrees moves pure red to pure green exactly; 60 degrees turns red's hue to yellow.
+        assert_eq!(rotate([1.0, 0.0, 0.0], 2.0, 1.0), [0.0, 1.0, 0.0]);
+        assert_eq!(rotate([0.8, 0.3, 0.3], 1.0, 1.0), [0.8, 0.8, 0.3]);
+        assert_eq!(rotate([0.8, 0.3, 0.3], 5.0, 1.0), [0.8, 0.3, 0.8]);
+        // A gray has no hue; zero saturation keeps lightness; saturation stops at 1.
+        assert_eq!(rotate([0.5, 0.5, 0.5], 3.0, 2.0), [0.5, 0.5, 0.5]);
+        assert_eq!(rotate([0.8, 0.2, 0.4], 0.0, 0.0), [0.5, 0.5, 0.5]);
+        assert_eq!(rotate([0.9, 0.1, 0.5], 0.0, 4.0), [1.0, 0.0, 0.5]);
+        // A turn landing on 6 sextants is hue 0.
+        assert_eq!(rotate([1.0, 0.0, 0.0], 6.0, 1.0), [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn hue_and_saturation_are_sampled_and_bypass_when_neutral() {
+        let neutral = || json!({"kind":"grade","exposure_milli":0,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000]});
+        let mut whole = neutral();
+        whole["hue_shift_mdeg"] = 360_000.into();
+        let mut animated = neutral();
+        animated["saturation_milli"] = 1000.into();
+        animated["animation"] = json!({"hue_shift_mdeg":{"keys":[{"time":{"num":0,"den":1},"value":-360000,"interpolation":"hold"}]}});
+        let sampled = |effects: &[Effect]| -> Vec<Sample> {
+            prepare(effects, Time::new(1, 1).unwrap())
+                .unwrap()
+                .iter()
+                .map(|s| s.sample(Time::new(0, 1).unwrap()).unwrap())
+                .collect()
+        };
+        let effects: Vec<Effect> =
+            serde_json::from_value(json!([whole, animated, neutral()])).unwrap();
+        let samples = sampled(&effects);
+        let reported = serde_json::to_value(&samples).unwrap();
+        assert_eq!(reported[0]["hue_shift_mdeg"], 360_000);
+        assert!(reported[0].get("saturation_milli").is_none());
+        assert_eq!(reported[1]["hue_shift_mdeg"], -360_000);
+        assert_eq!(reported[1]["saturation_milli"], 1000);
+        assert!(reported[2].get("hue_shift_mdeg").is_none());
+        // Whole turns and a neutral scale keep the exact integer bypass.
+        assert!(Processor::new(&effects, &samples).is_none());
+        let mut shifted = neutral();
+        shifted["hue_shift_mdeg"] = 55_000.into();
+        let effects: Vec<Effect> = serde_json::from_value(json!([shifted])).unwrap();
+        let samples = sampled(&effects);
+        let processor = Processor::new(&effects, &samples).expect("a hue shift");
+        assert!(processor.tables().is_none());
+        // Pip's scarf: HSL hue 353.4 degrees turns to 48.4, keeping its largest and smallest
+        // channels; a gray is unchanged.
+        assert_eq!(
+            processor.pixel(&[224, 79, 95, 255], AlphaMode::Straight, [0, 0]),
+            Some([224, 196, 79, 255])
+        );
+        assert_eq!(
+            processor.pixel(&[90, 90, 90, 255], AlphaMode::Straight, [0, 0]),
+            Some([90, 90, 90, 255])
+        );
+        for (field, value) in [
+            ("hue_shift_mdeg", 360_001),
+            ("hue_shift_mdeg", -360_001),
+            ("saturation_milli", 4001),
+        ] {
+            let mut grade = neutral();
+            grade[field] = value.into();
+            let effects: Vec<Effect> = serde_json::from_value(json!([grade])).unwrap();
+            let error = prepare(&effects, Time::new(1, 1).unwrap()).err().unwrap();
+            assert_eq!(error.code, "INVALID_EFFECT");
         }
     }
 }

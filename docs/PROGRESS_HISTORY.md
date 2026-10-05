@@ -20,6 +20,37 @@ Measured with `research/mcp_surface.py` on debug builds of `83de4ca` and of this
 | Core, with a workspace | 77,112 B | 65,957 B |
 
 The core catalog with a workspace is about 20k tokens instead of 23k. A unit test checks that listings no longer carry the reference definitions or the dropped keywords, and that lookups still return them. No scoring changed. Evidence stays stale until the next thorough run.
+## 5 October 2026: hue and saturation in grades, and `cutbolt --version`
+
+The part-two progress demo (main `83de4ca`, `C:\DEV\CutboltData\demo-progress2-20261005`, ISSUES.md 5 and 6) found two gaps.
+- **Recoloring took trial and error.** Its effects scene turns Pip's red scarf gold with a `selective_grade`. Grades had exposure, contrast, RGB gains and curves, but no hue control, so the gold came from extreme gains: green ×4, blue ×0.6 and +0.9 stop.
+- **No version flag.** `cutbolt --version` was a usage error.
+
+The changes:
+- **`hue_shift_mdeg` and `saturation_milli` grade controls.** Both are optional, in `grade` and in a `selective_grade`'s nested grade, and animatable like the other five controls.
+  - The hue shift is -360000..360000 millidegrees; saturation is a 0..4000 scale, with 1000 neutral.
+  - They run after the channel curves, on HSL of the encoded sRGB color: the same space the selective qualifier measures, so a measured hue difference is the shift to use. Lightness is kept and saturation stops at 1. Achromatic colors are unchanged.
+  - The shift is reduced modulo a whole turn in integers, so 0, ±360000 and saturation 1000 keep the exact integer bypass.
+  - Sampled parameters report the two controls only when a grade declares them, so existing receipts are unchanged.
+  - [GRADING.md](GRADING.md#hue-and-saturation) defines the arithmetic, with the scarf as the worked example.
+- **Per-pixel where needed, unchanged elsewhere.** The step mixes channels, so a grade using it is processed per pixel and never through `Processor::tables()`. The row kernel, the per-frame source regions and the once-processed constant chains (`processed_sources`) all take that per-pixel path. Chains without the controls run exactly the code they did before.
+- **`cutbolt --version`** prints one plain-text line: the package version and, when the build could ask Git, the commit checked out at build time, with `, sources modified` when engine sources differed from it. `build.rs` records the commit apart from the engine identity, so a new commit of the same sources shares caches. It reruns when this worktree's HEAD moves. `capabilities` reports the same under `build`.
+
+Verification:
+- **Rust.** Unit tests cover known rotations (red to green at 120 degrees, gray unchanged, saturation 0 and its limit), whole-turn bypass, bounds, sampling and the scarf value `[224,79,95]` to `[224,196,79]`. The per-pixel chain test now includes hue chains. The compositor tests compare the row kernel, spatial taps and once-processed sources with the per-pixel reference paths for hue grades and a selective hue turn, transparent and opaque, on 1 and 3 threads.
+- **grading fixture.** 11 new renders and 7 new rejections; 183 decoded frames in all. The oracle evaluates the step with the CSS Color 4 RGB-to-HSL and HSL-to-RGB equations at 48 digits, not the engine's sextant rebuild. With neutral primary controls a turn is rational in encoded sRGB, so every opaque chart pixel of those cases, over 25 animated frames, must equal the exact result rounded to the nearest level, either way only at an exact half tie. Third turns must permute channels exactly; whole turns, eight eighth-turns and the neutral frame of an animated turn must equal the bypass byte for byte.
+- **selection fixture.** 3 new renders and 1 new rejection; a selected pure red turned 55 degrees must give `[255,234,0]`. Values whose exact result is a half-level tie now differ from the oracle by one level, within the documented tolerance.
+- **A/B.** `scripts/ab.py` in `C:\DEV\CutboltData\vfx-stress-20261005` rendered nine existing 10 s 1080p effect scenes on release builds of `83de4ca` and of this change, back to back, with the machine 10-100 % busy. Grades, animated grades, selective grades, keys, an eight-effect chain and spatial layers all decoded identically. Engine CPU was at parity, for example 189.9 s and 188.8 s for nine animated selective layers.
+  - The first build of this change cost those per-pixel selective layers about 5-7 % more engine CPU, in three interleaved rounds. Moving the hue path out of line, so the per-channel loop inlines as before, removed it: 182.6-184.3 s against 183.3-185.1 s.
+  - New hue scenes, added to `perf_scenes()`, show the per-pixel cost. A constant hue grade on eight full-frame layers is processed once per source: 24 engine CPU-s, against 21 for the same grade without hue. Animating that hue costs 891 CPU-s (47 s wall), against 31 for an animated plain grade, about 0.2 µs per pixel for nine transfer evaluations. Animated selective hue turns on eight layers took 313 CPU-s, against 189 without the turn. Like the animated selective grades and keys noted after `83de4ca`, this stays open.
+- **Catalog.** The MCP catalog is unchanged in size, 267,135 bytes (274,707 with a workspace): grades live in the abbreviated `scene` stub.
+
+The demo's scarf was re-made with the control in `C:\DEV\CutboltData\demo-progress2-20261005\hue-remake` (`remake.py`). It keeps the qualifier and mix curve and replaces the gains with `hue_shift_mdeg: 55000` and `saturation_milli: 1100`, a turn computed from the measured scarf hues of 353.4 and 347.3 degrees.
+- **Before.** The gains put the two scarf shades at different hues: `[255,201,100]` at 39 degrees, clipped to full saturation, and an orange `[225,134,78]` at 23 degrees, lifting both lightnesses.
+- **After.** The turn gives golds `[231,200,72]` at 48 degrees and `[169,132,44]` at 42 degrees, at the original lightness of 0.594 and 0.418, so the shading survives.
+- The old recipe renders identically on the new engine, and the whole scene rendered in 7.4 s. `out/scarf-before-after.png` compares the two stills at 15 s.
+
+This extends C02/C03 controls without new capability points: no criteria, weights or scoring changed. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: H.264 exports stream straight from the timeline
 

@@ -2736,6 +2736,10 @@ mod tests {
         let grade = effect(
             json!({"kind":"grade","exposure_milli":400,"contrast_milli":1200,"white_balance_milli":[1100,1000,900]}),
         );
+        // A hue turn mixes channels, so its constant chain is processed per pixel.
+        let turn = effect(
+            json!({"kind":"grade","exposure_milli":-200,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000],"hue_shift_mdeg":70000,"saturation_milli":1400}),
+        );
         let key = json!({"kind":"chroma_key","key_rgb":[28,56,89],"inner_milli":60,"outer_milli":300,"strength_milli":700,"unmix_milli":500,"spill":{"channel":"blue","strength_milli":500}});
         let mut fading_key = key.clone();
         fading_key["strength_curve"] = json!({"keys":[{"time":{"num":0,"den":1},"value":0,"interpolation":"linear"},{"time":{"num":3,"den":1},"value":1000,"interpolation":"hold"}]});
@@ -2756,6 +2760,7 @@ mod tests {
             layer("moving-keyed", vec![effect(key)], curve("position_y", -30)),
             layer("fading-key", vec![effect(fading_key)], None),
             layer("fading", vec![], curve("opacity", 255)),
+            layer("moving-turned", vec![turn], curve("position_x", -25)),
         ];
         for transparent in [false, true] {
             scene.transparent = transparent;
@@ -2770,7 +2775,7 @@ mod tests {
             assert_eq!(cached.base.as_ref().unwrap().layers, 2);
             let mut processed = cached.processed.keys().map(|k| k.0).collect::<Vec<_>>();
             processed.sort();
-            assert_eq!(processed, [2, 3]);
+            assert_eq!(processed, [2, 3, 6]);
             for n in 0..frames {
                 assert_eq!(
                     compose(&scene, &cached, n).unwrap(),
@@ -2823,6 +2828,11 @@ mod tests {
             "mix_milli":800,"mix_curve":curve(100, 900),"qualifier":{"saturation":{"low":200,"high":1000,"feather":100},"inverted":false}});
         let grade = json!({"kind":"grade","exposure_milli":300,"contrast_milli":1100,"white_balance_milli":[1050,1000,950],
             "animation":{"exposure_milli":curve(-500, 800)}});
+        // Hue turns and saturation need per-pixel processing on every path.
+        let turned = json!({"kind":"grade","exposure_milli":200,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000],
+            "hue_shift_mdeg":-60000,"animation":{"hue_shift_mdeg":curve(-90000, 200000),"saturation_milli":curve(0, 2500)}});
+        let selective_turn = json!({"kind":"selective_grade","grade":{"exposure_milli":0,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000],
+            "hue_shift_mdeg":55000,"saturation_milli":1300},"mix_milli":900,"qualifier":{"hue":{"center":350000,"inner":20000,"outer":60000},"inverted":false}});
         let centered = json!({"radius":12,"edge":"centered"});
         let layers = vec![
             // Unchanging, so it joins the static base.
@@ -2865,6 +2875,22 @@ mod tests {
                 "spatial-graded",
                 json!({"spatial":spatial("bilinear", "transparent", 0, json!({"translate_y_milli":curve(-3000, 5000)})),
                     "effects":[{"kind":"grade","exposure_milli":-400,"contrast_milli":900,"white_balance_milli":[1000,1000,1200]}]}),
+            ),
+            layer(
+                "masked-row-turned",
+                json!({"mask":mask([10, 5, 110, 70], false, centered.clone(), json!({"width":curve(110, 60)})),
+                    "effects":[turned.clone()], "position":[13, -9]}),
+            ),
+            layer(
+                "spatial-turned",
+                json!({"spatial":spatial("bilinear", "clamp", 12000, json!({"rotation_mdeg":curve(0, 30000)})),
+                    "effects":[turned]}),
+            ),
+            // A constant selective turn, applied once to the source in a render.
+            layer(
+                "spatial-selective-turn",
+                json!({"spatial":spatial("nearest", "transparent", 0, json!({"translate_x_milli":curve(4000, -6000)})),
+                    "effects":[selective_turn]}),
             ),
         ];
         let root = std::env::temp_dir();
@@ -2924,10 +2950,9 @@ mod tests {
             prepared.base = static_base(&scene, &prepared).unwrap();
             prepared.processed = processed_sources(&scene, &prepared).unwrap();
             assert_eq!(prepared.base.as_ref().unwrap().layers, 1);
-            assert_eq!(
-                prepared.processed.keys().map(|k| k.0).collect::<Vec<_>>(),
-                [7]
-            );
+            let mut processed = prepared.processed.keys().map(|k| k.0).collect::<Vec<_>>();
+            processed.sort();
+            assert_eq!(processed, [7, 10]);
             for n in 0..frames {
                 let expected = reference(&prepared, n);
                 assert!(

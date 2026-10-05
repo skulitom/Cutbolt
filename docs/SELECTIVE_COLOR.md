@@ -31,7 +31,7 @@ Add this object to a layer's `effects` list:
 }
 ```
 
-`grade` and `mix_milli` are required, plus at least one of `qualifier` or `mask`. **The nested `grade` has no `kind` field.** Its controls, optional master/RGB curves, animation and limits are exactly those in the primary grading contract. `mix_milli` is an integer 0..1000: 0 bypasses the correction, 1000 applies the full selected correction. Unknown fields and unsupported effect kinds fail explicitly.
+`grade` and `mix_milli` are required, plus at least one of `qualifier` or `mask`. **The nested `grade` has no `kind` field.** Its controls, optional master/RGB curves, [hue shift and saturation](GRADING.md#hue-and-saturation), animation and limits are exactly those in the primary grading contract. `mix_milli` is an integer 0..1000: 0 bypasses the correction, 1000 applies the full selected correction. Unknown fields and unsupported effect kinds fail explicitly.
 
 ## Color qualification
 
@@ -63,7 +63,7 @@ If every effect leaves a pixel unselected, the original encoded sample and alpha
 
 ## Animation and inspection
 
-- Nested `grade.animation` animates the five primary grading controls.
+- Nested `grade.animation` animates the seven primary grading controls.
 - Optional effect-level `mix_curve` overrides `mix_milli`, using the ordinary property-curve shape and values 0..1000.
 - `mask.animation` may contain `x`, `y`, `width` and `height` curves, with the same bounds as the static rectangle. Mask feather and color-band boundaries are static.
 
@@ -102,8 +102,18 @@ result = subprocess.run([r"C:\DEV\Cutbolt\target\debug\cutbolt.exe"],
 print(json.loads(result.stdout)["result"]["asset"])
 ```
 
+To recolor rather than brighten a selection, rotate its hue. Measure the selected color's HSL hue, then shift by the difference to the target hue. For example, a red scarf near 350 degrees turns gold, near 45 degrees, with a turn of about 55 degrees. The qualifier sees the incoming color, so the turn cannot reselect pixels:
+
+```json
+{"kind": "selective_grade", "mix_milli": 1000,
+ "grade": {"exposure_milli": 0, "contrast_milli": 1000, "white_balance_milli": [1000, 1000, 1000],
+           "hue_shift_mdeg": 55000, "saturation_milli": 1100},
+ "qualifier": {"hue": {"center": 350000, "inner": 8000, "outer": 16000},
+               "saturation": {"low": 400, "high": 1000, "feather": 50}}}
+```
+
 Keep the editable recipe; rendered assets use normal saved sessions and need recompilation for later color changes. Existing files are never overwritten.
 
-The independent acceptance fixture compares **158 decoded frames and 303,360 silent stereo sample frames** across 34 scene renders and a saved-session cut. It uses exact Fraction HSL geometry and selection/mask weights, 48-digit Decimal grading, original color charts and forward per-pixel composition. It covers hue wraparound and exact half ties, achromatic/near-gray colors, hard/soft scalar boundaries, product/inverted qualifiers, thin/empty/outside/inverted masks, four rotations with crop/trim offsets, all blend modes, low/zero/full alpha, unchanged premultiplied pixels, eight ordered effects, different selections on shared images, animated controls/mix/masks, looping source frames, shape layers, template reuse, MCP/schema checks and saved-session retries. The retained run matched every RGB value exactly; the numerical contract permits at most one level. All PCM samples must match exactly. Twenty-seven rejection/output-preservation cases and source hashes check failure safety. Two direct Rust tests additionally check known HSL values, half ties and mask pixel-center coverage.
+The independent acceptance fixture compares **176 decoded frames and 337,920 silent stereo sample frames** across 37 scene renders and a saved-session cut. It uses exact Fraction HSL geometry and selection/mask weights, 48-digit Decimal grading, original color charts and forward per-pixel composition. It covers hue wraparound and exact half ties, achromatic/near-gray colors, hard/soft scalar boundaries, product/inverted qualifiers, selected hue turns and saturation (static, soft-mixed and animated), thin/empty/outside/inverted masks, four rotations with crop/trim offsets, all blend modes, low/zero/full alpha, unchanged premultiplied pixels, eight ordered effects, different selections on shared images, animated controls/mix/masks, looping source frames, shape layers, template reuse, MCP/schema checks and saved-session retries. The retained run matched every RGB value exactly except in the hue cases, where values whose exact result is a half-level tie differ by one; the numerical contract permits at most one level. A selected pure red turned 55 degrees must give exactly `[255,234,0]`. All PCM samples must match exactly. Twenty-eight rejection/output-preservation cases and source hashes check failure safety. Two direct Rust tests additionally check known HSL values, half ties and mask pixel-center coverage.
 
 This earns C03 basic and extended only. Chroma key has its own [acceptance fixture](KEYING.md); tracking and broader color management remain required by their own unchanged checkpoints. The HSL interpretation follows the public definitions in [W3C CSS Color 4, sections 7 and 7.2, draft of 30 September 2026](https://www.w3.org/TR/2026/CRD-css-color-4-20260930/#rgb-to-hsl). Quantization, weights, masks and correction order are original project design; no external implementation, copied document or media asset is included.

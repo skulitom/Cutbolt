@@ -14,7 +14,7 @@ from jsonschema import Draft202012Validator
 from agents import Client
 from animation import animated_scene_at, sample
 from compositing import rect_at
-from grading import D, changed, curve, encoded, linear, neutral, resolve, tone
+from grading import D, changed, curve, encoded, hue_saturation, linear, neutral, resolve, sampled, tone
 from graphics import shape_pixels
 from scenes import audio_bytes, identity, selected, time
 
@@ -86,7 +86,7 @@ def corrected(color,g_json):
     for c,v in enumerate(color):
         v=min(D(1),max(D(0),v*exposure*D(g['white_balance_milli'][c])/1000*contrast+D('0.18')*(1-contrast)))
         result.append(tone(tone(v,g.get('master_curve')),g.get(('red_curve','green_curve','blue_curve')[c])))
-    return tuple(result)
+    return hue_saturation(tuple(result),g)
 
 @lru_cache(maxsize=131072)
 def pixel_reference(pixel,alpha,position,chain_json):
@@ -196,7 +196,7 @@ def run(root):
                 if parameters is None:continue
                 clock=F(n,25)-F(layer['start']['num'],layer['start']['den']);expected=[]
                 for e in resolve_chain(layer['effects'],clock):
-                    g=e if e['kind']=='grade' else e['grade'];r={k:g[k] for k in ('exposure_milli','contrast_milli','white_balance_milli')};r['kind']=e['kind']
+                    g=e if e['kind']=='grade' else e['grade'];r=sampled(g);r['kind']=e['kind']
                     if e['kind']=='selective_grade':r.update(mix_milli=e['mix_milli'],mask_rect=e.get('mask',{}).get('rect'))
                     expected.append(r)
                 assert parameters.get('effects',[])==expected
@@ -225,6 +225,17 @@ def run(root):
     combined={**hue(0,15000,45000),'saturation':{'low':300,'high':800,'feather':150},'lightness':{'low':150,'high':700,'feather':200}}
     check(base([selective(combined,grade=changed(exposure_milli=700,white_balance_milli=[1200,900,700]))]),'hsl-product')
     passed.append('selection.hsl_qualifiers_boundaries_inversion')
+
+    # A selected hue turn recolors only the qualified reds: pure red turns 55 degrees to (255,234,0).
+    scarf=check(base([selective(hue(0,10000,25000),grade=changed(hue_shift_mdeg=55000))]),'red-to-gold')
+    assert point(scarf,11,8)==(255,234,0) and point(scarf,13,8)==palette[5] and point(scarf,10,8)==palette[2]
+    check(base([selective({**hue(350000,8000,16000),'saturation':{'low':400,'high':1000,'feather':50}},mix=600,
+        grade=changed(exposure_milli=200,hue_shift_mdeg=-300000,saturation_milli=1300))]),'soft-hue-turn')
+    spin=base([selective(hue(0,20000,60000),grade=changed(hue_shift_mdeg=0))],frames=12)
+    spin['layers'][0]['effects'][0]['grade']['animation']={'hue_shift_mdeg':curve([(0,1,0,'linear'),(11,25,360000,'hold')]),
+        'saturation_milli':curve([(0,1,4000,'ease_out'),(11,25,0,'hold')])}
+    check(spin,'animated-hue-turn')
+    passed.append('selection.hue_saturation_turns')
 
     for name,rect,feather,invert in [('hard',[10,7,20,15],0,False),('feather',[10,7,20,15],4,False),('inverse',[10,7,20,15],4,True),
             ('thin',[10,7,1,15],1,False),('empty',[10,7,0,15],2,False),('empty-inverse',[10,7,0,15],2,True),('outside',[-90,-90,10,10],4,False)]:
@@ -300,7 +311,7 @@ def run(root):
     bad(selective(mask={'rect':[0,0,-1,5]}),'INVALID_MASK');bad(selective(mask={'rect':[32769,0,1,1]}),'INVALID_MASK')
     bad(selective(mask={'rect':[0,0,1,1],'feather':4097}));bad(selective(mask={'rect':[0,0,1,1],'animation':{}}),'INVALID_MASK')
     bad(selective(mask={'rect':[0,0,1,1],'animation':{'width':curve([(0,1,-1,'hold')])}}),'INVALID_ANIMATION')
-    bad(selective(hue(0,0,1),grade=changed(exposure_milli=8001)))
+    bad(selective(hue(0,0,1),grade=changed(exposure_milli=8001)));bad(selective(hue(0,0,1),grade=changed(hue_shift_mdeg=360001)))
     bad(selective({'hue':{'center':-1,'inner':0,'outer':1}}),'INVALID_JSON');bad(selective({'hue':{'center':0.5,'inner':0,'outer':1}}),'INVALID_JSON')
     bad(selective({'lightness':{'low':0,'high':1000,'feather':0},'luma':100}),'INVALID_JSON')
     extra=selective(hue(0,0,1));extra['grade']['kind']='grade';bad(extra,'INVALID_JSON')

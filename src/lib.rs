@@ -87,6 +87,20 @@ pub mod workspace;
 
 use serde::Serialize;
 
+/// The Git commit checked out when this engine was built, and whether its sources differed from
+/// it; `None` when the build could not ask Git.
+pub const BUILD_COMMIT: Option<(&str, bool)> = include!(concat!(env!("OUT_DIR"), "/commit.rs"));
+
+/// `cutbolt --version`: the package version and, when known, the build's commit.
+pub fn version() -> String {
+    let version = concat!("cutbolt ", env!("CARGO_PKG_VERSION"));
+    match BUILD_COMMIT {
+        Some((commit, false)) => format!("{version} (commit {commit})"),
+        Some((commit, true)) => format!("{version} (commit {commit}, sources modified)"),
+        None => version.to_owned(),
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Error {
     pub code: &'static str,
