@@ -277,6 +277,18 @@ def run(root):
     again=render(voice["recipe"],"prepared-wav-explicit")
     assert frame_digests(output/"prepared-wav.mkv")==frame_digests(output/"prepared-wav-explicit.mkv") and again["frames"]==voice["frames"]
     prepare("hdr.mkv",error="UNSUPPORTED_MEDIA")
+    # A source longer than media.conform's 45000-frame output limit is refused, never shortened:
+    # 781 s at 60 fps is 46860 frames, so a whole-source recipe would drop the last 1860.
+    long=root/"long-sources";long.mkdir()
+    ff(["-f","lavfi","-i","color=c=gray:s=16x16:r=60:d=781","-c:v","ffv1","-pix_fmt","bgr0","-threads","1",str(long/"long.mkv")])
+    limit="46860 frames (781 s) at 60 fps, longer than media.conform's 45000-frame output limit (750 s at this rate); a whole-source recipe would drop the last 1860 frames (31 s)"
+    readiness=request({"command":"media.inspect","path":str(long/"long.mkv"),"input_root":str(long)})["timeline"]
+    assert readiness["ready"] is False and "conform" not in readiness and limit in readiness["reasons"][-1],readiness
+    refused=request({"command":"media.prepare","path":str(long/"long.mkv"),"input_root":str(long),"output_root":str(output)},"UNSUPPORTED_MEDIA")
+    assert limit in refused["error"]["message"] and not (output/"long-prepared.mkv").exists(),refused
+    many=request({"command":"media.prepare","paths":["long.mkv"],"input_root":str(long),"output_root":str(output)})
+    assert many["failed"]==1 and many["prepared"][0]["error"]["code"]=="UNSUPPORTED_MEDIA" and limit in many["prepared"][0]["error"]["message"] and many["operations"]==[],many
+    assert not (output/"long-prepared.mkv").exists()
     passed.append("conform.one_step_preparation")
     # Batch preparation: one job for several files, IDs unique within the batch and the project,
     # one file's failure reported without stopping the others, and media.add operations returned.

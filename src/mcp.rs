@@ -202,7 +202,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Read newest-first revision summaries. limit defaults to 50 (1-200). Pass next_before_revision as before_revision for the next page; null means finished."
         }
         "media.inspect" => {
-            "Probe a local source inside an explicit absolute input_root. Returns its content identity (path relative to input_root, SHA-256, bytes), stream metadata and `timeline`: whether the file can go on a timeline as it is, with its exact frame rate, frames, rational duration and a media.add-ready asset, or the reasons it cannot and, for video, a media.conform recipe and output to run with job.start."
+            "Probe a local source inside an explicit absolute input_root. Returns its content identity (path relative to input_root, SHA-256, bytes), stream metadata and `timeline`: whether the file can go on a timeline as it is, with its exact frame rate, frames, rational duration and a media.add-ready asset, or the reasons it cannot and, for video, a media.conform recipe and output to run with job.start. A source longer than media.conform's 45000 output frames gets a reason instead of a shortened recipe."
         }
         "render.plan" => {
             "Validate the narrow reference media profile and inspect an export plan. Requires absolute input/output roots and an unused .mkv output. May take time to decode source metadata."
@@ -271,7 +271,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Recognize a whole source file's speech with the local speech runtime, any length and any decodable format: its audio is extracted losslessly, recognized in overlapping 120 s windows, stitched at word boundaries into non-overlapping transcript documents bound to the source file, and saved as one JSON file. Sound that is not speech, such as [Music], is reported apart from the words, and speech no word covers (a left-out um) as uncovered. Given text (the script of a synthesized narration, up to 120 s), its words are aligned to the audio instead of recognized, keeping names and spelling exact. Run it with job.start."
         }
         "media.prepare" => {
-            "Turn any decodable video file, such as a phone or camera MP4, or a PCM16 WAV (an audio-only asset), into a timeline asset in one step:a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. With paths, several files are prepared in one job and the result includes their media.add operations. Run it with job.start; the result's asset goes to media.add."
+            "Turn any decodable video file, such as a phone or camera MP4, or a PCM16 WAV (an audio-only asset), into a timeline asset in one step:a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. A source longer than 45000 frames at that rate (30 min at 25 fps, 12.5 at 60), or a WAV over an hour, is refused with UNSUPPORTED_MEDIA, never shortened. With paths, several files are prepared in one job and the result includes their media.add operations. Run it with job.start; the result's asset goes to media.add."
         }
         "media.sheet" => {
             "See a source file without adding it to a project: a sheet of frames at given times or spread evenly through it, from any format FFmpeg decodes, returned as an inline image with each cell's time."

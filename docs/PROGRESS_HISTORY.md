@@ -568,6 +568,23 @@ Tests:
 - `tracking` follows a texture across a 1920 x 1080 shot.
 
 These are limits, not features: no capability points change. X01-X03 keep their check names; the record and budget checks inside them changed with the limits. Evidence stays stale until the next thorough run.
+## 5 October 2026: long sources are refused, never silently shortened
+
+`media.inspect` readiness recipes and `media.prepare` capped a proposed whole-source conversion at `media.conform`'s 45,000-frame output limit without saying so. A 780 s, 60 fps MP4 got a 750 s recipe, so an agent lost the last 30 s of footage without being told. `color.match` built its target recipe the same way. Found while drafting roadmap item B1.
+
+The changes:
+- **Refuse, don't clamp.** The readiness recipe builders (`readiness::conform` and `conform_audio`) now refuse a source longer than 45,000 frames at the proposed rate. Readiness already refused other sources `media.conform` cannot take whole (HDR, non-BT.709 color), so this follows the same rule. The reason gives the source's frames and seconds at that rate, the limit, and the frames and seconds a whole-source recipe would drop. It also says to convert in parts with `source_in` and `duration`.
+  - `media.inspect` returns that reason in `timeline.reasons`, with no `conform` proposal.
+  - `media.prepare` with `path` fails with `UNSUPPORTED_MEDIA` and the same message before converting anything. With `paths`, the file is listed as a failure and the others continue.
+  - The limit is counted at the conversion's rate, so a 13-minute 60 fps clip is refused at 60 fps but fits a 30 fps project. Exactly 45,000 frames is still proposed whole.
+- **`color.match` checks its target first.** It builds the target's recipe before decoding histograms or writing the `.cube` table. A target it cannot convert whole is refused with no table left behind. Before, an HDR or BT.601 target was refused only after its table had been written.
+- **Docs.** [USAGE.md](USAGE.md) (media readiness and `media.prepare`), [CONFORM.md](CONFORM.md), [LUTS_SCOPES.md](LUTS_SCOPES.md) and the MCP descriptions of `media.inspect` and `media.prepare` state the limit and the refusal.
+
+Tests:
+- Rust tests cover the 780 s, 60 fps case with its exact message, a source of exactly 45,000 frames, `media.prepare`'s verified duration at 24 and 25 fps, the 1501.5 s limit at 30000/1001, and an over-long PCM16 WAV.
+- The `conform` fixture adds a 781 s, 60 fps FFV1 source (46,860 frames). `media.inspect` gives no recipe, `media.prepare` with `path` and with `paths` fails with `UNSUPPORTED_MEDIA`, and no output is written.
+
+This is a correctness fix: no scoring changed. Evidence stays stale until the next thorough run.
 
 ## 5 October 2026: independent jobs run at once in one job root
 

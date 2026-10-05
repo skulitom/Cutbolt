@@ -166,6 +166,26 @@ pub fn propose(request: &Request) -> Result<Value> {
             format!("{} already exists", output.display()),
         ));
     }
+    // The target's conform recipe, before anything is decoded or written, so a target that
+    // media.conform cannot take whole (HDR, non-BT.709 or too long) leaves no table behind.
+    let relative = crate::identity::relative(&target, request.input_root)?;
+    let metadata = media::probe(&target)?;
+    let streams = metadata["streams"].as_array().cloned().unwrap_or_default();
+    let video = streams
+        .iter()
+        .find(|s| s["codec_type"] == "video")
+        .cloned()
+        .unwrap_or_default();
+    let audio = streams.iter().find(|s| s["codec_type"] == "audio").cloned();
+    let rate = crate::readiness::native_rate(&video, &metadata);
+    let mut recipe = crate::readiness::conform(
+        relative["path"].as_str().unwrap_or_default(),
+        &video,
+        audio.as_ref(),
+        rate,
+        None,
+    )
+    .map_err(|why| error("UNSUPPORTED_MEDIA", why))?;
     let (reference_counts, reference_frames) =
         histograms(&reference, request.reference_times.clone())?;
     let (target_counts, target_frames) = histograms(&target, request.target_times.clone())?;
@@ -195,25 +215,7 @@ pub fn propose(request: &Request) -> Result<Value> {
         )
     })?;
     let lut = json!({"file":identity,"interpolation":"linear"});
-    // The target's conform recipe, with an identity normalization for an encoded RGB asset.
-    let relative = crate::identity::relative(&target, request.input_root)?;
-    let metadata = media::probe(&target)?;
-    let streams = metadata["streams"].as_array().cloned().unwrap_or_default();
-    let video = streams
-        .iter()
-        .find(|s| s["codec_type"] == "video")
-        .cloned()
-        .unwrap_or_default();
-    let audio = streams.iter().find(|s| s["codec_type"] == "audio").cloned();
-    let rate = crate::readiness::native_rate(&video, &metadata);
-    let mut recipe = crate::readiness::conform(
-        relative["path"].as_str().unwrap_or_default(),
-        &video,
-        audio.as_ref(),
-        rate,
-        None,
-    )
-    .map_err(|why| error("UNSUPPORTED_MEDIA", why))?;
+    // Identity normalization for an encoded RGB asset.
     recipe["source"]["file"] = relative;
     if recipe["source"]["color"] == "encoded_rgb" {
         recipe["source"]

@@ -15,7 +15,8 @@ const RATES: [(u64, u64); 8] = [
     (30000, 1001),
     (60000, 1001),
 ];
-/// media.conform output limits: at most 4096x2160, 8M pixels and 45000 frames at 25 fps.
+/// media.conform output limits: at most 4096x2160, 8M pixels and 45000 frames (30 minutes at
+/// 25 fps, 12.5 at 60).
 const CONFORM_FRAMES: u64 = 45_000;
 /// Audio-only media.conform output: at most one hour at 48 kHz.
 const AUDIO_ONLY_SAMPLES: u64 = 48_000 * 3600;
@@ -599,6 +600,28 @@ fn moved_onto(
         .collect()
 }
 
+/// `frames` at `rate` if a whole-source recipe can hold them. A longer source is refused rather
+/// than shortened to media.conform's output limit, naming both lengths and what would be lost.
+fn within_limit(what: &str, frames: u64, rate: Time) -> Result<u64, String> {
+    if frames <= CONFORM_FRAMES {
+        return Ok(frames);
+    }
+    let seconds = |n: u64| {
+        let text = format!("{:.3}", n as f64 * rate.den as f64 / rate.num as f64);
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    let over = frames - CONFORM_FRAMES;
+    Err(format!(
+        "{what} is {frames} frames ({} s) at {rate} fps, longer than media.conform's \
+         {CONFORM_FRAMES}-frame output limit ({} s at this rate); a whole-source recipe would drop \
+         the last {over} frames ({} s), so none is proposed: convert it in parts of at most \
+         {CONFORM_FRAMES} frames with media.conform recipes that set source_in and duration",
+        seconds(frames),
+        seconds(CONFORM_FRAMES),
+        seconds(over)
+    ))
+}
+
 /// Why a stream cannot be a media.conform audio-only source, if it cannot.
 fn pcm16_wav(relative: &str, audio: &Value, metadata: &Value) -> Result<(), &'static str> {
     let format = metadata["format"]["format_name"].as_str().unwrap_or("");
@@ -618,19 +641,32 @@ fn pcm16_wav(relative: &str, audio: &Value, metadata: &Value) -> Result<(), &'st
 }
 
 /// A media.conform recipe that resamples a whole PCM16 WAV into an audio-only 48 kHz stereo WAV,
-/// or why there is none. Its length is every whole 48 kHz sample the source covers, at most an
-/// hour.
+/// or why there is none. Its length is every whole 48 kHz sample the source covers. Audio longer
+/// than the one-hour audio-only limit is refused, never shortened.
 pub(crate) fn conform_audio_only(
     relative: &str,
     audio: &Value,
     metadata: &Value,
-) -> Result<Value, &'static str> {
+) -> Result<Value, String> {
     pcm16_wav(relative, audio, metadata)?;
     let d = stream_duration(audio)
         .ok_or("the audio duration is not exact, so no conform duration can be proposed")?;
-    let samples = ((u128::from(d.num) * 48_000 / u128::from(d.den)) as u64).min(AUDIO_ONLY_SAMPLES);
+    let samples = (u128::from(d.num) * 48_000 / u128::from(d.den)) as u64;
+    if samples > AUDIO_ONLY_SAMPLES {
+        let seconds = |n: u64| {
+            let text = format!("{:.3}", n as f64 / 48_000.0);
+            text.trim_end_matches('0').trim_end_matches('.').to_string()
+        };
+        return Err(format!(
+            "the audio is {} s, longer than media.conform's one-hour audio-only output limit; a \
+             whole-source recipe would drop the last {} s, so none is proposed: convert it in \
+             parts of at most an hour with media.conform recipes that set source_in and duration",
+            seconds(samples),
+            seconds(samples - AUDIO_ONLY_SAMPLES)
+        ));
+    }
     if samples == 0 {
-        return Err("the audio is shorter than one 48 kHz sample");
+        return Err("the audio is shorter than one 48 kHz sample".into());
     }
     Ok(
         json!({"schema_version":1,"id":asset_id(relative),"source":{"file":{"path":relative},"color":null},
@@ -642,22 +678,21 @@ pub(crate) fn conform_audio_only(
 /// A media.conform recipe that turns a whole PCM16 WAV into an asset with a silent black picture
 /// of `size` at `rate` (the older audio asset kind), or why there is none. Its length is the
 /// audio's whole frames (and whole 48 kHz samples); a tail shorter than one frame is left out.
+/// Audio longer than the output limit is refused, never shortened.
 pub(crate) fn conform_audio(
     relative: &str,
     audio: &Value,
     metadata: &Value,
     rate: Time,
     size: (u32, u32),
-) -> Result<Value, &'static str> {
+) -> Result<Value, String> {
     pcm16_wav(relative, audio, metadata)?;
     let step = sample_step(rate);
     let frames = frames_at(audio, rate)
-        .ok_or("the audio duration is not exact, so no conform duration can be proposed")?
-        .min(CONFORM_FRAMES)
-        / step
-        * step;
+        .ok_or("the audio duration is not exact, so no conform duration can be proposed")?;
+    let frames = within_limit("the audio", frames, rate)? / step * step;
     if frames == 0 {
-        return Err("the audio is shorter than one frame");
+        return Err("the audio is shorter than one frame".into());
     }
     let mut recipe = json!({"schema_version":1,"id":asset_id(relative),"source":{"file":{"path":relative},"color":null},
         "source_in":0,"duration":Time::new(frames * rate.den, rate.num).map_err(|_| "the proposed duration overflows")?,
@@ -668,21 +703,22 @@ pub(crate) fn conform_audio(
     Ok(recipe)
 }
 
-/// A media.conform recipe for the whole source at 25 fps, from its tags, or why there is none.
+/// A media.conform recipe for the whole source at `rate` (25 fps without one), from its tags, or
+/// why there is none. A source longer than the output limit is refused, never shortened.
 pub(crate) fn conform(
     relative: &str,
     video: &Value,
     audio: Option<&Value>,
     rate: Option<Time>,
     known: Option<Time>,
-) -> Result<Value, &'static str> {
+) -> Result<Value, String> {
     let tag = |key: &str| {
         video[key]
             .as_str()
             .filter(|v| !v.is_empty() && *v != "unknown")
     };
     if matches!(tag("color_transfer"), Some("smpte2084" | "arib-std-b67")) {
-        return Err("HDR source: convert it with hdr.conform instead of media.conform");
+        return Err("HDR source: convert it with hdr.conform instead of media.conform".into());
     }
     let pix_fmt = video["pix_fmt"].as_str().unwrap_or("");
     let rgb = matches!(pix_fmt, "bgr0" | "rgb24" | "bgra" | "rgba" | "gbrp");
@@ -690,7 +726,8 @@ pub(crate) fn conform(
         || matches!(tag("color_primaries"), Some(p) if p != "bt709");
     if !rgb && tagged_601 {
         return Err(
-            "the source is tagged with non-BT.709 color, which media.conform does not convert",
+            "the source is tagged with non-BT.709 color, which media.conform does not convert"
+                .into(),
         );
     }
     // Keep the source's own rate when it is a timeline rate, so every frame survives.
@@ -710,11 +747,10 @@ pub(crate) fn conform(
                 .collect::<Option<Vec<_>>>()
                 .and_then(|f| f.into_iter().min())
         })
-        .ok_or("the stream durations are not exact, so no conform duration can be proposed")?
-        .min(CONFORM_FRAMES);
-    let frames = frames / step * step;
+        .ok_or("the stream durations are not exact, so no conform duration can be proposed")?;
+    let frames = within_limit("the source", frames, rate)? / step * step;
     if frames == 0 {
-        return Err("the source is shorter than one frame at the proposed rate");
+        return Err("the source is shorter than one frame at the proposed rate".into());
     }
     let (mut width, mut height) = (dimension(&video["width"]), dimension(&video["height"]));
     if width > 4096 || height > 2160 || u64::from(width) * u64::from(height) > 8_294_400 {
@@ -874,5 +910,106 @@ mod tests {
         let result = timeline(Path::new("unused"), "logo.png", &still);
         assert_eq!(result["reasons"].as_array().unwrap().len(), 1);
         assert!(result.get("conform").is_none());
+    }
+
+    #[test]
+    fn refuses_sources_longer_than_the_conform_limit() {
+        // 780 s at 60 fps is 46800 frames: 1800 more than media.conform writes.
+        let stream = |seconds: u64| {
+            let video = json!({"codec_type":"video","codec_name":"h264","pix_fmt":"yuv420p","width":640,"height":360,
+                "r_frame_rate":"60/1","avg_frame_rate":"60/1","time_base":"1/15360","duration_ts":seconds * 15360,
+                "color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709"});
+            let audio = json!({"codec_type":"audio","codec_name":"aac","sample_rate":"48000","channels":2,
+                "time_base":"1/48000","duration_ts":seconds * 48000});
+            json!({"streams":[video,audio],"format":{"format_name":"mov,mp4"}})
+        };
+        let result = timeline(Path::new("unused.mp4"), "talk.mp4", &stream(780));
+        assert!(result.get("conform").is_none(), "{result}");
+        let reason = result["reasons"].as_array().unwrap().last().unwrap();
+        assert_eq!(
+            reason,
+            "the source is 46800 frames (780 s) at 60 fps, longer than media.conform's 45000-frame \
+             output limit (750 s at this rate); a whole-source recipe would drop the last 1800 frames \
+             (30 s), so none is proposed: convert it in parts of at most 45000 frames with \
+             media.conform recipes that set source_in and duration"
+        );
+        // Exactly the limit is still proposed whole.
+        let result = timeline(Path::new("unused.mp4"), "talk.mp4", &stream(750));
+        assert_eq!(
+            result["conform"]["recipe"]["duration"],
+            json!({"num":750,"den":1})
+        );
+        // media.prepare's verified duration and a project's rate take the same test: 1801 s fits
+        // at 24 fps but not at 25.
+        let metadata = stream(1801);
+        let video = &metadata["streams"][0];
+        let known = Some(Time { num: 1801, den: 1 });
+        let at = |num| conform("talk.mp4", video, None, Some(Time { num, den: 1 }), known);
+        assert_eq!(at(24).unwrap()["duration"], json!({"num":1801,"den":1}));
+        assert!(
+            at(25)
+                .unwrap_err()
+                .contains("45025 frames (1801 s) at 25 fps")
+        );
+        // At 30000/1001 the limit is 1501.5 s.
+        let fractional = Time {
+            num: 30000,
+            den: 1001,
+        };
+        let why = conform("talk.mp4", video, None, Some(fractional), None).unwrap_err();
+        assert!(why.contains("(1501.5 s at this rate)"), "{why}");
+    }
+
+    #[test]
+    fn refuses_audio_longer_than_its_conform_limit() {
+        // 1801 s of 24 kHz mono is 45025 frames at 25 fps: an audio-only asset holds it whole, while
+        // the older black-picture kind is refused at 25 fps and fits at 24.
+        let wav = |seconds: u64| {
+            let audio = json!({"codec_type":"audio","codec_name":"pcm_s16le","sample_rate":"24000","channels":1,
+                "time_base":"1/24000","duration_ts":seconds * 24000});
+            json!({"streams":[audio],"format":{"format_name":"wav"}})
+        };
+        let metadata = wav(1801);
+        let result = timeline(Path::new("unused.wav"), "voice/long.wav", &metadata);
+        assert_eq!(
+            result["conform"]["recipe"]["duration"],
+            json!({"num":1801,"den":1}),
+            "{result}"
+        );
+        let refused = conform_audio(
+            "long.wav",
+            &metadata["streams"][0],
+            &metadata,
+            Time { num: 25, den: 1 },
+            (64, 32),
+        )
+        .unwrap_err();
+        assert!(
+            refused.contains(
+                "the audio is 45025 frames (1801 s) at 25 fps, longer than media.conform's 45000-frame"
+            ),
+            "{refused}"
+        );
+        // Over an hour, the audio-only recipe is refused, never cut to the hour.
+        let hour = wav(3600);
+        assert!(conform_audio_only("hour.wav", &hour["streams"][0], &hour).is_ok());
+        let over = wav(3601);
+        let refused = conform_audio_only("over.wav", &over["streams"][0], &over).unwrap_err();
+        assert!(
+            refused.starts_with("the audio is 3601 s, longer than media.conform's one-hour")
+                && refused.contains("drop the last 1 s"),
+            "{refused}"
+        );
+        let result = timeline(Path::new("unused.wav"), "voice/over.wav", &over);
+        assert!(result.get("conform").is_none(), "{result}");
+        let rate = Time { num: 24, den: 1 };
+        let recipe = conform_audio(
+            "long.wav",
+            &metadata["streams"][0],
+            &metadata,
+            rate,
+            (64, 32),
+        );
+        assert_eq!(recipe.unwrap()["duration"], json!({"num":1801,"den":1}));
     }
 }
