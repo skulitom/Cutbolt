@@ -220,7 +220,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Cancellation stops a queued job; a running one finishes."
         }
         "job.wait" => {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false."
@@ -248,6 +248,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         }
         "audio.normalize" => {
             "Bring the whole mix to a loudness target such as -14 LKFS: measure the timeline's integrated loudness and sample peak, then propose clip_audio operations that scale every audio clip's level (and gain curve) by one factor, stopping at a peak ceiling (default -1 dBFS) or the clip gain range. The proposed levels are measured before they are returned (two to four renders of the mix), so result is what applying them gives. Read-only; apply the operations with session.apply."
+        }
+        "media.transcribe" => {
+            "Recognize a whole source file's speech with the local speech runtime, any length and any decodable format: its audio is extracted losslessly, recognized in overlapping 120 s windows, stitched at word boundaries into non-overlapping transcript documents bound to the source file, and saved as one JSON file. Run it with job.start."
         }
         "media.prepare" => {
             "Turn any decodable video file, such as a phone or camera MP4, into a timeline asset in one step: a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. Run it with job.start; the result's asset goes to media.add."
@@ -300,8 +303,9 @@ pub(crate) fn description(command: &str) -> &'static str {
 pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
 /// Long renders belong in persisted jobs so the MCP connection stays usable.
-const BLOCKING: [&str; 16] = [
+const BLOCKING: [&str; 17] = [
     "media.prepare",
+    "media.transcribe",
     "captions.render",
     "export.review",
     "image.sequence.compile",

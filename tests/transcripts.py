@@ -646,6 +646,22 @@ def run(root):
                                  (talk, {'id':'not valid'}, 'INVALID_CAPTIONS')):
             client.call('captions.draft', code, project=p_, transcripts=spoken, **fields)
         passed.append('transcript.captions_draft_follows_the_rules')
+        # Whole-file recognition needs the speech runtime (tests/transcription.py runs it). Here:
+        # validation, a queued-only command, and a recognition failure that leaves no output.
+        assert not any(t['name'] == 'cutbolt_media_transcribe' for t in catalog)
+        absent = {'distribution':'Ubuntu', 'python':'/usr/bin/python3', 'python_paths':['/opt/speech'],
+                  'model':str(root/'missing.pt'), 'alignment_root':str(root), 'threads':1}
+        transcribing = {'command':'media.transcribe', 'path':str(movie), 'input_root':str(source), 'output_root':str(output),
+                        'output':str(output/'whole.json'), 'runtime':absent, 'language':'en'}
+        call(transcribing, 'MODEL_UNAVAILABLE')
+        assert not (output/'whole.json').exists()
+        (output/'taken.json').write_text('{}', encoding='utf-8')
+        for fields, code in (({'output':str(output/'taken.json')}, 'OUTPUT_EXISTS'), ({'id':' '}, 'INVALID_ID'),
+                             ({'timeout_seconds':0}, 'INVALID_ARGUMENT'), ({'start':time(4)}, 'INVALID_RANGE'),
+                             ({'start':time(3), 'duration':time(2)}, 'INVALID_RANGE'), ({'output':str(output/'whole.txt')}, 'UNSUPPORTED_OUTPUT')):
+            call({**transcribing, **fields}, code)
+        assert not (output/'whole.json').exists()
+        passed.append('transcript.whole_file_recognition_rejections_leave_nothing')
     finally:
         client.close()
 

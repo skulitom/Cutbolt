@@ -133,6 +133,24 @@ def run(root,setup):
         assert result['worker']['network_interfaces']==['lo'] and result['worker']['python_network_attempts']==0
         quality.append(item);preserved();print(json.dumps({k:v for k,v in item.items() if k!='word_errors'}),flush=True)
     passed.append('transcription.offline_languages_independent_word_clocks')
+    # Whole-file recognition in one job: documents bound to the movie itself, covering all of its
+    # audio and meeting without overlap; the words match the reference as direct recognition does.
+    for name,parent in parents.items():
+        local={k:v for k,v in runtime.items() if k!='alignment_roots'};local['alignment_root']=runtime['alignment_roots'][speech[name]['language']]
+        saved=output/(name+'-whole.json')
+        whole=call({'command':'media.transcribe','path':str(parent['path']),'input_root':str(sources),'output_root':str(output),'output':str(saved),
+                    'runtime':local,'language':speech[name]['language'],'id':name,'timeout_seconds':300},timeout=1800)
+        docs=json.loads(saved.read_text(encoding='utf-8'))['transcripts']
+        assert whole['documents']==len(docs)>=1 and docs[0]['range_start']==time(0)
+        for a,b in zip(docs,docs[1:]):assert seconds(a['range_start'])+seconds(a['range_duration'])==seconds(b['range_start'])
+        assert seconds(docs[-1]['range_start'])+seconds(docs[-1]['range_duration'])==F(parent['count'],48000)
+        for d in docs:
+            assert d['source']=={'path':parent['path'].name,'identity':parent['identity'],'duration':time(parent['count'],48000)}
+            call({'command':'transcript.inspect','document':d,'input_root':str(sources)})
+        match=correspondence(speech[name]['reference'],[w for d in docs for w in d['words']])
+        assert match['rate']<=.10,(name,match)
+    preserved()
+    passed.append('transcription.whole_file_documents_meet_and_bind_to_the_source')
 
     def decode(path,expected,label):
         nonlocal frames,samples

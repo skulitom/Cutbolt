@@ -32,6 +32,7 @@ pub mod keying;
 pub mod lut;
 pub mod mcp;
 pub mod media;
+pub mod media_transcribe;
 pub mod meters;
 pub mod model;
 pub mod multicam;

@@ -18,6 +18,17 @@ Acoustic alignment longer than 30 seconds uses 24-second acoustic tiles with one
 
 The original supervisor is namespace PID 1 with no external network interface. It runs a fixed content-checked worker, enforces the explicit 1–600 second analysis deadline, and treats closure of the native owner's input pipe as cancellation. Exiting that PID namespace terminates detached descendants too. Only the three known files in the invocation's owned scratch directory are removed; cleanup never traverses arbitrary directories. This is a process/network boundary, not a filesystem sandbox. A hard exit before the supervisor starts, or forcefully killing the WSL bridge itself, can leave the three known scratch files. The bridge-kill fixture observes this limitation and verifies that no worker or detached descendant survives. Such files are not a published transcript or changed source. Ordinary error, deadline and owner-pipe cancellation use the cleanup path.
 
+## Whole-file recognition
+
+`media.transcribe`, queued with `job.start`, recognizes a whole source file in one job. The file can be any length and any format FFmpeg decodes with an audio stream, including 30 fps prepared assets that the reference-movie format does not accept. The job works in steps:
+1. It extracts the first audio stream losslessly to 48 kHz stereo PCM16, so word times are source times.
+2. It recognizes `[start, start + duration)` (default the whole audio) in 120 s windows, each starting 5 s before the previous one ends, with the same runtime settings as `transcript.transcribe`.
+3. It stitches each overlap where the documents meet. The earlier document keeps the words whose middle lies before the overlap's middle. The seam moves to the end of its last kept word if that is later, and the next document keeps only words starting at or after the seam.
+4. It binds the documents to the source file itself (relative path, content identity and audio length), so `timeline.outline`, `captions.draft`, `export.review` and `transcript.plan` match them to the file's assets.
+5. It saves `{"transcripts": [...]}` to a new `.json` `output`. With a workspace, later calls can name it as `{"file": ..., "select": "transcripts"}`.
+
+Documents are `<id>-1`, `<id>-2` and so on, and their words remain estimates that need review. A recognition failure leaves no output file.
+
 ## Document contract
 
 A version-1 document contains an ID, revision, optional parent fingerprint, source identity/path/duration, an analysis range, explicit `en` or `el` language, recognition provenance and ordered words. Every word has a stable ID, one text unit, exact start/end times, an `estimated` or `corrected` origin and optional `probability_milli` from 0 to 1,000. Confidence is model output, not a factual probability of correctness. Corrected words have no model probability.

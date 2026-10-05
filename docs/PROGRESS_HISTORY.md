@@ -1,5 +1,11 @@
 # Progress history
 
+## 5 October 2026: whole-file speech recognition
+
+Recognizing speech took one `transcript.transcribe` call per 120 s window, with `start` and `duration` worked out by hand. It also only read WAV files or 25 fps reference movies, so prepared 30 fps assets could not be transcribed. `media.transcribe`, queued with `job.start`, now extracts a file's audio losslessly and recognizes it in overlapping windows. It stitches the windows at word boundaries into documents that meet without overlapping, binds them to the source file, and saves them to one JSON file that outlines, captions, reviews and word cuts can use directly.
+
+Verification is partial. Unit tests cover the window plan and the stitching, including a word straddling the overlap's middle. The transcripts fixture covers validation, the queued-only listing, and a recognition failure after extraction, which must leave no output. No speech runtime is installed on this machine, so the new runtime-fixture case is untested. That case transcribes each speech fixture whole and checks coverage, seams, binding, `transcript.inspect` and the reference word rate. No scoring changed.
+
 ## 5 October 2026: jump cuts from pauses in speech
 
 Removing dead air from talking-head footage meant one ripple deletion per pause, each with hand-computed times and fresh IDs for every split clip and link. The read-only `audio.tighten` now proposes them all. It finds pauses in the voice track, or in a sequential timeline's whole program, with the same 10 ms detector as `audio.duck`. Each cut keeps some silence next to the speech, lies on a grid exact in frames and samples, and ripples every track so they stay in sync. Each cut is tried on a working copy first: refused cuts, for example inside a fade, are reported with the reason, so the returned batch always applies.
