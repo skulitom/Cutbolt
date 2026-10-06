@@ -1,6 +1,6 @@
 //! Original deterministic PCM routing graph, panning and named-layout publication.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Sampler},
     audio::{self, Mix, Voice},
     audio_processing::{Effect, Processor},
@@ -311,15 +311,21 @@ impl Graph {
                 tracks.insert(id.clone(), index);
             }
             lookup.insert(key.clone(), index);
+            let curve = curve
+                .as_ref()
+                .map(|c| c.prepare(mix.duration, 0, 4000))
+                .transpose()
+                .under(|| match &key {
+                    NodeRef::Track { id } => format!("track {id:?} gain_curve"),
+                    NodeRef::Bus { id } => format!("bus {id:?} gain_curve"),
+                    NodeRef::Output => "output gain_curve".into(),
+                })?;
             nodes.push(Node {
                 key,
                 layout,
                 gain,
                 mute,
-                curve: curve
-                    .as_ref()
-                    .map(|c| c.prepare(mix.duration, 0, 4000))
-                    .transpose()?,
+                curve,
                 processor: Processor::new(&effects, layout.channels())?,
                 effect_count: effects.len(),
             });
@@ -387,7 +393,8 @@ impl Graph {
                             curve: curve
                                 .as_ref()
                                 .map(|c| c.prepare(mix.duration, -1000, 1000))
-                                .transpose()?,
+                                .transpose()
+                                .under(|| format!("route {:?} mapping.curve", route.id))?,
                         },
                         64,
                     )
@@ -405,7 +412,8 @@ impl Graph {
                             curve: curve
                                 .as_ref()
                                 .map(|c| c.prepare(mix.duration, -1000, 1000))
-                                .transpose()?,
+                                .transpose()
+                                .under(|| format!("route {:?} mapping.curve", route.id))?,
                         },
                         2,
                     )

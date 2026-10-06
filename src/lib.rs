@@ -107,6 +107,10 @@ pub fn version() -> String {
 pub struct Error {
     pub code: &'static str,
     pub message: String,
+    /// Structured data a caller can act on, such as the observations accepted before a tracking
+    /// failure; most errors carry none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -115,6 +119,7 @@ pub fn error(code: &'static str, message: impl Into<String>) -> Error {
     Error {
         code,
         message: message.into(),
+        detail: None,
     }
 }
 
@@ -161,14 +166,39 @@ pub(crate) fn missing_listed(
 /// Prefix an error with the JSON path of the request field that caused it, keeping its code.
 pub(crate) trait At<T> {
     fn at(self, path: impl FnOnce() -> String) -> Result<T>;
+    /// Like `at`, for an error from a nested part that may already name its own field relative to
+    /// `path`: `layers[2] (title)` and `animation.opacity.keys[3].time: ...` join with a dot, as
+    /// `layers[2] (title).animation.opacity.keys[3].time: ...`. Other messages read as with `at`.
+    fn under(self, path: impl FnOnce() -> String) -> Result<T>;
 }
 impl<T> At<T> for Result<T> {
     fn at(self, path: impl FnOnce() -> String) -> Result<T> {
         self.map_err(|e| Error {
-            code: e.code,
             message: format!("{}: {}", path(), e.message),
+            ..e
         })
     }
+    fn under(self, path: impl FnOnce() -> String) -> Result<T> {
+        self.map_err(|e| {
+            let nested = e
+                .message
+                .split_once(": ")
+                .is_some_and(|(head, _)| relative_path(head));
+            let separator = if nested { "." } else { ": " };
+            Error {
+                message: format!("{}{separator}{}", path(), e.message),
+                ..e
+            }
+        })
+    }
+}
+
+/// A field path relative to some object, such as `animation.opacity` or `keys[3].time`.
+fn relative_path(text: &str) -> bool {
+    text.starts_with(|c: char| c.is_ascii_lowercase())
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '[' | ']'))
 }
 
 impl From<std::io::Error> for Error {
@@ -230,6 +260,28 @@ mod tests {
                 && !many.message.contains("a20"),
             "{}",
             many.message
+        );
+    }
+
+    #[test]
+    fn nested_field_paths_join_with_a_dot() {
+        let nested: Result<()> = Err(error("X", "keys[3].time: 7 s is late"));
+        let joined = nested.under(|| "animation.opacity".into()).unwrap_err();
+        assert_eq!(
+            joined.message,
+            "animation.opacity.keys[3].time: 7 s is late"
+        );
+        let layer = Err::<(), _>(joined)
+            .under(|| "layers[2] (title)".into())
+            .unwrap_err();
+        assert_eq!(
+            layer.message,
+            "layers[2] (title).animation.opacity.keys[3].time: 7 s is late"
+        );
+        let plain: Result<()> = Err(error("X", "Layer frame 3: lost"));
+        assert_eq!(
+            plain.under(|| "segments[1]".into()).unwrap_err().message,
+            "segments[1]: Layer frame 3: lost"
         );
     }
 }

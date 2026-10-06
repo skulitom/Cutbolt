@@ -1,6 +1,6 @@
 //! Original ordered scene effects with explicit linear-light grading equations.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Sampler as CurveSampler},
     composite::AlphaMode,
     error,
@@ -200,49 +200,129 @@ pub(crate) fn prepare(effects: &[Effect], duration: Time) -> Result<Vec<Sampler>
     if effects.len() > 8 {
         return Err(invalid("Use at most eight ordered effects per layer"));
     }
-    effects.iter().map(|effect| {
-        if let Effect::ChromaKey(key) = effect {
-            return Ok(Sampler::Key(Box::new(key.prepare(duration)?)));
-        }
-        let (g, selection) = match effect {
-            Effect::Grade(g) => (g, None),
-            Effect::SelectiveGrade(s) => {
-                if s.mix_milli > 1000 || (s.qualifier.is_none() && s.mask.is_none()) {
-                    return Err(invalid("Selective grades require a qualifier or mask and mix 0..1000"));
-                }
-                if let Some(q) = &s.qualifier { q.validate()?; }
-                ( &s.grade, Some(SelectionSampler { mix_milli:s.mix_milli,
-                    mix_curve:s.mix_curve.as_ref().map(|c|c.prepare(duration,0,1000)).transpose()?,
-                    mask:s.mask.as_ref().map(|m|m.prepare(duration)).transpose()? }))
+    effects
+        .iter()
+        .enumerate()
+        .map(|(index, effect)| prepare_one(effect, duration).under(|| format!("effects[{index}]")))
+        .collect()
+}
+fn prepare_one(effect: &Effect, duration: Time) -> Result<Sampler> {
+    if let Effect::ChromaKey(key) = effect {
+        return Ok(Sampler::Key(Box::new(key.prepare(duration)?)));
+    }
+    let (g, selection, grade) = match effect {
+        Effect::Grade(g) => (g, None, ""),
+        Effect::SelectiveGrade(s) => {
+            if s.mix_milli > 1000 || (s.qualifier.is_none() && s.mask.is_none()) {
+                return Err(invalid(
+                    "Selective grades require a qualifier or mask and mix 0..1000",
+                ));
             }
-            Effect::ChromaKey(_) => unreachable!("key prepared above"),
-        };
-        let values = [g.exposure_milli, g.contrast_milli as i32, g.white_balance_milli[0] as i32, g.white_balance_milli[1] as i32, g.white_balance_milli[2] as i32,
-            g.hue_shift_mdeg.unwrap_or(0), g.saturation_milli.map_or(1000, i32::from)];
-        let bounds = [(-8000,8000),(0,4000),(100,4000),(100,4000),(100,4000),(-360000,360000),(0,4000)];
-        for (value,(minimum,maximum)) in values.iter().zip(bounds) {
-            if !(minimum..=maximum).contains(value) {
-                return Err(invalid("Grade exposure must be -8000..8000, contrast 0..4000, white-balance gains 100..4000, hue shift -360000..360000 and saturation 0..4000"));
+            if let Some(q) = &s.qualifier {
+                q.validate().under(|| "qualifier".into())?;
             }
+            (
+                &s.grade,
+                Some(SelectionSampler {
+                    mix_milli: s.mix_milli,
+                    mix_curve: s
+                        .mix_curve
+                        .as_ref()
+                        .map(|c| c.prepare(duration, 0, 1000))
+                        .transpose()
+                        .under(|| "mix_curve".into())?,
+                    mask: s
+                        .mask
+                        .as_ref()
+                        .map(|m| m.prepare(duration))
+                        .transpose()
+                        .under(|| "mask".into())?,
+                }),
+                "grade.",
+            )
         }
-        for curve in [&g.master_curve,&g.red_curve,&g.green_curve,&g.blue_curve].into_iter().flatten() {
-            curve.validate()?;
+        Effect::ChromaKey(_) => unreachable!("key prepared above"),
+    };
+    let values = [
+        g.exposure_milli,
+        g.contrast_milli as i32,
+        g.white_balance_milli[0] as i32,
+        g.white_balance_milli[1] as i32,
+        g.white_balance_milli[2] as i32,
+        g.hue_shift_mdeg.unwrap_or(0),
+        g.saturation_milli.map_or(1000, i32::from),
+    ];
+    let bounds = [
+        (-8000, 8000),
+        (0, 4000),
+        (100, 4000),
+        (100, 4000),
+        (100, 4000),
+        (-360000, 360000),
+        (0, 4000),
+    ];
+    let fields = [
+        "exposure_milli",
+        "contrast_milli",
+        "white_balance_milli[0]",
+        "white_balance_milli[1]",
+        "white_balance_milli[2]",
+        "hue_shift_mdeg",
+        "saturation_milli",
+    ];
+    for ((value, (minimum, maximum)), field) in values.iter().zip(bounds).zip(fields) {
+        if !(minimum..=maximum).contains(value) {
+            return Err(invalid(&format!(
+                "{grade}{field}: {value} is outside {minimum}..{maximum}; grade exposure must be -8000..8000, contrast 0..4000, white-balance gains 100..4000, hue shift -360000..360000 and saturation 0..4000"
+            )));
         }
-        let mut curves = [const { None }; CONTROLS];
-        let mut declared = [g.hue_shift_mdeg.is_some(), g.saturation_milli.is_some()];
-        if let Some(a) = &g.animation {
-            let inputs = [&a.exposure_milli,&a.contrast_milli,&a.red_balance_milli,&a.green_balance_milli,&a.blue_balance_milli,&a.hue_shift_mdeg,&a.saturation_milli];
-            if inputs.iter().all(|c| c.is_none()) {
-                return Err(invalid("Grade animation requires at least one property"));
-            }
-            for (i,input) in inputs.into_iter().enumerate() {
-                curves[i] = input.as_ref().map(|c| c.prepare(duration,bounds[i].0,bounds[i].1)).transpose()?;
-            }
-            declared[0] |= a.hue_shift_mdeg.is_some();
-            declared[1] |= a.saturation_milli.is_some();
+    }
+    for curve in [&g.master_curve, &g.red_curve, &g.green_curve, &g.blue_curve]
+        .into_iter()
+        .flatten()
+    {
+        curve.validate()?;
+    }
+    let mut curves = [const { None }; CONTROLS];
+    let mut declared = [g.hue_shift_mdeg.is_some(), g.saturation_milli.is_some()];
+    if let Some(a) = &g.animation {
+        let inputs = [
+            &a.exposure_milli,
+            &a.contrast_milli,
+            &a.red_balance_milli,
+            &a.green_balance_milli,
+            &a.blue_balance_milli,
+            &a.hue_shift_mdeg,
+            &a.saturation_milli,
+        ];
+        if inputs.iter().all(|c| c.is_none()) {
+            return Err(invalid("Grade animation requires at least one property"));
         }
-        Ok(Sampler::Grade(Box::new(GradeSampler { values, curves, declared, selection })))
-    }).collect()
+        let names = [
+            "exposure_milli",
+            "contrast_milli",
+            "red_balance_milli",
+            "green_balance_milli",
+            "blue_balance_milli",
+            "hue_shift_mdeg",
+            "saturation_milli",
+        ];
+        for (i, input) in inputs.into_iter().enumerate() {
+            curves[i] = input
+                .as_ref()
+                .map(|c| c.prepare(duration, bounds[i].0, bounds[i].1))
+                .transpose()
+                .under(|| format!("{grade}animation.{}", names[i]))?;
+        }
+        declared[0] |= a.hue_shift_mdeg.is_some();
+        declared[1] |= a.saturation_milli.is_some();
+    }
+    Ok(Sampler::Grade(Box::new(GradeSampler {
+        values,
+        curves,
+        declared,
+        selection,
+    })))
 }
 impl Sampler {
     pub(crate) fn sample(&self, time: Time) -> Result<Sample> {

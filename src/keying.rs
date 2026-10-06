@@ -1,6 +1,6 @@
 //! Original bounded chroma-distance keying, screen unmixing and spill suppression.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Sampler as CurveSampler},
     composite::MaskSampler,
     effects::{Effect, Sample},
@@ -87,12 +87,14 @@ impl ChromaKey {
                 .strength_curve
                 .as_ref()
                 .map(|c| c.prepare(duration, 0, 1000))
-                .transpose()?,
+                .transpose()
+                .under(|| "strength_curve".into())?,
             mask: self
                 .mask
                 .as_ref()
                 .map(|m| m.prepare(duration))
-                .transpose()?,
+                .transpose()
+                .under(|| "mask".into())?,
         })
     }
     fn retention(&self, rgb: [u8; 3]) -> f64 {

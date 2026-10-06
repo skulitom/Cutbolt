@@ -198,7 +198,9 @@ impl TrackClip {
             ));
         }
         if let Some(curve) = &self.gain_curve {
-            curve.prepare_keys(source_duration, 0, MAX_GAIN_MILLI as i32, MAX_GAIN_KEYS)?;
+            curve
+                .prepare_keys(source_duration, 0, MAX_GAIN_MILLI as i32, MAX_GAIN_KEYS)
+                .under(|| "gain_curve".into())?;
         }
         if self.gain_milli > MAX_GAIN_MILLI {
             return Err(invalid("gain_milli must be 0..4000, with 1000 for unity"));

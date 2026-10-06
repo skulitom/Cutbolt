@@ -1,5 +1,5 @@
 use crate::{
-    Result, audio, conform, jobs, media,
+    At, Result, audio, conform, jobs, media,
     model::{Operation, Project},
     preview, proxy, registry, render, scene, store,
     summary::Detail,
@@ -1236,6 +1236,14 @@ pub fn handle_json_as(
         completed.extend(prepare(&mut queued, workspace)?);
         parse(queued.clone())
             .map_err(|e| crate::error(e.code, format!("arguments: {}", e.message)))?;
+        // The command would reject a missing output folder only once the job ran.
+        if let (Some(output), Some(root)) =
+            (queued["output"].as_str(), queued["output_root"].as_str())
+            && std::path::Path::new(output).is_absolute()
+        {
+            render::output_folder(output.as_ref(), root.as_ref())
+                .at(|| "arguments.output".into())?;
+        }
         queued.as_object_mut().unwrap().remove("command");
         request["arguments"] = queued;
     }
@@ -2278,6 +2286,38 @@ fn sections(all: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queued_jobs_reject_a_missing_output_folder_at_submission() {
+        let scratch = crate::tracking::Scratch::new("job-output-folder");
+        let root = &scratch.0;
+        let template: Value =
+            serde_json::from_str(include_str!("../examples/title-card-template.json")).unwrap();
+        let folder = root.join("renders");
+        let output = folder.join("title.mkv");
+        let error = handle_json(
+            json!({"command":"job.start","job_root":root,"request_id":"title","run":"scene.render",
+                "arguments":{"scene":template["scene"],"input_root":root,"output_root":root,"output":output}}),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "IO_ERROR");
+        let expected = format!(
+            "arguments.output: Output folder {} for {} does not exist (",
+            folder.display(),
+            output.display()
+        );
+        assert!(error.message.starts_with(&expected), "{}", error.message);
+        assert!(
+            error.message.ends_with(&format!(
+                "); outputs go only into existing folders, so create it inside output_root {} first",
+                root.display()
+            )),
+            "{}",
+            error.message
+        );
+        assert!(!folder.exists());
+    }
 
     #[test]
     fn capabilities_summarize_by_default_and_detail_by_section() {

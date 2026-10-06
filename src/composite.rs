@@ -1,6 +1,6 @@
 //! Original integer compositing and source-canvas rectangular mask sampling.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Sampler},
     error,
     time::Time,
@@ -263,7 +263,9 @@ impl RectMask {
             if !(minimum..=32768).contains(value) {
                 return Err(error(
                     "INVALID_MASK",
-                    "Mask position must be -32768..32768 and dimensions 0..32768",
+                    format!(
+                        "rect[{i}]: {value} is outside {minimum}..32768; mask position must be -32768..32768 and dimensions 0..32768"
+                    ),
                 ));
             }
         }
@@ -285,7 +287,8 @@ impl RectMask {
                 curves[i] = entry
                     .as_ref()
                     .map(|c| c.prepare(duration, if i < 2 { -32768 } else { 0 }, 32768))
-                    .transpose()?;
+                    .transpose()
+                    .under(|| format!("animation.{}", ["x", "y", "width", "height"][i]))?;
             }
         }
         Ok(MaskSampler {

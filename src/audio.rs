@@ -1,6 +1,6 @@
 //! Original sample-aligned PCM editing, gain envelopes and deterministic track summation.
 use crate::{
-    Result,
+    At, Result,
     animation::Curve,
     error, media, render,
     scene::{self, Identity},
@@ -211,7 +211,8 @@ impl<'a> Voice<'a> {
                 .gain_curve
                 .as_ref()
                 .map(|c| c.prepare(clip.duration, 0, 4000))
-                .transpose()?,
+                .transpose()
+                .under(|| format!("clip {:?} gain_curve", clip.id))?,
         })
     }
     pub fn weight(&self, i: u64) -> Result<(i128, i128)> {

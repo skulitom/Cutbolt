@@ -1,6 +1,6 @@
 //! Original bounded patch tracking from content-bound local image sequences.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Interpolation, Keyframe},
     composite::{AlphaMode, MaskAnimation, RectMask},
     error,
@@ -52,6 +52,9 @@ pub struct Inspect {
 pub(crate) struct Observation {
     pub time: Time,
     pub layer_time: Time,
+    /// Layer frame at 25 fps, as failures name it.
+    #[serde(skip)]
+    pub layer_frame: u64,
     pub source_frame: usize,
     pub region: [i32; 4],
     pub displacement: [i32; 2],
@@ -65,11 +68,27 @@ pub(crate) struct Observation {
 fn invalid(message: &str) -> crate::Error {
     error("INVALID_TRACKING", message)
 }
-fn lost(n: u64, reason: &str) -> crate::Error {
-    error(
-        "TRACKING_UNRELIABLE",
-        format!("Layer frame {n}: {reason}; no trajectory or replacement scene was produced"),
-    )
+/// A failure at layer frame `frame`, keeping the observations accepted before it in the error's
+/// `detail`, so a caller can shorten the layer to the frames that tracked.
+fn lost(frame: u64, reason: &str, accepted: &[Observation]) -> crate::Error {
+    let outcome = match accepted {
+        [] => "no frame was tracked, and no mask or replacement scene was produced".to_owned(),
+        [only] => format!(
+            "frame {} tracked before it, but no mask or replacement scene was produced",
+            only.layer_frame
+        ),
+        [first, .., last] => format!(
+            "frames {}-{} tracked before it, but no mask or replacement scene was produced",
+            first.layer_frame, last.layer_frame
+        ),
+    };
+    crate::Error {
+        detail: Some(json!({"failed_layer_frame":frame,"observations":accepted})),
+        ..error(
+            "TRACKING_UNRELIABLE",
+            format!("Layer frame {frame}: {reason}; {outcome}"),
+        )
+    }
 }
 
 fn patch(image: &[u8], stride: usize, rect: [i32; 4]) -> Vec<u8> {
@@ -122,12 +141,15 @@ fn correlation(
     )
 }
 
-pub(crate) fn measure(request: &Inspect) -> Result<Vec<Observation>> {
-    measure_impl(request, false)
+/// Track a window cut from a longer layer, whose first frame is `first_frame` of that layer;
+/// failures name the longer layer's frames. Observations of the window are not reported.
+pub(crate) fn measure(request: &Inspect, first_frame: u64) -> Result<Vec<Observation>> {
+    measure_impl(request, false, first_frame).map_err(|e| crate::Error { detail: None, ..e })
 }
 
-pub(crate) fn measure_precise(request: &Inspect) -> Result<Vec<Observation>> {
-    measure_impl(request, true)
+/// `measure` with the sub-pixel refinement stabilization uses.
+pub(crate) fn measure_precise(request: &Inspect, first_frame: u64) -> Result<Vec<Observation>> {
+    measure_impl(request, true, first_frame).map_err(|e| crate::Error { detail: None, ..e })
 }
 
 fn precise_correlation(
@@ -172,7 +194,7 @@ fn precise_correlation(
     Some((product / (energy * variance).sqrt()).clamp(-1.0, 1.0))
 }
 
-fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
+fn measure_impl(request: &Inspect, precise: bool, first_frame: u64) -> Result<Vec<Observation>> {
     let [x, y, w, h] = request.region;
     if !(4..=64).contains(&w)
         || !(4..=64).contains(&h)
@@ -209,16 +231,25 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
             "Tracking requires 2..128 active image frames and an initial patch inside the source canvas",
         ));
     }
-    request.mask.prepare(layer.duration)?;
-    if count
-        * u64::from(2 * request.search_radius + 1).pow(2)
-        * if precise { 26 } else { 1 }
-        * u64::from(w * h)
-        > 64_000_000
-    {
+    request
+        .mask
+        .prepare(layer.duration)
+        .under(|| "mask".into())?;
+    let candidates = u64::from(2 * request.search_radius + 1).pow(2);
+    let work = count * candidates * if precise { 26 } else { 1 } * u64::from(w * h);
+    if work > 64_000_000 {
+        let refinement = if precise {
+            " x 26 comparisons per candidate (one whole-pixel and 25 sub-pixel)"
+        } else {
+            ""
+        };
         return Err(error(
             "LIMIT_EXCEEDED",
-            "Tracking is bounded to 64000000 patch-pixel comparisons; reduce duration, patch or search radius",
+            format!(
+                "Tracking needs {work} patch-pixel comparisons, above the 64000000 limit: {count} frames x {candidates} candidates ((2 x search radius {} + 1)^2){refinement} x {} patch pixels ({w}x{h}); reduce duration, patch or search radius",
+                request.search_radius,
+                w * h
+            ),
         ));
     }
     let mut images = HashMap::new();
@@ -244,8 +275,15 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
     let mut observations = Vec::new();
     let stride = layer.canvas[0] as usize;
     for n in 0..count {
+        let frame_number = first_frame + n;
         let source_frame = scene::select_frame(layer, start + n, Time { num: 25, den: 1 })?
-            .ok_or_else(|| lost(n, "source is transparent beyond its last frame"))?;
+            .ok_or_else(|| {
+                lost(
+                    frame_number,
+                    "source is transparent beyond its last frame",
+                    &observations,
+                )
+            })?;
         let frame = &layer.frames[source_frame];
         let image = &images[&frame.image.path];
         let mut canvas = vec![0u8; (layer.canvas[0] * layer.canvas[1]) as usize];
@@ -290,8 +328,13 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
         });
         if frame_change * 1000.0 > f64::from(request.maximum_frame_change_milli) {
             return Err(lost(
-                n,
-                "whole-canvas change exceeds the declared cut threshold",
+                frame_number,
+                &format!(
+                    "whole-canvas change {:.3} thousandths exceeds the declared cut threshold, maximum_frame_change_milli {}",
+                    frame_change * 1000.0,
+                    request.maximum_frame_change_milli
+                ),
+                &observations,
             ));
         }
         if n == 0 {
@@ -299,9 +342,14 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
             reference_sum = reference.iter().map(|&v| i64::from(v)).sum();
             reference_energy = energy(&reference);
             if reference_energy < 25 * (reference.len() as i64).pow(2) {
+                // The energy is n^2 times the variance.
+                let deviation = (reference_energy as f64).sqrt() / reference.len() as f64;
                 return Err(lost(
-                    n,
-                    "reference patch has less than five encoded levels of luminance deviation",
+                    frame_number,
+                    &format!(
+                        "reference patch {initial:?} has {deviation:.2} encoded levels of luminance deviation, less than the five required; choose a more textured region"
+                    ),
+                    &observations,
                 ));
             }
         }
@@ -372,37 +420,82 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
             second = refined.get(1).map_or(-1.0, |p| p.0);
         }
         let margin = best.0 - second.max(-1.0);
-        if best.0 * 1000.0 + 1e-9 < f64::from(request.minimum_correlation_milli)
-            || margin * 1000.0 + 1e-9 < f64::from(request.minimum_margin_milli)
-        {
+        if best.0 < -1.0 {
             return Err(lost(
-                n,
+                frame_number,
                 &format!(
-                    "patch correlation {:.6} or uniqueness margin {:.6} is insufficient",
-                    best.0, margin
+                    "no candidate within search radius {radius} of {:?} has five encoded levels of luminance deviation",
+                    [previous[0], previous[1]]
                 ),
+                &observations,
+            ));
+        }
+        if best.0 * 1000.0 + 1e-9 < f64::from(request.minimum_correlation_milli) {
+            return Err(lost(
+                frame_number,
+                &format!(
+                    "best match correlation {:.6} at {:?} is below minimum_correlation_milli {} (uniqueness margin {margin:.6})",
+                    best.0,
+                    [best.1[0], best.1[1]],
+                    request.minimum_correlation_milli
+                ),
+                &observations,
+            ));
+        }
+        if margin * 1000.0 + 1e-9 < f64::from(request.minimum_margin_milli) {
+            return Err(lost(
+                frame_number,
+                &format!(
+                    "uniqueness margin {margin:.6} is below minimum_margin_milli {}: the best match at {:?} (correlation {:.6}) barely leads the runner-up ({:.6})",
+                    request.minimum_margin_milli,
+                    [best.1[0], best.1[1]],
+                    best.0,
+                    second.max(-1.0)
+                ),
+                &observations,
             ));
         }
         // The seed region itself must be the unique first match.
         if n == 0 && best.1 != initial {
-            return Err(lost(n, "initial patch is ambiguous"));
+            return Err(lost(
+                frame_number,
+                &format!(
+                    "initial patch {initial:?} is ambiguous: its best match in the first frame is at {:?}",
+                    [best.1[0], best.1[1]]
+                ),
+                &observations,
+            ));
         }
         let step = [
             i64::from(location[0] - previous_milli[0]),
             i64::from(location[1] - previous_milli[1]),
         ];
+        let length = |v: [i64; 2]| ((v[0] * v[0] + v[1] * v[1]) as f64).sqrt() / 1000.0;
         if step.iter().map(|v| v * v).sum::<i64>() > (i64::from(request.maximum_step) * 1000).pow(2)
-            || n > 1
-                && step
-                    .iter()
-                    .zip(previous_step)
-                    .map(|(a, b)| (a - b).pow(2))
-                    .sum::<i64>()
-                    > (i64::from(request.maximum_acceleration) * 1000).pow(2)
         {
             return Err(lost(
-                n,
-                "measured motion exceeds the step or acceleration bound",
+                frame_number,
+                &format!(
+                    "measured step of {:.3} pixels exceeds maximum_step {}",
+                    length(step),
+                    request.maximum_step
+                ),
+                &observations,
+            ));
+        }
+        let change = [step[0] - previous_step[0], step[1] - previous_step[1]];
+        if n > 1
+            && change.iter().map(|v| v * v).sum::<i64>()
+                > (i64::from(request.maximum_acceleration) * 1000).pow(2)
+        {
+            return Err(lost(
+                frame_number,
+                &format!(
+                    "measured step changed by {:.3} pixels from the previous step, exceeding maximum_acceleration {}",
+                    length(change),
+                    request.maximum_acceleration
+                ),
+                &observations,
             ));
         }
         let displacement = [best.1[0] - initial[0], best.1[1] - initial[1]];
@@ -410,6 +503,7 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
         observations.push(Observation {
             time: Time::new(start + n, 25)?,
             layer_time,
+            layer_frame: frame_number,
             source_frame,
             region: best.1,
             displacement,
@@ -431,7 +525,7 @@ fn measure_impl(request: &Inspect, precise: bool) -> Result<Vec<Observation>> {
 }
 
 pub fn inspect(request: &Inspect) -> Result<Value> {
-    let observations = measure(request)?;
+    let observations = measure_impl(request, false, 0)?;
     let layer = request
         .scene
         .layers
@@ -477,6 +571,131 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     )
 }
 
+/// Test footage: a 25 fps scene whose one layer `shot` shows `frames`, gray PNGs of
+/// `width` x `height` luma bytes written into `root` with their identities.
+#[cfg(test)]
+pub(crate) fn footage(
+    root: &std::path::Path,
+    width: u32,
+    height: u32,
+    frames: &[Vec<u8>],
+) -> Scene {
+    use sha2::{Digest, Sha256};
+    let images: Vec<Value> = frames
+        .iter()
+        .enumerate()
+        .map(|(n, luma)| {
+            let name = format!("frame{n}.png");
+            let rgb: Vec<u8> = luma.iter().flat_map(|&v| [v, v, v]).collect();
+            scene::write_png(&root.join(&name), width, height, &rgb).unwrap();
+            let bytes = std::fs::read(root.join(&name)).unwrap();
+            json!({"image":{"path":name,"sha256":format!("{:x}", Sha256::digest(&bytes)),"bytes":bytes.len()},
+                "hold":{"num":1,"den":25},"offset":[0,0],"anchor":[0,0]})
+        })
+        .collect();
+    let duration = json!({"num":frames.len(),"den":25});
+    serde_json::from_value(json!({"schema_version":1,"id":"footage","width":width,"height":height,
+        "duration":duration,"output_scale":1,"background":[0,0,0],"color":"srgb_straight_encoded","audio":null,"layers":[{"id":"shot","canvas":[width,height],
+        "start":{"num":0,"den":1},"duration":duration,"frames":images,"timing":"strict","end":"hold_last",
+        "transform":{"position":[0,0],"crop":[0,0,width,height],"scale":1,"quarter_turns":0,"opacity":255}}]}))
+    .unwrap()
+}
+
+/// Test texture: deterministic noise over the integer plane, so shifted frames keep one match.
+#[cfg(test)]
+pub(crate) fn texture(width: u32, height: u32, shift: [i64; 2]) -> Vec<u8> {
+    let mut pixels = Vec::new();
+    for y in 0..i64::from(height) {
+        for x in 0..i64::from(width) {
+            let (u, v) = ((x - shift[0]) as u64, (y - shift[1]) as u64);
+            let h = u.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ v.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+            pixels.push(((h ^ (h >> 29)).wrapping_mul(0xBF58_476D_1CE4_E5B9) >> 56) as u8);
+        }
+    }
+    pixels
+}
+
+/// A scratch directory removed on drop.
+#[cfg(test)]
+pub(crate) struct Scratch(pub PathBuf);
+#[cfg(test)]
+impl Scratch {
+    pub(crate) fn new(name: &str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "cutbolt-{name}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
+#[cfg(test)]
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 pub fn capabilities() -> Value {
-    json!({"profile":"patch-tracking-v1","models":["translation"],"input":"content_bound_scene_image_layer","space":"source_canvas_before_effects_and_transform","maximum_frames":128,"patch_dimensions":[4,64],"maximum_search_radius":32,"maximum_patch_pixel_comparisons":64000000,"matching":"fixed_initial_template_normalized_alpha_associated_luminance","minimum_luminance_deviation":5,"confidence":"peak_correlation_and_all_other_candidate_margin","failure":"reject_entire_trajectory_without_output","output":"editable_hold_keyframe_mask_and_explicit_replacement_scene","subpixel_motion":false,"scale_rotation_tracking":false,"automatic_recovery":false})
+    json!({"profile":"patch-tracking-v1","models":["translation"],"input":"content_bound_scene_image_layer","space":"source_canvas_before_effects_and_transform","maximum_frames":128,"patch_dimensions":[4,64],"maximum_search_radius":32,"maximum_patch_pixel_comparisons":64000000,"matching":"fixed_initial_template_normalized_alpha_associated_luminance","minimum_luminance_deviation":5,"confidence":"peak_correlation_and_all_other_candidate_margin","failure":"reject_without_mask_or_scene_reporting_accepted_observations","output":"editable_hold_keyframe_mask_and_explicit_replacement_scene","subpixel_motion":false,"scale_rotation_tracking":false,"automatic_recovery":false})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(scene: Scene, root: &std::path::Path, region: [u32; 4], radius: u32) -> Inspect {
+        serde_json::from_value(json!({"scene":scene,"input_root":root,"layer_id":"shot","model":"translation",
+            "region":region,"search_radius":radius,"maximum_step":2.min(radius),"maximum_acceleration":4,
+            "minimum_correlation_milli":900,"minimum_margin_milli":50,"maximum_frame_change_milli":1000,
+            "mask":{"rect":[0,0,8,8],"inverted":false}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn failures_name_the_frame_measurement_and_bound_and_keep_tracked_frames() {
+        let scratch = Scratch::new("tracking-messages");
+        let root = &scratch.0;
+        // The patch moves one pixel, then three: the second step exceeds maximum_step 2.
+        let frames = [[0, 0], [1, 0], [4, 0]].map(|shift| texture(48, 32, shift));
+        let scene = footage(root, 48, 32, &frames);
+        let error = inspect(&request(scene, root, [16, 12, 12, 8], 4)).unwrap_err();
+        assert_eq!(error.code, "TRACKING_UNRELIABLE");
+        assert_eq!(
+            error.message,
+            "Layer frame 2: measured step of 3.000 pixels exceeds maximum_step 2; frames 0-1 tracked before it, but no mask or replacement scene was produced"
+        );
+        let detail = error.detail.unwrap();
+        assert_eq!(detail["failed_layer_frame"], 2);
+        let observations = detail["observations"].as_array().unwrap();
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations[1]["displacement"], json!([1, 0]));
+        assert_eq!(observations[1]["layer_time"], json!({"num":1,"den":25}));
+
+        // A flat reference patch reports its measured deviation against the required five levels.
+        let flat = Scratch::new("tracking-flat");
+        let scene = footage(&flat.0, 48, 32, &[vec![128; 48 * 32], vec![128; 48 * 32]]);
+        let error = inspect(&request(scene, &flat.0, [16, 12, 12, 8], 4)).unwrap_err();
+        assert_eq!(
+            error.message,
+            "Layer frame 0: reference patch [16, 12, 12, 8] has 0.00 encoded levels of luminance deviation, less than the five required; choose a more textured region; no frame was tracked, and no mask or replacement scene was produced"
+        );
+        assert_eq!(error.detail.unwrap()["observations"], json!([]));
+    }
+
+    #[test]
+    fn excessive_work_states_the_count_and_its_terms() {
+        let scratch = Scratch::new("tracking-limit");
+        let frames = vec![texture(64, 64, [0, 0]); 4];
+        let scene = footage(&scratch.0, 64, 64, &frames);
+        let error = inspect(&request(scene, &scratch.0, [0, 0, 64, 64], 32)).unwrap_err();
+        assert_eq!(error.code, "LIMIT_EXCEEDED");
+        assert_eq!(
+            error.message,
+            "Tracking needs 69222400 patch-pixel comparisons, above the 64000000 limit: 4 frames x 4225 candidates ((2 x search radius 32 + 1)^2) x 4096 patch pixels (64x64); reduce duration, patch or search radius"
+        );
+    }
 }

@@ -778,6 +778,42 @@ pub(crate) fn destination(output: &Path, root: &Path) -> Result<PathBuf> {
     destination_extension(output, root, "mkv")
 }
 
+/// The resolved, existing folder an output goes in. Outputs never create folders, so a missing
+/// one is named, with the root to create it in, rather than left to the bare OS error.
+pub(crate) fn output_folder(output: &Path, root: &Path) -> Result<PathBuf> {
+    let parent = output
+        .parent()
+        .ok_or_else(|| error("INVALID_PATH", "Missing output parent"))?;
+    parent.canonicalize().map_err(|e| {
+        let problem = if e.kind() == std::io::ErrorKind::NotFound {
+            format!(
+                "does not exist ({e}); outputs go only into existing folders, so create it inside output_root {} first",
+                root.display()
+            )
+        } else {
+            format!("cannot be resolved ({e})")
+        };
+        error(
+            "IO_ERROR",
+            format!(
+                "Output folder {} for {} {problem}",
+                parent.display(),
+                output.display()
+            ),
+        )
+    })
+}
+
+/// `root` resolved, naming it when it cannot be.
+pub(crate) fn output_root(root: &Path) -> Result<PathBuf> {
+    root.canonicalize().map_err(|e| {
+        error(
+            "IO_ERROR",
+            format!("output_root {} cannot be resolved ({e})", root.display()),
+        )
+    })
+}
+
 pub(crate) fn destination_extension(
     output: &Path,
     root: &Path,
@@ -786,11 +822,8 @@ pub(crate) fn destination_extension(
     if !output.is_absolute() || !root.is_absolute() {
         return Err(error("INVALID_PATH", "Output and root must be absolute"));
     }
-    let parent = output
-        .parent()
-        .ok_or_else(|| error("INVALID_PATH", "Missing output parent"))?
-        .canonicalize()?;
-    if !parent.starts_with(root.canonicalize()?) {
+    let parent = output_folder(output, root)?;
+    if !parent.starts_with(output_root(root)?) {
         return Err(error(
             "PATH_OUTSIDE_ROOT",
             "Output must be inside the allowed output root",
@@ -1512,6 +1545,45 @@ mod tests {
         assert_eq!(fs::read(&sentinel).unwrap(), b"preserve this file");
         fs::remove_file(sentinel).unwrap();
         fs::remove_dir(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_output_folder_is_named_with_its_root() {
+        let scratch = crate::tracking::Scratch::new("missing-output-folder");
+        let root = &scratch.0;
+        let folder = root.join("renders");
+        let output = folder.join("final.mkv");
+        let error = destination(&output, root).unwrap_err();
+        assert_eq!(error.code, "IO_ERROR");
+        assert!(
+            error.message.starts_with(&format!(
+                "Output folder {} for {} does not exist (",
+                folder.display(),
+                output.display()
+            )),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.ends_with(&format!(
+                "); outputs go only into existing folders, so create it inside output_root {} first",
+                root.display()
+            )),
+            "{}",
+            error.message
+        );
+        // Rendering never creates folders.
+        assert!(!folder.exists());
+        fs::create_dir(&folder).unwrap();
+        assert_eq!(
+            destination(&output, root).unwrap(),
+            folder.canonicalize().unwrap().join("final.mkv")
+        );
     }
 }
 

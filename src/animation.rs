@@ -1,5 +1,5 @@
 //! Original bounded rational property sampling for pixel scenes.
-use crate::{Result, error, time::Time};
+use crate::{At, Result, error, time::Time};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
@@ -59,6 +59,18 @@ fn invalid(message: &str) -> crate::Error {
     error("INVALID_ANIMATION", message)
 }
 
+/// Exact seconds for messages, with the decimal value when it is a fraction: `34/5 s (6.8 s)`.
+fn seconds(time: Time) -> String {
+    if time.den == 1 {
+        return format!("{time} s");
+    }
+    let decimal = format!("{:.6}", time.num as f64 / time.den as f64);
+    format!(
+        "{time} s ({} s)",
+        decimal.trim_end_matches('0').trim_end_matches('.')
+    )
+}
+
 impl Curve {
     pub(crate) fn prepare(&self, duration: Time, minimum: i32, maximum: i32) -> Result<Sampler> {
         self.prepare_keys(duration, minimum, maximum, 128)
@@ -72,41 +84,83 @@ impl Curve {
         keys: usize,
     ) -> Result<Sampler> {
         if self.keys.is_empty() || self.keys.len() > keys {
-            return Err(invalid(&format!("Each curve requires 1-{keys} keys")));
+            return Err(invalid(&format!(
+                "keys: each curve requires 1-{keys} keys, got {}",
+                self.keys.len()
+            )));
         }
         let mut keys = self.keys.clone();
-        for key in &mut keys {
-            key.time.validate()?;
-            key.time = Time::new(key.time.num, key.time.den)?;
-            if key.time.den > 1_000_000
-                || key.time.compare(duration)? == Ordering::Greater
-                || !(minimum..=maximum).contains(&key.value)
-            {
-                return Err(invalid(
-                    "Keys must lie within layer duration, use reduced denominators <=1000000 and bounded property values",
-                ));
+        for (index, key) in keys.iter_mut().enumerate() {
+            key.time.validate().at(|| format!("keys[{index}].time"))?;
+            key.time =
+                Time::new(key.time.num, key.time.den).at(|| format!("keys[{index}].time"))?;
+            if key.time.den > 1_000_000 {
+                return Err(invalid(&format!(
+                    "keys[{index}].time: {} reduces to denominator {}, above the 1000000 limit; use a coarser fraction",
+                    seconds(key.time),
+                    key.time.den
+                )));
+            }
+            if key.time.compare(duration)? == Ordering::Greater {
+                return Err(invalid(&format!(
+                    "keys[{index}].time: {} is past the end of the {} duration; key times must lie within 0..duration",
+                    seconds(key.time),
+                    seconds(duration)
+                )));
+            }
+            if !(minimum..=maximum).contains(&key.value) {
+                return Err(invalid(&format!(
+                    "keys[{index}].value: {} is outside the property's range {minimum}..{maximum}",
+                    key.value
+                )));
             }
         }
-        keys.sort_by(|a, b| a.time.compare(b.time).expect("validated key times"));
-        if keys.windows(2).any(|pair| pair[0].time == pair[1].time) {
-            return Err(invalid(
-                "Equal-time keys are ambiguous, including equivalent rational times",
-            ));
+        // Sort positions rather than keys, so an equal-time pair is named by its authored indexes.
+        let mut order: Vec<usize> = (0..keys.len()).collect();
+        order.sort_by(|&a, &b| {
+            keys[a]
+                .time
+                .compare(keys[b].time)
+                .expect("validated key times")
+                .then(a.cmp(&b))
+        });
+        if let Some(pair) = order
+            .windows(2)
+            .find(|pair| keys[pair[0]].time == keys[pair[1]].time)
+        {
+            return Err(invalid(&format!(
+                "keys[{}].time: {} equals keys[{}].time; equal-time keys are ambiguous, including equivalent rational times",
+                pair[1],
+                seconds(keys[pair[1]].time),
+                pair[0]
+            )));
         }
+        let keys = order.into_iter().map(|i| keys[i].clone()).collect();
         if let Some(retime) = self.retime {
-            for time in [retime.start, retime.rate] {
-                time.validate()?;
-                if Time::new(time.num, time.den)?.den > 1_000_000 {
-                    return Err(invalid("Retime denominators must reduce to <=1000000"));
+            for (field, time) in [("start", retime.start), ("rate", retime.rate)] {
+                time.validate().at(|| format!("retime.{field}"))?;
+                let reduced = Time::new(time.num, time.den).at(|| format!("retime.{field}"))?;
+                if reduced.den > 1_000_000 {
+                    return Err(invalid(&format!(
+                        "retime.{field}: {reduced} reduces to denominator {}, above the 1000000 limit",
+                        reduced.den
+                    )));
                 }
             }
-            if retime.start.compare(duration)? == Ordering::Greater
-                || retime.rate.compare(Time::new(1, 16)?)? == Ordering::Less
+            if retime.start.compare(duration)? == Ordering::Greater {
+                return Err(invalid(&format!(
+                    "retime.start: {} is past the end of the {} duration; retime start must fit the layer",
+                    seconds(retime.start),
+                    seconds(duration)
+                )));
+            }
+            if retime.rate.compare(Time::new(1, 16)?)? == Ordering::Less
                 || retime.rate.compare(Time::new(16, 1)?)? == Ordering::Greater
             {
-                return Err(invalid(
-                    "Retime start must fit the layer and rate must be 1/16..16",
-                ));
+                return Err(invalid(&format!(
+                    "retime.rate: {} is outside 1/16..16",
+                    retime.rate
+                )));
             }
         }
         Ok(Sampler {
@@ -231,6 +285,50 @@ impl Sampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejections_name_the_field_value_and_rule() {
+        let duration = Time::new(168, 25).unwrap();
+        let message = |curve: Curve| curve.prepare(duration, 0, 255).err().unwrap().message;
+        let one = vec![key(0, 1, 0, Interpolation::Hold)];
+        assert_eq!(
+            message(Curve {
+                keys: Vec::new(),
+                retime: None
+            }),
+            "keys: each curve requires 1-128 keys, got 0"
+        );
+        let retimed = |start: Time, rate: Time| Curve {
+            keys: one.clone(),
+            retime: Some(Retime {
+                start,
+                rate,
+                reverse: false,
+            }),
+        };
+        assert_eq!(
+            message(retimed(Time::new(7, 1).unwrap(), Time::new(1, 1).unwrap())),
+            "retime.start: 7 s is past the end of the 168/25 s (6.72 s) duration; retime start must fit the layer"
+        );
+        assert_eq!(
+            message(retimed(Time::ZERO, Time::new(1, 32).unwrap())),
+            "retime.rate: 1/32 is outside 1/16..16"
+        );
+        let invalid = Curve {
+            keys: vec![Keyframe {
+                time: Time { num: 1, den: 0 },
+                ..one[0].clone()
+            }],
+            retime: None,
+        };
+        let error = invalid.prepare(duration, 0, 255).err().unwrap();
+        assert_eq!(error.code, "INVALID_TIME");
+        assert!(
+            error.message.starts_with("keys[0].time: "),
+            "{}",
+            error.message
+        );
+    }
 
     fn key(n: u64, d: u64, value: i32, interpolation: Interpolation) -> Keyframe {
         Keyframe {
