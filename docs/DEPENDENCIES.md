@@ -238,6 +238,8 @@ The reference renderer uses FFV1 and PCM. The bounded [media-conform matrix](CON
 
 Other formats/encoders present in the build remain outside the declared engine contract. No dependency version changed for these additions.
 
+The [animated GIF profile](EXPORT_FORMATS.md#animated-gif) encodes with original Rust written from the public [GIF89a specification](https://www.w3.org/Graphics/GIF/spec-gif89a.txt). It uses no GIF library, palette filter or encoder from the FFmpeg build. Verification decodes the result with the same build's GIF demuxer and decoder. Its fixture also decodes every frame with an original Python reader. No dependency was added.
+
 The [high-bit-depth/HDR path](HDR.md) selects the same external build's FFV1 native planar RGB/YUV444 10/12/16-bit decoding and RGB16 encoding. Transfer, gamut, exposure and tone calculations are original Rust using public equations; the engine writes standard declared display metadata into reserved space in its own temporary Matroska output. The acceptance fixture also uses this existing build's `zscale` filter as an external PQ-to-linear numerical reference. No additional package, binary, source, specification copy or fixture asset is vendored, and the selected build/version/license is unchanged. Public references and the comparison tolerance are in the HDR contract.
 
 ## External compatibility pilot assets and tools

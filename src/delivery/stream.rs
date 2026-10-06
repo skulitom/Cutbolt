@@ -130,7 +130,8 @@ struct Outputs<'a> {
 /// One FFmpeg run: the reference graph extended to split the picture after packing it as RGB24
 /// and the mix, then three outputs. The delivery comes first, so x264 is output stream 0 in both
 /// passes and finds its pass-1 statistics by that index; the frames then go to stdout and the
-/// samples to `pcm`, all at the timeline's exact clock.
+/// samples to `pcm`, all at the timeline's exact clock. Without delivered audio the mix goes to a
+/// null output instead.
 fn arguments(request: &Export, c: &Checked, o: Outputs) -> Vec<String> {
     let rate = c.project.frame_rate;
     let audio = request.streams.audio() && o.pass != Some(1);
@@ -139,11 +140,9 @@ fn arguments(request: &Export, c: &Checked, o: Outputs) -> Vec<String> {
         "{};{}format=rgb24,split=2[export_rgb][export_yuv];[export_yuv]{conversion}[export_video]",
         o.graph, o.picture
     );
-    graph.push_str(if audio {
-        ";[aout]asplit=2[export_pcm][export_audio]"
-    } else {
-        ";[aout]anullsink"
-    });
+    if audio {
+        graph.push_str(";[aout]asplit=2[export_pcm][export_audio]");
+    }
     let clock = [
         "-r".to_owned(),
         format!("{}/{}", rate.num, rate.den),
@@ -174,6 +173,12 @@ fn arguments(request: &Export, c: &Checked, o: Outputs) -> Vec<String> {
             ["-map", "[export_pcm]", "-c:a", "pcm_s16le", "-f", "s16le"].map(str::to_owned),
         );
         args.push(o.pcm.to_string_lossy().into_owned());
+    } else {
+        // The graph still computes the mix, so an output must read it to its end. With an
+        // `anullsink` in the graph instead, FFmpeg 7.0 could finish the picture while the sink
+        // still awaited the mix's end, with every input already closed, and abort on
+        // `best_input >= 0` (a one-clip 1080p timeline, video only).
+        args.extend(["-map", "[aout]", "-c:a", "pcm_s16le", "-f", "null", "-"].map(str::to_owned));
     }
     args
 }
@@ -323,6 +328,7 @@ mod tests {
             h264,
             aac_bitrate: None,
             sequence_first: None,
+            gif: None,
         }
     }
     fn outputs(c: &Checked, request: &Export, pass: Option<u8>) -> Vec<String> {
@@ -442,14 +448,21 @@ mod tests {
     fn video_only_and_first_passes_return_frames_but_no_samples() {
         let c = checked(Time::new(25, 1).unwrap());
         let video = outputs(&c, &request(&c, Streams::Video, None), None);
-        assert!(video[position(&video, "-filter_complex") + 1].ends_with(";[aout]anullsink"));
+        // The unused mix is read to its end by a null output, never by a sink inside the graph.
+        let graph = &video[position(&video, "-filter_complex") + 1];
+        assert!(graph.ends_with("[export_video]") && !graph.contains("nullsink"));
         assert!(
             !video
                 .iter()
                 .any(|a| a == "[export_pcm]" || a == "[export_audio]")
         );
         assert!(position(&video, "scratch/encoded.mp4") < position(&video, "[export_rgb]"));
-        assert_eq!(video.last().unwrap(), "pipe:1");
+        let mix = position(&video, "[aout]");
+        assert!(position(&video, "pipe:1") < mix);
+        assert_eq!(
+            video[mix - 1..],
+            ["-map", "[aout]", "-c:a", "pcm_s16le", "-f", "null", "-"]
+        );
         let two_pass = H264 {
             rate_control: RateControl::TwoPass {
                 bitrate: 1_000_000,
@@ -461,13 +474,13 @@ mod tests {
         let both = request(&c, Streams::AudioVideo, Some(two_pass));
         let first = outputs(&c, &both, Some(1));
         let at = position(&first, "-filter_complex");
-        assert!(first[at + 1].ends_with(";[aout]anullsink"));
-        assert!(!first.iter().any(|a| a == "[export_pcm]" || a == "-c:a"));
+        assert!(first[at + 1].ends_with("[export_video]"));
+        assert!(!first.iter().any(|a| a == "[export_pcm]" || a == "aac"));
         assert_eq!(first[position(&first, "-pass") + 1], "1");
         let null = position(&first, "null");
         assert_eq!(first[null - 1..null + 2], ["-f", "null", "-"]);
         assert!(null < position(&first, "[export_rgb]"));
-        assert_eq!(first.last().unwrap(), "pipe:1");
+        assert_eq!(first[first.len() - 7..first.len() - 5], ["-map", "[aout]"]);
         // x264 is the first output stream in both passes.
         let second = outputs(&c, &both, Some(2));
         assert_eq!(first[at + 2..at + 4], ["-map", "[export_video]"]);

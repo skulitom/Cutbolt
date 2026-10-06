@@ -200,6 +200,19 @@ def run(root):
             raw=decode(r['output'],False);assert raw==bytes(2048*4) and receipt['audio_samples']==1920;samples_checked+=1920
         cases.append(Path(r['output']).name)
 
+    # Regression: one appended clip spanning its whole source, as H.264 video only. The unused mix
+    # once ended in a sink inside the graph, and FFmpeg 7.0 aborted on "best_input >= 0".
+    p=call({'command':'project.create','id':'one-clip','width':W,'height':H,'frame_rate':time(25)})
+    p=call({'command':'timeline.apply','project':p,'expected_revision':0,'operations':[{'op':'media.add','asset':assets[0]},{'op':'clip.append','clip':{'id':'whole','asset_id':'source-0','source_in':time(0),'duration':time(N,25)}}]})
+    whole=hashlib.sha256(b''.join(frame(0,n) for n in range(N))).hexdigest()
+    for streams in ('video','audio_video'):
+        r=request('one-clip-'+streams,'h264_aac',streams,p=p,transfer='bt709');receipt=call(r)
+        assert receipt['video_frames']==N and receipt['verification']['encoder_input']=='streamed'
+        assert receipt['verification']['timeline_video_sha256']==whole
+        assert len(decode(r['output'],True))==N*W*H*3;frames_checked+=N
+        cases.append(Path(r['output']).name)
+    passed.append('delivery.one_clip_video_only')
+
     # Preview attachments are deliberately offline during export; full-quality data must still win.
     proxy=call({'command':'proxy.generate','project':project,'expected_revision':project['revision'],'asset_id':'source-0','scale':2,'input_root':str(sources),'output_root':str(output),'output':str(output/'proxy.mkv')})
     preview=call({'command':'timeline.apply','project':project,'expected_revision':project['revision'],'operations':proxy['operations']+[{'op':'preview.proxy','scale':2}]})

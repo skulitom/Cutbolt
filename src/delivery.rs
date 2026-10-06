@@ -11,11 +11,13 @@ use std::{
 };
 
 const FPS: Time = Time { num: 25, den: 1 };
+mod gif;
 mod sequence;
 mod settings;
 mod stream;
+pub use gif::{Gif, GifTiming};
 pub use settings::{Compatibility, H264, RateControl};
-/// Export profile: `reference` (FFV1/bgr0 and PCM16 `.mkv`, audio-only `.wav`), `h264_aac` (`.mp4` at the timeline's native rate, audio-only `.m4a`), `png_mov` (PNG RGB and optional PCM16 `.mov`), `png_sequence` (new `.frames` directory of numbered PNGs, manifest and optional WAV; Windows only).
+/// Export profile: `reference` (FFV1/bgr0 and PCM16 `.mkv`, audio-only `.wav`), `h264_aac` (`.mp4` at the timeline's native rate, audio-only `.m4a`), `png_mov` (PNG RGB and optional PCM16 `.mov`), `png_sequence` (new `.frames` directory of numbered PNGs, manifest and optional WAV; Windows only), `gif` (animated `.gif`, video only, each frame's exact colors; a frame over 256 colors is refused).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Profile {
@@ -23,8 +25,9 @@ pub enum Profile {
     H264Aac,
     PngMov,
     PngSequence,
+    Gif,
 }
-/// Streams to write: `audio_video`, `video` or `audio` (48 kHz stereo); PNG profiles need video.
+/// Streams to write: `audio_video`, `video` or `audio` (48 kHz stereo); PNG profiles need video, and GIF takes `video` only.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Streams {
@@ -107,7 +110,7 @@ pub struct Export {
     /// Timeline interval to export; omit or null for the whole timeline.
     #[serde(default)]
     pub range: Option<Range>,
-    /// Transfer of the timeline's encoded RGB values for H.264 and PNG video: for H.264, `srgb` converts to BT.709 transfer first and `bt709` passes values unchanged; PNG keeps values and tags the choice. Omit to use the project's declared `transfer`; reference and audio-only exports take none.
+    /// Transfer of the timeline's encoded RGB values for H.264 and PNG video: for H.264, `srgb` converts to BT.709 transfer first and `bt709` passes values unchanged; PNG keeps values and tags the choice. Omit to use the project's declared `transfer`; reference, GIF and audio-only exports take none.
     #[serde(default)]
     pub input_transfer: Option<Transfer>,
     /// H.264 encoder settings, only for `h264_aac` with video; omit for High profile CRF 18.
@@ -119,6 +122,9 @@ pub struct Export {
     /// First image number for `png_sequence` only (default 0); all numbers must fit six digits.
     #[serde(default)]
     pub sequence_first: Option<u32>,
+    /// GIF settings, only for the `gif` profile: `plays` (omit to loop endlessly) and `timing` (omit for exact 25 or 50 fps delays).
+    #[serde(default)]
+    pub gif: Option<Gif>,
 }
 struct Checked {
     project: Project,
@@ -152,9 +158,10 @@ fn nonce() -> Result<String> {
     ))
 }
 impl Export {
-    /// H.264 and PNG video convert or tag encoded values, so they need a transfer.
+    /// H.264 and PNG video convert or tag encoded values, so they need a transfer. GIF has no
+    /// transfer tag and keeps the values, which viewers read as sRGB.
     fn color_needed(&self) -> bool {
-        self.profile != Profile::Reference && self.streams.video()
+        !matches!(self.profile, Profile::Reference | Profile::Gif) && self.streams.video()
     }
     /// Transfer applied to video: `input_transfer`, else the project's declaration; none for
     /// reference and audio-only exports. Validated by `selected`.
@@ -171,6 +178,7 @@ impl Export {
             (Profile::H264Aac, _) => "mp4",
             (Profile::PngMov, _) => "mov",
             (Profile::PngSequence, _) => "frames",
+            (Profile::Gif, _) => "gif",
         }
     }
     fn selected(&self) -> Result<(Project, Range)> {
@@ -188,15 +196,25 @@ impl Export {
                 "Export range must contain 1..180000 whole frames inside the timeline",
             ));
         }
-        if matches!(self.profile, Profile::PngMov | Profile::PngSequence)
-            && (!self.streams.video()
-                || self.project.width > 4096
-                || self.project.height > 4096
-                || self.project.width as u64 * self.project.height as u64 > 8_847_360)
+        if self.profile == Profile::Gif && self.streams != Streams::Video {
+            return Err(invalid("GIF holds pictures only; pass streams: \"video\""));
+        }
+        if matches!(
+            self.profile,
+            Profile::PngMov | Profile::PngSequence | Profile::Gif
+        ) && (!self.streams.video()
+            || self.project.width > 4096
+            || self.project.height > 4096
+            || self.project.width as u64 * self.project.height as u64 > 8_847_360)
         {
             return Err(invalid(
-                "PNG exports require video with dimensions at most 4096 and at most 8847360 pixels",
+                "PNG and GIF exports require video with dimensions at most 4096 and at most 8847360 pixels",
             ));
+        }
+        if self.profile == Profile::Gif {
+            self.gif.unwrap_or_default().validate(rate)?;
+        } else if self.gif.is_some() {
+            return Err(invalid("gif settings require the gif profile"));
         }
         if self.profile == Profile::PngSequence {
             if !cfg!(windows) {
@@ -214,7 +232,7 @@ impl Export {
         }
         if !self.color_needed() && self.input_transfer.is_some() {
             return Err(invalid(
-                "Reference and audio-only exports keep encoded values; omit input_transfer",
+                "Reference, GIF and audio-only exports keep encoded values; omit input_transfer",
             ));
         }
         if self.color_needed()
@@ -284,13 +302,13 @@ impl Export {
     }
 }
 fn report(request: &Export, c: &Checked) -> Value {
-    json!({"profile":request.profile,"profile_version":if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
+    json!({"profile":request.profile,"profile_version":if request.profile==Profile::Gif{1}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
         "timeline_frames":c.reference.frames,"video_frames":if request.streams.video(){c.reference.frames}else{0},"audio_samples":if request.streams.audio(){c.reference.samples}else{0},
         "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.transfer(),"sources":c.reference.sources,
-        "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report(c.project.width,c.project.height,c.project.frame_rate)},
+        "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Gif{request.gif.unwrap_or_default().report(c.project.frame_rate,c.reference.frames)}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report(c.project.width,c.project.height,c.project.frame_rate)},
         "audio":if !request.streams.audio(){Value::Null}else if request.profile!=Profile::H264Aac{json!({"codec":"pcm_s16le","sample_rate":48000,"channels":2,"decoded_tail_padding":0})}else{json!({"codec":"aac","profile":"LC","bitrate":request.aac_bitrate.unwrap_or(320000),"coder":"twoloop","noise_substitution":false,"cutoff_hz":aac_cutoff(request.aac_bitrate.unwrap_or(320000)),"sample_rate":48000,"channels":2,"presentation_samples":c.reference.samples,"decoder_tail_padding":"reported_separately_0_to_1023_samples"})},
         "encoder_passes":if request.profile==Profile::Reference{0}else if request.streams.video() && request.h264.unwrap_or_default().rate_control.two_pass(){2}else{1},
-        "container":match request.profile { Profile::H264Aac=>"mp4",Profile::PngMov=>"mov",Profile::PngSequence=>"numbered_png_and_manifest",Profile::Reference=>if request.streams==Streams::Audio{"wav"}else{"matroska"}},"sequence_first":if request.profile==Profile::PngSequence{Some(request.sequence_first.unwrap_or(0))}else{None}})
+        "container":match request.profile { Profile::H264Aac=>"mp4",Profile::PngMov=>"mov",Profile::PngSequence=>"numbered_png_and_manifest",Profile::Gif=>"gif",Profile::Reference=>if request.streams==Streams::Audio{"wav"}else{"matroska"}},"sequence_first":if request.profile==Profile::PngSequence{Some(request.sequence_first.unwrap_or(0))}else{None}})
 }
 pub fn inspect(request: &Export) -> Result<Value> {
     let c = request.check()?;
@@ -314,6 +332,7 @@ impl Drop for Scratch {
             "encoded.m4a",
             "encoded.wav",
             "encoded.mov",
+            "encoded.gif",
             "decoded.pcm",
             "reference.pcm",
             "timeline.pcm",
@@ -648,6 +667,8 @@ fn validate_output(
         container.split(',').any(|s| s == "mp4")
     } else if request.profile == Profile::PngMov {
         container.split(',').any(|s| s == "mov")
+    } else if request.profile == Profile::Gif {
+        container == "gif"
     } else if request.streams == Streams::Audio {
         container == "wav"
     } else {
@@ -728,13 +749,24 @@ fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, Result<T>>) -> Result<T> 
 }
 /// The output video stream's codec, color tags and exact duration for the profile.
 fn check_video_stream(request: &Export, c: &Checked, v: &Value, metadata: &Value) -> Result<()> {
+    // A GIF's frames carry their own delays, checked frame by frame instead of a stream rate.
     if v["width"] != c.project.width
         || v["height"] != c.project.height
-        || !render::clock::rate_hint(v, metadata, c.project.frame_rate)
+        || request.profile != Profile::Gif
+            && !render::clock::rate_hint(v, metadata, c.project.frame_rate)
     {
         return Err(verification("Output video geometry/rate mismatch"));
     }
-    if request.profile == Profile::Reference {
+    if request.profile == Profile::Gif {
+        if v["codec_name"] != "gif"
+            || v["start_pts"] != 0
+            || exact_time(v, "duration_ts")?
+                .compare(gif::length(c.project.frame_rate, c.reference.frames)?)?
+                .is_ne()
+        {
+            return Err(verification("Unexpected GIF codec or animation length"));
+        }
+    } else if request.profile == Profile::Reference {
         if v["codec_name"] != "ffv1" || v["pix_fmt"] != "bgr0" {
             return Err(verification("Unexpected reference video codec"));
         }
@@ -815,14 +847,20 @@ fn decoded_timestamps(request: &Export, c: &Checked, path: &Path, v: &Value) -> 
     for (n, frame) in frames.iter().enumerate() {
         let mut timestamp = frame.clone();
         timestamp["time_base"] = v["time_base"].clone();
+        // GIF frames start at whole centiseconds: exactly on time at 25 and 50 fps.
+        let expected = if request.profile == Profile::Gif {
+            Time::new(gif::start(c.project.frame_rate, n as u64), 100)?
+        } else {
+            Time::new(
+                n as u64 * c.project.frame_rate.den,
+                c.project.frame_rate.num,
+            )?
+        };
         if request.profile == Profile::Reference {
             render::clock::timestamp(frame, n, c.project.frame_rate, v)
                 .map_err(|_| verification("Decoded frame timestamp mismatch"))?;
         } else if exact_time(&timestamp, "best_effort_timestamp")?
-            .compare(Time::new(
-                n as u64 * c.project.frame_rate.den,
-                c.project.frame_rate.num,
-            )?)?
+            .compare(expected)?
             .is_ne()
         {
             return Err(verification("Decoded frame timestamp mismatch"));
@@ -917,6 +955,7 @@ pub fn run(request: &Export) -> Result<Value> {
     // H.264 video is encoded straight from the timeline. Other outputs are made from a verified
     // lossless intermediate, which they must then match exactly.
     let streamed = stream::encode(request, &c, &scratch.0, &encoded, &control)?;
+    let mut measured = None;
     if streamed.is_none() {
         let render = if audio_only {
             render::run_audio_range
@@ -934,26 +973,31 @@ pub fn run(request: &Export) -> Result<Value> {
         if request.profile == Profile::PngSequence {
             return sequence::run(request, &c, &reference, &scratch.0);
         }
-        let two_pass = request.profile == Profile::H264Aac
-            && request.streams.video()
-            && request.h264.unwrap_or_default().rate_control.two_pass();
-        // Long exports get time in proportion: at least 2 Mpx per second beyond the fixed allowance.
-        let pixels = u64::from(c.project.width) * u64::from(c.project.height);
-        let timeout =
-            Duration::from_secs(600) + Duration::from_millis(c.reference.frames * pixels / 2_000);
-        let encode = |pass: Option<u8>, phase: &str| -> Result<()> {
-            control.phase(phase)?;
-            let mut args = arguments(request, &reference, &encoded, pass, &scratch.0);
-            args.splice(
-                0..0,
-                ["-progress".into(), "pipe:1".into(), "-nostats".into()],
-            );
-            media::capture_controlled(&media::tool("ffmpeg"), &args, timeout, &control).map(|_| ())
-        };
-        if two_pass {
-            encode(Some(1), "encoding pass 1")?;
+        if request.profile == Profile::Gif {
+            measured = Some(gif::encode(request, &c, &reference, &encoded, &control)?);
+        } else {
+            let two_pass = request.profile == Profile::H264Aac
+                && request.streams.video()
+                && request.h264.unwrap_or_default().rate_control.two_pass();
+            // Long exports get time in proportion: at least 2 Mpx per second beyond the fixed allowance.
+            let pixels = u64::from(c.project.width) * u64::from(c.project.height);
+            let timeout = Duration::from_secs(600)
+                + Duration::from_millis(c.reference.frames * pixels / 2_000);
+            let encode = |pass: Option<u8>, phase: &str| -> Result<()> {
+                control.phase(phase)?;
+                let mut args = arguments(request, &reference, &encoded, pass, &scratch.0);
+                args.splice(
+                    0..0,
+                    ["-progress".into(), "pipe:1".into(), "-nostats".into()],
+                );
+                media::capture_controlled(&media::tool("ffmpeg"), &args, timeout, &control)
+                    .map(|_| ())
+            };
+            if two_pass {
+                encode(Some(1), "encoding pass 1")?;
+            }
+            encode(two_pass.then_some(2), "encoding")?;
         }
-        encode(two_pass.then_some(2), "encoding")?;
     }
     control.phase("verifying")?;
     let lossless = (request.profile != Profile::H264Aac).then_some(reference.as_path());
@@ -978,6 +1022,12 @@ pub fn run(request: &Export) -> Result<Value> {
         verified["timeline_audio_sha256"] = json!(timeline.audio);
     }
     let mut result = report(request, &c);
+    if let Some(Value::Object(measured)) = measured {
+        result["video"]
+            .as_object_mut()
+            .expect("GIF video settings")
+            .extend(measured);
+    }
     result["verification"] = verified;
     result["sha256"] = json!(media::file_hash(&encoded)?);
     result["ffmpeg"] = json!(media::version("ffmpeg")?);
@@ -986,5 +1036,7 @@ pub fn run(request: &Export) -> Result<Value> {
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    json!({"profiles":["reference","h264_aac","png_mov","png_sequence"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_encoder":"native_lc_twoloop_without_noise_substitution","aac_cutoff_hz":{"192000":null,"256000":null,"320000":AAC_CUTOFF_HZ},"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},"queued":false})
+    json!({"profiles":["reference","h264_aac","png_mov","png_sequence","gif"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_encoder":"native_lc_twoloop_without_noise_substitution","aac_cutoff_hz":{"192000":null,"256000":null,"320000":AAC_CUTOFF_HZ},"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},
+        "gif":{"streams":"video","maximum_dimension":4096,"maximum_pixels":8847360,"palette":"exact_local_table_per_frame","maximum_colors_per_frame":256,"more_colors":"refused_never_quantized","input_transfer":"none_values_preserved","plays_default":"endless","plays":[1,65536],"timing":{"exact":["25","50"],"nearest_centisecond":["24","24000/1001","30","30000/1001"],"refused":["60","60000/1001"]}},
+        "queued":false})
 }
