@@ -309,6 +309,14 @@ def grow(rms, lo, hi, low, high, threshold):
     return lo, hi
 
 
+# The share of frames that must hear speech: of a recognized segment's CTC spans, and of an uncovered
+# sound from its first letter to its last. In the effects reel's speech check, "Thanks for watching!"
+# written over a music bed that the acoustic model reads as a few scattered letters a second ("OTUR",
+# "ORS OR") had 6.4% of its frames heard, and the bed's letters 7%; every narrated sentence had
+# about 39% or more, every narrated word at least 20%.
+HEARD_SHARE = 0.15
+
+
 def uncovered(pcm, best, letter, separator, names, frames, raw, np):
     """Speech that no word covers, for review, such as a filler the recognizer left out.
 
@@ -318,8 +326,9 @@ def uncovered(pcm, best, letter, separator, names, frames, raw, np):
     overlapping merge. A group whose sound runs on into a word's CTC span without such a dip is
     left to that word: it cannot be told from the word's own onset or ending, which the aligner
     can place a little late or early. A group whose peak is more than 14 dB below the median
-    level inside the words is background and left out too. Each reports the letters the acoustic
-    model read there, never a word.
+    level inside the words is background and left out too, and so is a sound whose letters are
+    scattered: fewer than HEARD_SHARE of its frames from the first letter to the last hear speech,
+    as over a music bed. Each reports the letters the acoustic model read there, never a word.
     """
     count = len(pcm)
     covered = np.zeros(len(best), dtype=bool)
@@ -347,10 +356,15 @@ def uncovered(pcm, best, letter, separator, names, frames, raw, np):
         if output and item['start_sample'] < output[-1]['end_sample']:
             first = output[-1]['first_frame']
             output[-1] = {**output[-1],'end_sample':max(output[-1]['end_sample'], item['end_sample']),
-                'letters':reading(best[first:g1], letter, separator, names)}
+                'letters':reading(best[first:g1], letter, separator, names),'end_frame':g1}
         else:
-            output.append({**item,'first_frame':g0})
-    return [{k:v for k,v in item.items() if k != 'first_frame'} for item in output]
+            output.append({**item,'first_frame':g0,'end_frame':g1})
+    # Speech reads as letters close together. Scattered letters merged over one continuous sound,
+    # such as a music bed, are kept only when HEARD_SHARE of the frames from the first to the last
+    # hear speech, as recognized segments are.
+    heard = letter[best] if separator is None else letter[best] | (best == separator)
+    return [{k:v for k,v in item.items() if k not in ('first_frame','end_frame')} for item in output
+        if heard[item['first_frame']:item['end_frame']].mean() >= HEARD_SHARE]
 
 
 def letters(text, vocab):
@@ -520,16 +534,20 @@ def emissions(pcm, loaded):
 
 
 def unheard(words, windows, frames, heard):
-    """Drop recognized segments the acoustic model hears nothing of.
+    """Drop recognized segments the acoustic model hears too little of.
 
     Over music or noise alone a prompted recognizer can still write text: the vocabulary prompt
     itself ("Pip, PixelForge, Cutbolt.") or a stock phrase ("Thanks for watching!"). A frame hears
     speech when its most likely acoustic label is not the blank. A segment, as the recognizer
-    returned it, is dropped when no frame of any of its words' CTC spans hears speech. Returns the
-    kept words, the windows' word indices renumbered to them, and one `unheard` note per dropped
-    segment with its words and the recognizer's times.
+    returned it, is dropped when fewer than HEARD_SHARE of the frames of its words' CTC spans hear
+    speech. Returns the kept words, the windows' word indices renumbered to them, and one
+    `unheard` note per dropped segment with its words and the recognizer's times.
     """
-    spoken = {w['segment'] for w, (a, b) in zip(words, frames) if heard[a:b].any()}
+    spans, voiced = {}, {}
+    for w, (a, b) in zip(words, frames):
+        spans[w['segment']] = spans.get(w['segment'], 0)+b-a
+        voiced[w['segment']] = voiced.get(w['segment'], 0)+int(heard[a:b].sum())
+    spoken = {s for s in spans if voiced[s] and voiced[s] >= HEARD_SHARE*spans[s]}
     keep = [i for i, w in enumerate(words) if w['segment'] in spoken]
     notes = []
     for w in words:

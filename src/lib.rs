@@ -67,6 +67,7 @@ pub mod scopes;
 pub mod selection;
 pub mod sequences;
 pub mod spatial;
+mod spelling;
 pub mod stabilize;
 pub mod store;
 pub mod summary;

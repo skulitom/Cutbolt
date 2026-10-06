@@ -176,12 +176,24 @@ def review_words(p, docs):
 
 # Number phrases of the fixture, read independently; digits read as themselves.
 NUMBERS = {'eighty':80, 'a hundred and seventy':170}
+# British spellings rewritten to the American ones recognition writes, read independently from the
+# documented rules: each British pattern with the letters it needs around it.
+SPELLINGS = [(r'(\w{2,}o)u(r\w*)', r'\1\2'), (r'(\w{3,}[iy])s([aei]\w*)', r'\1z\2'), (r'(\w{3,})re(s?)', r'\1er\2'),
+             (r'(\w{3,}og)ue(s?)', r'\1\2'), (r'(\w{3,}en)c(es?)', r'\1s\2'), (r'(\w{4,}l)l(ed|ings?|ers?|ors?)', r'\1\2'),
+             (r'(\w*)[ao](e\w{3,})', r'\1\2'), (r'(\w*[ad]g)e(ing|ments?)', r'\1\2')]
+
+
+def spelling_variants(a, b):
+    import re
+    return a != b and any(m is not None and m.expand(american) == y for x, y in ((a, b), (b, a))
+                          for pattern, american in SPELLINGS for m in [re.fullmatch(pattern, x)])
 
 
 def review_compare(expected, heard, tolerance):
     """Independent reading of the documented in-order matching rule: one word on one side and one
     to eight words on the other match when the middles of their spans are within the tolerance and
-    their letters and digits run together are the same, or they say the same number."""
+    their letters and digits run together are the same or two spellings of one word, or they say the
+    same number."""
     import math
     norm = lambda t:''.join(c for c in t if c.isalnum()).lower()
     run = lambda words, a, n:''.join(norm(w[2]) for w in words[a:a+n])
@@ -190,7 +202,7 @@ def review_compare(expected, heard, tolerance):
         said = ' '.join(norm(w[2]) for w in words)
         return int(said) if said.isdigit() else NUMBERS.get(said)
     heard = sorted(heard, key=lambda w:w[0])
-    me, mh, nxt, matched, joins, numbers, i = [False]*len(expected), [False]*len(heard), 0, 0, 0, 0, 0
+    me, mh, nxt, matched, joins, numbers, spellings, i = [False]*len(expected), [False]*len(heard), 0, 0, 0, 0, 0, 0
     shapes = [(1, 1)]+[(1, n) for n in range(2, 9)]+[(n, 1) for n in range(2, 9)]
     while i < len(expected):
         reach = middle(expected, min(i+7, len(expected)-1), 1)+tolerance;step = 1
@@ -200,14 +212,16 @@ def review_compare(expected, heard, tolerance):
             for a, b in shapes:
                 if i+a > len(expected) or k+b > len(heard) or abs(middle(expected, i, a)-middle(heard, k, b)) > tolerance:continue
                 if run(expected, i, a) == run(heard, k, b):
-                    pair = (a, b, 0);break
+                    pair = (a, b, '');break
+                if spelling_variants(run(expected, i, a), run(heard, k, b)):
+                    pair = (a, b, 'spelling');break
                 value = number(expected[i:i+a])
                 if value is not None and value == number(heard[k:k+b]):
-                    pair = (a, b, 1);break
+                    pair = (a, b, 'number');break
             if pair:
-                a, b, n = pair
+                a, b, how = pair
                 me[i:i+a] = [True]*a;mh[k:k+b] = [True]*b
-                matched += a;joins += a+b > 2;numbers += n;nxt = k+b;step = a;break
+                matched += a;joins += a+b > 2;numbers += how == 'number';spellings += how == 'spelling';nxt = k+b;step = a;break
         i += step
     groups = {}
     for words, flags, side in ((expected, me, 0), (heard, mh, 1)):
@@ -223,7 +237,7 @@ def review_compare(expected, heard, tolerance):
     differences.sort(key=lambda d:seconds(d['start']))
     ratio = math.floor(matched/len(expected)*1000+0.5)/1000 if expected else None
     return {'expected_words':len(expected), 'heard_words':len(heard), 'matched':matched, 'match_ratio':ratio,
-            'tolerance':time(tolerance), 'joined_matches':joins, 'number_matches':numbers,
+            'tolerance':time(tolerance), 'joined_matches':joins, 'number_matches':numbers, 'spelling_matches':spellings,
             'differences':{'count':len(differences), 'listed':differences[:50]}}
 
 
@@ -643,6 +657,21 @@ def run(root):
             assert comparison == review_compare(spelled_words, numeral_words, F(1, 2)), comparison
             assert comparison['matched'] == matched and comparison['number_matches'] == (2 if number == '170' else 1), comparison
             assert [(d['expected'], d['heard']) for d in comparison['differences']['listed']] == differences, comparison
+        # British spellings in the script and the American ones recognition writes match ("Colour" and
+        # "Color", as in the effects reel); "four" and "for" stay a difference.
+        british = {**document, 'id':'british', 'words':[{'id':f'b{i}', 'text':t, 'start':time(a, 25), 'end':time(b, 25), 'origin':'estimated',
+            'probability_milli':900} for i, (t, a, b) in enumerate([('Colour', 10, 14), ('square!', 21, 26), ('neighbours', 30, 31), ('travelled', 31, 32),
+            ('centre', 32, 33), ('catalogue', 33, 34), ('blue', 40, 44), ('four.', 50, 54)])]}
+        british_words = review_words(restored, [british])[0]
+        assert [w[2] for w in british_words] == ['Colour', 'neighbours', 'travelled', 'centre', 'catalogue', 'four.'], british_words
+        american_words = [(a, b, t) for (a, b, _), t in zip(british_words, ['Color', 'neighbors', 'traveled', 'center', 'catalog', 'for.'])]
+        american_doc = {**heard_doc, 'id':'american', 'words':[{'id':f'h{i}', 'text':t, 'start':time(a), 'end':time(b), 'origin':'estimated',
+            'probability_milli':700} for i, (a, b, t) in enumerate(american_words)]}
+        spelt = call({**reviewing, 'transcripts':[british], 'heard':[american_doc], 'output':str(output/'review-spelling'), 'rendition_height':0})
+        comparison = spelt['speech']['comparison']
+        assert comparison == review_compare(british_words, american_words, F(1, 2)), comparison
+        assert comparison['matched'] == 5 and comparison['spelling_matches'] == 5, comparison
+        assert [(d['expected'], d['heard']) for d in comparison['differences']['listed']] == [('four.', 'for.')], comparison
         muted = apply(restored, [edit('clip_audio', clip_ids=[pieces[1][2]['id']], gain_milli=0)])
         quiet = call({**reviewing, 'output':str(output/'review-muted'), 'project':muted, 'rendition_height':0})
         assert quiet['speech']['comparison'] == review_compare(review_words(muted, [doc])[0], heard_words, F(1, 2))

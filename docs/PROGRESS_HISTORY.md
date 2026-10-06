@@ -89,6 +89,30 @@ Tests (`tests/production.py`):
 - **Captions** were checked by hand on that film: rendered 20 frames past its end, scene `one` burns in scene `two`'s first caption at the same timeline time as `two` does.
 
 These fixtures pass in quick mode: production, offline and full. No Rust changed. No points change: the coordinator is agent tooling outside the scored editing coverage. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+## 6 October 2026: the speech check matches British spellings, and speech evidence needs a share of heard frames
+
+The effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`) found two faults in the speech check:
+- **Finding 31.** "neighbour" and "Colour", heard as "neighbor" and "Color", counted as differences: 333 of 338 words.
+- **Finding 44.** Every build heard `Thanks for watching!` over the music-only end card (165.52-170.85 s). The build gave no warning, because 98.5% clears the 95% threshold.
+
+**Why `fb9747b` did not stop the phrase.** The reel's engine, `6e3d7d3`, predates that change: its speech reviews carry worker `5bc3629b…`, so the gate never ran in the demo. The reel's mix was replayed with `export.review` on a release build of `5d26a3d` (worker `7771e9be…`), and it still heard the phrase:
+- **The window.** The end card shares its recognition window (115-172.32 s) with the last minute of narration, so the window was decoded.
+- **The bed.** The acoustic model reads this bed as a few scattered letters a second ("OTUR", "ORS OR"): 1-6 frames a second that are not blank, against 9-32 in the narration. Both earlier demos' beds read as blank.
+- **The rule.** One heard frame kept a whole segment. The phrase's CTC spans held 13 heard frames out of 203 (6.4%). Every narrated sentence of the reel had about 39% or more, and every narrated word at least 20%. Whisper gave "Thanks" a probability of 0.012, and its alignment scores (116, 382 and 74 milli) were the lowest of all 343 words.
+
+Changes:
+- **Spelling variants** (`src/spelling.rs`, used by `export.review`'s comparison). Two words match when they differ in one place by one of eight British and American patterns: `our`/`or`, `ise`/`ize` and kin, `re`/`er`, `ogue`/`og`, `ence`/`ense`, `ll`/`l`, `ae` or `oe`/`e`, and `ageing`/`aging`. A list of 26 whole words covers the rest, such as `grey`/`gray`. Each pattern needs letters around it, so "four" and "for", "filled" and "filed", "prise" and "prize", "acre" and "acer", or "shoes" and "she's" stay different. The comparison reports `spelling_matches` ([USAGE](USAGE.md)).
+- **Segments** (`tools/transcribe_worker.py`). A recognized segment needs 15% of the frames of its words' CTC spans heard (`HEARD_SHARE`), not one frame.
+- **Uncovered sounds.** With the phrase dropped, the uncovered-speech detector reported the bed's letters instead: `OROTURN ORS ORURND` at 163.68-171.8 s. Single letters grow over a continuous bed and merge into one long sound. A sound now needs the same 15% from its first letter to its last. The bed's merged sound had 20 of 273 frames (7%). Over its whole grown extent, the morning demo's "um" had only 14% heard, which is why the share is taken between the letters: there it reads its two letters side by side ([TRANSCRIPTS](TRANSCRIPTS.md#speech-evidence)).
+
+Results, replaying the reel's mix with this build: 340 words heard, 335 of 338 matched (99.1%), and four differences: "Green" heard as "Grain" twice, an extra "Pip", and "Expressions" as "Expression". The phrase is listed as an `unheard` note, and no uncovered sound remains. The probes are in the session scratchpad only; the replay inputs are the demo's `narration/reviews/mix-r3-0b6f074d-4.wav` and its transcripts.
+
+Tests:
+- `cargo test`: 26 variant pairs both ways, 17 distinct pairs, and the reel's sentence through the comparison (6 matched, 3 by spelling, "Four green" against "For grain" one difference).
+- `transcripts`: its independent comparison oracle reads the documented patterns as regular expressions and adds a British script heard in American spelling: 5 matches by spelling, "four." and "for." one difference.
+- `transcription` (WSL worker rules): a stock phrase with 2 of its 30 frames heard is dropped, and kept with 5; scattered letters over a continuous bed are left out, and the same sound read as "um" is kept.
+
+No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
 
 ## 6 October 2026: hand-written scenes cue scene-level curves and frame holds, preview without a build, and take numbered footage
 

@@ -487,13 +487,21 @@ impl<'a> Reading<'a> {
     }
 }
 
+/// How a group of expected words matched heard words.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Matched {
+    Letters,
+    Spelling,
+    Number,
+}
+
 /// Match expected and heard words in order. A group of expected words matches a group of heard
 /// words when the middles of their spans lie within `tolerance` and they say the same thing: the
-/// same letters and digits, ignoring case and punctuation, or the same numbers. One side is a
-/// single word; the other is one word or up to `MAX_JOINED` words run together, so a name split in
-/// one list and whole in the other ("pixel forge" and "PixelForge") matches, and so does a numeral
-/// and its spoken words ("80" and "eighty", "170" and "a hundred and seventy"). Unmatched words
-/// between two matches form one difference.
+/// same letters and digits, ignoring case and punctuation, two spellings of one word ("colour" and
+/// "color"), or the same numbers. One side is a single word; the other is one word or up to
+/// `MAX_JOINED` words run together, so a name split in one list and whole in the other ("pixel
+/// forge" and "PixelForge") matches, and so does a numeral and its spoken words ("80" and "eighty",
+/// "170" and "a hundred and seventy"). Unmatched words between two matches form one difference.
 fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value, Vec<Value>)> {
     let (wanted_words, heard_words) = (Reading::new(expected), Reading::new(heard));
     let mut matched_expected = vec![false; expected.len()];
@@ -502,6 +510,7 @@ fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value,
     let mut matches = 0;
     let mut joins = 0;
     let mut numbers = 0;
+    let mut spellings = 0;
     let mut i = 0;
     while i < expected.len() {
         // A heard word whose middle is later than this cannot start a match of expected word i.
@@ -514,7 +523,7 @@ fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value,
             if heard[k].middle()?.compare(reach)?.is_gt() {
                 break;
             }
-            // (expected words, heard words, matched as numbers) that match here.
+            // (expected words, heard words, how) that match here.
             let mut found = None;
             let shapes = std::iter::once((1, 1))
                 .chain((2..=MAX_JOINED).map(|n| (1, n)))
@@ -529,23 +538,29 @@ fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value,
                 {
                     continue;
                 }
-                if joined(expected, i, wanted) == joined(heard, k, got) {
-                    found = Some((wanted, got, false));
+                let (said, written) = (joined(expected, i, wanted), joined(heard, k, got));
+                if said == written {
+                    found = Some((wanted, got, Matched::Letters));
+                    break;
+                }
+                if crate::spelling::variants(&said, &written) {
+                    found = Some((wanted, got, Matched::Spelling));
                     break;
                 }
                 if (wanted_words.numeric(i, wanted) || heard_words.numeric(k, got))
                     && wanted_words.key(i, wanted) == heard_words.key(k, got)
                 {
-                    found = Some((wanted, got, true));
+                    found = Some((wanted, got, Matched::Number));
                     break;
                 }
             }
-            if let Some((wanted, got, number)) = found {
+            if let Some((wanted, got, how)) = found {
                 matched_expected[i..i + wanted].fill(true);
                 matched_heard[k..k + got].fill(true);
                 matches += wanted;
                 joins += usize::from(wanted + got > 2);
-                numbers += usize::from(number);
+                numbers += usize::from(how == Matched::Number);
+                spellings += usize::from(how == Matched::Spelling);
                 next = k + got;
                 step = wanted;
                 break;
@@ -607,6 +622,7 @@ fn compare(expected: &[Said], heard: &[Said], tolerance: Time) -> Result<(Value,
     Ok((
         json!({"expected_words":expected.len(),"heard_words":heard.len(),"matched":matches,
             "match_ratio":ratio(matches, expected.len()),"tolerance":tolerance,"joined_matches":joins,"number_matches":numbers,
+            "spelling_matches":spellings,
             "differences":{"count":differences.len(),"listed":differences.iter().take(MAX_LISTED).collect::<Vec<_>>()}}),
         differences,
     ))
@@ -1218,6 +1234,45 @@ mod tests {
         );
         assert_eq!(differences[0]["expected"], "PixelForge,");
         assert_eq!(differences[0]["heard"], "pixel forged");
+    }
+
+    #[test]
+    fn british_spellings_match_what_recognition_writes() {
+        let tolerance = Time::new(1, 2).unwrap();
+        // The effects reel's script against what recognition wrote down.
+        let expected = said(&[
+            (0, "Colour"),
+            (2, "sets"),
+            (4, "the"),
+            (6, "neighbour's"),
+            (8, "mood."),
+            (10, "Four"),
+            (12, "green"),
+            (14, "colours."),
+        ]);
+        let heard = said(&[
+            (0, "Color"),
+            (2, "sets"),
+            (4, "the"),
+            (6, "neighbor's"),
+            (8, "mood."),
+            (10, "For"),
+            (12, "grain"),
+            (14, "colors."),
+        ]);
+        let (comparison, differences) = compare(&expected, &heard, tolerance).unwrap();
+        assert_eq!(comparison["matched"], 6);
+        assert_eq!(comparison["spelling_matches"], 3);
+        let listed: Vec<_> = differences
+            .iter()
+            .map(|d| {
+                (
+                    d["expected"].as_str().unwrap(),
+                    d["heard"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(listed, [("Four green", "For grain")]);
     }
 
     #[test]

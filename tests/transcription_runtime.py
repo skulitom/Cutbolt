@@ -209,6 +209,15 @@ assert found==[{'start_sample':8000,'end_sample':11200,'letters':'UM'}],found
 assert uncovered(pcm,best,letter,1,names,[(5,15),(24,35),(45,49)],raw,np)==[]
 onset=pcm.copy();onset[12800:14400]=.3*np.sin(2*np.pi*220*t[12800:14400])
 assert uncovered(onset,best,letter,1,names,[(5,15),(45,49)],raw,np)==found
+# A music bed the acoustic model reads as a few scattered letters (the effects reel's end card read
+# "OTUR ORS OR"): each letter grows over the continuous sound and they merge, but only 3 of the 25
+# frames from the first letter to the last hear speech, under HEARD_SHARE. The same sound read as an
+# "um" (letters together) is kept.
+bed=pcm.copy();bed[6400:]=.3*np.sin(2*np.pi*220*t[6400:])
+scattered=best.copy();scattered[24:49]=0;scattered[[22,34,46]]=(2,3,4)
+assert uncovered(bed,scattered,letter,1,names,[(5,15)],raw[:1],np)==[]
+together=best.copy();together[24:49]=0;together[26:29]=2;together[31:34]=3
+assert [x['letters'] for x in uncovered(bed,together,letter,1,names,[(5,15)],raw[:1],np)]==['UM']
 assert reading([2,2,0,2,1,1,3,0],letter,1,names)=='UU M' and reading([4]*70,letter,1,names)=='A'
 long=reading([4,0]*70,letter,1,names);assert len(long)==64 and long[:63]=='A'*63
 # Numerals align as the English words they are read as (the shared table), other words exactly as
@@ -228,9 +237,9 @@ for text,vocab,language,given,needle in (('80',greek,'el',False,'known text'),('
  except Failure as error:assert error.code=='UNSUPPORTED_ALIGNMENT_TEXT' and repr(text)[1:-1] in error.message and needle in error.message,error.message
  else:raise AssertionError(text)
 # Speech evidence: a frame hears speech when its most likely acoustic label is not the blank. Frames
-# are centred every 320 samples from sample 200. A segment none of whose words' CTC spans hears
-# speech (the prompt written over music) is dropped with an unheard note, and the windows' word
-# indices follow; a segment with one heard word is kept whole.
+# are centred every 320 samples from sample 200. A segment fewer than HEARD_SHARE of whose words'
+# CTC frames hear speech (the prompt written over music) is dropped with an unheard note, and the
+# windows' word indices follow; a segment heard enough is kept whole.
 frame_at,unheard=worker['frame_at'],worker['unheard']
 assert [frame_at(n,10) for n in (0,200,201,520,521,99999)]==[0,0,1,1,2,10]
 heard=np.zeros(40,dtype=bool);heard[2:6]=True;heard[30]=True
@@ -242,6 +251,14 @@ kept,renumbered,notes=unheard(words,windows,[(2,4),(6,9),(10,14),(14,20),(28,32)
 assert said(kept)==['Hello','there.','Bye.'] and [(x['first_word'],x['end_word']) for x in renumbered]==[(0,2),(2,3)],(kept,renumbered)
 assert notes==[{'text':'Pip, PixelForge.','kind':'unheard','start_sample':16000,'end_sample':24000}],notes
 one=[{**windows[0],'end_word':2}];assert unheard(words[:2],one,[(2,4),(6,9)],heard)==(words[:2],one,[])
+# A stock phrase over a bed that reads as scattered letters: 2 of its 30 frames hear speech; with 5
+# (one in six) it is kept.
+assert worker['HEARD_SHARE']==.15
+sparse=np.zeros(40,dtype=bool);sparse[[5,25]]=True
+phrase=[said_at('Thanks',0,0,9600),said_at('for',0,9600,12800),said_at('watching!',0,12800,19200)]
+spans=[(0,15),(15,20),(20,30)];whole=[{**windows[0],'end_word':3}]
+assert unheard(phrase,whole,spans,sparse)[2]==[{'text':'Thanks for watching!','kind':'unheard','start_sample':0,'end_sample':19200}]
+sparse[[8,12,18]]=True;assert unheard(phrase,whole,spans,sparse)[0]==phrase
 print(json.dumps({'uncovered':found,'spoken_numbers':len(table)}))
 """
 
