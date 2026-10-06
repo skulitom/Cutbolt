@@ -1,15 +1,20 @@
-//! Composite a placed-track timeline's top-level `alpha_over` tracks in the engine.
+//! Composite a placed-track timeline's top-level transitions and `alpha_over` tracks in the engine.
 //!
-//! FFmpeg decodes the opaque base picture (one graph) and each visible overlay clip (one small
-//! graph per clip, cropped) to raw planar RGB on pipes. The engine then applies the clip's
-//! shrink, opacity and position and the exact straight-alpha "over" of `tracks.md`, in parallel
-//! row bands, and streams the result to the encoder. Every decoder reads its input once, in order.
+//! FFmpeg decodes the opaque base picture (one graph), the incoming side of each visible
+//! transition and each visible overlay clip (one small graph each, overlays cropped) to raw planar
+//! RGB on pipes. Where a transition shows, the base picture holds its outgoing side, and the
+//! engine mixes in the incoming side by the exact equations of `transitions.md`. It then applies
+//! each overlay clip's shrink, opacity and position and the exact straight-alpha "over" of
+//! `tracks.md`. Both run in parallel row bands, and the result streams to the encoder. Every
+//! decoder reads its input once, in order.
 use crate::{
     Result, error,
     media::{self, Control, StreamReader, Watch},
+    tracks::TransitionKind,
 };
 use serde::Serialize;
 use std::{
+    collections::VecDeque,
     process::Command,
     sync::{
         Arc,
@@ -44,7 +49,25 @@ impl Layer {
     }
 }
 
-/// The base picture's decoder plus the overlay clips composited over it.
+/// A top-level transition over consecutive window frames where its track is the visible one: the
+/// base picture holds the outgoing side there, and a decoder supplies the incoming side.
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct Mix {
+    pub track_id: String,
+    pub transition_id: String,
+    /// Window frames `[first, end)` the decoder supplies, one per frame, in order.
+    pub first: u64,
+    pub end: u64,
+    pub kind: TransitionKind,
+    /// Frames in the whole effect interval, and the effect frame of window frame `first`.
+    pub count: u64,
+    pub offset: u64,
+    /// Decoder of the incoming side: planar G, B, R frames of the canvas size on stdout.
+    pub arguments: Vec<String>,
+}
+
+/// The base picture's decoder plus the transitions mixed into it and the overlay clips
+/// composited over it.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Compositor {
     pub width: u32,
@@ -55,6 +78,9 @@ pub(crate) struct Compositor {
     /// Window frame runs `[start, end)` and the index of the visible opaque track (None: black).
     #[serde(skip)]
     pub runs: Vec<(u64, u64, Option<usize>)>,
+    /// Transitions in window order; they never overlap, and apply before any layer.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<Mix>,
     pub layers: Vec<Layer>,
 }
 
@@ -113,46 +139,96 @@ impl Ahead {
     }
 }
 
+/// Transition and layer decoders start up to this many frames before their first one, at most
+/// `EARLY` at a time, so that their startup overlaps the frames before.
+const AHEAD: u64 = 25;
+const EARLY: usize = 2;
+
 /// Decoders of one composition and the frame they are on.
 struct Decoders<'a> {
     compositor: &'a Compositor,
     base: Ahead,
-    pending: Vec<(usize, Command)>,
+    /// Transition decoders not yet started, in window order, then the started ones; the first
+    /// supplies frames during its run.
+    mixes: VecDeque<(usize, Command)>,
+    mixing: VecDeque<(usize, Ahead)>,
+    /// Layer decoders not yet started, by first frame, then the started ones by track.
+    pending: VecDeque<(usize, Command)>,
     active: Vec<(usize, Ahead)>,
     program: String,
     timeout: Duration,
     abort: Arc<AtomicBool>,
 }
 impl Decoders<'_> {
+    /// Start a decoder of `count` frames of `size` bytes.
+    fn start(&self, command: Command, size: usize, count: u64) -> Result<Ahead> {
+        let reader = StreamReader::spawn_with(
+            command,
+            &self.program,
+            self.timeout,
+            Watch {
+                abort: Some(self.abort.clone()),
+            },
+        )?;
+        Ok(Ahead::start(reader, size, count))
+    }
+    /// Start the decoders due by frame `n`, then the next ones early, in order of first frame.
+    fn start_due(&mut self, n: u64) -> Result<()> {
+        let c = self.compositor;
+        loop {
+            let mix = (self.mixes.front()).map(|(index, _)| c.transitions[*index].first);
+            let layer = (self.pending.front()).map(|(index, _)| c.layers[*index].first);
+            let Some(first) = mix.into_iter().chain(layer).min() else {
+                return Ok(());
+            };
+            let early = (self.mixing.iter())
+                .filter(|(index, _)| c.transitions[*index].first > n)
+                .count()
+                + (self.active.iter())
+                    .filter(|(index, _)| c.layers[*index].first > n)
+                    .count();
+            if first > n && (first > n + AHEAD || early >= EARLY) {
+                return Ok(());
+            }
+            if mix == Some(first) {
+                let (index, command) = self.mixes.pop_front().expect("pending transition");
+                let m = &c.transitions[index];
+                let decoder = self.start(command, c.plane() * 3, m.end - m.first)?;
+                self.mixing.push_back((index, decoder));
+            } else {
+                let (index, command) = self.pending.pop_front().expect("pending layer");
+                let layer = &c.layers[index];
+                let decoder = self.start(command, layer.frame_bytes(), layer.end - layer.first)?;
+                self.active.push((index, decoder));
+                self.active.sort_by_key(|(index, _)| c.layers[*index].track);
+            }
+        }
+    }
     /// The composited frame `n` as planar G, B, R.
     fn next(&mut self, n: u64) -> Result<Vec<u8>> {
         let c = self.compositor;
+        self.start_due(n)?;
         let mut frame = self.base.next()?;
-        while let Some(position) = self
-            .pending
-            .iter()
-            .position(|(index, _)| c.layers[*index].first == n)
+        if let Some((index, decoder)) = self.mixing.front()
+            && c.transitions[*index].first <= n
         {
-            let (index, command) = self.pending.remove(position);
-            let reader = StreamReader::spawn_with(
-                command,
-                &self.program,
-                self.timeout,
-                Watch {
-                    abort: Some(self.abort.clone()),
-                },
-            )?;
-            let layer = &c.layers[index];
-            self.active.push((
-                index,
-                Ahead::start(reader, layer.frame_bytes(), layer.end - layer.first),
-            ));
-            self.active.sort_by_key(|(index, _)| c.layers[*index].track);
+            let m = &c.transitions[*index];
+            let incoming = decoder.next()?;
+            let effect = Effect::new(m.kind, c.width, m.count, m.offset + (n - m.first));
+            effect.apply(&mut frame, &incoming, c.width as usize);
+            decoder.recycle(incoming);
+            if m.end == n + 1 {
+                let (_, decoder) = self.mixing.pop_front().expect("transition decoder");
+                decoder.finish()?;
+            }
         }
         let base = c.base_index(n);
         for (index, decoder) in &self.active {
-            let pixels = decoder.next()?;
             let layer = &c.layers[*index];
+            if layer.first > n {
+                continue;
+            }
+            let pixels = decoder.next()?;
             if base.is_none_or(|b| layer.track > b) {
                 over(&mut frame, c.width, c.height, layer, &pixels);
             }
@@ -190,15 +266,22 @@ fn decoders<'a>(
         compositor.plane() * 3,
         compositor.frames,
     );
-    let pending = compositor
-        .layers
-        .iter()
-        .enumerate()
-        .map(|(index, layer)| Ok((index, control.command(&program, &layer.arguments)?)))
-        .collect::<Result<Vec<_>>>()?;
+    let mixes = (compositor.transitions.iter().enumerate())
+        .map(|(index, mix)| Ok((index, control.command(&program, &mix.arguments)?)))
+        .collect::<Result<VecDeque<_>>>()?;
+    let mut layers: Vec<usize> = (0..compositor.layers.len()).collect();
+    layers.sort_by_key(|&index| compositor.layers[index].first);
+    let pending = (layers.into_iter())
+        .map(|index| {
+            let arguments = &compositor.layers[index].arguments;
+            Ok((index, control.command(&program, arguments)?))
+        })
+        .collect::<Result<VecDeque<_>>>()?;
     Ok(Decoders {
         compositor,
         base,
+        mixes,
+        mixing: VecDeque::new(),
         pending,
         active: Vec::new(),
         program,
@@ -465,6 +548,118 @@ impl Span {
     }
 }
 
+/// One frame of a transition by the equations of `transitions.md`, at p = (2i + 1) / (2n) for
+/// effect frame i of n, applied alike to every plane of the outgoing (base) frame. With d = 2n and
+/// k = 2i + 1, the weighted sums are rounded to nearest with ties up as `floor((x + n) / d)`.
+enum Effect {
+    /// `floor((L(d - k) + Rk + n) / d)`, which is `L + steps[R - L + 255]` with
+    /// `steps[s + 255] = floor((sk + n) / d)`.
+    Dissolve(Box<[i16; 511]>),
+    /// Dip to black: `max(d - 2k, 0)` weights the outgoing side and `max(2k - d, 0)` the incoming
+    /// one, and at most one of them is positive, so each value maps through `levels` of one side.
+    Dip {
+        incoming: bool,
+        levels: Box<[u8; 256]>,
+    },
+    /// Wipe: these columns of every row take the incoming side.
+    Columns(std::ops::Range<usize>),
+}
+impl Effect {
+    fn new(kind: TransitionKind, width: u32, count: u64, index: u64) -> Self {
+        let (n, k, w) = (
+            i128::from(count),
+            2 * i128::from(index) + 1,
+            i128::from(width),
+        );
+        let d = 2 * n;
+        let rounded = |x: i128| (x + n).div_euclid(d);
+        match kind {
+            TransitionKind::Dissolve => {
+                let mut steps = Box::new([0; 511]);
+                for (s, step) in (-255..=255).zip(steps.iter_mut()) {
+                    *step = rounded(s * k) as i16;
+                }
+                Effect::Dissolve(steps)
+            }
+            TransitionKind::DipBlack => {
+                let (incoming, weight) = if 2 * k > d {
+                    (true, 2 * k - d)
+                } else {
+                    (false, d - 2 * k)
+                };
+                let mut levels = Box::new([0; 256]);
+                for (v, level) in (0..).zip(levels.iter_mut()) {
+                    *level = rounded(v * weight) as u8;
+                }
+                Effect::Dip { incoming, levels }
+            }
+            // Incoming where (2x + 1)n <= Wk, which holds on a prefix of each row.
+            TransitionKind::WipeLeft => {
+                Effect::Columns(0..(0..w).filter(|x| (2 * x + 1) * n <= w * k).count())
+            }
+            // Incoming where (2(W - x) - 1)n <= Wk, which holds on a suffix of each row.
+            TransitionKind::WipeRight => {
+                let count = (0..w).filter(|x| (2 * (w - x) - 1) * n <= w * k).count();
+                Effect::Columns(width as usize - count..width as usize)
+            }
+        }
+    }
+    /// Mix `incoming` into the planar `frame` of rows `width` long, in parallel row bands.
+    fn apply(&self, frame: &mut [u8], incoming: &[u8], width: usize) {
+        if let Effect::Columns(columns) = self
+            && columns.is_empty()
+        {
+            return;
+        }
+        let workers = if frame.len() < 1 << 19 {
+            1
+        } else {
+            std::thread::available_parallelism()
+                .map_or(1, |n| n.get())
+                .clamp(1, 16)
+        };
+        if workers == 1 {
+            return self.rows(frame, incoming, width);
+        }
+        let band = (frame.len() / width).div_ceil(workers) * width;
+        std::thread::scope(|scope| {
+            for (frame, incoming) in frame.chunks_mut(band).zip(incoming.chunks(band)) {
+                scope.spawn(move || self.rows(frame, incoming, width));
+            }
+        });
+    }
+    fn rows(&self, frame: &mut [u8], incoming: &[u8], width: usize) {
+        match self {
+            Effect::Dissolve(steps) => {
+                for (l, &r) in frame.iter_mut().zip(incoming) {
+                    let step = steps[(i16::from(r) - i16::from(*l) + 255) as usize];
+                    *l = (i16::from(*l) + step) as u8;
+                }
+            }
+            Effect::Dip {
+                incoming: false,
+                levels,
+            } => frame.iter_mut().for_each(|l| *l = levels[*l as usize]),
+            Effect::Dip {
+                incoming: true,
+                levels,
+            } => {
+                for (l, &r) in frame.iter_mut().zip(incoming) {
+                    *l = levels[r as usize];
+                }
+            }
+            Effect::Columns(columns) => {
+                for (l, r) in frame
+                    .chunks_exact_mut(width)
+                    .zip(incoming.chunks_exact(width))
+                {
+                    l[columns.clone()].copy_from_slice(&r[columns.clone()]);
+                }
+            }
+        }
+    }
+}
+
 /// The raw input options of an encoder reading composited frames on stdin.
 pub(crate) fn raw_input(width: u32, height: u32, rate: crate::time::Time) -> Vec<String> {
     [
@@ -594,6 +789,97 @@ mod tests {
         // Large enough for parallel row bands.
         check(640, 480, layer(640, 480, true, 1, 200, [0, 0]), 9);
         check(640, 480, layer(1280, 960, false, 2, 255, [0, 0]), 10);
+    }
+
+    /// Independent per-value reference of the transition table in `transitions.md` on one row-major
+    /// plane sequence, with p = (2i + 1) / (2n) kept as a fraction.
+    fn transition(
+        kind: TransitionKind,
+        width: usize,
+        l: &[u8],
+        r: &[u8],
+        n: u64,
+        i: u64,
+    ) -> Vec<u8> {
+        let (num, den, w) = (u128::from(2 * i + 1), u128::from(2 * n), width as u128);
+        // The nearest integer to v / den, ties up.
+        let nearest = |v: u128| ((2 * v + den) / (2 * den)) as u8;
+        (l.iter().zip(r).enumerate())
+            .map(|(at, (&a, &b))| {
+                let (x, outgoing, incoming) = ((at % width) as u128, u128::from(a), u128::from(b));
+                let wipe = |shown: bool| if shown { b } else { a };
+                match kind {
+                    TransitionKind::Dissolve => nearest((den - num) * outgoing + num * incoming),
+                    TransitionKind::DipBlack => nearest(
+                        den.saturating_sub(2 * num) * outgoing
+                            + (2 * num).saturating_sub(den) * incoming,
+                    ),
+                    // (x + 1/2) / W <= p
+                    TransitionKind::WipeLeft => wipe((2 * x + 1) * den <= 2 * w * num),
+                    // (W - x - 1/2) / W <= p
+                    TransitionKind::WipeRight => wipe((2 * w - 2 * x - 1) * den <= 2 * w * num),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn transitions_match_the_documented_equations() {
+        let kinds = [
+            TransitionKind::Dissolve,
+            TransitionKind::DipBlack,
+            TransitionKind::WipeLeft,
+            TransitionKind::WipeRight,
+        ];
+        let frames: [(u64, u64); 15] = [
+            (1, 0),
+            (2, 0),
+            (2, 1),
+            (3, 1),
+            (5, 2),
+            (12, 0),
+            (12, 5),
+            (12, 6),
+            (12, 11),
+            (25, 7),
+            (24, 12),
+            (180000, 0),
+            (180000, 89999),
+            (180000, 90000),
+            (180000, 179999),
+        ];
+        // Every pair of outgoing and incoming values, in each of three planes.
+        let size = 256;
+        let l: Vec<u8> = (0..3 * size * size).map(|v| (v % size) as u8).collect();
+        let r: Vec<u8> = (0..3 * size * size)
+            .map(|v| (v / size % size) as u8)
+            .collect();
+        for kind in kinds {
+            for (n, i) in frames {
+                let mut frame = l.clone();
+                Effect::new(kind, size as u32, n, i).apply(&mut frame, &r, size);
+                let expected = transition(kind, size, &l, &r, n, i);
+                assert!(frame == expected, "{kind:?} frame {i} of {n}");
+            }
+        }
+        // Odd and one-column widths, and frames large enough for parallel row bands.
+        let mut state = 11u32;
+        let mut next = || {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            (state >> 24) as u8
+        };
+        for (width, height) in [(1, 1), (1, 5), (7, 3), (640, 480), (1919, 3)] {
+            let l: Vec<u8> = (0..3 * width * height).map(|_| next()).collect();
+            let r: Vec<u8> = (0..3 * width * height).map(|_| next()).collect();
+            for kind in kinds {
+                for (n, i) in frames {
+                    let mut frame = l.clone();
+                    Effect::new(kind, width as u32, n, i).apply(&mut frame, &r, width);
+                    let expected = transition(kind, width, &l, &r, n, i);
+                    assert!(frame == expected, "{kind:?} {width}x{height} {i} of {n}");
+                }
+            }
+        }
     }
 
     #[test]

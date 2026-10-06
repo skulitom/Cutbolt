@@ -263,6 +263,27 @@ def run(root):
             canvas[y0:y1, x0:x1] = part[y0 - py:y1 - py, x0 - px:x1 - px]
         return canvas.astype(np.uint8)
 
+    def transitioned(t, n, frame):
+        """Base track t's picture at frame n: its transition there by the integer equations of
+        TRANSITIONS.md (p = (2i + 1) / 2count at effect frame i), else `frame`."""
+        clips = {c["id"]: c for c in t["clips"]}
+        fraction = lambda value: F(value["num"], value["den"])
+        source = lambda c: decoded[c["asset_id"]][int((fraction(c["source_in"]) + F(n, 25) - fraction(c["start"])) * 25)]
+        for e in t.get("transitions", []):
+            cut = fraction(clips[e["right_id"]]["start"])
+            first, end = cut - fraction(e["before"]), cut + fraction(e["after"])
+            if not first <= F(n, 25) < end:
+                continue
+            count, k = int((end - first) * 25), 2 * int((F(n, 25) - first) * 25) + 1
+            left, right = (source(clips[e[side]]).astype(np.int64) for side in ("left_id", "right_id"))
+            if e["kind"] in ("dissolve", "dip_black"):
+                a, b = (2 * count - k, k) if e["kind"] == "dissolve" else (max(2 * count - 2 * k, 0), max(2 * k - 2 * count, 0))
+                return ((left * a + right * b + count) // (2 * count)).astype(np.uint8)
+            x = np.arange(W)
+            shown = (2 * x + 1) * count <= W * k if e["kind"] == "wipe_left" else (2 * (W - x) - 1) * count <= W * k
+            return np.where(shown[None, :, None], right, left).astype(np.uint8)
+        return frame
+
     def composed(p, n):
         layers = p["tracks"]["tracks"]
         def at(t):
@@ -276,7 +297,7 @@ def run(root):
         frame = np.zeros((H, W, 3), np.uint8)
         if base_index is not None:
             c, index = at(layers[base_index])
-            frame = decoded[c["asset_id"]][index].copy()
+            frame = transitioned(layers[base_index], n, decoded[c["asset_id"]][index].copy())
         for i, t in enumerate(layers):
             if t.get("composite") == "alpha_over" and t["enabled"] and (base_index is None or i > base_index) and at(t):
                 c, index = at(t)
@@ -324,6 +345,39 @@ def run(root):
          output=str(output / "bad-shrunk-alpha.mkv"))
     assert not (output / "bad-shrunk-alpha.mkv").exists()
     passed.append("overlays.picture_in_picture_transforms_exact")
+
+    # Transitions on the base track are mixed by the engine before the overlays above it: every style
+    # under faded, transformed and plain overlays. The incoming b2 starts at 2.6 s after a 10-frame
+    # handle; a has 10 frames after its end. The 13-frame effect [59, 72) of an odd length puts a dip
+    # at exactly black under the overlays on frame 65. Ranges and previews also start inside it.
+    mixed_frames = 0
+    for kind in ("dissolve", "dip_black", "wipe_left", "wipe_right"):
+        effect = {"id": "x", "left_id": "a", "right_id": "b2", "before": time(6, 25), "after": time(7, 25), "kind": kind}
+        cut = call("timeline.apply", project=pip, expected_revision=pip["revision"], operations=[
+            edit("remove", clip_ids=["b"], links="reject_partial"), place("V1", clip("b2", "base-b", (13, 5), (2, 5), (13, 5))),
+            edit("transition_set", track_id="V1", transition=effect)])
+        windows = [(52, 30), (63, 5)] if kind == "dissolve" else [(52, 30)]
+        for start, count in windows:
+            name = f"mix-{kind}-{start}.mkv"
+            call("export.run", project=cut, input_root=str(sources), output_root=str(output), output=str(output / name),
+                 profile="reference", streams="video", range={"start": time(start, 25), "duration": time(count, 25)})
+            got = decode(output / name, "rgb24", 3)
+            assert got.shape[0] == count and all(np.array_equal(f, composed(cut, start + i)) for i, f in enumerate(got)), name
+            mixed_frames += count
+        if kind == "dip_black":
+            call("render.run", project=cut, input_root=str(sources), output_root=str(output), output=str(output / "mix-dip.mkv"))
+            got = decode(output / "mix-dip.mkv", "rgb24", 3)
+            assert got.shape[0] == 150
+            for n in range(150):
+                assert np.array_equal(got[n], composed(cut, n)), f"mixed frame {n} differs"
+            mixed_frames += 150
+        frame = {"dissolve": 64, "dip_black": 59, "wipe_left": 65, "wipe_right": 71}[kind]
+        call("preview.frame", project=cut, input_root=str(sources), output_root=str(output), output=str(output / f"mix-{kind}.png"),
+             time=time(frame, 25))
+        with Image.open(output / f"mix-{kind}.png") as image:
+            assert np.array_equal(np.asarray(image.convert("RGB")), composed(cut, frame)), kind
+        mixed_frames += 1
+    passed.append("overlays.over_engine_mixed_transitions")
 
     # Source inspections. A file the engine verified while writing it is not decoded again, even
     # as an overlay; a source that only feeds audio is timed from packets; contact-sheet cells read
@@ -393,8 +447,9 @@ def run(root):
     assert undo["revision"] == 2 and head.get("tracks") is None and head["assets"] == []
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir() if p.name in originals} == originals
     passed.append("overlays.sources_preserved")
-    report = {"passed": passed, "frames_compared": 150 + 6 + 60 + 1 + 150 + 150 + 3 + 20 + 3 * 50 + 10,
-              "oracle": "separately decoded sources; exact integer straight-alpha over; top opaque track as base"}
+    report = {"passed": passed, "frames_compared": 150 + 6 + 60 + 1 + 150 + 150 + 3 + 20 + mixed_frames + 3 * 50 + 10,
+              "oracle": "separately decoded sources; exact integer straight-alpha over; top opaque track as base, "
+                        "with its transitions by the documented integer equations"}
     (root / "verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
 

@@ -56,6 +56,51 @@ Tests, in `production`:
 - **`resolve`.** From stand-in `timing` and `align` receipts, the CLI plans the 4.5 s take at 5.28 s, lists the same cue frames, and writes the recipe the scene stage then renders under the same name. Its stills at frames 15 and 75 equal those frames decoded from the render. `check` lists the sequence, and `resolve` returns `NOT_AN_OVERRIDE`, `INVALID_TIME`, `NOT_BUILT` and `STALE_ALIGNMENT` where it should.
 
 The production fixture passes in quick mode on Linux, in a cloud session, where it needed three local changes that were not committed: manifest paths without a drive letter, check_quality's engine calls made directly (the job queue needs Windows), and Liberation Sans standing in for Arial. It has not run on Windows. No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+## 6 October 2026: track transitions are mixed in the engine
+
+The effects-reel demo (`C:\DEV\CutboltData\demo-vfx-20261006`, FINDINGS.md item 40) found transitions to be the slowest part of a finished export. Its finished film, `cutbolt-effects-reel-finish-d`, has:
+- 172.32 s of 1080p25;
+- 15 transitions of 12–16 frames on the picture track;
+- three overlay tracks, one of them a full-length caption overlay.
+
+On main `6e3d7d3` it exported to H.264 in 295–314 s, against 72 s for the same cut without track effects. Each transition was an FFmpeg `blend=all_expr` expression, evaluated per pixel and plane on the graph's single filter thread: about 0.55–0.6 s per 1080p transition frame.
+
+The changes:
+- **Top-level video transitions are mixed by the engine** (`track_composite.rs`), like the top-level overlays.
+  - Where a transition shows on the visible track, the base graph emits its outgoing side. One more FFmpeg decoder per visible run of the transition supplies the incoming side as raw planar RGB.
+  - The engine mixes the incoming side in before the overlays above. It evaluates the documented equations in integers, in parallel row bands:
+    - a dissolve frame is `L + steps[R - L + 255]`, from a 511-entry table of `floor((sk + n) / 2n)` with k = 2i + 1;
+    - a dip frame maps the one side whose weight is positive through a 256-level table;
+    - a wipe frame copies whole columns of each row.
+  - A window with a visible top-level transition now goes through the engine compositor even without overlays. `render.plan` lists the runs under `compositor.transitions`.
+  - Video transitions inside nested sequences and all audio transitions keep their FFmpeg expressions.
+- **Compositor decoders start early.** Transition and overlay decoders used to start only when their first frame was due, so each process start and first decode stalled the frame loop. They now start up to 25 frames early, at most two at a time.
+
+Exactness:
+- **Rust.** A unit test compares the kernel with an independent fraction-based reference of the documented table. It covers every pair of 8-bit outgoing and incoming values in three planes for all four styles at 15 effect positions, from n = 1 to n = 180,000 and including an exact dip midpoint. It also covers random frames of widths 1–1919, some large enough for parallel row bands.
+- **Overlays fixture.** A new case, `overlays.over_engine_mixed_transitions`, puts each style on the base track under faded, transformed and plain overlays. Its numpy oracle mixes the base by the documented integer equations before the over equation. It compares 279 frames: a 30-frame range export around each effect, a 5-frame range starting inside the dissolve, a whole render whose odd-length dip reaches exact black under the overlays, and a preview inside each effect. The case passes on this build and on `5d26a3d`'s FFmpeg path alike.
+- **Fixtures.** These pass in quick mode: transitions, tracks, overlays, delivery, sequences, track_edits, proxies, dynamics, native_timing and transcripts. `cargo test` and clippy pass.
+
+Measured with release builds of `5d26a3d` and of this change, back to back on the demo workspace (`remeasure/transitions-20261006`), with warm source inspections. Other sessions kept the machine 12–85 % busy; the film rows show the busy fraction before each run. Every run of every case gave the same timeline, decoded and file digests on both builds. The film's timeline video digest `8ee01a0e…` equals the demo's own `6e3d7d3` export.
+
+| H.264 export | `5d26a3d` | This change |
+| --- | ---: | ---: |
+| Finished film (audio and video) | 361.9 s (15 %), 486.2 s (58 %), 447.2 s (69 %) | 91.2 s (34 %), 143.6 s (85 %) |
+| Same cut without track effects | 81.5 s (42 %) | 81.2 s (37 %) |
+| 12-frame wipe range | 12.3 s, 16.0 s, 13.3 s | 5.5 s |
+| 12 plain frames at the same place | 4.5 s, 8.4 s, 4.2 s | 4.4 s |
+| 12-frame dissolve range | 19.1 s, 25.9 s, 23.8 s | 5.7 s |
+| 12-frame dip range | 23.1 s, 30.5 s, 27.4 s | 4.9 s |
+| 50-frame montage range (dissolve, wipe, dip) | 71.0 s, 106.9 s | 11.5 s |
+
+The film now costs about 10 s more than the plain cut under similar load, against about 280–370 s before. Without the early decoder starts, a first build of the engine mix exported the film in 104.4 s (24 % busy), against 94.4 s (68 %) and 91.2 s (34 %) with them; those are single runs.
+
+Not changed:
+- the documented equations and outputs;
+- nested video transitions and audio transitions;
+- sources are still trimmed from frame 0 (FINDINGS.md item 41), so an incoming side whose source starts late still decodes everything before its handle.
+
+No capability points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
 
 ## 6 October 2026: AAC at 320 kb/s codes up to 20 kHz
 

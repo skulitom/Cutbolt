@@ -361,6 +361,7 @@ mod tests {
             frames: 50,
             base: Vec::new(),
             runs: Vec::new(),
+            transitions: Vec::new(),
             layers: Vec::new(),
         });
         assert_eq!(layout(&composited).unwrap().2, "[0:v:0]");

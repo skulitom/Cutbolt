@@ -57,6 +57,9 @@ struct Graph<'a> {
     /// When the top-level overlays are composited by the engine: the base picture's frame runs
     /// and the index of their visible opaque track.
     runs: Vec<(u64, u64, Option<usize>)>,
+    /// The runs among those where a transition shows, which the engine mixes, as the indices of
+    /// its track and of the transition on it, then the window frames `[first, end)`.
+    mixed: Vec<(usize, usize, u64, u64)>,
 }
 impl<'a> Graph<'a> {
     fn new(project: &'a Project, root: &'a Path, control: &'a dyn media::Control) -> Self {
@@ -67,6 +70,7 @@ impl<'a> Graph<'a> {
             sources: BTreeMap::new(),
             indices: BTreeMap::new(),
             runs: Vec::new(),
+            mixed: Vec::new(),
             args: ["-hide_banner", "-v", "error", "-nostdin", "-n"]
                 .map(str::to_owned)
                 .to_vec(),
@@ -733,8 +737,9 @@ impl<'a> Graph<'a> {
     ) -> Result<()> {
         self.compose_with(a, start, duration, kind, output, false)
     }
-    /// `deferred` leaves this arrangement's `alpha_over` tracks to the engine compositor: the
-    /// picture is cut only where the visible opaque content changes, and its runs are recorded.
+    /// `deferred` leaves this arrangement's `alpha_over` tracks and the incoming sides of its
+    /// transitions to the engine compositor: the picture is cut only where the visible opaque
+    /// content changes, its runs are recorded, and it shows each transition's outgoing side.
     fn compose_with(
         &mut self,
         a: &crate::tracks::Arrangement,
@@ -811,7 +816,20 @@ impl<'a> Graph<'a> {
                 };
                 if let Some((track, clip)) = visible {
                     if let Some(fx) = track.transition_at(at)? {
-                        self.effect(track, fx, at, length, &base)?;
+                        if deferred {
+                            self.video_source(track.endpoints(fx)?.0, at, length, &base)?;
+                            let index = (track.transitions.iter())
+                                .position(|t| std::ptr::eq(t, fx))
+                                .expect("track transition");
+                            self.mixed.push((
+                                base_index.expect("visible track"),
+                                index,
+                                part[0] - first,
+                                part[1] - first,
+                            ));
+                        } else {
+                            self.effect(track, fx, at, length, &base)?;
+                        }
                     } else {
                         self.video_source(clip, at, length, &base)?;
                     }
@@ -1047,24 +1065,30 @@ impl<'a> Graph<'a> {
         values.sort_by(|a, b| a.path.cmp(&b.path));
         values
     }
+    /// Another graph of this render, to which everything already inspected and counted carries
+    /// over.
+    fn branch(&self) -> Graph<'a> {
+        let mut next = Graph::new(self.project, self.root, self.control);
+        next.sources = self.sources.clone();
+        next.overlay_assets = self.overlay_assets.clone();
+        next.alpha_assets = self.alpha_assets.clone();
+        next.audio_only = self.audio_only;
+        next.packet_timed = self.packet_timed.clone();
+        next.serial = self.serial;
+        next.inspected = self.inspected;
+        next
+    }
     /// A graph for the encoder of an engine-composited picture: input 0 is that picture on
     /// stdin, and everything already inspected and counted carries over.
     fn successor(&mut self) -> Graph<'a> {
-        let mut next = Graph::new(self.project, self.root, self.control);
+        let mut next = self.branch();
         next.args.extend(track_composite::raw_input(
             self.project.width,
             self.project.height,
             self.project.frame_rate,
         ));
         next.inputs = 1;
-        next.sources = self.sources.clone();
-        next.overlay_assets = self.overlay_assets.clone();
-        next.alpha_assets = self.alpha_assets.clone();
-        next.audio_only = self.audio_only;
-        next.packet_timed = self.packet_timed.clone();
         next.prefetched = std::mem::take(&mut self.prefetched);
-        next.serial = self.serial;
-        next.inspected = self.inspected;
         next
     }
     /// The shown clips of `a`'s `alpha_over` tracks over `[start, start + duration)`, each with a
@@ -1187,6 +1211,66 @@ impl<'a> Graph<'a> {
         }
         Ok(layers)
     }
+    /// The transitions a deferred composition of `a` from `start` left to the engine, each with a
+    /// decoder of its incoming side; consecutive runs of one transition share a decoder.
+    fn mixes(
+        &mut self,
+        a: &crate::tracks::Arrangement,
+        start: Time,
+    ) -> Result<Vec<track_composite::Mix>> {
+        let rate = self.project.frame_rate;
+        let window = start.units(rate)?;
+        let mut runs: Vec<(usize, usize, u64, u64)> = Vec::new();
+        for &(track, index, first, end) in &self.mixed {
+            match runs.last_mut() {
+                Some(last) if (last.0, last.1, last.3) == (track, index, first) => last.3 = end,
+                _ => runs.push((track, index, first, end)),
+            }
+        }
+        let mut mixes = Vec::new();
+        for (track, index, first, end) in runs {
+            let track = &a.tracks[track];
+            let effect = &track.transitions[index];
+            let (begin, finish) = track.interval(effect)?;
+            let at = Time::new((window + first) * rate.den, rate.num)?;
+            let length = Time::new((end - first) * rate.den, rate.num)?;
+            let mut incoming = self.branch();
+            incoming.video_source(track.endpoints(effect)?.1, at, length, "incoming")?;
+            for (id, source) in &incoming.sources {
+                self.sources
+                    .entry(id.clone())
+                    .or_insert_with(|| source.clone());
+            }
+            (self.serial, self.inspected) = (incoming.serial, incoming.inspected);
+            let (mut arguments, _, _) = incoming.finish();
+            arguments.extend(
+                [
+                    "-map",
+                    "[incoming]",
+                    "-an",
+                    "-fps_mode",
+                    "passthrough",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "gbrp",
+                    "pipe:1",
+                ]
+                .map(str::to_owned),
+            );
+            mixes.push(track_composite::Mix {
+                track_id: track.id.clone(),
+                transition_id: effect.id.clone(),
+                first,
+                end,
+                kind: effect.kind,
+                count: finish.minus(begin)?.units(rate)?,
+                offset: at.minus(begin)?.units(rate)?,
+                arguments,
+            });
+        }
+        Ok(mixes)
+    }
     fn finish(mut self) -> (Vec<String>, Vec<Source>, Vec<render::Generated>) {
         let sources = self.sources();
         self.args.extend([
@@ -1292,17 +1376,22 @@ fn audio_windows(a: &crate::tracks::Arrangement, first: u64, end: u64) -> Result
     }
     Ok(windows)
 }
-/// A compiled window: one FFmpeg graph, or, when top-level `alpha_over` clips show, the base
-/// picture's graph and the overlay clips for the engine compositor beside the encoder's graph.
+/// A compiled window: one FFmpeg graph, or, when top-level transitions or `alpha_over` clips
+/// show, the base picture's graph, the transitions and the overlay clips for the engine
+/// compositor beside the encoder's graph.
 struct Compiled<'a> {
     /// The single graph, or the encoder's graph (audio, with the composited picture as input 0).
     graph: Graph<'a>,
-    picture: Option<(Graph<'a>, Vec<track_composite::Layer>)>,
+    picture: Option<(
+        Graph<'a>,
+        Vec<track_composite::Mix>,
+        Vec<track_composite::Layer>,
+    )>,
 }
 impl Compiled<'_> {
     /// The engine compositor of this window, with the base decoder writing raw planar RGB.
     fn compositor(&mut self, frames: u64) -> Result<Option<Compositor>> {
-        let Some((picture, layers)) = self.picture.take() else {
+        let Some((picture, transitions, layers)) = self.picture.take() else {
             return Ok(None);
         };
         let project = picture.project;
@@ -1323,7 +1412,10 @@ impl Compiled<'_> {
             ]
             .map(str::to_owned),
         );
-        for arguments in std::iter::once(&base).chain(layers.iter().map(|l| &l.arguments)) {
+        for arguments in std::iter::once(&base)
+            .chain(transitions.iter().map(|m| &m.arguments))
+            .chain(layers.iter().map(|l| &l.arguments))
+        {
             if arguments.iter().map(|s| s.len() + 3).sum::<usize>() > 24000 {
                 return Err(error(
                     "LIMIT_EXCEEDED",
@@ -1337,6 +1429,7 @@ impl Compiled<'_> {
             frames,
             base,
             runs,
+            transitions,
             layers,
         }))
     }
@@ -1371,26 +1464,35 @@ fn compile<'a>(
     graph.prefetch(a, start, duration, (video, audio));
     if video {
         graph.check_arrangement(a, start, duration, Kind::Video)?;
-        let overlays = a
-            .tracks
-            .iter()
-            .filter(|t| t.kind == Kind::Video && t.enabled && !t.composite.is_opaque())
+        let video_tracks = || (a.tracks.iter()).filter(|t| t.kind == Kind::Video && t.enabled);
+        let overlays = video_tracks()
+            .filter(|t| !t.composite.is_opaque())
             .flat_map(|t| &t.clips)
             .map(|c| Ok(c.start.compare(end)?.is_lt() && c.end()?.compare(start)?.is_gt()))
             .collect::<Result<Vec<_>>>()?
             .contains(&true);
-        if overlays {
-            // Top-level overlays are composited by the engine; nested ones stay in the graph.
+        let transitions = video_tracks()
+            .flat_map(|t| t.transitions.iter().map(move |fx| t.interval(fx)))
+            .map(|interval| {
+                let (x, y) = interval?;
+                Ok(x.compare(end)?.is_lt() && y.compare(start)?.is_gt())
+            })
+            .collect::<Result<Vec<_>>>()?
+            .contains(&true);
+        if overlays || transitions {
+            // Top-level transitions and overlays are composited by the engine; nested ones stay
+            // in the graph.
             graph.compose_with(a, start, duration, Kind::Video, "vout", true)?;
             let layers = graph.layers(a, start, duration)?;
-            if !layers.is_empty() {
+            let mixes = graph.mixes(a, start)?;
+            if !mixes.is_empty() || !layers.is_empty() {
                 let mut encoder = graph.successor();
                 if audio {
                     encoder.audio(a, start, duration)?;
                 }
                 return Ok(Compiled {
                     graph: encoder,
-                    picture: Some((graph, layers)),
+                    picture: Some((graph, mixes, layers)),
                 });
             }
         } else {

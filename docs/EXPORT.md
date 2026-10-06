@@ -107,7 +107,7 @@ Audio-only exports (`streams: "audio"`) never decode, composite or encode pictur
 
 H.264 exports with video are encoded straight from the timeline. No lossless intermediate is written, checked and decoded again:
 
-1. One FFmpeg run executes the selected full-quality reference graph and converts and encodes its picture and mix. With [engine-composited overlays](TRACKS.md), the engine compositor feeds that run's picture on stdin instead.
+1. One FFmpeg run executes the selected full-quality reference graph and converts and encodes its picture and mix. With engine-composited [transitions](TRANSITIONS.md#previews-ranges-and-output) or [overlays](TRACKS.md), the engine compositor feeds that run's picture on stdin instead.
 2. The same run also returns exactly what it encoded. The packed RGB24 frames go to the engine on stdout, which counts and hashes them as they arrive, and the stereo PCM s16le samples go to a scratch file. Both must hold exactly the range's frames and samples, at the timeline's exact clock. The receipt reports `verification.encoder_input: "streamed"`, `timeline_video_sha256` and `timeline_audio_sha256`. These equal the `decoded_video_sha256` and `decoded_audio_prefix_sha256` of a `reference` export of the same range, so a delivery can be tied to a lossless render without making one. Two-pass encodes run the graph twice, and both passes must receive identical frames.
 
 Reference and PNG exports, audio-only delivery, and ranges rendered as joined chunks (more than 64 clips per graph) still compile the selected interval into a lossless intermediate under a private scratch directory beside the output, verify it, then extract reference streams or encode from it.

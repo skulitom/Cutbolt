@@ -64,7 +64,14 @@ At a transition frame, `preview.frame` returns `transition_id`, `track_id`, `sou
 
 Proxy frame/range previews evaluate transitions at reduced dimensions with unchanged clocks. Full-quality synchronous and queued reference renders ignore proxy selection, as before. Reference and H.264/AAC range exports use the same transition interval evaluation. Existing outputs and original media remain protected, including when an input changes after encoding.
 
-The original compiler emits project-defined arithmetic through the existing external FFmpeg build's public [blend](https://www.ffmpeg.org/ffmpeg-filters.html#blend_002c-tblend), [audio expression](https://www.ffmpeg.org/ffmpeg-filters.html#aeval) and [channel join](https://www.ffmpeg.org/ffmpeg-filters.html#join) interfaces. Inputs are mapped explicitly by channel and sample index. No third-party implementation is copied or added; dependency versions and licenses are unchanged.
+The engine mixes top-level video transitions itself, before any [overlay track](TRACKS.md) above them:
+- FFmpeg decodes the base picture, which shows each transition's outgoing side, to raw planar RGB. One more decoder per visible run of a transition supplies its incoming side. Decoders start up to 25 frames ahead, at most two early at a time, so their startup overlaps earlier frames.
+- The engine evaluates the equations above in integers, in parallel row bands. A dissolve frame computes `L + floor(((R - L)k + n) / 2n)` for k = 2i + 1 from a 511-entry table of differences. A dip frame maps one side through a 256-level table, because at most one of its weights is positive. A wipe frame copies whole columns of every row.
+- `render.plan` lists these runs under `compositor.transitions`, with each decoder's arguments.
+
+On the effects-reel demo, a 172 s 1080p25 film with 15 top-level transitions of 12–16 frames and three overlay tracks, the H.264 export took 91–144 s instead of 362–486 s, with identical files. A 12-frame wipe range took 5.5 s instead of 13.3 s, against 4.4 s for 12 plain frames at the same place. These are back-to-back release builds while other sessions kept the machine 15–85 % busy; the [progress history](PROGRESS_HISTORY.md) has the details.
+
+Video transitions inside nested sequences are still compiled into that sequence's FFmpeg graph as expressions of the existing external build's public [blend](https://www.ffmpeg.org/ffmpeg-filters.html#blend_002c-tblend) interface, evaluated per pixel on one filter thread, which is much slower. Audio transitions use its [audio expression](https://www.ffmpeg.org/ffmpeg-filters.html#aeval) and [channel join](https://www.ffmpeg.org/ffmpeg-filters.html#join) interfaces, with inputs mapped explicitly by channel and sample index. No third-party implementation is copied or added; dependency versions and licenses are unchanged.
 
 ## Verification and remaining work
 
