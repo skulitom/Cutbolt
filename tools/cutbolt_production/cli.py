@@ -1,13 +1,14 @@
-"""Command line: build, check, status, show and review. Results are one JSON object on stdout, like the engine's."""
+"""Command line: build, check, resolve, status, show and review. Results are one JSON object on stdout, like the engine's."""
 import argparse
 import json
 import os
 import sys
 import uuid
+from fractions import Fraction as F
 from pathlib import Path
 
 from . import manifest as manifest_module
-from .engine import ToolError
+from .engine import Engine, ToolError
 from .pipeline import Production, estimate
 from .state import State, StateError, now
 
@@ -122,6 +123,12 @@ def main(argv=None):
     b.add_argument("--until", choices=["scenes", "cut"], help="stop after the scenes, or after the saved cut, before the export")
     c = sub.add_parser("check", help="validate a manifest and show its plan without running anything")
     c.add_argument("manifest")
+    v = sub.add_parser("resolve", help="resolve a hand-written scene from the last build's take and alignment, optionally with stills")
+    v.add_argument("manifest")
+    v.add_argument("scene")
+    v.add_argument("--root", required=True, help="the production folder of an earlier build")
+    v.add_argument("--still", action="append", default=[], help="render the frame on screen at this scene time (repeatable): 2.4, 61/25")
+    v.add_argument("--config", help="local tool configuration JSON, for --still; default $CUTBOLT_PRODUCTION_CONFIG")
     s = sub.add_parser("status", help="stages, the last build and review gates")
     s.add_argument("--root", required=True)
     w = sub.add_parser("show", help="one stage's receipt")
@@ -151,9 +158,43 @@ def main(argv=None):
             scenes.append(row)
         length, warnings = estimate(m)
         warn(warnings)
-        emit({"ok": True, "result": {"production_id": m["production_id"], "manifest_sha256": m["manifest_sha256"], "scenes": scenes,
-                                     "art_recipes": sorted(recipes), "labels": sorted(index["labels"]),
-                                     "estimate": length, "warnings": warnings}})
+        result = {"production_id": m["production_id"], "manifest_sha256": m["manifest_sha256"], "scenes": scenes,
+                  "art_recipes": sorted(recipes), "labels": sorted(index["labels"]), "estimate": length, "warnings": warnings}
+        sequences = {name: {**spec, "frames": spec["last"] - spec["first"] + 1} for name, spec in m["inputs"].items() if isinstance(spec, dict)}
+        if sequences:
+            result["sequences"] = sequences
+        emit({"ok": True, "result": result})
+
+    if args.action == "resolve":
+        try:
+            m = manifest_module.load(args.manifest)
+        except manifest_module.ManifestError as error:
+            fail("INVALID_MANIFEST", str(error))
+        try:
+            stills = [manifest_module.exact_time(t, f"--still {t}", maximum=F(120)) for t in args.still]
+        except manifest_module.ManifestError as error:
+            fail("INVALID_TIME", str(error))
+        root = root_of(args.root)
+        if not (root / "state" / "stages").is_dir():
+            fail("NOT_BUILT", f"{root} holds no production; build it first (build --until scenes is enough)")
+        production = Production(m, root, {})
+        state = production.state
+        revisions = state.revisions()
+        built = state.revision(revisions[-1])["manifest"]["production_id"] if revisions else None
+        if built != m["production_id"]:
+            fail("WRONG_PRODUCTION", f"{root} holds production {built!r}, not {m['production_id']!r}")
+        if stills:
+            config = load_config(args.config)
+            env = {k: v for k, v in (("CUTBOLT_FFMPEG", config.get("ffmpeg")), ("CUTBOLT_FFPROBE", config.get("ffprobe"))) if v}
+            production.engine = Engine(config["engine"], root, env, state, 1)
+        try:
+            state.acquire()
+            result = production.preview(args.scene, stills)
+        except (ToolError, StateError) as error:
+            fail(getattr(error, "code", "FAILED"), str(error))
+        finally:
+            state.release()
+        emit({"ok": True, "result": result})
 
     if args.action == "build":
         try:

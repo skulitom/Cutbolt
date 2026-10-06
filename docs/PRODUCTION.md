@@ -80,6 +80,7 @@ Costs of this choice, recorded as open gaps:
 4. **Inspect or revise.**
    - `status --root DIR` lists every stage's state, the last build with its warnings, and the review gates.
    - `show STAGE --root DIR` prints one receipt, for example `show timing` or `show scene:s2`.
+   - `resolve MANIFEST SCENE --root DIR [--still T ...]` resolves a hand-written scene from the last build's take and renders stills of it, without a build ([previewing](#previewing-a-hand-written-scene)).
    - Edit the manifest and run `build` again: only stages whose inputs changed run.
 
 ## The manifest (`cutbolt-production-1`)
@@ -93,7 +94,7 @@ Unknown fields fail with the field named; nothing is guessed. Times are exact se
 | `title`, `notes` | Free text, recorded only |
 | `template` | `{"id": "pixel-stage-explainer", "version": 1}`, the only template so far |
 | `language` | `"en"`, used for alignment and the speech check |
-| `inputs` | Map of name to absolute local file. Network paths, relative paths and alternate data streams are refused. |
+| `inputs` | Map of name to absolute local file, or to a numbered [image sequence](#image-sequences), `{"sequence": "C:\\...\\track_####.png"}`. Network paths, relative paths and alternate data streams are refused. |
 | `fonts` | `{"bold": <input>, "regular": <input>}`, TrueType or OpenType, for captions and the end card |
 | `voice` | `speaker` (a CustomVoice preset such as `ryan`), `language` (`English`), `seed`, optional `instruct`, and `split`: `none` (default, each line in one breath) or `sentence` (each sentence on its own, joined by `pause`, default 0.3 s) |
 | `music` | `null`, or `input` (a PCM16 WAV), `bpm`, `bed_db_under_voice` (default 6), `duck_milli` (default 300), `fade_out` (default 1.92 s), `loop`: `none` (default; the bed plays once) or `bars` (it repeats on whole bars, which needs `bpm`; see [music](#music-beds)) |
@@ -165,7 +166,7 @@ How the [contract's invalidation table](pipeline/CONTRACT.md#reviews-and-invalid
 | Shared palette | Every art recipe and every scene, the cut and delivery | Every take, alignment and voice asset |
 | One label | The labels recipe and the scenes that show labels | Every take |
 | Music, loudness target | Music preparation (new music only), mix, cut and delivery | Takes, scenes |
-| A hand-written scene recipe, or an input it names | That scene, the cut and delivery | Takes, art and every other scene |
+| A hand-written scene recipe, an input it names, or a sequence frame it shows | That scene, the cut and delivery | Takes, art and every other scene, including scenes that show other frames of the same sequence |
 | Engine build | Engine stages, whose keys include the engine's SHA-256 | Takes and art |
 
 The `timing` receipt lists every scene whose start or length changed, with old and new boundaries. This is the contract's `ripple_following_scenes`: later scenes move, and nothing is trimmed or stretched. A scene with a fixed `duration` is the `preserve_scene_duration` choice: a take that does not fit fails with `NARRATION_OVERFLOW` instead of being cut.
@@ -205,15 +206,18 @@ The coordinator takes a lock (`state/coordinator.lock`, with its PID). A second 
 
 A scene the template cannot draw takes a recipe of its own: `overrides.scenes.<scene>.input` names a JSON input holding an ordinary [scene recipe](SCENES.md) (the scene itself, or `{"scene": ...}`). The scene then needs no `beat`. A beat given beside a recipe only sets the scene's timing rules (a title's bars, an end card's minimum) and draws no art. The scene keeps its place in the timing plan, its narration and its burned-in captions.
 
-Like a template beat, a recipe can follow the narration and the production's files. Four values may name production data instead of fixed numbers and paths; the coordinator resolves them before the engine sees the recipe:
+Like a template beat, a recipe can follow the narration and the production's files. These values may name production data instead of fixed numbers and paths; the coordinator resolves them before the engine sees the recipe:
 
 | In the recipe | Write | Becomes |
 | --- | --- | --- |
 | A layer's `start` | `{"cue": "zooms"}`, `{"cue": {"word": "gold", "nth": 1, "edge": "end"}}`, optionally with `"offset": "-4/25"` | The frame where the narrator says the word, found as for a template cue: the aligned take's word time plus the scene's lead, to the nearest frame. The offset, in whole frames, may be negative. |
 | Any `time` inside a layer: keyframes of position, opacity, masks, effects | The same cue time | The same moment, measured from the layer's start as keyframe times are |
+| Any `time` in `geometry`: keyframes of node transforms, the camera and lights | The same cue time | The same moment in the scene: [geometry curves](GEOMETRY.md) run on the scene's clock |
+| The `value` of a scalar `literal` node in `expressions` | The same cue time | The moment in scene seconds, as `{"op": "time"}` without a layer reads it ([expressions](EXPRESSIONS.md)) |
 | A layer's `duration` | `{"until": <cue time>}` or `{"until": "end"}` | The layer lasts until that word, or until the scene ends |
+| A frame's `hold`, in a layer's `frames` or a tile's | `{"until": <cue time>}` | The frame lasts from where it starts until that word, so the next frame starts on it. A frame starts at the layer's start plus the earlier frames' holds; with `end: "loop"` this is the first pass. |
 | The scene's `duration` | `"scene"` | The scene's length in the timing plan. A fixed length must equal it, or the build fails with `OVERRIDE_DURATION`. |
-| Any file identity: frame `image` and `matte`, `fonts`, audio `file`, LUT `file` | `{"input": "vfx_stage"}` | The full identity of the production's copy of that input, `{"path": "sources/vfx_stage-<sha12>.png", "sha256", "bytes"}` |
+| Any file identity: frame `image` and `matte`, `fonts`, audio `file`, LUT `file` | `{"input": "vfx_stage"}`, or `{"input": "track", "frame": 12}` for a frame of an [image sequence](#image-sequences) | The full identity of the production's copy of that input or frame, `{"path": "sources/vfx_stage-<sha12>.png", "sha256", "bytes"}` |
 
 For example, a label that fades in on "zooms" and leaves two frames before "gold":
 
@@ -225,10 +229,45 @@ For example, a label that fades in on "zooms" and leaves two frames before "gold
  "animation": {"opacity": {"keys": [{"time": 0, "value": 0, "interpolation": "linear"}, {"time": "4/25", "value": 255, "interpolation": "hold"}]}}}
 ```
 
-- **Checked with the manifest.** `check` and `build` read the recipe and check every cue word and occurrence against the scene's script, every offset, and every input name against `inputs` (a PNG where an image or matte goes, a TrueType or OpenType font in `fonts`). `check` lists each scene's cue uses and inputs. A cue anywhere else, such as a frame `hold`, a `retime` start or the scene audio's `start`, is refused with its path.
-- **Resolved by the build**, from the production's own copy of the recipe and the aligned take. The resolved recipe is the base recipe under `scenes/`. The build log names each cue's frame, and `show scene:<id>` lists, under `request.override`, every cue's word, offset, time and frame, every input identity, the recipe file's SHA-256 and the scene length.
-- **Keyed by what it resolved to.** The scene's key covers the resolved recipe, the recipe file's SHA-256, every cue time and every input identity. A new take that moves a cue word by a frame re-renders the scene, and so does a changed image; a neighbour's retiming does not.
-- **Refused at build time:** a cue word the take never says (`CUE_NOT_HEARD`); a cue time outside the scene, or a keyframe outside its layer (`OVERRIDE_TIMING`); a layer that would end where it starts or after the scene (`OVERRIDE_TIMING`); a recipe whose length is not the scene's (`OVERRIDE_DURATION`); a recipe file that is not valid JSON (`INVALID_OVERRIDE`). Nothing is rendered.
+A 3D gallery whose camera drifts between two words, with footage frames that change on a word, writes its cues the same way. The camera's x position eases from 0 to -20 units between "drifts" and "left", and the second frame holds until "second":
+
+```json
+"camera": {"position_milli": {"value": [0, 0, 100000], "animation": {"x": {"keys": [
+  {"time": {"cue": "drifts"}, "value": 0, "interpolation": "linear"},
+  {"time": {"cue": "left"}, "value": -20000, "interpolation": "hold"}]}}}, ...}
+
+"frames": [{"image": {"input": "track", "frame": 1}, "hold": "4/25", "offset": [0, 0], "anchor": [0, 0]},
+           {"image": {"input": "track", "frame": 2}, "hold": {"until": {"cue": "second"}}, "offset": [0, 0], "anchor": [0, 0]},
+           {"image": {"input": "track", "frame": 3}, "hold": "1/25", "offset": [0, 0], "anchor": [0, 0]}]
+```
+
+- **Checked with the manifest.** `check` and `build` read the recipe and check every cue word and occurrence against the scene's script, every offset, and every input name against `inputs` (a PNG where an image or matte goes, a TrueType or OpenType font in `fonts`; a frame number within its sequence). `check` lists each scene's cue uses, inputs and sequence frames. A cue anywhere else, such as a `retime` start, `temporal` (its shutter angle and phase are degrees, not times) or the scene audio's `start`, is refused with its path. So is a hold given as a bare cue: a hold is a length, so it takes `{"until": <cue time>}`.
+- **Resolved by the build**, from the production's own copy of the recipe and the aligned take. The resolved recipe is the base recipe under `scenes/`. The build log names each cue's frame, and `show scene:<id>` lists, under `request.override`, every cue's word, offset, time and frame, every input identity and sequence frame identity (`frames`), the recipe file's SHA-256 and the scene length.
+- **Keyed by what it resolved to.** The scene's key covers the resolved recipe, the recipe file's SHA-256, every cue time and every input and frame identity. A new take that moves a cue word by a frame re-renders the scene, and so does a changed image or sequence frame it shows; a neighbour's retiming does not.
+- **Refused at build time:** a cue word the take never says (`CUE_NOT_HEARD`); a cue time outside the scene, a keyframe outside its layer, or a geometry key or expression literal outside the scene (`OVERRIDE_TIMING`); a layer that would end where it starts or after the scene (`OVERRIDE_TIMING`); a frame whose hold's word comes no later than the frame starts, or after its layer ends (`OVERRIDE_TIMING`); a recipe whose length is not the scene's (`OVERRIDE_DURATION`); a recipe file that is not valid JSON (`INVALID_OVERRIDE`). Nothing is rendered.
+- **Whole frames.** Cue times land on frames. A hold until a word therefore ends on that word's frame, and lasts whole frames when the layer's start and the earlier holds do, as strict timing requires anyway.
+
+#### Image sequences
+
+Numbered footage is one input, not one per frame: `"inputs": {"track": {"sequence": "C:\\footage\\track\\track_####.png"}}`.
+- **The pattern.** One run of `#` in the file name stands for the frame number, written with at least that many digits, zero-padded. The input is every file in the folder that the pattern numbers. It must run from its first number to its last without a gap, hold at most 10,000 frames, and be `.png`. On Windows the names match regardless of case.
+- **Checked with the manifest.** A missing folder, no matching file, a missing number, a number written with other digits (`p_001.png` for `p_####.png`) or two files with one number fail `check`, which lists each sequence with its first and last number and frame count.
+- **Used by frame.** A recipe names one frame, `{"input": "track", "frame": 12}`, wherever a PNG image or matte goes. `{"input": "track"}` alone, a number outside the sequence, and a frame of a single-file input are refused, and a sequence cannot be a font, music, a take or a recipe.
+- **Copied by content.** The build copies every frame to `sources/track/<number>-<sha12>.png`, numbers padded to the last one's digits, in one `input:track` receipt whose key covers every frame's SHA-256. A changed frame is copied again alone, and re-keys only the scenes that show it.
+
+#### Previewing a hand-written scene
+
+`scene.still` needs a recipe with plain times, and only the build resolves cues. `resolve` does it without a build:
+
+```powershell
+python tools/production.py resolve my-film.production.json gallery --root C:\DEV\CutboltData\my-film --still 2.4 --still 61/25 --config C:\DEV\CutboltData\production-config.json
+```
+
+- **What it uses.** The manifest and the recipe as they are now, the last build's aligned take of the scene (`align:<scene>`), and the take's length from the `timing` receipt, planned with the manifest's current timing rules and lead. Inputs are copied into `sources/` as the build copies them.
+- **What it writes.** The resolved recipe goes to `scenes/<scene>-base-<sha12>.json`, the name the build gives it, so the next build finds it. The result lists the recipe path, the scene length, every cue's word, time and frame, every input and frame identity, and the alignment it used.
+- **Stills.** Each `--still T`, in exact scene seconds, renders the frame on screen at T with the engine's `scene.still` to `previews/<scene>-<sha12>-f<frame>.png`; a still of the same recipe and frame is reused. Stills need the engine, so give `--config` or set `CUTBOLT_PRODUCTION_CONFIG`. They show the base recipe, without the captions the build burns in.
+- **When it refuses.** It takes the coordinator lock, so it fails with `PRODUCTION_BUSY` while a build runs. A narrated scene needs a timed, aligned take: `NOT_ALIGNED` until a build has made one (`build --until scenes` is enough, and so is a build that failed on this recipe), `STALE_ALIGNMENT` once the script has changed since. Other codes: `NOT_BUILT`, `WRONG_PRODUCTION`, `NOT_AN_OVERRIDE` (a template scene), `INVALID_TIME`, and the recipe's own refusals as in a build.
+- **Its take is the last build's.** After a new voice, seed or supplied take, build first. A silent scene needs no take.
 
 ### Review gates
 
@@ -247,13 +286,14 @@ For example, a label that fades in on "zooms" and leaves two frames before "gold
 
 | Folder | Contents |
 | --- | --- |
-| `sources/` | Imported inputs, named `<name>-<sha12>` |
+| `sources/` | Imported inputs, named `<name>-<sha12>`; an image sequence's frames under `<name>/` |
 | `generated/art/` | PixelForge recipes and rendered bundles, one folder per recipe key |
 | `generated/tts/` | Takes and the worker's receipt, one folder per batch attempt |
 | `generated/align/` | Aligned transcripts, one per voice asset |
 | `generated/timeline/`, `generated/captions/` | Target snapshots, the combined transcripts and the caption draft |
 | `media/` | Prepared voice and music assets |
 | `scenes/`, `renders/` | Scene recipes (base and captioned) and compiled scene assets |
+| `previews/` | Stills from `resolve --still` |
 | `exports/` | The MP4 and the SRT/WebVTT sidecars |
 | `reviews/` | The review (sheet, `review.json`), the speech check (the audio-only mix, transcripts, `review.json`) and the mix's AAC trials (`aac-*.m4a` with their `review.json`) |
 | `state/` | Stage receipts, revisions, events, engine and companion call logs, review decisions, the engine's job queues (`state/jobs/<lane>`) |
@@ -352,7 +392,8 @@ Not implemented:
 ## Limits and open gaps
 
 - **One template.** A different look needs a new template module and beat catalog.
-- **Cue words** must appear in the script and are matched by letters and digits. In a hand-written recipe they can time a layer's start, its end and the keyframes inside it, in whole frames; not frame holds, curve retiming or the scene's own audio.
+- **Cue words** must appear in the script and are matched by letters and digits. In a hand-written recipe they can time a layer's start and end, the keyframes inside it, its frames' holds, geometry curves and expression literals, in whole frames; not curve retiming or the scene's own audio.
+- **`resolve`** previews from the last build's take and alignment, and its stills leave out the burned-in captions.
 - **Narration.** The CustomVoice preset speakers only; no reference-voice cloning. English alignment only.
 - **Music** plays once, or loops on whole bars without a crossfade. A bed that does not start on a downbeat, or is not in 4/4 at its `bpm`, loops off the beat. See [music beds](#music-beds).
 - **Narration length** is estimated at `check` time at about 2.6 words/s, the rate measured for `ryan` only.
