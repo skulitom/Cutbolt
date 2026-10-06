@@ -159,7 +159,7 @@ impl Palette {
         self.indices[self.slot(color)]
     }
 }
-fn rgb(pixel: &[u8]) -> u32 {
+fn rgb(pixel: &[u8; 3]) -> u32 {
     u32::from(pixel[0]) << 16 | u32::from(pixel[1]) << 8 | u32::from(pixel[2])
 }
 /// Collect the colors of `rows` (packed RGB24); false past 256.
@@ -167,7 +167,7 @@ fn collect<'a>(palette: &mut Palette, rows: impl Iterator<Item = &'a [u8]>) -> b
     palette.clear();
     let mut last = EMPTY;
     for row in rows {
-        for pixel in row.chunks_exact(3) {
+        for pixel in row.as_chunks::<3>().0 {
             let color = rgb(pixel);
             if color != last {
                 if !palette.insert(color) {
@@ -429,7 +429,7 @@ pub(super) fn encode(
         if !collect(&mut palette, std::iter::once(&current[..])) {
             exceeding += 1;
             if refused.is_none() {
-                let colors: HashSet<u32> = current.chunks_exact(3).map(rgb).collect();
+                let colors: HashSet<u32> = current.as_chunks::<3>().0.iter().map(rgb).collect();
                 refused = Some((n, colors.len()));
             }
             continue;
@@ -453,7 +453,7 @@ pub(super) fn encode(
         writer.indices.clear();
         let mut last = (EMPTY, 0);
         for row in rows(&current, width, rectangle) {
-            for pixel in row.chunks_exact(3) {
+            for pixel in row.as_chunks::<3>().0 {
                 let color = rgb(pixel);
                 if color != last.0 {
                     last = (color, palette.index(color));
