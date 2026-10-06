@@ -607,9 +607,11 @@ class Layer:
         self.position, self.scale, self.opacity = list(position), scale, opacity
         self.curves = curves or {}          # name -> [(t from layer start, value, interpolation)]
         self.tilemap, self.graphics, self.native = tilemap, graphics, native
+        self.tail = F(0)                    # how long it plays on past `end`: a transition's handle, past the scene's end
 
     def to_json(self):
-        length = self.end - self.start
+        visible = self.end - self.start
+        length = visible + self.tail
         factor = 1 if self.native else FACTOR
         layer = {"id": self.id, "canvas": self.canvas, "start": rt(self.start), "duration": rt(length), "timing": "strict",
                  "transform": {"position": [v * factor for v in self.position], "crop": [0, 0, *self.canvas],
@@ -629,11 +631,13 @@ class Layer:
             layer["animation"] = {}
             for name, keys in self.curves.items():
                 scale = factor if name in ("position_x", "position_y") else 1
-                out = []
-                for t, v, mode in sorted(keys, key=lambda k: k[0]):
-                    if t > length:
-                        continue
-                    out.append({"time": rt(t), "value": int(v) * scale, "interpolation": mode})
+                keys = sorted(keys, key=lambda k: k[0])
+                kept = [k for k in keys if k[0] <= visible]
+                later = [k for k in keys if visible < k[0] <= length]
+                if later and kept[-1][0] != visible:
+                    # Keys in the handle continue a motion there; up to the scene's end it plays as it would without one.
+                    kept.append((visible, kept[-1][1], "hold"))
+                out = [{"time": rt(t), "value": int(v) * scale, "interpolation": mode} for t, v, mode in kept + later]
                 if out[-1]["time"] != rt(length):
                     out.append({"time": rt(length), "value": out[-1]["value"], "interpolation": "hold"})
                 layer["animation"][name] = {"keys": out}
@@ -641,7 +645,9 @@ class Layer:
 
 
 def clip_frames(frames, length):
-    """Frame list covering exactly `length`, the last hold shortened to fit."""
+    """Frame list covering exactly `length`, the last hold shortened to fit. A single still image is held throughout."""
+    if len(frames) == 1:
+        frames = [(frames[0][0], length, frames[0][2])]
     out, t = [], F(0)
     for path, hold, anchor in frames:
         if t >= length:
@@ -673,12 +679,20 @@ def cycle(pattern, total, frame_path, offset=0):
 
 
 class SceneBuilder:
-    """Builds one scene recipe. `art` maps recipe names to their rendered folders; `cue` resolves cue words."""
+    """Builds one scene recipe. `art` maps recipe names to their rendered folders; `cue` resolves cue words.
 
-    def __init__(self, scene, duration, art, index, patterns, colors, cue, fonts, scene_number):
+    `tail` renders the scene that much past its `duration`, as the handle a transition into the next scene reads. Every
+    layer that lasts until the scene's end plays on through it: Pip keeps its motion and the clouds keep drifting. The
+    beat's timing still follows `duration`, so the scene up to its end is exactly the scene without a handle."""
+
+    def __init__(self, scene, duration, art, index, patterns, colors, cue, fonts, scene_number, tail=0):
         self.scene, self.duration, self.art, self.index = scene, F(duration), art, index
         self.patterns, self.colors, self.cue, self.fonts = patterns, colors, cue, fonts
-        self.number = scene_number
+        self.number, self.tail = scene_number, F(tail)
+
+    def span(self, start, end):
+        """How long a layer over [start, end) plays: through the handle too when it lasts until the scene's end."""
+        return end - start + (self.tail if end == self.duration else 0)
 
     def frame(self, recipe, frame):
         return f"{self.art[recipe]}/frames/{frame}.png"
@@ -708,8 +722,11 @@ class SceneBuilder:
             x1 = x0 - math.floor(speed * length)
             if x1 > 320 or x0 < -64:
                 continue
+            drift = [(F(0), x0, "linear"), (length, x1, "hold")]
+            if self.tail:
+                drift[1:] = [(length, x1, "linear"), (length + self.tail, x1 - math.floor((x0 - x1) * self.tail / length), "hold")]
             layers.append(Layer(f"cloud{i + 1}", [64, 24], 0, length, frames=[(self.frame("clouds", frame), length, [0, 0])],
-                                position=(x0, y), curves={"position_x": [(F(0), x0, "linear"), (length, x1, "hold")]}))
+                                position=(x0, y), curves={"position_x": drift}))
         return layers
 
     def label(self, id, text, start, end, x=160, y=8, fade=F(4, 25)):
@@ -718,7 +735,7 @@ class SceneBuilder:
                      position=(x, y), curves=curves)
 
     def pip(self, id, motion, start, end, x=160, bundle="pip", curves=None):
-        return Layer(id, PIP_CANVAS, start, end, frames=cycle(self.patterns[motion], end - start, self.pip_frame(bundle)),
+        return Layer(id, PIP_CANVAS, start, end, frames=cycle(self.patterns[motion], self.span(start, end), self.pip_frame(bundle)),
                      position=(x, GROUND_Y), curves=curves)
 
     def strip(self, id, order, start, end, y=6, fade=True):
@@ -731,9 +748,12 @@ class SceneBuilder:
         layers = getattr(self, "beat_" + beat["type"])(beat)
         if len(layers) > 48:
             raise TemplateError(f"scene {self.scene['id']!r} has {len(layers)} layers; captions need room under the 64-layer limit")
+        for layer in layers:
+            if layer.end == self.duration:
+                layer.tail = self.tail
         background = self.colors["outline"] if beat["type"] == "end" else self.colors["sky_1"]
         return {"schema_version": 1, "id": self.scene["id"], "width": SIZE[0], "height": SIZE[1], "output_scale": 1,
-                "duration": rt(self.duration), "background": rgb(background), "color": "srgb_straight_encoded",
+                "duration": rt(self.duration + self.tail), "background": rgb(background), "color": "srgb_straight_encoded",
                 "layers": [layer.to_json() for layer in layers], "audio": None}
 
     # ------------------------------------------------------------------ beats
@@ -806,7 +826,7 @@ class SceneBuilder:
     def highlight(self, id, order, start, end):
         pattern = self.strip_motion(order)
         xs, ops, t = [], [], F(0)
-        length = end - start
+        length = self.span(start, end)
         while t < length and len(xs) < 200:
             for slot, (pose, frames) in enumerate(pattern):
                 if t >= length:
@@ -823,14 +843,14 @@ class SceneBuilder:
         layers = self.background() + [self.strip("strip-a", beat["order"], 0, switch, fade=False),
                                       self.highlight("hl-a", beat["order"], 0, switch)]
         pattern_a = self.strip_motion(beat["order"])
-        layers.append(Layer("pip-a", PIP_CANVAS, 0, switch, frames=cycle(pattern_a, switch, self.pip_frame()), position=(160, GROUND_Y)))
+        layers.append(Layer("pip-a", PIP_CANVAS, 0, switch, frames=cycle(pattern_a, self.span(0, switch), self.pip_frame()), position=(160, GROUND_Y)))
         if beat["label"]:
             layers.append(self.label("label-a", beat["label"], 0, switch, y=68))
         if beat["then"]:
             then = beat["then"]
             layers += [self.strip("strip-b", then["order"], switch, d, fade=False), self.highlight("hl-b", then["order"], switch, d)]
             pattern_b = self.strip_motion(then["order"])
-            layers.append(Layer("pip-b", PIP_CANVAS, switch, d, frames=cycle(pattern_b, d - switch, self.pip_frame()), position=(160, GROUND_Y)))
+            layers.append(Layer("pip-b", PIP_CANVAS, switch, d, frames=cycle(pattern_b, self.span(switch, d), self.pip_frame()), position=(160, GROUND_Y)))
             if then["label"]:
                 layers.append(self.label("label-b", then["label"], switch, d, y=68))
         return layers
@@ -863,7 +883,7 @@ class SceneBuilder:
             self.pip("pip-before", beat["motion"], 0, swap),
             # The new colour continues the same motion where the old one stopped.
             Layer("pip-after", PIP_CANVAS, swap, d, position=(160, GROUND_Y),
-                  frames=cycle(self.patterns[beat["motion"]], d - swap, self.pip_frame(variant), offset=round(swap * FPS))),
+                  frames=cycle(self.patterns[beat["motion"]], self.span(swap, d), self.pip_frame(variant), offset=round(swap * FPS))),
         ]
 
     def beat_travel(self, beat):
@@ -876,8 +896,10 @@ class SceneBuilder:
             c = cycle_len * k
             xs += [(c + F(4, 25), 52 + 36 * k, "linear"), (c + F(19, 25), 52 + 36 * (k + 1), "hold")]
         rest = cycle_len * hops
-        frames = cycle(PATTERNS["hop"], rest, self.pip_frame()) + cycle(self.patterns["idle"], d - rest, self.pip_frame()) if rest < d \
-            else cycle(PATTERNS["hop"], d, self.pip_frame())
+        # Pip hops, then idles; in a handle after its last hop it idles too.
+        total = self.span(0, d)
+        frames = cycle(PATTERNS["hop"], min(rest, total), self.pip_frame()) + \
+            (cycle(self.patterns["idle"], total - rest, self.pip_frame()) if rest < total else [])
         layers = self.background()
         if beat["label"]:
             layers.append(self.label("label", beat["label"], 0, d, y=6))
@@ -888,9 +910,9 @@ class SceneBuilder:
         d = self.duration
         ground = Layer("ground", [320, 60], 0, d, position=(0, 720), scale=6, native=True,
                        tilemap={"tile": [32, 60], "cells": [[0] * 10], "image": self.frame("ground", "ground")})
-        idle = min(F(48, 25), d)
+        idle, total = min(F(48, 25), d), self.span(0, d)
         pip = Layer("pip", PIP_CANVAS, 0, d, position=(330, 744), scale=6, native=True,
-                    frames=cycle(self.patterns["idle"], idle, self.pip_frame()) + (cycle(PATTERNS["hop"], d - idle, self.pip_frame()) if d > idle else []))
+                    frames=cycle(self.patterns["idle"], idle, self.pip_frame()) + (cycle(PATTERNS["hop"], total - idle, self.pip_frame()) if total > idle else []))
         layers = [ground, pip]
         styles = [(84, "label", "bold", 170), (46, "label_accent", "bold", 330), (46, "label_accent", "bold", 410), (36, "body_light", "regular", 520)]
         for i, text in enumerate(beat["lines"]):

@@ -9,12 +9,16 @@ alignment on the voice assets while the music is still being prepared; a hand-wr
 and input references, checked against its script, resolved from a stand-in alignment, rendered by the coordinator's
 scene stage and re-keyed when a cue time or an input changes; delivery warnings from speech checks and reviews
 (an engine-shaped recognition failure, a delivered peak over its target, a short music bed at check and build time);
-music looped on whole bars; and the mix's AAC trial encode through the engine, whose decoded audio must equal the
-delivered MP4's, with each correction of the limiter ceiling following the documented rule.
+music looped on whole bars; the mix's AAC trial encode through the engine, whose decoded audio must equal the
+delivered MP4's, with each correction of the limiter ceiling following the documented rule; and scene transitions:
+their manifest checks, template and recipe handles that leave each scene unchanged up to its end while its motion
+continues, and a cut whose transitions are set, changed and restored after a hand edit with only the scenes they need
+rendered again.
 
 With CUTBOLT_PRODUCTION_CONFIG (PixelForge, the Qwen worker and the speech runtime installed): a complete four-scene
 production, a repeated build that reuses every stage, a one-line script change that rebuilds only that line's chain
-and the delivery, and a palette change that re-renders art and scenes but keeps every take.
+and the delivery, a palette change that re-renders art and scenes but keeps every take, and a transition that, added,
+changed in kind and changed in length, re-renders at most its outgoing scene and the cut.
 """
 from engine import ENGINE, per_frame
 import argparse
@@ -384,6 +388,7 @@ def check_offline(out, passed):
     passed.append("production.align_starts_before_music_finishes")
 
     check_overrides(out, inputs, font, passed)
+    check_transitions(out, inputs, font, passed)
 
 
 EFFECTS_SCRIPT = "The camera zooms in, then the gold label lands on gold."
@@ -809,6 +814,213 @@ def check_overrides(out, inputs, font, passed):
     passed.append("production.resolve_previews_override (stills at frames 15 and 75 equal the rendered frames)")
 
 
+def fr(value):
+    return F(value["num"], value["den"]) if isinstance(value, dict) else F(value)
+
+
+def inspected(root, scene):
+    """Per layer, each frame's sampled parameters and the image it shows, from the engine's scene.inspect."""
+    report = engine("scene.inspect", root, scene=scene)
+    frames = {layer["id"]: layer.get("frames") or [] for layer in scene["layers"]}
+    out = {}
+    for layer in report["timing"]:
+        own = frames[layer["layer_id"]]
+        shown = [own[i]["image"]["path"] if own and i is not None else i for i in per_frame(layer.get("selected_frames") or [])]
+        out[layer["layer_id"]] = (per_frame(layer["sampled_parameters"]), shown)
+    return out
+
+
+def check_transitions(out, inputs, font, passed):
+    """A scene's transition into the next: checked with the manifest, rendered as a handle past the scene's end (template
+    scenes and recipes), and set on the saved cut, where changing it re-renders only that scene, or nothing."""
+    # 1. The manifest: kinds, whole frames, nothing after the last scene, and frames that fit the shortest the next scene
+    #    can be. On the every-beat film's beat grid (12/25 s) min_scene's 3 s becomes 7 beats, 84 frames.
+    raw = every_beat(inputs)
+    raw["scenes"][0]["transition"] = {"kind": "dip_black", "frames": 12}
+    raw["scenes"][1]["transition"] = {"kind": "wipe_left", "frames": 84}
+    m = manifest_module.validate(raw)
+    assert [s["transition"] for s in m["scenes"][:3]] == [{"kind": "dip_black", "frames": 12}, {"kind": "wipe_left", "frames": 84}, None], m["scenes"][:3]
+    path = out / "transitions.production.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "check", str(path)], capture_output=True, timeout=60)
+    listed = json.loads(done.stdout)["result"]["scenes"]
+    assert [row.get("transition") for row in listed[:3]] == [s["transition"] for s in m["scenes"][:3]], listed
+    cases = []
+
+    def broken(fragment, change):
+        raw = every_beat(inputs)
+        change(raw)
+        cases.append(rejected(raw, fragment))
+    broken("transition.kind: one of ['dissolve', 'dip_black', 'wipe_left', 'wipe_right']; got 'fade'",
+           lambda r: r["scenes"][1].update(transition={"kind": "fade", "frames": 12}))
+    for frames in (0, 12.0, "12", True):
+        broken("a whole number of 25 fps frames, at least 1", lambda r, frames=frames: r["scenes"][1].update(transition={"kind": "dissolve", "frames": frames}))
+    broken("missing required field(s) ['frames']", lambda r: r["scenes"][1].update(transition={"kind": "dissolve"}))
+    broken("unknown field(s) ['before']", lambda r: r["scenes"][1].update(transition={"kind": "dissolve", "frames": 6, "before": 3}))
+    broken("the last scene has no next scene", lambda r: r["scenes"][-1].update(transition={"kind": "dissolve", "frames": 6}))
+    broken("85 frames do not fit in the next scene 'two', which can be as short as 84 frames",
+           lambda r: r["scenes"][1].update(transition={"kind": "dissolve", "frames": 85}))
+    broken("51 frames do not fit in the next scene 'two', which can be as short as 50 frames",
+           lambda r: r["scenes"][2].update(duration=2) or r["scenes"][1].update(transition={"kind": "dissolve", "frames": 51}))
+    # The bound is what the timing plan gives a scene whose take is empty: exact for silent and fixed scenes, less than a
+    # narrated end card's bars.
+    variants = every_beat(inputs)
+    variants["scenes"] += [{"id": "quiet", "beat": {"type": "travel", "label": "GO"}}, {"id": "fixed", "script": "Pip waits.", "duration": "77/25",
+                                                                                      "beat": {"type": "travel", "label": "GO"}}]
+    v = manifest_module.validate(variants)
+    for s in v["scenes"]:
+        row = {"id": s["id"], "duration": s["duration"] and f"{s['duration'].numerator}/{s['duration'].denominator}", "type": s["beat"]["type"],
+               "take": {"samples": 0, "rate": 24000} if s["script"] else None}
+        planned, least = F(plan_timing(v["timing"], [row])["scenes"][0]["duration"]), manifest_module.shortest(s, v["timing"])
+        assert least == planned or (s["script"] and s["beat"]["type"] == "end" and least < planned), (s["id"], least, planned)
+    passed.append(f"production.transition_manifest_checks ({len(cases)} rejections)")
+
+    # 2. Template handles: every beat rendered 40 frames past its end. Up to the end it is the scene without a handle, frame
+    #    by frame; in the handle, every Pip that lasts until the end keeps its motion and the clouds keep drifting.
+    work = out / "work"
+    patterns = pixel_stage.check_patterns(m["patterns"])
+    recipes, index = pixel_stage.art_plan(m["scenes"], m["colors"], patterns)
+    art = {name: f"art/{name}" for name in recipes}
+    fonts = {"bold": "fonts/bold.ttf", "regular": "fonts/regular.ttf"}
+    lead, tail = m["timing"]["lead"], F(40, 25)
+    for number, scene in enumerate(m["scenes"]):
+        times = {}
+        for k, w in enumerate(pixel_stage.words_of(scene["script"] or "")):
+            times.setdefault(w, []).append((F(3, 10) * k + F(13, 1000), F(3, 10) * k + F(1, 4)))
+
+        def cue(c, times=times):
+            start, end = times[c["word"]][c["nth"]]
+            return pixel_stage.snap(lead + (start if c["edge"] == "start" else end))
+        duration = F(12) if scene["script"] else F(96, 25)
+        plain, handle = [pixel_stage.SceneBuilder(scene, duration, art, index, patterns, m["colors"], cue, fonts, number, t).build() for t in (0, tail)]
+        assert fr(handle["duration"]) == duration + tail, handle["duration"]
+        reaching = set()
+        for a, b in zip(plain["layers"], handle["layers"]):
+            ends = fr(a["start"]) + fr(a["duration"]) == duration
+            assert (a["id"], a["start"]) == (b["id"], b["start"]) and fr(b["duration"]) == fr(a["duration"]) + (tail if ends else 0), (scene["id"], a["id"])
+            if ends:
+                reaching.add(a["id"])
+        n = int(duration * 25)
+        before, after = inspected(work, plain), inspected(work, handle)
+        for lid in before:
+            assert after[lid][0][:n] == before[lid][0] and after[lid][1][:n] == before[lid][1], (scene["id"], lid)
+        pips = [layer["id"] for layer in handle["layers"] if layer["canvas"] == list(pixel_stage.PIP_CANVAS) and layer["id"] in reaching]
+        assert pips and all(len(set(after[lid][1][n:])) > 1 for lid in pips), (scene["id"], {lid: after[lid][1][n:] for lid in pips})
+        clouds = [lid for lid in reaching if lid.startswith("cloud")]
+        assert all(after[lid][0][-1]["position"][0] < after[lid][0][n - 1]["position"][0] for lid in clouds), (scene["id"], clouds)
+        assert clouds or scene["beat"]["type"] == "end", scene["id"]
+    passed.append(f"production.template_handles_continue ({len(m['scenes'])} beats, scene unchanged up to its end)")
+    check_transition_cut(out, font, passed)
+
+
+def check_transition_cut(out, font, passed):
+    """Three hand-written scenes through the coordinator's scene and cut stages: handles, keys and reconciliation."""
+    folder = out / "transition-inputs"
+    folder.mkdir()
+    colors = {"stage": (60, 120, 200), "stage_b": (230, 200, 40), "stage_c": (40, 160, 90)}
+    for name, color in colors.items():
+        Image.new("RGBA", (320, 180), (*color, 255)).save(folder / f"{name}.png")
+    Image.new("RGBA", (64, 16), (255, 209, 102, 255)).save(folder / "label.png")
+    (folder / "bold.ttf").write_bytes(font.read_bytes())
+    (folder / "a.json").write_text(json.dumps(effects_recipe()), encoding="utf-8")
+    for sid in ("b", "c"):
+        (folder / f"{sid}.json").write_text(json.dumps(recipe(sid, [layer("stage", [320, 180], 0, {"until": "end"}, [0, 0], frames=held(f"stage_{sid}"))])),
+                                            encoding="utf-8")
+    files = {name: str(folder / f"{name}.png") for name in (*colors, "label")}
+    files.update(bold=str(folder / "bold.ttf"), **{sid: str(folder / f"{sid}.json") for sid in ("a", "b", "c")})
+
+    def film(transitions):
+        raw = {"contract_version": "cutbolt-production-1", "production_id": "transition-film", "template": {"id": "pixel-stage-explainer", "version": 1},
+               "voice": {"speaker": "ryan"}, "inputs": files, "fonts": {"bold": "bold", "regular": "bold"},
+               "scenes": [{"id": "a", "script": EFFECTS_SCRIPT}, {"id": "b"}, {"id": "c"}],
+               "overrides": {"scenes": {sid: {"input": sid} for sid in ("a", "b", "c")}}}
+        for scene in raw["scenes"]:
+            if scene["id"] in transitions:
+                scene["transition"] = transitions[scene["id"]]
+        return manifest_module.validate(raw)
+
+    root = out / "transition-film"
+    for d in ("sources", "renders", "generated/timeline", "reviews"):
+        (root / d).mkdir(parents=True)
+    production = Production(film({}), root, {"engine": str(ENGINE)}, log=io.StringIO())
+    production.engine = DirectEngine(ENGINE, root, {}, production.state, 1)
+    production.engine_identity, production.lanes = {"sha256": sha256_file(ENGINE)}, 1
+    copies = production.stage_inputs()
+    rows = [{"id": "a", "start": "0/1", "duration": "5/1"}, {"id": "b", "start": "5/1", "duration": "2/1"}, {"id": "c", "start": "7/1", "duration": "2/1"}]
+    timing, aligned = {"result": {"scenes": rows}}, {"a": {"words": stand_in_words(EFFECTS_SCRIPT)}}
+    project = engine("project.create", id="transition-film", width=320, height=180, frame_rate=25)
+    snapshot = engine("timeline.apply", project=project, expected_revision=0, operations=[
+        {"op": "tracks.edit", "edit": {"op": "create", "duration": {"num": 9, "den": 1}}}] + [
+        {"op": "tracks.edit", "edit": {"op": "add", "track": {"id": t, "kind": k, "locked": False, "enabled": True, "clips": []}}}
+        for t, k in (("picture", "video"), ("voice", "audio"), ("music", "audio"))])
+    (root / "generated/timeline/mixed.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    mixed = {"result": {"snapshot": "generated/timeline/mixed.json"}}
+
+    def head():
+        project = production.engine.call("session.get", {"project_id": "transition-film"})
+        project = project.get("project", project)
+        picture = next(t for t in project["tracks"]["tracks"] if t["id"] == "picture")
+        return project, {c["id"]: (fr(c["start"]), fr(c["duration"]), fr(c["source_in"])) for c in picture["clips"]}, \
+            {x["id"]: (x["kind"], x["left_id"], x["right_id"], fr(x["before"]), fr(x["after"])) for x in picture.get("transitions", [])}
+
+    def build(transitions):
+        production.m = film(transitions)
+        production.outcomes.clear()
+        rendered = production.stage_scenes(timing, aligned, None, {}, copies)
+        cut = production.stage_cut(mixed, rendered, timing)
+        return {k: v for k, v in production.outcomes.items()}, cut["result"], head()
+    placed = {f"v-{r['id']}": (F(r["start"]), F(r["duration"]), F(0)) for r in rows}
+    outcomes, cut, (_, clips, transitions) = build({})
+    assert outcomes == {"scene:a": "built", "scene:b": "built", "scene:c": "built", "cut": "built"} and cut["action"] == "created", (outcomes, cut)
+    assert clips == placed and transitions == {}, (clips, transitions)
+    plain = json.loads((root / production.state.receipt("scene:a")["result"]["recipe"]).read_text(encoding="utf-8"))
+
+    # Adding transitions renders the two outgoing scenes with handles; the clips keep their places.
+    outcomes, cut, (_, clips, transitions) = build({"a": {"kind": "dissolve", "frames": 6}, "b": {"kind": "wipe_left", "frames": 4}})
+    assert outcomes == {"scene:a": "built", "scene:b": "built", "scene:c": "reused", "cut": "built"} and cut["operations"] == 7, (outcomes, cut)
+    assert clips == placed, clips
+    assert transitions == {"x-a": ("dissolve", "v-a", "v-b", 0, F(6, 25)), "x-b": ("wipe_left", "v-b", "v-c", 0, F(4, 25))}, transitions
+    scenes = {sid: production.state.receipt(f"scene:{sid}") for sid in ("a", "b", "c")}
+    assert [scenes[s]["request"].get("handle") for s in "abc"] == ["6/25", "4/25", None], [scenes[s]["request"] for s in "abc"]
+    assert [fr(scenes[s]["result"]["asset"]["duration"]) for s in "abc"] == [F(131, 25), F(54, 25), F(2)], [scenes[s]["result"]["asset"] for s in "abc"]
+    # The recipe's layers that last until the end play on through the handle; the zoom label, which ends on "gold", does not.
+    handle = json.loads((root / scenes["a"]["result"]["recipe"]).read_text(encoding="utf-8"))
+    lengths = {x["id"]: (fr(x["duration"]), fr(y["duration"])) for x, y in zip(plain["layers"], handle["layers"])}
+    assert lengths == {"stage": (5, F(131, 25)), "zoom-label": (F(28, 25), F(28, 25)), "gold-label": (F(74, 25), F(80, 25)),
+                       "caption": (F(44, 25), F(50, 25))}, lengths
+    before, after = inspected(root, plain), inspected(root, handle)
+    assert all(after[lid][0][:125] == before[lid][0] and after[lid][1][:125] == before[lid][1] for lid in before), "the recipe changed before its end"
+    assert all(v is not None for lid in ("stage", "gold-label", "caption") for v in after[lid][0][125:]) and after["zoom-label"][0][125:] == [None] * 6
+    # The cut plays the handle: two frames into the dissolve, a's stage and b's mix by p = 5/12, rounded half up.
+    frame = production.engine.call("preview.frame", {"project": {"project_id": "transition-film"}, "output": "reviews/x-a-2.png",
+                                                     "time": {"num": 127, "den": 25}})
+    assert frame["transition_id"] == "x-a", frame
+    with Image.open(root / "reviews" / "x-a-2.png") as image:
+        pixel = image.convert("RGB").getpixel((5, 5))
+    p = F(5, 12)
+    assert pixel == tuple(int((1 - p) * a + p * b + F(1, 2)) for a, b in zip(colors["stage"], colors["stage_b"])), pixel
+
+    # A new kind is only the cut: one operation. A new length re-renders the outgoing scene, whose clip is placed again,
+    # and both transitions at its ends are set again.
+    outcomes, cut, (_, clips, transitions) = build({"a": {"kind": "dip_black", "frames": 6}, "b": {"kind": "wipe_left", "frames": 4}})
+    assert outcomes == {"scene:a": "reused", "scene:b": "reused", "scene:c": "reused", "cut": "built"} and cut["operations"] == 1, (outcomes, cut)
+    assert transitions["x-a"][0] == "dip_black" and clips == placed, transitions
+    outcomes, cut, (project, clips, transitions) = build({"a": {"kind": "dip_black", "frames": 6}, "b": {"kind": "wipe_left", "frames": 8}})
+    assert outcomes == {"scene:a": "reused", "scene:b": "built", "scene:c": "reused", "cut": "built"} and cut["operations"] == 5, (outcomes, cut)
+    assert clips == placed and transitions == {"x-a": ("dip_black", "v-a", "v-b", 0, F(6, 25)), "x-b": ("wipe_left", "v-b", "v-c", 0, F(8, 25))}, transitions
+
+    # A transition changed by hand in the saved project is put back by the next build: the hand-made one is removed
+    # before the manifest's is set over the same frames.
+    production.engine.call("session.apply", {"project_id": "transition-film", "request_id": "hand-edit", "expected_revision": project["revision"], "operations": [
+        {"op": "tracks.edit", "edit": {"op": "transition_remove", "track_id": "picture", "id": "x-a"}},
+        {"op": "tracks.edit", "edit": {"op": "transition_set", "track_id": "picture", "transition": {
+            "id": "hand", "left_id": "v-a", "right_id": "v-b", "before": {"num": 0, "den": 1}, "after": {"num": 6, "den": 25}, "kind": "wipe_right"}}}]})
+    assert set(head()[2]) == {"hand", "x-b"}
+    outcomes, cut, (_, clips, again) = build({"a": {"kind": "dip_black", "frames": 6}, "b": {"kind": "wipe_left", "frames": 8}})
+    assert outcomes["cut"] == "built" and cut["operations"] == 2 and again == transitions and clips == placed, (outcomes, cut, again)
+    passed.append("production.transition_cut (handles 6 and 4 frames; kind change 1 operation; length change re-renders one scene; hand edit undone)")
+
+
 def write_wav(path, samples, rate):
     """Original synthetic PCM16 from floats in -1..1, mono (n,) or stereo (n, 2)."""
     data = np.clip(np.round(np.asarray(samples) * 32767), -32768, 32767).astype("<i2")
@@ -1066,6 +1278,38 @@ def check_full(out, config, passed):
     assert "art:pip" in built and "scene:one" in built and not any(b.startswith(("tts:", "align:", "prepare:")) for b in built), built
     passed.append("production.palette_change_keeps_takes")
 
+    # A transition from "one" into "two": adding it re-renders only "one" (with its handle) and the cut, a new kind only the
+    # cut, a new length "one" again. No clip or take moves, and the delivery plays the transition.
+    def saved():
+        project = engine("session.get", root, project_id="fixture-film")
+        tracks = {t["id"]: t for t in project.get("project", project)["tracks"]["tracks"]}
+        clips = {t: {c["id"]: (c["start"], c["duration"], c["source_in"]) for c in tracks[t]["clips"]} for t in ("picture", "voice")}
+        return clips, {x["id"]: (x["kind"], x["left_id"], x["right_id"], x["before"], x["after"]) for x in tracks["picture"].get("transitions", [])}
+    placed, _ = saved()
+    raw4 = copy.deepcopy(raw3)
+    for kind, frames, until, expected in (("dissolve", 12, ["--until", "cut"], ["cut", "scene:one"]), ("wipe_left", 12, ["--until", "cut"], ["cut"]),
+                                          ("wipe_left", 8, [], None)):
+        raw4["scenes"][1]["transition"] = {"kind": kind, "frames": frames}
+        path.write_text(json.dumps(raw4), encoding="utf-8")
+        result = build(path, root, config, *until)
+        built = set(result["stages"]["built"])
+        if expected:
+            assert sorted(built) == expected, (kind, frames, sorted(built))
+        else:
+            assert {"scene:one", "cut", "export", "review"} <= built, built
+            assert not built & {"timing", "captions", "mix", "audio-timeline", "scene:title", "scene:two", "scene:end"}, built
+            assert not any(b.startswith(("art:", "tts:", "align:", "prepare:")) for b in built), built
+        clips, transitions = saved()
+        assert clips == placed and transitions == {"x-one": (kind, "v-one", "v-two", {"num": 0, "den": 1}, {"num": frames, "den": 25})}, (clips, transitions)
+    assert result["scenes"] == fourth["scenes"] and result["duration"] == fourth["duration"], (result["scenes"], fourth["scenes"])
+    review = result["review"]["summary"]
+    assert "black: none" in review and "timing: matches project" in review, review
+    cut = next(F(s["start"]) for s in result["scenes"] if s["id"] == "two")
+    frame = engine("preview.frame", root, project={"project_id": "fixture-film"}, output="reviews/transition.png",
+                   time={"num": int(cut * 25) + 3, "den": 25})
+    assert frame["transition_id"] == "x-one", frame
+    passed.append("production.transition_rebuilds_one_scene (add: scene and cut; kind: cut; length: scene, cut and delivery)")
+
 
 def run(out, config):
     out = out.resolve()
@@ -1080,9 +1324,9 @@ def run(out, config):
         check_full(out, config, passed)
     report = {"passed": passed, "full_run": full,
               "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal, build order, "
-                       "hand-written scene overrides with word cues and input references, delivery warnings, music loops and "
-                       "length estimates, the mix's AAC trial; with a production config, a real PixelForge/Qwen/Cutbolt build "
-                       "with stage reuse and selective rebuilds",
+                       "hand-written scene overrides with word cues and input references, scene transitions with rendered handles, "
+                       "delivery warnings, music loops and length estimates, the mix's AAC trial; with a production config, a real "
+                       "PixelForge/Qwen/Cutbolt build with stage reuse and selective rebuilds, transitions included",
               "oracle": "Hand-computed boundaries, cue frames, loop placements and estimates, the engine's own scene.inspect, "
                         "timeline.apply and export.review, decoded AAC from FFmpeg, recipe digests and stage keys"}
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

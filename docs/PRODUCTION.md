@@ -103,7 +103,7 @@ Unknown fields fail with the field named; nothing is guessed. Times are exact se
 | `timing` | `lead` before each line (default 0.24 s), `tail` after it (0.4 s), `snap` (`frame`, `beat` or `bar`; default `beat` with a tempo, else `frame`), `title_bars` (2), `end_min_bars` (4), `min_scene` (3 s) |
 | `delivery` | `captions` (`burn_in` true; `sidecars` `["srt", "vtt"]`; `line_chars` 40; `lines` 2); `loudness_lkfs` (-14); `peak_dbfs` (-1), the delivered file's highest true peak; `review` (`speech` true, `frames` 16, `preview` false, `min_speech_match` 0.95: the share of expected words the speech check must hear) |
 | `review_policy` | `version`, `gates` (from script, storyboard, narration, rough_cut, final_export) and `human_required` (default final_export) |
-| `scenes` | 1-24 scenes: `id`, optional `script` (1-600 characters; omit for a silent scene), `beat` (optional when `overrides.scenes` gives the scene a recipe), optional fixed `duration` (seconds or `{"bars": n}`) |
+| `scenes` | 1-24 scenes: `id`, optional `script` (1-600 characters; omit for a silent scene), `beat` (optional when `overrides.scenes` gives the scene a recipe), optional fixed `duration` (seconds or `{"bars": n}`), optional `transition` into the next scene (see [transitions](#transitions)) |
 | `overrides` | `narration.<scene>.input`: a supplied PCM16 WAV used instead of synthesis. `scenes.<scene>.input`: a [hand-written scene recipe](#hand-written-scenes) (JSON) used instead of the template's, whose layers can start on words of the script and name files by input; captions are still added. |
 
 ### Beats
@@ -126,6 +126,36 @@ Poses are `stand`, `blink`, `crouch`, `push`, `float` and `land`. Built-in motio
 ### Palette slots
 
 The template's colours have names: Pip (`outline`, `body`, `body_shade`, `body_light`, `body_glint`, `feet`, `feet_shade`, `scarf`, `scarf_shade`, `eye_glint`, `cheek`, `dust`, `dust_shade`), the stage (`sky_1`-`sky_4`, `hills_far`, `hills_far_shade`, `hills_near`, `hills_near_shade`, `hills_near_light`, `grass`, `grass_shade`, `grass_light`, `soil`, `soil_shade`, `soil_dark`, `pebble`, `cloud`, `cloud_shade`), text and cards (`label`, `label_accent`, `ink`, `card`, `card_shade`, `highlight`), timing bars (`bar_1`-`bar_5`) and the caption box (`caption_box`).
+
+### Transitions
+
+Scenes are cut together unless a scene has a `transition` into the next one, for example:
+
+```json
+{"id": "s2", "script": "...", "beat": {...}, "transition": {"kind": "dissolve", "frames": 12}}
+```
+
+- `kind` is one of the engine's [video track transitions](TRANSITIONS.md): `dissolve`, `dip_black`, `wipe_left` or `wipe_right`.
+- `frames` is the effect's length in whole 25 fps frames, at least 1.
+
+The effect starts on the cut and covers the first `frames` of the next scene: its `before` is zero and its `after` is `frames`. Neither scene moves and the timing plan does not change, so the narration stays where it was. The next scene's narration starts its `lead` after the cut, inside a longer effect.
+
+A track transition reads the outgoing scene past its end, so the coordinator renders that scene `frames` longer as a tail handle. The clip on the timeline keeps the scene's length; only the rendered asset is longer.
+- **Template scenes.** Every layer that lasts until the scene's end plays on through the handle: Pip keeps moving (after a `travel` beat's last hop, Pip idles), and the clouds keep drifting. The beat's timing still follows the scene's length, so up to its end the scene is exactly what it would be without a handle.
+- **Hand-written recipes.** Every layer whose start plus duration reaches the scene's end, from `{"until": "end"}` or otherwise, lasts `frames` longer and plays on by its own frames, keys and `end` policy. Nothing before the end changes. An `audio_mix`, whose length must be the scene's, is padded with silence.
+- **Captions.** Burned-in captions are taken from the film's caption draft over the whole render, at timeline time. A caption of the next scene that starts inside the handle therefore shows there at the same moment and place as in the next scene, and stays steady through the effect.
+
+`check` and `build` refuse:
+- an unknown kind or field;
+- `frames` that is not a whole number of at least 1;
+- a transition on the last scene;
+- `frames` longer than the next scene can be. That is its fixed `duration`, a silent title's `title_bars`, or else `timing.min_scene` rounded up to the snap grid: a narrated scene lasts at least that, whatever its take. On a 125 BPM beat grid the default 3 s becomes 84 frames.
+
+`check` lists each scene's transition. A build also refuses a handle that would make a scene longer than 120 s (`SCENE_TOO_LONG`).
+
+Each transition is set on the `picture` track as `x-<scene>`, between `v-<scene>` and the next scene's clip. Changing a transition's `kind` changes only the cut. Changing its length, or adding or removing one, also re-renders the outgoing scene, whose recipe changed; see [invalidation](#stages-keys-and-receipts). `show scene:<id>` lists the handle as `request.handle`.
+
+Transitions slow the export, because each frame inside one is an FFmpeg blend on one filter thread. In the fixture's 21 s film, one 8-frame wipe took the export from 13.7-14.3 s to 26.3 s (6 October 2026, under other sessions' load).
 
 ## Stages, keys and receipts
 
@@ -167,6 +197,8 @@ How the [contract's invalidation table](pipeline/CONTRACT.md#reviews-and-invalid
 | One label | The labels recipe and the scenes that show labels | Every take |
 | Music, loudness target | Music preparation (new music only), mix, cut and delivery | Takes, scenes |
 | A hand-written scene recipe, an input it names, or a sequence frame it shows | That scene, the cut and delivery | Takes, art and every other scene, including scenes that show other frames of the same sequence |
+| A transition's kind | The cut and delivery | Every scene, take and piece of art |
+| A transition added, removed or of a new length | The outgoing scene (its handle), the cut and delivery | Takes, art, timing, captions, the mix and every other scene |
 | Engine build | Engine stages, whose keys include the engine's SHA-256 | Takes and art |
 
 The `timing` receipt lists every scene whose start or length changed, with old and new boundaries. This is the contract's `ripple_following_scenes`: later scenes move, and nothing is trimmed or stretched. A scene with a fixed `duration` is the `preserve_scene_duration` choice: a take that does not fit fails with `NARRATION_OVERFLOW` instead of being cut.
@@ -176,12 +208,12 @@ The `timing` receipt lists every scene whose start or length changed, with old a
 The timeline is one saved session whose ID is `production_id`. It has a `picture` track, a `voice` track and a `music` track.
 - **First build.** The coordinator assembles the target arrangement as a pure snapshot and creates the session from it.
 - **Later builds.** It computes the operations that turn the saved head into the new target and applies them as one revision. The target is assembled with `project.create` and `timeline.apply`, and mixed with `timeline.meters`, `audio.duck` and `audio.normalize`.
-  - The operations add new assets, remove and re-place only clips whose placement changed, set the end, and set levels and fades.
-  - Unchanged clips get no operation, so `session.history` and receipts show what each build changed.
+  - The operations add new assets, remove and re-place only clips whose placement changed, set the end, set [transitions](#transitions), and set levels and fades.
+  - Unchanged clips and transitions get no operation, so `session.history` and receipts show what each build changed. Removing a clip removes the transitions at its ends, so those are set again after it is placed. A transition the target no longer has is removed before any is set.
   - Asset IDs name content: scenes are `<scene>-<key>`, takes are `<scene>-<key>` from the file name. A revised scene therefore enters beside the old one rather than replacing it under the same name.
-- **Checked before saving.** The operations are first applied to a pure copy of the head with `timeline.apply`. The result must play exactly as the target: the same settings, referenced assets, clips by ID with every field, track settings, end, links and limiters. Otherwise nothing is saved, and the build fails with `RECONCILE_INCOMPLETE`, naming each differing track, clip and field. Assets no clip uses, and the order of clips inside a track, do not count.
+- **Checked before saving.** The operations are first applied to a pure copy of the head with `timeline.apply`. The result must play exactly as the target: the same settings, referenced assets, clips and transitions by ID with every field, track settings, end, links and limiters. Otherwise nothing is saved, and the build fails with `RECONCILE_INCOMPLETE`, naming each differing track, clip and field. Assets no clip uses, and the order of clips inside a track, do not count.
 - **Request IDs** are derived from the parent revision and the target's digest, so a lost response repeats safely.
-- **Reuse.** The `cut` receipt is reused only when the session head is still the revision it recorded.
+- **Reuse.** The `cut` receipt is reused only when the session head is still the revision it recorded. Otherwise the stage runs again, even for an unchanged manifest, and reconciles the head to the target. Before 6 October 2026 it reused the receipt anyway: the edit stayed in the head, and the export rendered the recorded revision.
 - **The manifest is the source of truth.** An edit made directly to the saved project survives until the next build, which reconciles every clip, level and limiter back to the target in one revision. The edit stays in the session's history and can be restored with `session.restore`. Make lasting changes in the manifest, or as [overrides](#overriding-a-stage).
 
 ### Interruption and resumption
@@ -264,7 +296,7 @@ python tools/production.py resolve my-film.production.json gallery --root C:\DEV
 ```
 
 - **What it uses.** The manifest and the recipe as they are now, the last build's aligned take of the scene (`align:<scene>`), and the take's length from the `timing` receipt, planned with the manifest's current timing rules and lead. Inputs are copied into `sources/` as the build copies them.
-- **What it writes.** The resolved recipe goes to `scenes/<scene>-base-<sha12>.json`, the name the build gives it, so the next build finds it. The result lists the recipe path, the scene length, every cue's word, time and frame, every input and frame identity, and the alignment it used.
+- **What it writes.** The resolved recipe goes to `scenes/<scene>-base-<sha12>.json`, the name the build gives it, so the next build finds it. A scene with a [transition](#transitions) is written with its handle, as the build renders it; stills stay within the scene's length. The result lists the recipe path, the scene length, every cue's word, time and frame, every input and frame identity, and the alignment it used.
 - **Stills.** Each `--still T`, in exact scene seconds, renders the frame on screen at T with the engine's `scene.still` to `previews/<scene>-<sha12>-f<frame>.png`; a still of the same recipe and frame is reused. Stills need the engine, so give `--config` or set `CUTBOLT_PRODUCTION_CONFIG`. They show the base recipe, without the captions the build burns in.
 - **When it refuses.** It takes the coordinator lock, so it fails with `PRODUCTION_BUSY` while a build runs. A narrated scene needs a timed, aligned take: `NOT_ALIGNED` until a build has made one (`build --until scenes` is enough, and so is a build that failed on this recipe), `STALE_ALIGNMENT` once the script has changed since. Other codes: `NOT_BUILT`, `WRONG_PRODUCTION`, `NOT_AN_OVERRIDE` (a template scene), `INVALID_TIME`, and the recipe's own refusals as in a build.
 - **Its take is the last build's.** After a new voice, seed or supplied take, build first. A silent scene needs no take.
@@ -398,6 +430,7 @@ Not implemented:
 - **Music** plays once, or loops on whole bars without a crossfade. A bed that does not start on a downbeat, or is not in 4/4 at its `bpm`, loops off the beat. See [music beds](#music-beds).
 - **Narration length** is estimated at `check` time at about 2.6 words/s, the rate measured for `ryan` only.
 - **Composition limits.** Scenes last at most 120 s, so long scripts must be split across scenes; films at most 600 s; 24 scenes.
+- **Transitions** start on the cut and read only the outgoing scene's handle, so they cover the start of the next scene. A transition centred on the cut, which would need a head handle on the incoming scene and move its cues, is not offered.
 - **Gates** are recorded but do not block a build.
 - **MCP-only hosts** cannot start a production without a shell (see the decision above).
 - **Measured on one Windows machine** with an RTX 4090, the pinned Qwen snapshot and the recorded PixelForge commit. Nothing else has been tested.

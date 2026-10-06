@@ -17,6 +17,8 @@ ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 GATES = ("script", "storyboard", "narration", "rough_cut", "final_export")
 SEQUENCE_FRAMES = 10000
+# The engine's video track transitions (docs/TRANSITIONS.md); a scene's transition leads into the next scene.
+TRANSITIONS = ("dissolve", "dip_black", "wipe_left", "wipe_right")
 
 
 class ManifestError(ValueError):
@@ -273,7 +275,7 @@ def validate(raw):
     seen = set()
     for i, scene in enumerate(scenes):
         where = f"scenes[{i}]"
-        fields(scene, {"id", "title", "script", "beat", "duration"}, where, ["id"])
+        fields(scene, {"id", "title", "script", "beat", "duration", "transition"}, where, ["id"])
         if not isinstance(scene["id"], str) or not ID.match(scene["id"]) or scene["id"] in seen:
             raise ManifestError(f"{where}.id: a unique 1-48 character lowercase id")
         if "beat" not in scene and scene["id"] not in scene_over:
@@ -297,6 +299,15 @@ def validate(raw):
                 raise ManifestError(f"{where}.duration: whole frames at 25 fps")
         else:
             norm["duration"] = None
+        transition = scene.get("transition")
+        if transition is not None:
+            fields(transition, {"kind", "frames"}, f"{where}.transition", ["kind", "frames"])
+            if transition["kind"] not in TRANSITIONS:
+                raise ManifestError(f"{where}.transition.kind: one of {list(TRANSITIONS)}; got {transition['kind']!r}")
+            if type(transition["frames"]) is not int or transition["frames"] < 1:
+                raise ManifestError(f"{where}.transition.frames: a whole number of 25 fps frames, at least 1; got {transition['frames']!r}")
+            transition = {"kind": transition["kind"], "frames": transition["frames"]}
+        norm["transition"] = transition
         try:
             norm["beat"] = pixel_stage.check_beat({**norm, "beat": scene["beat"]}, patterns, colors) if "beat" in scene else None
         except pixel_stage.TemplateError as error:
@@ -304,6 +315,16 @@ def validate(raw):
         if norm["beat"] and norm["beat"]["type"] == "end":
             norm["fonts_needed"] = True
         out["scenes"].append(norm)
+    # A transition covers the first frames of the next scene, so it must fit in the shortest that scene can be.
+    for i, (scene, following) in enumerate(zip(out["scenes"], out["scenes"][1:] + [None])):
+        if not scene["transition"]:
+            continue
+        if following is None:
+            raise ManifestError(f"scenes[{i}].transition: the last scene has no next scene to lead into")
+        frames, least = scene["transition"]["frames"], shortest(following, out["timing"]) * pixel_stage.FPS
+        if frames > least:
+            raise ManifestError(f"scenes[{i}].transition.frames: {frames} frames do not fit in the next scene {following['id']!r}, which can "
+                                f"be as short as {least} frames; use at most {least}, or give {following['id']!r} a longer fixed duration")
     for key in narration_over:
         if key not in seen:
             raise ManifestError(f"overrides.narration.{key}: no such scene")
@@ -348,6 +369,18 @@ def validate(raw):
     out["notes"] = raw.get("notes")
     out["manifest_sha256"] = digest(raw)
     return out
+
+
+def shortest(scene, timing):
+    """The least a scene can last in the timing plan: its fixed duration, a silent title's bars, or else timing.min_scene
+    on the snap grid, which a narrated scene lasts at least whatever its take."""
+    if scene["duration"]:
+        return scene["duration"]
+    beat = timing["beat"]
+    if scene["script"] is None and scene["beat"] and scene["beat"]["type"] == "title":
+        return 4 * beat * timing["title_bars"]
+    grid = {"frame": F(1, pixel_stage.FPS), "beat": beat, "bar": 4 * beat}[timing["snap"]]
+    return F(-(-timing["min_scene"] // grid)) * grid
 
 
 def templated(manifest):

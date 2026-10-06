@@ -155,6 +155,8 @@ def main(argv=None):
                    "words": len(pixel_stage.words_of(s["script"] or ""))}
             if s["id"] in m["overrides"]["scenes"]:
                 row["override"] = m["overrides"]["scenes"][s["id"]]
+            if s["transition"]:
+                row["transition"] = s["transition"]
             scenes.append(row)
         length, warnings = estimate(m)
         warn(warnings)

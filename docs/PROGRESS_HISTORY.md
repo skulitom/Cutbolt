@@ -1,5 +1,38 @@
 # Progress history
 
+## 6 October 2026: scene transitions in production manifests
+
+Finding 33 of the effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`): `production.py build` rendered each scene to exactly its length in the timing plan, so a track transition between two scenes had no source handle and failed with `INSUFFICIENT_HANDLES`. The reel's finishing pass worked around it by script. It re-rendered twelve scenes 12 frames longer, extending the layers that reached each scene's end, and replaced every picture clip before setting the transitions.
+
+Changes ([PRODUCTION](PRODUCTION.md#transitions)):
+- **Manifest.** A scene's optional `transition: {kind, frames}` leads into the next scene. The kinds are the engine's four video transitions. `check` lists each one. `check` and `build` refuse:
+  - unknown kinds and fields;
+  - `frames` that is not a whole number of at least 1;
+  - a transition on the last scene;
+  - `frames` longer than the shortest the next scene can be: its fixed duration, a silent title's bars, or `timing.min_scene` on the snap grid.
+- **Handles.** The outgoing scene renders `frames` past its end; its clip keeps the scene's length. The transition starts on the cut (`before` 0, `after` its frames), so no scene moves and the narration stays in place.
+  - In a template scene, layers that last until the end play on through the handle: Pip keeps moving and the clouds keep drifting. The beat's timing still follows the scene's length.
+  - In a hand-written recipe, layers that reach the scene's end are extended and play on by their own `end` policy; an `audio_mix` is padded.
+- **Cut and reconciliation.** Each transition is `x-<scene>` on the picture track. `reconcile()` sets the transitions that changed, including those removed with a re-placed clip, after removing any the target lacks. The arrangement check compares transitions by ID.
+- **Keys.** A new kind changes only the cut. A new length, or adding or removing a transition, also changes the outgoing scene's recipe. Timing, captions, the mix and the other scenes keep their keys. Recipes without a transition are byte-identical to before: every beat type at four lengths was compared with the previous code. Existing productions therefore keep their scene renders.
+- **`production.py resolve`** (from the entry below) writes a scene with a transition with the same handle as a build, so the build still finds that recipe.
+- **Fix.** The cut stage now reconciles a saved head that moved since its receipt, as PRODUCTION.md already described. Before, a build with an unchanged manifest reused the receipt: an edit made directly to the project stayed in the head, and the export rendered the recorded revision.
+
+Tests (`tests/production.py`):
+- **Offline** (four new checks):
+  - 10 manifest rejections, `check`'s listing, and the next-scene bound against `plan_timing` with an empty take.
+  - Every beat type built 40 frames longer. Through `scene.inspect`, each layer's parameters and shown image match the scene without a handle on every frame up to its end. In the handle every Pip shows more than one pose and every cloud moves on.
+  - Three hand-written scenes through the scene and cut stages. Handles of 6 and 4 frames render only the two outgoing scenes, and `preview.frame` two frames into the dissolve matches the exact mix of both stage colours. A new kind is one operation and re-renders nothing. A new length re-renders one scene in five operations. A transition replaced by hand is put back in two operations; without the fix this step fails.
+- **Full run** (PixelForge, Qwen and the speech runtime, `C:\DEV\CutboltData\production-transitions-20261006\fixture-1`):
+  - adding a 12-frame dissolve from `one` into `two` (`--until cut`) built exactly `scene:one` and `cut`, in 6.4 s;
+  - changing it to `wipe_left` built only `cut`, in 1.0 s;
+  - changing it to 8 frames built `scene:one`, the cut, export, review and speech check, in 52.4 s.
+
+  No clip or take moved, and scene boundaries and duration matched the build before. The review found no black and matching timing, and `preview.frame` inside the effect names `x-one`. Its export took 26.3 s, against 13.7-14.3 s for the same film without the wipe.
+- **Captions** were checked by hand on that film: rendered 20 frames past its end, scene `one` burns in scene `two`'s first caption at the same timeline time as `two` does.
+
+These fixtures pass in quick mode: production, offline and full. No Rust changed. No points change: the coordinator is agent tooling outside the scored editing coverage. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: hand-written scenes cue scene-level curves and frame holds, preview without a build, and take numbered footage
 
 The VFX demo (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`) wrote its scenes as [hand-written recipes](PRODUCTION.md#hand-written-scenes) and hit four limits:

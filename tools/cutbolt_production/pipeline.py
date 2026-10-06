@@ -125,9 +125,10 @@ class Production:
     def key(self, stage, request, deps=None):
         return digest({"stage": stage.split(":")[0], "stage_version": STAGE_VERSION, "request": request, "deps": deps or {}})
 
-    def stage(self, name, key, request, run, deps=None):
-        """Reuse the completed receipt for `key`, or run `run(attempt)` -> (outputs, result) and record it."""
-        if not self.forced(name):
+    def stage(self, name, key, request, run, deps=None, reuse=True):
+        """Reuse the completed receipt for `key` (unless `reuse` is false: the caller found it stale), or run
+        `run(attempt)` -> (outputs, result) and record it."""
+        if reuse and not self.forced(name):
             receipt = self.state.reusable(name, key)
             if receipt:
                 self.outcomes[name] = "reused"
@@ -800,9 +801,30 @@ class Production:
                 "sample_peak_dbfs": quality.highest(meters.get("sample_peak_dbfs")), "true_peak_dbtp": quality.highest(meters.get("true_peak_dbtp"))}
 
     # ------------------------------------------------------------------ scenes
+    def transitions(self, timing):
+        """Each scene's transition into the next, as {scene: (transition, next scene)}, checked against the timing plan.
+        The effect covers the first `frames` of the next scene, read from a handle rendered past this scene's end, so
+        neither scene moves and the incoming one needs no handle of its own."""
+        rows = {r["id"]: r for r in timing["result"]["scenes"]}
+        out = {}
+        for scene, following in zip(self.m["scenes"], self.m["scenes"][1:]):
+            transition = scene["transition"]
+            if not transition:
+                continue
+            handle, length, room = F(transition["frames"], FPS), F(rows[scene["id"]]["duration"]), F(rows[following["id"]]["duration"])
+            if handle > room:
+                raise ToolError("production", "TRANSITION_TOO_LONG", f"scene {scene['id']}: its {transition['frames']}-frame transition is longer "
+                                f"than the next scene {following['id']!r} ({room * FPS} frames)")
+            if length + handle > 120:
+                raise ToolError("production", "SCENE_TOO_LONG", f"scene {scene['id']} lasts {float(length):.2f} s, and the handle of its transition "
+                                f"would render it {float(length + handle):.2f} s; scenes stop at 120 s, so split its script")
+            out[scene["id"]] = (transition, following["id"])
+        return out
+
     def stage_scenes(self, timing, aligned, captions, art, inputs):
         timer = Timer()
         rows = {r["id"]: r for r in timing["result"]["scenes"]}
+        transitions = self.transitions(timing)
         patterns = pixel_stage.check_patterns(self.m["patterns"])
         fonts = {k: inputs[v] for k, v in self.m["fonts"].items()}
         layouts = pixel_stage.caption_layouts(fonts, self.m["colors"])
@@ -815,13 +837,17 @@ class Production:
             number, scene = item
             row = rows[scene["id"]]
             duration = F(row["duration"])
+            # A transition into the next scene reads this scene past its end: render it that much longer.
+            tail = F(transitions[scene["id"]][0]["frames"], FPS) if scene["id"] in transitions else F(0)
             override = self.m["overrides"]["scenes"].get(scene["id"])
             resolved = None
             if override:
                 base, resolved = self.resolve_override(scene, override, duration, inputs, cue_resolver(scene["id"]))
+                if tail:
+                    base = override_module.with_tail(base, duration, tail)
             else:
                 base = pixel_stage.SceneBuilder(scene, duration, art, self.art_index, patterns, self.m["colors"], cue_resolver(scene["id"]),
-                                                fonts, number).build()
+                                                fonts, number, tail).build()
             base_path = self.save_base(scene["id"], base)
             final_path = base_path
             if self.m["delivery"]["captions"]["burn_in"] and captions:
@@ -839,6 +865,8 @@ class Production:
             request = {"recipe": digest(recipe)}
             if resolved:
                 request["override"] = resolved
+            if tail:
+                request["handle"] = fstr(tail)
             key = self.key(f"scene:{scene['id']}", request, {"engine": self.engine_identity})
 
             def run(attempt):
@@ -848,7 +876,7 @@ class Production:
                                          lane=f"lane-{number % self.lanes}", label=f"scene:{scene['id']}")
                 # Asset IDs name content, so a revised scene enters the saved project beside the old one, never as it.
                 asset = dict(result["asset"], id=f"{scene['id']}-{key[:12]}")
-                return [self.ident(asset["path"])], {"asset": asset, "recipe": final_path, "layers": len(recipe["layers"])}
+                return [self.ident(asset["path"])], {"asset": asset, "recipe": final_path, "layers": len(recipe["layers"]), "handle": fstr(tail)}
             receipt = self.stage(f"scene:{scene['id']}", key, request, run, {"engine": self.engine_identity})
             return scene["id"], receipt["result"]["asset"]
 
@@ -921,6 +949,9 @@ class Production:
             self.mkdir(d)
         inputs = self.stage_inputs({override["input"], *override["inputs"], *override.get("frames", {})})
         base, resolved = self.resolve_override(scene, override, duration, inputs, cue_at(scene_id, words, self.m["timing"]["lead"]))
+        if scene["transition"]:
+            # As a build renders it: with the handle its transition into the next scene reads.
+            base = override_module.with_tail(base, duration, F(scene["transition"]["frames"], FPS))
         base_path = self.save_base(scene_id, base)
         shown = []
         for t in stills:
@@ -946,6 +977,11 @@ class Production:
             ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "picture", "collision": "reject", "clip": {
                 "id": f"v-{s['id']}", "asset_id": rendered[s["id"]]["id"], "start": rt(F(row["start"])), "source_in": rt(0),
                 "duration": rt(F(row["duration"]))}}})
+        # Each transition starts on the cut and reads the outgoing scene's handle: `before` is zero, `after` its frames.
+        for scene_id, (transition, following) in self.transitions(timing).items():
+            ops.append({"op": "tracks.edit", "edit": {"op": "transition_set", "track_id": "picture", "transition": {
+                "id": f"x-{scene_id}", "left_id": f"v-{scene_id}", "right_id": f"v-{following}", "before": rt(0),
+                "after": rt(F(transition["frames"], FPS)), "kind": transition["kind"]}}})
         desired = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": ops})
         request = {"desired": digest(strip_revision(desired))}
         key = self.key("cut", request, {"engine": self.engine_identity})
@@ -985,7 +1021,8 @@ class Production:
             if current is not None and current.get("project", current)["revision"] == receipt["result"]["revision"]:
                 self.outcomes["cut"] = "reused"
                 return receipt
-        receipt = self.stage("cut", key, request, run, {"engine": self.engine_identity})
+        # Otherwise the saved head moved (an edit made directly to the project) or is gone: reconcile it to the target.
+        receipt = self.stage("cut", key, request, run, {"engine": self.engine_identity}, reuse=False)
         self.log(f"cut: project {project_id} revision {receipt['result']['revision']} ({receipt['result']['action']}, "
                  f"{receipt['result']['operations']} operation(s), {timer.seconds():.1f}s)")
         return receipt
@@ -1253,8 +1290,8 @@ def strip_revision(snapshot):
 
 
 def arrangement(snapshot):
-    """What a snapshot plays: its settings, tracks with clips keyed by ID, links, the end, limiters, and the assets its clips use.
-    Array order inside a track and assets no clip uses do not change playback, so they are left out."""
+    """What a snapshot plays: its settings, tracks with clips and transitions keyed by ID, links, the end, limiters, and the
+    assets its clips use. Array order inside a track and assets no clip uses do not change playback, so they are left out."""
     tracks = snapshot.get("tracks") or {}
     clips = {c["id"]: c for t in tracks.get("tracks", []) for c in t["clips"]}
     used = {c.get("asset_id") for c in clips.values()}
@@ -1264,7 +1301,8 @@ def arrangement(snapshot):
         "assets": {a["id"]: a for a in snapshot.get("assets", []) if a["id"] in used},
         "end": tracks.get("duration"), "master": tracks.get("master"),
         "links": sorted((json.dumps(link, sort_keys=True) for link in tracks.get("links", []))),
-        "tracks": {t["id"]: {**{k: v for k, v in t.items() if k != "clips"}, "clips": {c["id"]: c for c in t["clips"]}}
+        "tracks": {t["id"]: {**{k: v for k, v in t.items() if k not in ("clips", "transitions")}, "clips": {c["id"]: c for c in t["clips"]},
+                             "transitions": {x["id"]: x for x in t.get("transitions", [])}}
                    for t in tracks.get("tracks", [])},
     }
 
@@ -1282,8 +1320,10 @@ def arrangement_differences(a, b):
         for tid in sorted(left["tracks"]):
             lt, rt_ = left["tracks"][tid], right["tracks"][tid]
             for field in sorted(set(lt) | set(rt_)):
-                if field != "clips" and lt.get(field) != rt_.get(field):
+                if field not in ("clips", "transitions") and lt.get(field) != rt_.get(field):
                     out.append(f"tracks.{tid}.{field}")
+            out += [f"tracks.{tid}.transitions.{x}" for x in sorted(set(lt["transitions"]) | set(rt_["transitions"]))
+                    if lt["transitions"].get(x) != rt_["transitions"].get(x)]
             for cid in sorted(set(lt["clips"]) | set(rt_["clips"])):
                 lc, rc = lt["clips"].get(cid), rt_["clips"].get(cid)
                 if lc is None or rc is None:
@@ -1308,7 +1348,8 @@ DEFAULT_AUDIO = (1000, None, ZERO, ZERO)
 
 def reconcile(head, desired):
     """Operations that turn the saved head into the desired arrangement: new assets, removed or moved clips, the end,
-    placements, then levels and fades. Unchanged clips get no operation, so a one-scene revision touches one clip."""
+    placements, transitions, then levels and fades. Unchanged clips and transitions get no operation, so a one-scene
+    revision touches one clip and the transitions at its ends."""
     head_assets = {a["id"] for a in head.get("assets", [])}
     ops = [{"op": "media.add", "asset": a} for a in desired.get("assets", []) if a["id"] not in head_assets]
     if desired.get("transfer") and head.get("transfer") != desired.get("transfer"):
@@ -1349,6 +1390,16 @@ def reconcile(head, desired):
     for track, clip in place:
         ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": track, "collision": "reject", "clip": {
             k: clip[k] for k in ("id", "asset_id", "start", "source_in", "duration")}}})
+    # Transitions: removing a clip removes the transitions at its ends, so those are set again with every one that changed.
+    def transitions(snapshot):
+        return {x["id"]: (track["id"], x) for track in (snapshot.get("tracks") or {}).get("tracks", []) for x in track.get("transitions", [])}
+    gone = set(remove)
+    kept = {tid: value for tid, value in transitions(head).items() if not {value[1]["left_id"], value[1]["right_id"]} & gone}
+    wanted = transitions(desired)
+    ops += [{"op": "tracks.edit", "edit": {"op": "transition_remove", "track_id": track, "id": tid}}
+            for tid, (track, _) in sorted(kept.items()) if tid not in wanted or wanted[tid][0] != track]
+    ops += [{"op": "tracks.edit", "edit": {"op": "transition_set", "track_id": track, "transition": transition}}
+            for tid, (track, transition) in sorted(wanted.items()) if kept.get(tid) != (track, transition)]
     ops += [{"op": "tracks.edit", "edit": change} for change in levels]
     # Timeline limiters: the master (from audio.normalize) and any audio track's.
     if (head.get("tracks") or {}).get("master") != desired["tracks"].get("master"):

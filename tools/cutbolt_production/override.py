@@ -292,3 +292,20 @@ def prepare(document, scene, inputs, where, resolution=None):
         if frames:
             report["frames"] = {name: {str(n): resolution.identity(name, n) for n in sorted(numbers)} for name, numbers in sorted(frames.items())}
     return recipe, report
+
+
+def with_tail(recipe, duration, tail):
+    """A resolved recipe rendered `tail` past the scene's `duration`, as the handle a transition into the next scene
+    reads. Every layer that lasts until the scene's end plays on through it, by its own frames, keys and `end` policy;
+    nothing before the end changes. An `audio_mix`, whose length must be the scene's, is padded with it."""
+    recipe = copy.deepcopy(recipe)
+    recipe["duration"] = rt(duration + tail)
+    for i, layer in enumerate(recipe["layers"]):
+        at = f"layers[{i}] ({layer.get('id')})"
+        length = exact(layer.get("duration"), f"{at}.duration")
+        if exact(layer.get("start"), f"{at}.start") + length == duration:
+            layer["duration"] = rt(length + tail)
+    mix = recipe.get("audio_mix")
+    if isinstance(mix, dict) and "duration" in mix:
+        mix["duration"] = rt(exact(mix["duration"], "audio_mix.duration") + tail)
+    return recipe
