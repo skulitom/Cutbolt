@@ -155,6 +155,7 @@ def run(root,device):
     for bitrate in [192000,256000,320000]:
         r={**request('audio-'+str(bitrate),'high_hd',controls[0],bitrate),'streams':'audio','input_transfer':None,'h264':None,'output':str(output/f'audio-{bitrate}.m4a')}
         result=call(r);assert result['encoder_passes']==1 and result['audio']['bitrate']==bitrate and result['video'] is None
+        assert result['audio']['cutoff_hz']==(20000 if bitrate==320000 else None),result['audio']
         audio=np.frombuffer(ff(['-i',r['output'],'-map','0:a:0','-f','s16le','-']),dtype='<i2').reshape((-1,2))[:len(pcm)]
         snr=10*math.log10(float(np.sum(pcm.astype(float)**2))/float(np.sum((audio.astype(float)-pcm)**2)));assert snr>=AAC_SNR_DB[bitrate],(bitrate,snr)
         audio_only.append({'aac_bitrate':bitrate,'pcm_snr_db':round(snr,3)})

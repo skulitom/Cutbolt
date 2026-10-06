@@ -20,7 +20,7 @@ from jsonschema import Draft202012Validator
 
 ROOT=Path(__file__).resolve().parents[1]
 W,H,N=192,128,75
-ONE_FRAME_AAC_SNR_DB=20
+ONE_FRAME_AAC_SNR_DB=25
 PALETTE=[(0,0,0),(255,255,255),(64,64,64),(128,128,128),(192,192,192),(192,32,32),(32,192,32),(32,32,192)]
 
 @lru_cache(None)
@@ -150,12 +150,13 @@ def run(root):
                 actual=array('h');actual.frombytes(audio_raw[:len(expected)]);original=array('h');original.frombytes(expected)
                 assert len(audio_raw)//4==((wanted+1023)//1024)*1024
                 assert result['verification']['audio_tail_padding_samples']==len(audio_raw)//4-wanted
-                assert result['verification']['aac_priming_samples']==1024
+                assert result['verification']['aac_priming_samples']==1024 and result['audio']['cutoff_hz']==20000
                 power=sum(v*v for v in original);error=sum((a-b)**2 for a,b in zip(actual,original))
                 snr=10*math.log10(power/error) if power and error else 99
                 if power:
-                    # A one-frame (40 ms) clip is mostly encoder start-up. Without noise substitution the native
-                    # encoder measured 20.5 dB on it (33.9 dB with), so it has a measured floor; see EXPORT.md.
+                    # A one-frame (40 ms) clip is mostly encoder start-up. The native encoder measured 33.9 dB on it
+                    # with noise substitution, 20.5 dB without and 25.9 dB with the 20 kHz cutoff, so it has a
+                    # measured floor; see EXPORT.md.
                     assert snr>=(ONE_FRAME_AAC_SNR_DB if count==1 else 28),(path,'audio SNR',snr)
                     # Independent channel and timing check: the unshifted samples must fit best.
                     def mse(lag):

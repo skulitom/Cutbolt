@@ -465,7 +465,7 @@ def run(root):
     timeline, _ = oracle(hat_project)
     receipt = call({'command': 'export.run', 'project': hat_project, 'input_root': str(root), 'output_root': str(out), 'output': str(out / 'hats.m4a'),
                     'profile': 'h264_aac', 'streams': 'audio'})
-    assert receipt['audio']['coder'] == 'twoloop' and receipt['audio']['noise_substitution'] is False, receipt['audio']
+    assert receipt['audio']['coder'] == 'twoloop' and receipt['audio']['noise_substitution'] is False and receipt['audio']['cutoff_hz'] == 20000, receipt['audio']
     decoded = pcm_of(out / 'hats.m4a')[:len(timeline)]
     aac_overshoot = true_peak(decoded) - true_peak(timeline)
     assert aac_overshoot <= 0.25, (true_peak(timeline), true_peak(decoded))

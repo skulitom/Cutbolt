@@ -1,5 +1,33 @@
 # Progress history
 
+## 6 October 2026: AAC at 320 kb/s codes up to 20 kHz
+
+With noise substitution off (see "lossy deliveries meet their true-peak target" below), heavily limited mixes strong near the top of the band still decoded up to 1.2 dB over their own true peak. The production fixture's square-wave bed missed its target and stopped `not_better`. A `-cutoff 20000` encoder setting had halved that on five mixes, so it was measured more widely.
+
+The method: FFmpeg 7.0 (gyan build), the preset's exact AAC arguments, and the 4x true peak of `dynamics::TruePeak`. Scripts and data are in `C:\DEV\CutboltData\truepeak-20261005\cutoff-20261006\`.
+
+| Mixes at 320 kb/s | Codec overshoot, 22 kHz band (default) | With a 20 kHz cutoff |
+| --- | --- | --- |
+| 15 production mixes | max 0.22 dB, mean 0.10 | max 0.15 dB, mean 0.09 |
+| 31 hard mixes: the fixture bed at 10 ceilings and 1.5x hotter, the part-two demo at 11 ceilings | max 1.43 dB, mean 0.57, median 0.51 | max 1.02 dB, mean 0.25, median 0.21 |
+
+- **Hard mixes.** The cutoff lowered the overshoot on 29 of the 31; two rose 0.01 dB. One outlier, the demo limited at -7 dBFS, read 1.02 dB (1.12 before); every other stayed within 0.48 dB. Cutoffs of 19 and 19.5 kHz averaged about the same; 20.5 and 21 kHz kept less of the gain.
+- **Production mixes.** Most moved by 0.01 dB or less; four fell by 0.03-0.08 dB.
+- **The band at each rate.** At 320 kb/s the encoder always coded up to 22 kHz: `-cutoff 22000` decodes bit-identically to the default. At 192 and 256 kb/s it narrows the band frame by frame from its bit budget, and fixed cutoffs measured mixed on six mixes. At 192 kb/s, 20 kHz raised the fixture bed's overshoot from 0.35 to 1.23 dB. At 256 kb/s one bed trial fell from 0.59 to 0.16 dB and the other rose from 0.62 to 1.04 dB.
+- **Fidelity on the 15 mixes.** SNR below 18 kHz is 2.0-3.1 dB higher. Full-band SNR is 2.9-5.4 dB lower, because their synthetic beds carry -27 to -34 dB of their power above 20 kHz, which is no longer coded. Files are 1.1-3.5 % smaller.
+
+Changes, agreed with the user:
+- **Export preset.** At 320 kb/s, the default and the version-1 preset's rate, the native AAC encoder gets `-cutoff 20000`; 192 and 256 kb/s are unchanged. The receipt's `audio.cutoff_hz` reports 20000 or null, and capabilities add `aac_cutoff_hz` ([EXPORT](EXPORT.md#aac-peaks)).
+- **Fixtures.** `delivery`, `delivery_profiles` and `dynamics` check `cutoff_hz`.
+  - The delivery one-frame clip measures 25.90 dB (20.47 before), so its floor rises from 20 to 25 dB. The other delivery cases moved by -0.23 to +5.15 dB and measure at least 39.22 dB.
+  - The delivery-controls tones are unchanged at 192 and 256 kb/s (26.03 and 35.25 dB), and rose from 47.45 to 49.19 dB at 320 kb/s.
+  - The dynamics fixture's AAC hats decode 0.77 dB under the timeline's true peak (bound: 0.25 dB over).
+- **Production.**
+  - The fixture's harsh-bed mix now passes on its first trial: the -1.3 dBFS ceiling delivers -1.18 dBTP (+0.13 dB), `under_target`. Before, it took two trials, stopped `not_better` at -0.85 and -0.31 dBTP, and warned.
+  - The coordinator's codec headroom stays 0.3 dB. Real and demo mixes at -1 to -2 dBFS ceilings overshoot by at most 0.19 dB; 0.2 dB would leave a few hundredths of a dB of margin to save a tenth of a dB of limiting.
+
+These fixtures pass in quick mode: delivery, delivery_profiles, dynamics and production; `cargo test` and clippy pass. Exports at 320 kb/s made earlier decode differently from a new export of the same timeline. No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: recognition decodes only where the acoustic model hears speech
 
 The part-two demo's speech check (`demo-progress2-20261005`, ISSUES.md item 11) heard `Pip, PixelForge, Cutbolt.` over the film's music-only end card (89–91 s). That text is the vocabulary prompt (fe807a1). Prompted with `carry_initial_prompt`, Whisper writes the prompt back over audio without speech. The check counted three extra words: 150 heard, and 145 of the 149 expected words matched.

@@ -289,17 +289,17 @@ Warnings are derived on every build from the stage results and the review folder
 
 `peak_dbfs` bounds the delivered file's true peak, not just the mix's. The master limiter holds the mix's own true peak on its ceiling ([AUDIO](AUDIO.md#timeline-limiters)), but AAC encoding moves peaks again, by an amount that depends on the signal.
 
-Until 6 October 2026 the export's AAC encoder used perceptual noise substitution, and its bursts made deliveries miss the target by up to several dB. On the part-two demo rebuilt on `dbd6ffe`, the mix's three trials at -1.5, -2.57 and -5.02 dBFS ceilings decoded at +0.02, +1.40 and +1.62 dBTP. Each mix's own true peak sat on its ceiling; the bursts came from drum onsets in the bed, at moments when the mix was about -27 dBFS. The encoder now runs without it (see [AAC peaks](EXPORT.md#aac-peaks)). Over 15 production mixes, the codec then added at most 0.22 dB to the mix's true peak, more under heavier limiting.
+Until 6 October 2026 the export's AAC encoder used perceptual noise substitution, and its bursts made deliveries miss the target by up to several dB. On the part-two demo rebuilt on `dbd6ffe`, the mix's three trials at -1.5, -2.57 and -5.02 dBFS ceilings decoded at +0.02, +1.40 and +1.62 dBTP. Each mix's own true peak sat on its ceiling; the bursts came from drum onsets in the bed, at moments when the mix was about -27 dBFS. The encoder now runs without it, and at 320 kb/s codes up to 20 kHz instead of 22 kHz (see [AAC peaks](EXPORT.md#aac-peaks)). Over 15 production mixes, the codec then added at most 0.15 dB to the mix's true peak (0.22 dB with the 22 kHz band), more under heavier limiting.
 
 The mix therefore measures the encode against a measured headroom:
-1. It normalizes to `loudness_lkfs` with the limiter ceiling 0.3 dB under `peak_dbfs`: the codec headroom measured above, plus a margin.
+1. It normalizes to `loudness_lkfs` with the limiter ceiling 0.3 dB under `peak_dbfs`: the codec headroom measured above, plus a margin. With the 20 kHz band, real and demo mixes limited at -1 to -2 dBFS overshot by at most 0.19 dB; a smaller headroom would save a tenth of a dB of limiting at the risk of a second trial.
 2. It encodes that mix to an audio-only AAC M4A with the export's own settings, and meters the decoded file the way `export.review` meters the delivery. The M4A decodes to exactly the samples of the MP4's audio.
 3. If the true peak is over `peak_dbfs`, it lowers the ceiling by the excess plus 0.05 dB and tries again. The trials stop as soon as one of these holds, with the code recorded:
 
    | Code | When |
    | --- | --- |
    | `under_target` | The trial delivers at or under `peak_dbfs` |
-   | `not_better` | Its true peak is no lower than the best earlier trial's. A lower ceiling limits the mix harder, and the codec can then overshoot more: on a square-wave fixture bed, ceilings of -1.3 and -1.5 dBFS decoded at -0.85 and -0.31 dBTP. |
+   | `not_better` | Its true peak is no lower than the best earlier trial's. A lower ceiling limits the mix harder, and the codec can then overshoot more: with the 22 kHz band, ceilings of -1.3 and -1.5 dBFS on a square-wave fixture bed decoded at -0.85 and -0.31 dBTP. |
    | `trial_cap` | Three trials ran |
    | `ceiling_floor` | The ceiling cannot go below -20 dBFS |
    | `unmeasured` | The encode's true peak could not be measured |
