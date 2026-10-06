@@ -95,3 +95,68 @@ pub(crate) fn timestamp(frame: &Value, index: usize, rate: Time, video: &Value) 
         "Video timestamps do not match the zero-origin native frame clock at the declared container precision; convert VFR sources explicitly",
     ))
 }
+
+/// `thirds` thirds of a frame period at `rate`, floored to the microsecond, in FFmpeg's seconds.
+fn thirds(rate: Time, thirds: u64) -> String {
+    let micros = u128::from(thirds) * u128::from(rate.den) * 1_000_000 / (3 * u128::from(rate.num));
+    let (whole, fraction) = (micros / 1_000_000, micros % 1_000_000);
+    if fraction == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{}", format!("{fraction:06}").trim_end_matches('0'))
+    }
+}
+
+/// Input options that start reading a source at frame `first` (none for the first frame).
+///
+/// Inspection tied every frame of a source to its index (`timestamp`): frame `n` is timed `n`
+/// periods, at the container's precision. Reading starts a third of a period before `first`.
+/// FFmpeg moves the demuxer to the last keyframe at or before that time (every FFV1 frame is one),
+/// counts time from it and drops earlier frames; `seek_trim` then keeps the wanted frames by time.
+/// Each boundary lies at least a third of a period (5.5 ms at 60 fps) from every frame time. The
+/// container clock, the offset and the trim each round by at most half a millisecond on the 1 ms
+/// and finer clocks inspection accepts, and a coarser clock that passes inspection divides the
+/// period, so no frame can cross a boundary. Frames are thus chosen by their own timestamps: a seek
+/// that landed late could only lose frames, never show others, and every reader of a trimmed
+/// picture requires its exact frame count.
+pub(crate) fn seek_input(rate: Time, first: u64) -> Vec<String> {
+    if first == 0 {
+        return Vec::new();
+    }
+    vec!["-ss".into(), thirds(rate, 3 * first - 1)]
+}
+
+/// The trim keeping source frames `[first, end)` of an input started at frame `seek` by
+/// `seek_input` (`seek <= first`). Unsought inputs keep counting frames from the start.
+pub(crate) fn seek_trim(rate: Time, seek: u64, first: u64, end: u64) -> String {
+    if seek == 0 {
+        return format!("trim=start_frame={first}:end_frame={end}");
+    }
+    format!(
+        "trim=start={}:end={}",
+        thirds(rate, 3 * (first - seek)),
+        thirds(rate, 3 * (end - seek))
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeks_start_a_third_of_a_frame_early_and_trim_on_frame_times() {
+        let pal = Time { num: 25, den: 1 };
+        assert!(seek_input(pal, 0).is_empty());
+        assert_eq!(seek_input(pal, 2790), ["-ss", "111.586666"]);
+        assert_eq!(seek_trim(pal, 0, 5, 17), "trim=start_frame=5:end_frame=17");
+        assert_eq!(seek_trim(pal, 2790, 2790, 2802), "trim=start=0:end=0.48");
+        assert_eq!(seek_trim(pal, 100, 130, 131), "trim=start=1.2:end=1.24");
+        let ntsc = Time {
+            num: 30000,
+            den: 1001,
+        };
+        // 10 periods are 333,666.66 µs; a third before frame 10 is 322,544.44 µs.
+        assert_eq!(seek_input(ntsc, 10), ["-ss", "0.322544"]);
+        assert_eq!(seek_trim(ntsc, 10, 10, 20), "trim=start=0:end=0.333666");
+    }
+}

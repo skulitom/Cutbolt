@@ -1,5 +1,43 @@
 # Progress history
 
+## 6 October 2026: track renders and previews seek their sources
+
+Findings 38 and 41 of the effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`): every picture input of a track render was opened at its start and cut with `trim=start_frame=...`, so a late range or frame decoded every earlier frame of its sources. A 12-frame export at 111.6 s took 4.0 s against 1.65 s at 13.2 s, because the full-length caption overlay was decoded up to the range, and `preview.frame` took 2.3-7.4 s per frame.
+
+Changes ([TRACKS](TRACKS.md#seeking)):
+- **Seeking.** Each picture input starts a third of a frame before the earliest frame read from it (FFmpeg's input `-ss`). Each read then keeps its frames by time (`trim=start=...:end=...`, counted from the seek) instead of by count from the file's start. This covers:
+  - the base picture graph, transition endpoints and nested overlays, with one input per asset sought to its earliest read;
+  - the compositor's per-clip overlay decoders and transition incoming-side decoders;
+  - the single-clip `preview.frame` path, which used `select=eq(n,K)`.
+
+  Inputs read from frame 0 keep exactly their old arguments.
+- **Why it is exact.** Inspection already ties frame `n`'s timestamp to `n` periods at the container's precision. Every boundary lies a third of a period (5.5 ms at 60 fps) from every frame time. The container clock, the seek offset and the trim each round by at most half a millisecond on the 1 ms and finer clocks inspection accepts, and a coarser clock that passes inspection divides the period. A seek that landed late could therefore only lose frames, never show others. This was checked by hand: on a source missing frames 100-102, 12-frame windows from frames 97, 100 and 101 returned exactly their 9 or 10 surviving frames.
+- **Counts.** Every reader of a picture already requires its exact frame count: compositor decoders, render verification, the streamed encoder and preview frame sizes. So a lost frame fails the render. One filter could hide a loss: nested overlays stack base and overlay with `hstack`, which repeated the last frame of a shorter input. It now ends with the shorter input (`shortest=1`), which gives the same output when the counts match.
+- **Sound.** When one graph also mixes an asset's sound, the sound keeps its own input from the start, because PCM packet times are only checked to the millisecond. The pictures get a sought input of their own.
+- **Argument limit.** Seeking adds options. A graph whose arguments would then exceed the 24,000-character limit is built without seeking, as before. On the reel the base graph got shorter (8,896 to 8,808 characters), since time trims are shorter than frame trims.
+- **Unchanged.** Renders of sequential (untracked) timelines, one input per clip, still decode from frame 0.
+
+Measured with release builds of main `7aa6a6c` and this change, warm inspection caches, alternating order over four rounds; the machine was 10-24 % busy. Workspace `C:\DEV\CutboltData\demo-vfx-20261006\narration`, project `cutbolt-effects-reel-finish-d` (172 s, 1080p25, a full-length caption overlay, picture-in-picture, a montage of mid-scene snippets, 15 transitions). CPU is the whole process tree's user and kernel time, from a job object. Scripts and results are in `remeasure/seek-20261006/scripts/` there.
+
+| Request | main `7aa6a6c` | Seeking | CPU s, before → after |
+| --- | --- | --- | --- |
+| H.264 export, 12 frames at 111.6 s | 3.57-3.70 s | 1.06-1.13 s | 31.6 → 3.7 |
+| H.264 export, 12 frames at 13.2 s | 1.35-1.41 s | 1.03-1.07 s | 10.1 → 3.6 |
+| H.264 export, 8 s across the montage (153.6 s) | 9.97-10.14 s | 5.52-6.13 s | 144.9 → 63.3 |
+| `preview.range`, 12 frames at 111.6 s | 3.86-4.03 s | 1.33-1.35 s | 31.6 → 3.3 |
+| `preview.range`, 8 s across the montage | 13.68-14.02 s | 8.88-9.17 s | 130.7 → 47.0 |
+| `preview.frame`, finding 38's 12 frames | 48.5-49.9 s in all; 1.4-5.3 s each | 8.4-8.6 s in all; 0.5-0.9 s each | 580 → 35 |
+| Plain cut (`cutbolt-effects-reel`), its sources short scenes | 0.9-3.2 s | the same | the same |
+
+Every request made the same number of processes before and after. Every output was identical:
+- exports by the timeline digest of the frames the encoder received and by file hash;
+- ranges by the decoded MD5 of all streams;
+- frames by pixel digest.
+
+Full `render.run` renders of both projects decoded identically: the finished timeline in 166.5-167.5 s against 167.6-169.7 s (CPU 570-574 s against 601-609 s), and the plain cut in 157-161 s either way. An earlier comparison against `5d26a3d`, before transitions moved into the compositor, also gave identical outputs throughout, in five rounds including both full renders. There the montage range stayed bound by the `blend` filter, but used 35 % less CPU.
+
+Tests: `cargo test` (a new unit test of the seek and trim arguments at 25 fps and 30000/1001) and clippy pass. These fixtures pass in quick mode: tracks, overlays, transitions, delivery, scenes, sequences, native_timing, proxies, track_edits, cache_previews, multicam, timeline_edges and audio. No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: exact animated GIF, and one-clip H.264 video without a crash
 
 Findings 46-49 and 58 of the VFX demo (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`).

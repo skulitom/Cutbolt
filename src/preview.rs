@@ -204,25 +204,29 @@ pub(crate) fn read_frame(
         ));
     }
     let source_frame = clip.source_in.units(project.frame_rate)? + selected - offset;
-    let args = [
-        "-v".into(),
-        "error".into(),
-        "-nostdin".into(),
-        "-protocol_whitelist".into(),
-        "file,pipe".into(),
-        "-i".into(),
-        path.to_string_lossy().into_owned(),
+    // Decoding starts at the frame shown.
+    let rate = project.frame_rate;
+    let mut args: Vec<String> = ["-v", "error", "-nostdin"].map(str::to_owned).to_vec();
+    args.extend(render::clock::seek_input(rate, source_frame));
+    args.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
+    args.push(path.to_string_lossy().into_owned());
+    args.extend([
         "-vf".into(),
-        format!("select=eq(n\\,{source_frame})"),
-        "-frames:v".into(),
-        "1".into(),
-        "-an".into(),
-        "-pix_fmt".into(),
-        "rgb24".into(),
-        "-f".into(),
-        "rawvideo".into(),
-        "pipe:1".into(),
-    ];
+        render::clock::seek_trim(rate, source_frame, source_frame, source_frame + 1),
+    ]);
+    args.extend(
+        [
+            "-frames:v",
+            "1",
+            "-an",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+        ]
+        .map(str::to_owned),
+    );
     let pixels = media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(120))?;
     if pixels.len() != project.width as usize * project.height as usize * 3 {
         return Err(error(

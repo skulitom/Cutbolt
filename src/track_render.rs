@@ -4,7 +4,7 @@ use crate::{
     dynamics::{self, Limiter},
     error, media,
     model::Project,
-    render::{self, Plan, Source},
+    render::{self, Plan, Source, clock},
     time::Time,
     track_composite::{self, Compositor},
     tracks::{Kind, OverlayTransform, Track, TrackClip, Transition, TransitionKind},
@@ -34,6 +34,12 @@ struct Graph<'a> {
     sources: BTreeMap<String, Source>,
     /// This graph's FFmpeg input index of each asset it reads.
     indices: BTreeMap<String, usize>,
+    /// Where each media input's options start in `args`, by input index.
+    starts: BTreeMap<usize, usize>,
+    /// Inputs whose sound the graph reads.
+    sounds: BTreeSet<usize>,
+    /// Pictures the graph reads, placed on their inputs when it is finished (`arguments`).
+    reads: Vec<Read>,
     args: Vec<String>,
     filters: Vec<String>,
     serial: usize,
@@ -61,6 +67,13 @@ struct Graph<'a> {
     /// its track and of the transition on it, then the window frames `[first, end)`.
     mixed: Vec<(usize, usize, u64, u64)>,
 }
+/// Source frames `[first, end)` of an asset's pictures, trimmed at the head of filter `slot`.
+struct Read {
+    slot: usize,
+    asset: String,
+    first: u64,
+    end: u64,
+}
 impl<'a> Graph<'a> {
     fn new(project: &'a Project, root: &'a Path, control: &'a dyn media::Control) -> Self {
         Self {
@@ -69,6 +82,9 @@ impl<'a> Graph<'a> {
             control,
             sources: BTreeMap::new(),
             indices: BTreeMap::new(),
+            starts: BTreeMap::new(),
+            sounds: BTreeSet::new(),
+            reads: Vec::new(),
             runs: Vec::new(),
             mixed: Vec::new(),
             args: ["-hide_banner", "-v", "error", "-nostdin", "-n"]
@@ -111,6 +127,7 @@ impl<'a> Graph<'a> {
         let source = self.inspect(clip, kind, overlay)?;
         let (first, end) = self.span(clip, at, duration, kind, &source)?;
         if !self.indices.contains_key(&clip.asset_id) {
+            self.starts.insert(self.inputs, self.args.len());
             self.args.extend([
                 "-protocol_whitelist".into(),
                 "file,pipe".into(),
@@ -354,10 +371,92 @@ impl<'a> Graph<'a> {
                 label,
             );
         }
-        let (input, first, end) = self.input(clip, at, duration, Kind::Video)?;
+        let (_, first, end) = self.input(clip, at, duration, Kind::Video)?;
         let tb = timebase(self.project.frame_rate);
-        self.filters.push(format!("[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr={tb},setpts=N,format=pix_fmts=gbrp[{label}]"));
+        self.read(
+            &clip.asset_id,
+            (first, end),
+            format!(",settb=expr={tb},setpts=N,format=pix_fmts=gbrp[{label}]"),
+        );
         Ok(())
+    }
+    /// A filter that reads source frames `[first, end)` of an asset's pictures and continues with
+    /// `rest`; its input and trim are chosen when the graph is finished (`arguments`).
+    fn read(&mut self, asset: &str, (first, end): (u64, u64), rest: String) {
+        self.reads.push(Read {
+            slot: self.filters.len(),
+            asset: asset.to_owned(),
+            first,
+            end,
+        });
+        self.filters.push(rest);
+    }
+    /// The graph's FFmpeg arguments: its inputs and filters. With `seek`, each asset's picture
+    /// input starts at the first frame read from it (`clock::seek_input`) and every read is trimmed
+    /// from there; an input whose sound the graph also reads stays at its start for the sound, and
+    /// the pictures get an input of their own. Without, every input is read from its start.
+    fn arguments(&self, seek: bool) -> Vec<String> {
+        let rate = self.project.frame_rate;
+        let mut seeks: BTreeMap<&str, u64> = BTreeMap::new();
+        for read in &self.reads {
+            let first = if seek { read.first } else { 0 };
+            let at = seeks.entry(&read.asset).or_insert(first);
+            *at = (*at).min(first);
+        }
+        let mut args = self.args.clone();
+        let mut pictures = BTreeMap::new();
+        let mut options = Vec::new();
+        let (mut added, mut next) = (Vec::new(), self.inputs);
+        for (&asset, &first) in &seeks {
+            let input = self.indices[asset];
+            let index = if first == 0 {
+                input
+            } else if self.sounds.contains(&input) {
+                added.extend(clock::seek_input(rate, first));
+                added.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
+                added.push(self.sources[asset].path.to_string_lossy().into_owned());
+                next += 1;
+                next - 1
+            } else {
+                options.push((self.starts[&input], clock::seek_input(rate, first)));
+                input
+            };
+            pictures.insert(asset, index);
+        }
+        args.extend(added);
+        // Later positions first, so earlier ones stay valid.
+        options.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        for (at, option) in options {
+            args.splice(at..at, option);
+        }
+        let mut filters = self.filters.clone();
+        for read in &self.reads {
+            let asset = read.asset.as_str();
+            let trim = clock::seek_trim(rate, seeks[asset], read.first, read.end);
+            let rest = &self.filters[read.slot];
+            filters[read.slot] = format!("[{}:v:0]{trim}{rest}", pictures[asset]);
+        }
+        args.extend([
+            "-filter_complex_threads".into(),
+            "1".into(),
+            "-filter_complex".into(),
+            filters.join(";"),
+        ]);
+        args
+    }
+    /// `arguments` followed by `tail`, sought unless that alone takes them past the limit.
+    fn arguments_with(&self, tail: &[String]) -> Result<Vec<String>> {
+        for seek in [true, false] {
+            let mut args = self.arguments(seek);
+            args.extend_from_slice(tail);
+            if !too_long(&args) {
+                return Ok(args);
+            }
+        }
+        Err(error(
+            "LIMIT_EXCEEDED",
+            "Track render arguments exceed supported size",
+        ))
     }
     /// A clip on an alpha_over track, keeping its straight alpha plane (opaque sources read as 255).
     fn overlay_source(
@@ -367,35 +466,35 @@ impl<'a> Graph<'a> {
         duration: Time,
         label: &str,
     ) -> Result<()> {
-        let (input, first, end) = self.input_with(clip, at, duration, Kind::Video, true)?;
+        let (_, first, end) = self.input_with(clip, at, duration, Kind::Video, true)?;
         let tb = timebase(self.project.frame_rate);
-        let source = format!(
-            "[{input}:v:0]trim=start_frame={first}:end_frame={end},settb=expr={tb},setpts=N"
-        );
+        let timed = format!(",settb=expr={tb},setpts=N");
         if let Some(transform) = &clip.transform {
-            return self.transformed_overlay(clip, transform, &source, label);
+            return self.transformed_overlay(clip, transform, (first, end), &timed, label);
         }
-        if self.alpha_assets.contains(&clip.asset_id) {
+        let rest = if self.alpha_assets.contains(&clip.asset_id) {
             // Planar conversion of packed alpha through the scaler is not value-exact, so split the
             // decoded bgra planes and reassemble them as gbrap (G, B, R, A) without any arithmetic.
-            self.filters.push(format!(
-                "{source},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{label}]"
-            ));
+            format!(
+                "{timed},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{label}]"
+            )
         } else {
             // Opaque bgr0 overlays: exact RGB conversion with a constant 255 alpha plane.
-            self.filters
-                .push(format!("{source},format=pix_fmts=gbrap[{label}]"));
-        }
+            format!("{timed},format=pix_fmts=gbrap[{label}]")
+        };
+        self.read(&clip.asset_id, (first, end), rest);
         Ok(())
     }
     /// A picture-in-picture overlay on a transparent full canvas: crop, shrink by the floor of
     /// each block's mean (`pixelize`, then exact neighbor decimation of the constant blocks), scale
-    /// alpha by the opacity through a lookup table, then crop to the visible part and pad.
+    /// alpha by the opacity through a lookup table, then crop to the visible part and pad. `frames`
+    /// are the source frames read, retimed by `timed`.
     fn transformed_overlay(
         &mut self,
         clip: &TrackClip,
         transform: &OverlayTransform,
-        source: &str,
+        frames: (u64, u64),
+        timed: &str,
         label: &str,
     ) -> Result<()> {
         let (width, height) = (self.project.width, self.project.height);
@@ -411,14 +510,14 @@ impl<'a> Graph<'a> {
             ));
         }
         let planes = format!("{label}m");
-        if alpha {
-            self.filters.push(format!(
-                "{source},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{planes}]"
-            ));
+        let rest = if alpha {
+            format!(
+                "{timed},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{planes}]"
+            )
         } else {
-            self.filters
-                .push(format!("{source},format=pix_fmts=gbrp[{planes}]"));
-        }
+            format!("{timed},format=pix_fmts=gbrp[{planes}]")
+        };
+        self.read(&clip.asset_id, frames, rest);
         let [cx, cy, cw, ch] = transform.crop.unwrap_or([0, 0, width, height]);
         let mut chain = Vec::new();
         if [cx, cy, cw, ch] != [0, 0, width, height] {
@@ -471,7 +570,8 @@ impl<'a> Graph<'a> {
     }
     /// Straight-alpha "over" in encoded RGB with exact integer rounding (ties up):
     /// out = floor((2*(s*a + d*(255-a)) + 255) / 510). Base and overlay are stacked side by side
-    /// so the per-pixel expression can read both; values stay exact in double precision.
+    /// so the per-pixel expression can read both; values stay exact in double precision. The stack
+    /// ends with the shorter input, so a picture that came up short is never padded by a repeat.
     fn over(&mut self, base: &str, overlay: &str, output: &str) -> Result<()> {
         let width = self.project.width;
         let channel = |c: &str| {
@@ -481,7 +581,7 @@ impl<'a> Graph<'a> {
         };
         let stacked = self.label()?;
         self.filters.push(format!(
-            "[{base}]format=pix_fmts=gbrap[{stacked}b];[{stacked}b][{overlay}]hstack=inputs=2,geq=r='{}':g='{}':b='{}':a='255':interpolation=nearest,crop={width}:{}:0:0,format=pix_fmts=gbrp,settb=expr=1/25,setpts=N[{output}]",
+            "[{base}]format=pix_fmts=gbrap[{stacked}b];[{stacked}b][{overlay}]hstack=inputs=2:shortest=1,geq=r='{}':g='{}':b='{}':a='255':interpolation=nearest,crop={width}:{}:0:0,format=pix_fmts=gbrp,settb=expr=1/25,setpts=N[{output}]",
             channel("r"),
             channel("g"),
             channel("b"),
@@ -512,6 +612,7 @@ impl<'a> Graph<'a> {
             )?;
         } else {
             let (input, first, end) = self.input(clip, at, duration, Kind::Audio)?;
+            self.sounds.insert(input);
             self.filters.push(format!("[{input}:a:0]atrim=start_sample={first}:end_sample={end},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{raw}]"));
         }
         if clip.adjusts_audio() {
@@ -1160,23 +1261,19 @@ impl<'a> Graph<'a> {
                 } else {
                     format!(",crop={cw}:{ch}:{cx}:{cy}")
                 };
-                let mut arguments: Vec<String> = [
-                    "-hide_banner",
-                    "-v",
-                    "error",
-                    "-nostdin",
-                    "-protocol_whitelist",
-                    "file,pipe",
-                    "-i",
-                ]
-                .map(str::to_owned)
-                .to_vec();
+                let mut arguments: Vec<String> = ["-hide_banner", "-v", "error", "-nostdin"]
+                    .map(str::to_owned)
+                    .to_vec();
+                // The decoder starts at the clip's first shown frame.
+                arguments.extend(clock::seek_input(rate, source_first));
+                arguments.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
                 arguments.push(source.path.to_string_lossy().into_owned());
+                let trim = clock::seek_trim(rate, source_first, source_first, source_end);
                 arguments.extend([
                     "-filter_complex_threads".into(),
                     "1".into(),
                     "-filter_complex".into(),
-                    format!("[0:v:0]trim=start_frame={source_first}:end_frame={source_end},settb=expr={tb},setpts=N,{convert}{cropped}[out]"),
+                    format!("[0:v:0]{trim},settb=expr={tb},setpts=N,{convert}{cropped}[out]"),
                 ]);
                 arguments.extend(
                     [
@@ -1242,9 +1339,8 @@ impl<'a> Graph<'a> {
                     .or_insert_with(|| source.clone());
             }
             (self.serial, self.inspected) = (incoming.serial, incoming.inspected);
-            let (mut arguments, _, _) = incoming.finish();
-            arguments.extend(
-                [
+            let arguments = incoming.arguments_with(
+                &[
                     "-map",
                     "[incoming]",
                     "-an",
@@ -1257,7 +1353,7 @@ impl<'a> Graph<'a> {
                     "pipe:1",
                 ]
                 .map(str::to_owned),
-            );
+            )?;
             mixes.push(track_composite::Mix {
                 track_id: track.id.clone(),
                 transition_id: effect.id.clone(),
@@ -1271,16 +1367,13 @@ impl<'a> Graph<'a> {
         }
         Ok(mixes)
     }
-    fn finish(mut self) -> (Vec<String>, Vec<Source>, Vec<render::Generated>) {
-        let sources = self.sources();
-        self.args.extend([
-            "-filter_complex_threads".into(),
-            "1".into(),
-            "-filter_complex".into(),
-            self.filters.join(";"),
-        ]);
-        (self.args, sources, self.generated)
+    /// Arguments, sources and generated inputs of a graph that reads no pictures.
+    fn finish(self) -> (Vec<String>, Vec<Source>, Vec<render::Generated>) {
+        (self.arguments(false), self.sources(), self.generated)
     }
+}
+fn too_long(args: &[String]) -> bool {
+    args.iter().map(|s| s.len() + 3).sum::<usize>() > 24000
 }
 fn boundaries(track: &Track, begin: Time, end: Time, clock: Time) -> Result<BTreeSet<u64>> {
     let first = begin.units(clock)?;
@@ -1396,9 +1489,8 @@ impl Compiled<'_> {
         };
         let project = picture.project;
         let runs = picture.runs.clone();
-        let (mut base, _, _) = picture.finish();
-        base.extend(
-            [
+        let base = picture.arguments_with(
+            &[
                 "-map",
                 "[vout]",
                 "-an",
@@ -1411,12 +1503,11 @@ impl Compiled<'_> {
                 "pipe:1",
             ]
             .map(str::to_owned),
-        );
-        for arguments in std::iter::once(&base)
-            .chain(transitions.iter().map(|m| &m.arguments))
-            .chain(layers.iter().map(|l| &l.arguments))
+        )?;
+        for arguments in
+            (transitions.iter().map(|m| &m.arguments)).chain(layers.iter().map(|l| &l.arguments))
         {
-            if arguments.iter().map(|s| s.len() + 3).sum::<usize>() > 24000 {
+            if too_long(arguments) {
                 return Err(error(
                     "LIMIT_EXCEEDED",
                     "Track render arguments exceed supported size",
@@ -1614,9 +1705,9 @@ pub(crate) fn plan_window(
     let frames = duration.units(project.frame_rate)?;
     let mut compiled = compile(project, input_root, start, duration, (true, true), control)?;
     let compositor = compiled.compositor(frames)?;
-    let (mut args, sources, generated) = compiled.graph.finish();
     let (level, slices) = media::ffv1_encoding(project.width, project.height);
-    args.extend(
+    let mut tail = Vec::new();
+    tail.extend(
         [
             "-map",
             // The engine-composited picture arrives raw on stdin as input 0.
@@ -1650,9 +1741,9 @@ pub(crate) fn plan_window(
     );
     let rate = project.frame_rate;
     if rate == FPS {
-        args.extend(["-r".into(), "25".into()]);
+        tail.extend(["-r".into(), "25".into()]);
     } else {
-        args.extend([
+        tail.extend([
             "-r".into(),
             format!("{}/{}", rate.num, rate.den),
             "-fps_mode".into(),
@@ -1661,13 +1752,9 @@ pub(crate) fn plan_window(
             timebase(rate),
         ]);
     }
-    args.push(output.to_string_lossy().into_owned());
-    if args.iter().map(|s| s.len() + 3).sum::<usize>() > 24000 {
-        return Err(error(
-            "LIMIT_EXCEEDED",
-            "Track render arguments exceed supported size",
-        ));
-    }
+    tail.push(output.to_string_lossy().into_owned());
+    let args = compiled.graph.arguments_with(&tail)?;
+    let (sources, generated) = (compiled.graph.sources(), compiled.graph.generated);
     Ok(Plan {
         profile: if rate == FPS {
             "reference-tracks-ffv1-pcm-v1"
@@ -1702,15 +1789,8 @@ pub(crate) fn read_frame(
     let pixels = if let Some(compositor) = compiled.compositor(1)? {
         track_composite::frame_rgb(&compositor, Duration::from_secs(120), &media::Uncontrolled)?
     } else {
-        let mut args = std::mem::take(&mut compiled.graph.args);
-        args.extend([
-            "-filter_complex_threads".into(),
-            "1".into(),
-            "-filter_complex".into(),
-            compiled.graph.filters.join(";"),
-        ]);
-        args.extend(
-            [
+        let args = compiled.graph.arguments_with(
+            &[
                 "-map",
                 "[vout]",
                 "-frames:v",
@@ -1723,13 +1803,7 @@ pub(crate) fn read_frame(
                 "pipe:1",
             ]
             .map(str::to_owned),
-        );
-        if args.iter().map(|s| s.len() + 3).sum::<usize>() > 24000 {
-            return Err(error(
-                "LIMIT_EXCEEDED",
-                "Transition preview arguments exceed supported size",
-            ));
-        }
+        )?;
         media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(120))?
     };
     let sources = compiled.graph.sources();
