@@ -203,7 +203,7 @@ STAGES = [
     fixture("portable_projects", "--legacy-engine", legacy_store_engine or "", needs=["legacy"]),
     fixture("render_failures"),
     fixture("delivery_profiles", "--device", device, needs=["device"]),
-    fixture("export_formats"),
+    fixture("export_formats"), fixture("gif"),
     fixture("sessions", result="sessions/verification.json", utf8=False),
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
     fixture("audio_processing"), fixture("conform"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
@@ -599,6 +599,7 @@ report = {
     "delivery_profiles_evidence": delivery_profiles,
     "native_timing_evidence": native_timing,
     "export_formats_evidence": export_formats,
+    "gif_evidence": gif,
     "image_sequence_evidence": image_sequences,
     "long_form_4k_evidence": long_form_4k,
     "long_form_stress_evidence": long_form_stress,
@@ -622,6 +623,7 @@ report["passed"] += render_failures["passed"]
 report["passed"] += delivery_profiles["passed"]
 report["passed"] += native_timing["passed"]
 report["passed"] += export_formats["passed"]
+report["passed"] += gif["passed"]
 report["passed"] += image_sequences["passed"]
 report["passed"] += long_form_4k["passed"]
 report["passed"] += long_form_stress["passed"]
@@ -692,6 +694,7 @@ print(f"Passed {len(render_failures['passed'])} real encoding with injected writ
 print(f"Passed {len(delivery_profiles['passed'])} delivery rate-control, quality, actual device compatibility and failure checks.")
 print(f"Passed {len(native_timing['passed'])} native-rate, VFR conversion and complete long-form synchronization checks.")
 print(f"Passed {len(export_formats['passed'])} native-rate lossless containers, large dimensions and complete numbered-image checks.")
+print(f"Passed {len(gif['passed'])} exact animated GIF pixel, palette, delay and refusal checks.")
 print(f"Passed {len(image_sequences['passed'])} complete numbered footage, lossless color/alpha and long-form clock checks.")
 
 print(f"Passed {len(long_form_4k['passed'])+len(long_form_stress['passed'])} complete long-form 4K, cancellation, write-fault and performance-gate checks.")

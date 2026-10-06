@@ -1,5 +1,37 @@
 # Progress history
 
+## 6 October 2026: exact animated GIF, and one-clip H.264 video without a crash
+
+Findings 46-49 and 58 of the VFX demo (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`).
+
+**H.264 video only (finding 47).**
+- **The failure.** `export.run` with `h264_aac` and `streams: "video"` failed with `TOOL_FAILED: Assertion best_input >= 0 failed at ...ffmpeg_filter.c:1923` on a one-clip sequential project. With `audio_video` the same export succeeded.
+- **The cause.** The streamed encode sent the mix it did not deliver to an `anullsink` inside the filter graph. FFmpeg 7.0 could finish the picture while that sink still awaited the mix's end. Its graph scheduler then reported "need input" with every input already closed, and the input chooser asserted.
+- **Reproduction.** On main `5d26a3d`, but not with the gyan build: this session ran on Linux with a static FFmpeg 7.0.2 build. One appended clip spanning its whole source failed in 3 of 3 runs, both with the delivery fixture's 192 x 128 chart and at 1080p. In these runs a clip ending inside its source and several clips with a gap escaped it; the demo found placed tracks did too.
+- **The fix.** The unused mix now goes to a real null output (`-map [aout] -c:a pcm_s16le -f null -`), which reads it to its end; two-pass first passes too. Where the old graph worked, the new one writes byte-identical files: video only and with audio, one- and two-pass.
+- **Regression.** `delivery.one_clip_video_only` exports one clip spanning the chart source as video only and with audio, and checks the encoder's frames and the decoded frame count. It failed 3 of 3 times on the old engine and passes on the new.
+
+**GIF (findings 46 and 58).** The demo made its pixel-art GIFs with FFmpeg `palettegen`/`paletteuse` from Cutbolt's PNGs. Even with a palette per frame, some colors moved by one level, although no frame had more than 122 colors. New `profile: "gif"` ([EXPORT_FORMATS](EXPORT_FORMATS.md#animated-gif)):
+- **Encoder.** Original Rust from the public GIF89a specification: each frame has a local color table holding exactly its colors. A frame over 256 colors fails with `TOO_MANY_COLORS`, naming the first such frame and how many exceed; nothing is quantized. Later frames store only the rectangle that changed. Video only, and no `input_transfer`: values are written unchanged.
+- **Repetition.** `gif.plays`: omitted loops endlessly, 1 plays once, n writes a NETSCAPE repeat count of n - 1.
+- **Delays.** Whole centiseconds: exact at 25 and 50 fps. `gif.timing: "nearest_centisecond"` accepts 24, 30 and their 1000/1001 rates, starting each frame within half a centisecond and reporting `maximum_start_error`; 60 fps is refused.
+- **Verification.** The engine decodes every frame with FFmpeg's GIF decoder and requires the lossless render's RGB digest and every frame's timestamp.
+- **Fixture.** New `gif` fixture, registered in `tools/verify.py`: 196 frames over eight exports at 25, 50, 30 and 24000/1001 fps, from 8 x 8 to 200 x 150. A pixel-art loop has 108-122 colors per frame and 5,742 over 58 frames, led by colors one level apart; noise frames of exactly 256 colors force LZW table clears. Every frame is decoded by FFmpeg and by an original Python GIF reader and equals the reference render. Frames of 257 and 300 colors are refused; with invalid requests and an occupied output, 20 requests are rejected.
+- **Speed.** Fifty 1080p frames of changing 4 x 4 pixel art export in 7.1 s with a release build, 6.0 s of it the lossless render, and make 17.3 MB.
+- **Not run here.** The demo's `loop.mkv` and `prism.mkv` were not available in this environment; the profile has not been run on them.
+
+**Docs (findings 48 and 49).**
+- [EXPORT](EXPORT.md#explicit-color-interpretation) gains a measured table: with `srgb`, authored 31 decodes as 15 (16 as 4, 64 as 46, 128 as 113); with `bt709`, as 30.
+- [Pixel art and 4:2:0 color](EXPORT.md#pixel-art-and-420-color) measures a synthetic high-contrast pixel-art chart through 4:2:0 alone: 58.7 % of pixels more than 24 levels off at 1 x 1, 41.6 % at 2 x 2 and 23.1 % at 4 x 4, within 1.2 percentage points of the encoded results.
+- [Choosing a web or social delivery](EXPORT_FORMATS.md#choosing-a-web-or-social-delivery) sits next to the GIF section.
+
+Verification on Linux, with FFmpeg 7.0.2 first on `PATH`:
+- **Rust.** `cargo test`: 189 library tests pass. `jobs::pool::tests::jobs_writing_the_same_path_keep_submission_order` fails on Linux before and after this change, since it asserts Windows drive-letter paths. `cargo clippy --all-targets -D warnings` reports only `jobs.rs` items that are unused off Windows, as before.
+- **Quick fixtures.** `delivery` and `gif` pass; `gif` also passes on FFmpeg 6.1.1.
+- **The rest.** `export_formats` fails at `png_sequence`, which needs Windows; a scratch copy without its `png_sequence` cases passes (400 frames). `delivery_profiles` needs a CUDA device; a scratch copy with software decodes in place of CUDA passes.
+
+No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit; the Windows quick run of `export_formats` and `delivery_profiles` is still owed.
+
 ## 6 October 2026: scene transitions in production manifests
 
 Finding 33 of the effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`): `production.py build` rendered each scene to exactly its length in the timing plan, so a track transition between two scenes had no source handle and failed with `INSUFFICIENT_HANDLES`. The reel's finishing pass worked around it by script. It re-rendered twelve scenes 12 frames longer, extending the layers that reached each scene's end, and replaced every picture clip before setting the transitions.
@@ -56,7 +88,6 @@ Tests, in `production`:
 - **`resolve`.** From stand-in `timing` and `align` receipts, the CLI plans the 4.5 s take at 5.28 s, lists the same cue frames, and writes the recipe the scene stage then renders under the same name. Its stills at frames 15 and 75 equal those frames decoded from the render. `check` lists the sequence, and `resolve` returns `NOT_AN_OVERRIDE`, `INVALID_TIME`, `NOT_BUILT` and `STALE_ALIGNMENT` where it should.
 
 The production fixture passes in quick mode on Linux, in a cloud session, where it needed three local changes that were not committed: manifest paths without a drive letter, check_quality's engine calls made directly (the job queue needs Windows), and Liberation Sans standing in for Arial. It has not run on Windows. No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
-
 ## 6 October 2026: AAC at 320 kb/s codes up to 20 kHz
 
 With noise substitution off (see "lossy deliveries meet their true-peak target" below), heavily limited mixes strong near the top of the band still decoded up to 1.2 dB over their own true peak. The production fixture's square-wave bed missed its target and stopped `not_better`. A `-cutoff 20000` encoder setting had halved that on five mixes, so it was measured more widely.

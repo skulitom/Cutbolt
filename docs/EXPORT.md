@@ -34,8 +34,11 @@ Replace `project` with a complete snapshot, such as one returned by `session.get
 | `h264_aac` | `audio` | `.m4a` | AAC-LC stereo in an MP4 container |
 | `png_mov` | `audio_video` or `video` | `.mov` | Lossless RGB PNG video and optional PCM16 |
 | `png_sequence` | `audio_video` or `video` | New `.frames` directory | Numbered RGB PNGs, complete timing/identity manifest and optional PCM WAV |
+| `gif` | `video` | `.gif` | Animated GIF holding each frame's exact colors, at most 256 per frame; optional `gif` settings |
 
 The new PNG profiles require explicit source transfer interpretation, preserve encoded RGB values and accept up to DCI 4K. See [native-rate export formats](EXPORT_FORMATS.md) for dimensions, numbering and complete-directory publication. Their broader acceptance passes full verification and earns E05 extended.
+
+The `gif` profile also preserves encoded values, without a transfer. It refuses a frame with more than 256 colors instead of quantizing it, and its frame delays are exact at 25 and 50 fps. See [animated GIF](EXPORT_FORMATS.md#animated-gif) and [choosing a web or social delivery](EXPORT_FORMATS.md#choosing-a-web-or-social-delivery).
 
 Omit `range` or use null to export the whole timeline. Otherwise `start` and `duration` are exact nonnegative rational seconds on the supported native project frame boundaries; duration must be positive and the half-open interval must fit wholly inside the sequence. Ranges can cross cuts and gaps, start/end on any frame, or contain one frame. Output time starts at zero. Audio selection follows the same rational range at 48 kHz. Whole samples are required, so 30000/1001 and 60000/1001 cuts use multiples of five video frames; 25 fps retains exactly 1,920 sample frames per video frame. There is no implicit rounding, end padding or clamping of the requested range.
 
@@ -62,11 +65,37 @@ x264 runs eight slice threads, coding each frame as up to eight slices, and the 
 
 H.264 exports containing video need a transfer, `"srgb"` or `"bt709"`. Declare it once for the project with the `project.transfer` operation, or pass `input_transfer` with each export. A request value that contradicts the project's declaration is rejected, and the plan and receipt report the transfer used. Omit `input_transfer` for reference exports and audio-only delivery.
 
-Choosing between them: `bt709` passes the timeline's encoded RGB values through unchanged before the matrix conversion, so ordinary players show approximately the code values that were authored. Prefer it for screen-designed material such as PNG artwork, pixel art, text and UI captures. `srgb` converts transfer functions (sRGB decode, then BT.709 encode), which lowers dark and mid-tone code values, so typical players display shadows darker than designed; in one dark scene a sky value of about 28 dropped to about 13 levels, while `bt709` stayed within 1.5 levels of the design. Use `srgb` only when the downstream workflow explicitly expects that conversion. This is an explicit interpretation of the reference timeline's encoded RGB values; it does not infer a per-asset color space from names or metadata. The caller must supply a consistently interpreted sequence. Existing scene RGB normally uses the declared sRGB scene contract; media conformed from BT.709 sources can retain BT.709-encoded RGB values. Use [explicit SDR normalization](COLOR.md) to bring mixed interpretations into one working transfer before assembly. The timeline does not infer or enforce that normalization automatically.
+Choosing between them: `bt709` passes the timeline's encoded RGB values through unchanged before the matrix conversion, so ordinary players show approximately the code values that were authored. Prefer it for screen-designed material such as PNG artwork, pixel art, text and UI captures. `srgb` converts transfer functions (sRGB decode, then BT.709 encode), which lowers dark and mid-tone code values, so typical players display shadows darker than designed; in one dark scene a sky value of about 28 dropped to about 13 levels, while `bt709` stayed within 1.5 levels of the design.
+
+A player decodes H.264 values with the BT.709 matrix and shows them as they are. It does not undo the `srgb` conversion. The same pixels exported as GIF or PNG keep their values, so an `srgb` video looks darker beside them. Flat gray patches exported with the default preset and decoded by FFmpeg as tagged:
+
+| Authored value | `srgb` decodes as | `bt709` decodes as |
+| ---: | ---: | ---: |
+| 16 | 4 | 15 |
+| 31 | 15 | 30 |
+| 64 | 46 | 62 |
+| 128 | 113 | 126 |
+
+With `bt709`, the limited-range round trip and the encoder cost up to two levels. Use `srgb` only when the downstream workflow explicitly expects that conversion. This is an explicit interpretation of the reference timeline's encoded RGB values; it does not infer a per-asset color space from names or metadata. The caller must supply a consistently interpreted sequence. Existing scene RGB normally uses the declared sRGB scene contract; media conformed from BT.709 sources can retain BT.709-encoded RGB values. Use [explicit SDR normalization](COLOR.md) to bring mixed interpretations into one working transfer before assembly. The timeline does not infer or enforce that normalization automatically.
 
 For `srgb`, the engine specifies the public piecewise sRGB decode followed by the BT.709 opto-electronic transfer function. Each resulting encoded RGB channel is rounded to an 8-bit value before the matrix conversion. For `bt709`, encoded RGB is unchanged at this step. Both paths then apply a declared BT.709 RGB-to-YCbCr matrix and limited-range conversion, using bilinear chroma reduction with horizontal position 0 and vertical position 128 in units of 1/256 luma pixels. H.264 receives YUV 4:2:0 and matching color tags. Conversion is performed, not merely indicated by changing tags.
 
 The original transfer expressions run through FFmpeg's RGB lookup filter; the matrix/subsampling uses its software scaler. These choices avoid relying on an unspecified transfer-conversion default. Precision is intentionally 8-bit and chroma is subsampled. This does not implement project-wide color management, ICC/camera/log interpretation, HDR, gamut mapping or a display/viewing transform.
+
+### Pixel art and 4:2:0 color
+
+H.264 delivery stores color (chroma) at half the width and half the height of the picture, so every 2 x 2 block of pixels shares one color sample, which the encoder filters from neighboring pixels and the player interpolates back. Brightness keeps full resolution. Photographs and video hide this; one-pixel color detail does not. Edges, outlines, dithering and small colored text bleed into their neighbors. In one pixel-art demo, 15 % of pixels came back more than 24 levels from the design.
+
+Upscaling the art by a whole factor in the timeline reduces the share but does not remove it. A synthetic high-contrast pixel-art chart (16 saturated colors, one-pixel lines and dithering), converted to 4:2:0 and back without compression, measured:
+
+| Art pixel size | Pixels more than 24 levels off | Mean error per channel |
+| --- | ---: | ---: |
+| 1 x 1 | 58.7 % | 21.2 |
+| 2 x 2 | 41.6 % | 13.4 |
+| 3 x 3 | 34.2 % | 12.2 |
+| 4 x 4 | 23.1 % | 8.2 |
+
+Exported with the default preset and `bt709`, the same chart measured within 1.2 percentage points of these, so the subsampling, not the compression, costs most of it. Exact pixel art needs a lossless profile: `gif` within 256 colors per frame, or `png_mov`, `png_sequence` and `reference`. See [choosing a web or social delivery](EXPORT_FORMATS.md#choosing-a-web-or-social-delivery).
 
 The numerical acceptance reference uses public sRGB facts from [W3C CSS Color 4 section 10.2](https://www.w3.org/TR/2026/CRD-css-color-4-20260930/#predefined-sRGB) and BT.709 transfer/matrix/range facts from [ITU-R BT.709-6, sections 1 and 3](https://www.itu.int/rec/R-REC-BT.709-6-201506-I/en). No specification copy or third-party implementation is included. Filter interfaces are documented by FFmpeg's [RGB lookup](https://ffmpeg.org/ffmpeg-filters.html#lut_002c-lutrgb_002c-lutyuv) and [scale](https://ffmpeg.org/ffmpeg-filters.html#scale-1) references.
 
@@ -110,7 +139,7 @@ H.264 exports with video are encoded straight from the timeline. No lossless int
 1. One FFmpeg run executes the selected full-quality reference graph and converts and encodes its picture and mix. With [engine-composited overlays](TRACKS.md), the engine compositor feeds that run's picture on stdin instead.
 2. The same run also returns exactly what it encoded. The packed RGB24 frames go to the engine on stdout, which counts and hashes them as they arrive, and the stereo PCM s16le samples go to a scratch file. Both must hold exactly the range's frames and samples, at the timeline's exact clock. The receipt reports `verification.encoder_input: "streamed"`, `timeline_video_sha256` and `timeline_audio_sha256`. These equal the `decoded_video_sha256` and `decoded_audio_prefix_sha256` of a `reference` export of the same range, so a delivery can be tied to a lossless render without making one. Two-pass encodes run the graph twice, and both passes must receive identical frames.
 
-Reference and PNG exports, audio-only delivery, and ranges rendered as joined chunks (more than 64 clips per graph) still compile the selected interval into a lossless intermediate under a private scratch directory beside the output, verify it, then extract reference streams or encode from it.
+Reference, PNG and GIF exports, audio-only delivery, and ranges rendered as joined chunks (more than 64 clips per graph) still compile the selected interval into a lossless intermediate under a private scratch directory beside the output, verify it, then extract reference streams or encode from it.
 
 Every export then:
 

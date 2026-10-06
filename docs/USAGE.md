@@ -472,6 +472,8 @@ Use `interchange.import` to inspect a local identity-bound OTIO document and pro
 
 [Additional lossless exports](EXPORT_FORMATS.md) select `png_mov` for an RGB/PCM movie or `png_sequence` for a complete numbered-image directory with an exact-rate manifest. Both need `input_transfer` or a declared project `transfer`, and support odd/portrait/DCI-4K dimensions; `sequence_first` applies only to numbered images. Their declared acceptance matrix passes full verification.
 
+`profile: "gif"` with `streams: "video"` writes an [animated GIF](EXPORT_FORMATS.md#animated-gif) whose decoded pixels equal the timeline's: each frame keeps its exact colors in its own palette, and a frame with more than 256 colors fails with `TOO_MANY_COLORS` instead of being quantized. It takes no `input_transfer`. Optional `gif.plays` sets how many times it plays (omit to loop endlessly), and `gif.timing` is `exact` (25 and 50 fps, the default) or `nearest_centisecond` (24, 30 and their 1000/1001 rates). For choosing between GIF, H.264 and lossless files for the web, see [choosing a web or social delivery](EXPORT_FORMATS.md#choosing-a-web-or-social-delivery).
+
 `image.sequence.inspect` validates a complete numbered PNG recipe with explicit source window/repeat, rate, alpha association and color interpretation. `image.sequence.compile` produces a transparent FFV1/PNG movie or an explicitly flattened identity-bound native asset. The [numbered-footage contract](IMAGE_SEQUENCES.md) defines exact clocks, silent audio, limits and output preservation.
 
 ## Long-form reference rendering
