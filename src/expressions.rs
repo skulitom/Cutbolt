@@ -1,5 +1,5 @@
 //! Original pure, typed property graph. No source-code evaluation or ambient state.
-use crate::{Result, animation, error, scene::Scene, time::Time};
+use crate::{At, Result, animation, error, scene::Scene, time::Time};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha256};
@@ -327,7 +327,8 @@ impl<'a> Prepared<'a> {
             bindings: BTreeMap::new(),
             order: Vec::new(),
         };
-        for layer in &scene.layers {
+        for (li, layer) in scene.layers.iter().enumerate() {
+            let at = |field: &str| format!("layers[{li}] ({}).animation.{field}", layer.id);
             let (x, y, alpha) = if let Some(animation) = &layer.animation {
                 if animation.position_x.is_none()
                     && animation.position_y.is_none()
@@ -340,17 +341,20 @@ impl<'a> Prepared<'a> {
                         .position_x
                         .as_ref()
                         .map(|c| c.prepare(layer.duration, -32768, 32768))
-                        .transpose()?,
+                        .transpose()
+                        .under(|| at("position_x"))?,
                     animation
                         .position_y
                         .as_ref()
                         .map(|c| c.prepare(layer.duration, -32768, 32768))
-                        .transpose()?,
+                        .transpose()
+                        .under(|| at("position_y"))?,
                     animation
                         .opacity
                         .as_ref()
                         .map(|c| c.prepare(layer.duration, 0, 255))
-                        .transpose()?,
+                        .transpose()
+                        .under(|| at("opacity"))?,
                 )
             } else {
                 (None, None, None)

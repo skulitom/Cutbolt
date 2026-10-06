@@ -1,6 +1,6 @@
 //! Original subject-directed crop decisions with exact bounded source-pixel paths.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Interpolation, Keyframe},
     error, scene, spatial,
     time::Time,
@@ -196,8 +196,8 @@ fn manual(keys: &[BoxKey], duration: Time, canvas: [u32; 2], count: u64) -> Resu
             "Manual selections need 1..128 focus keys including time zero",
         ));
     }
-    for key in keys {
-        rect(key.rect, canvas, 0)?;
+    for (index, key) in keys.iter().enumerate() {
+        rect(key.rect, canvas, 0).at(|| format!("keys[{index}].rect"))?;
     }
     let curves: Vec<_> = (0..4)
         .map(|axis| {
@@ -306,7 +306,16 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     }
     let mut boundaries: Vec<_> = segments.iter().map(|s| s.0).collect();
     boundaries.push(count);
+    // Segments are sorted by start; messages name each by its index in the request.
+    let requested = |segment: &Segment| {
+        request
+            .segments
+            .iter()
+            .position(|s| std::ptr::eq(s, segment))
+            .expect("a requested segment")
+    };
     let mut work = 0u64;
+    let mut terms = Vec::new();
     for ((_, segment), span) in segments.iter().zip(boundaries.windows(2)) {
         if let Selection::Track {
             region,
@@ -314,35 +323,47 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
             controls,
         } = &segment.selection
         {
+            let index = requested(segment);
             let [x, y, w, h] = *region;
             if !(4..=64).contains(&w)
                 || !(4..=64).contains(&h)
                 || !(1..=32).contains(&controls.search_radius)
                 || span[1] - span[0] < 2
             {
-                return Err(invalid(
-                    "Tracked segments need at least two frames, a 4..64-pixel patch and radius 1..32",
-                ));
+                return Err(invalid(&format!(
+                    "segments[{index}]: tracked segments need at least two frames, a 4..64-pixel patch and radius 1..32 (got {} frames, a {w}x{h} patch and radius {})",
+                    span[1] - span[0],
+                    controls.search_radius
+                )));
             }
-            rect(*focus, layer.canvas, request.padding)?;
+            rect(*focus, layer.canvas, request.padding)
+                .at(|| format!("segments[{index}].selection.focus"))?;
             if i64::from(x) < i64::from(focus[0])
                 || i64::from(y) < i64::from(focus[1])
                 || u64::from(x) + u64::from(w) > (i64::from(focus[0]) + i64::from(focus[2])) as u64
                 || u64::from(y) + u64::from(h) > (i64::from(focus[1]) + i64::from(focus[3])) as u64
             {
-                return Err(invalid(
-                    "The reference tracking patch must lie within the selected focus box",
-                ));
+                return Err(invalid(&format!(
+                    "segments[{index}].selection.region: {region:?} must lie within the selected focus box {focus:?}"
+                )));
             }
-            work += (span[1] - span[0])
-                * u64::from(2 * controls.search_radius + 1).pow(2)
-                * u64::from(w * h);
+            let candidates = u64::from(2 * controls.search_radius + 1).pow(2);
+            let segment_work = (span[1] - span[0]) * candidates * u64::from(w * h);
+            work += segment_work;
+            terms.push(format!(
+                "segments[{index}] {} frames x {candidates} x {} = {segment_work}",
+                span[1] - span[0],
+                w * h
+            ));
         }
     }
     if work > 64_000_000 {
         return Err(error(
             "LIMIT_EXCEEDED",
-            "Reframing analysis is bounded to 64000000 aggregate patch-pixel comparisons",
+            format!(
+                "Reframing analysis needs {work} aggregate patch-pixel comparisons, above the 64000000 limit. Each tracked segment counts frames x candidates ((2 x search radius + 1)^2) x patch pixels: {}. Reduce the search radius, the patch size or the tracked frames",
+                terms.join("; ")
+            ),
         ));
     }
     let source_indices = (0..count)
@@ -363,7 +384,8 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
         let duration = Time::new(length, 25)?;
         let (boxes, confidence, provenance) = match &segment.selection {
             Selection::Manual { keys } => (
-                manual(keys, duration, layer.canvas, length)?,
+                manual(keys, duration, layer.canvas, length)
+                    .under(|| format!("segments[{}].selection", requested(segment)))?,
                 vec![None; length as usize],
                 "authored_boxes",
             ),
@@ -394,25 +416,29 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
                 window.duration = duration;
                 window.audio = None;
                 window.audio_mix = None;
-                let observations = tracking::measure(&tracking::Inspect {
-                    scene: window,
-                    input_root: request.input_root.clone(),
-                    layer_id: layer.id.clone(),
-                    model: tracking::Model::Translation,
-                    region: *region,
-                    search_radius: controls.search_radius,
-                    maximum_step: controls.maximum_step,
-                    maximum_acceleration: controls.maximum_acceleration,
-                    minimum_correlation_milli: controls.minimum_correlation_milli,
-                    minimum_margin_milli: controls.minimum_margin_milli,
-                    maximum_frame_change_milli: controls.maximum_frame_change_milli,
-                    mask: crate::composite::RectMask {
-                        rect: [0, 0, 1, 1],
-                        inverted: false,
-                        animation: None,
-                        feather: None,
+                let observations = tracking::measure(
+                    &tracking::Inspect {
+                        scene: window,
+                        input_root: request.input_root.clone(),
+                        layer_id: layer.id.clone(),
+                        model: tracking::Model::Translation,
+                        region: *region,
+                        search_radius: controls.search_radius,
+                        maximum_step: controls.maximum_step,
+                        maximum_acceleration: controls.maximum_acceleration,
+                        minimum_correlation_milli: controls.minimum_correlation_milli,
+                        minimum_margin_milli: controls.minimum_margin_milli,
+                        maximum_frame_change_milli: controls.maximum_frame_change_milli,
+                        mask: crate::composite::RectMask {
+                            rect: [0, 0, 1, 1],
+                            inverted: false,
+                            animation: None,
+                            feather: None,
+                        },
                     },
-                })?;
+                    span[0],
+                )
+                .under(|| format!("segments[{}].selection", requested(segment)))?;
                 let boxes = observations
                     .iter()
                     .map(|o| {
@@ -538,6 +564,41 @@ pub fn capabilities() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tracking::{Scratch, footage, texture};
+
+    fn request(scene: scene::Scene, root: &std::path::Path, segments: Value) -> Inspect {
+        serde_json::from_value(json!({"scene":scene,"input_root":root,"window":[32,24],"output_size":[32,24],
+            "padding":0,"maximum_step":[64,48],"smoothing_radius":0,"sampling":"nearest","segments":segments}))
+        .unwrap()
+    }
+
+    #[test]
+    fn rejections_name_the_requested_segment_and_the_work_terms() {
+        let scratch = Scratch::new("reframe-messages");
+        let scene = footage(&scratch.0, 64, 48, &vec![texture(64, 48, [0, 0]); 8]);
+        let key = |num: u64| json!({"time":{"num":num,"den":25},"rect":[0,0,32,24],"interpolation":"hold"});
+        // Listed after the segment it follows, the late key is still named by its request index.
+        let late = json!([
+            {"start":{"num":6,"den":25},"subject_id":"b","cut":true,"selection":{"mode":"manual","keys":[key(0),key(3)]}},
+            {"start":{"num":0,"den":1},"subject_id":"a","cut":true,"selection":{"mode":"manual","keys":[key(0)]}}]);
+        let error = inspect(&request(scene.clone(), &scratch.0, late)).unwrap_err();
+        assert_eq!(error.code, "INVALID_ANIMATION");
+        assert_eq!(
+            error.message,
+            "segments[0].selection.keys[1].time: 3/25 s (0.12 s) is past the end of the 2/25 s (0.08 s) duration; key times must lie within 0..duration"
+        );
+        let controls = json!({"search_radius":32,"maximum_step":4,"maximum_acceleration":4,
+            "minimum_correlation_milli":900,"minimum_margin_milli":50,"maximum_frame_change_milli":1000});
+        let tracked = json!([{"start":{"num":0,"den":1},"subject_id":"a","cut":true,"selection":{"mode":"track",
+            "focus":[0,0,64,48],"region":[0,0,64,48],"controls":controls}}]);
+        let error = inspect(&request(scene, &scratch.0, tracked)).unwrap_err();
+        assert_eq!(error.code, "LIMIT_EXCEEDED");
+        assert_eq!(
+            error.message,
+            "Reframing analysis needs 103833600 aggregate patch-pixel comparisons, above the 64000000 limit. Each tracked segment counts frames x candidates ((2 x search radius + 1)^2) x patch pixels: segments[0] 8 frames x 4225 x 3072 = 103833600. Reduce the search radius, the patch size or the tracked frames"
+        );
+    }
+
     #[test]
     fn future_constraints_and_exact_smoothing() {
         assert_eq!(

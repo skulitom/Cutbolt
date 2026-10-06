@@ -1,6 +1,6 @@
 //! Original bounded textured-plane geometry and explicit encoded-color lighting.
 use crate::{
-    Result,
+    At, Result,
     composite::{self, AlphaMode, BlendMode},
     error,
     scene::Scene,
@@ -47,9 +47,16 @@ impl TransformSampler {
         Ok(Self {
             position: value
                 .position_milli
-                .prepare(duration, -1_000_000, 1_000_000)?,
-            rotation: value.rotation_mdeg.prepare(duration, -360000, 360000)?,
-            scale: value.scale_milli.prepare(duration, 1, 100000)?,
+                .prepare(duration, -1_000_000, 1_000_000)
+                .under(|| "transform.position_milli".into())?,
+            rotation: value
+                .rotation_mdeg
+                .prepare(duration, -360000, 360000)
+                .under(|| "transform.rotation_mdeg".into())?,
+            scale: value
+                .scale_milli
+                .prepare(duration, 1, 100000)
+                .under(|| "transform.scale_milli".into())?,
         })
     }
     fn sample(&self, time: Time) -> Result<Matrix> {
@@ -354,7 +361,11 @@ pub(crate) fn prepare(scene: &Scene, times: &[Option<Time>]) -> Result<Option<Pr
     let transforms = spec
         .nodes
         .iter()
-        .map(|n| TransformSampler::new(&n.transform, scene.duration))
+        .enumerate()
+        .map(|(i, n)| {
+            TransformSampler::new(&n.transform, scene.duration)
+                .under(|| format!("geometry.nodes[{i}] ({})", n.id))
+        })
         .collect::<Result<Vec<_>>>()?;
     let c = &spec.camera;
     if c.near_milli == 0 || c.far_milli <= c.near_milli || c.far_milli > 2_000_000 {
@@ -362,27 +373,37 @@ pub(crate) fn prepare(scene: &Scene, times: &[Option<Time>]) -> Result<Option<Pr
             "Camera requires 0 < near < far <=2000000 thousandths",
         ));
     }
+    let camera_at = |field: &str| format!("geometry.camera.{field}");
     let (perspective, extent) = match &c.projection {
         Projection::Perspective { vertical_fov_mdeg } => (
             true,
-            vertical_fov_mdeg.prepare(scene.duration, 1000, 170000)?,
+            vertical_fov_mdeg
+                .prepare(scene.duration, 1000, 170000)
+                .under(|| camera_at("projection.vertical_fov_mdeg"))?,
         ),
         Projection::Orthographic {
             vertical_size_milli,
         } => (
             false,
-            vertical_size_milli.prepare(scene.duration, 1, 2_000_000)?,
+            vertical_size_milli
+                .prepare(scene.duration, 1, 2_000_000)
+                .under(|| camera_at("projection.vertical_size_milli"))?,
         ),
     };
     let camera = CameraSampler {
         parent: index(&c.parent)?,
         position: c
             .position_milli
-            .prepare(scene.duration, -1_000_000, 1_000_000)?,
+            .prepare(scene.duration, -1_000_000, 1_000_000)
+            .under(|| camera_at("position_milli"))?,
         target: c
             .target_milli
-            .prepare(scene.duration, -1_000_000, 1_000_000)?,
-        up: c.up_milli.prepare(scene.duration, -1000, 1000)?,
+            .prepare(scene.duration, -1_000_000, 1_000_000)
+            .under(|| camera_at("target_milli"))?,
+        up: c
+            .up_milli
+            .prepare(scene.duration, -1000, 1000)
+            .under(|| camera_at("up_milli"))?,
         perspective,
         extent,
         near: c.near_milli as f64 / 1000.0,
@@ -391,14 +412,18 @@ pub(crate) fn prepare(scene: &Scene, times: &[Option<Time>]) -> Result<Option<Pr
     let lights = spec
         .lights
         .iter()
-        .map(|l| {
+        .enumerate()
+        .map(|(li, l)| {
+            let at = |field: &str| format!("geometry.lights[{li}].{field}");
             Ok(match l {
                 Light::Ambient {
                     color,
                     intensity_milli,
                 } => LightSampler::Ambient {
                     color: *color,
-                    intensity: intensity_milli.prepare(scene.duration, 0, 4000)?,
+                    intensity: intensity_milli
+                        .prepare(scene.duration, 0, 4000)
+                        .under(|| at("intensity_milli"))?,
                 },
                 Light::Directional {
                     parent,
@@ -407,9 +432,13 @@ pub(crate) fn prepare(scene: &Scene, times: &[Option<Time>]) -> Result<Option<Pr
                     toward_light_milli,
                 } => LightSampler::Directional {
                     color: *color,
-                    intensity: intensity_milli.prepare(scene.duration, 0, 4000)?,
+                    intensity: intensity_milli
+                        .prepare(scene.duration, 0, 4000)
+                        .under(|| at("intensity_milli"))?,
                     parent: index(parent)?,
-                    direction: toward_light_milli.prepare(scene.duration, -1000, 1000)?,
+                    direction: toward_light_milli
+                        .prepare(scene.duration, -1000, 1000)
+                        .under(|| at("toward_light_milli"))?,
                 },
                 Light::Point {
                     parent,
@@ -426,9 +455,13 @@ pub(crate) fn prepare(scene: &Scene, times: &[Option<Time>]) -> Result<Option<Pr
                     }
                     LightSampler::Point {
                         color: *color,
-                        intensity: intensity_milli.prepare(scene.duration, 0, 4000)?,
+                        intensity: intensity_milli
+                            .prepare(scene.duration, 0, 4000)
+                            .under(|| at("intensity_milli"))?,
                         parent: index(parent)?,
-                        position: position_milli.prepare(scene.duration, -1_000_000, 1_000_000)?,
+                        position: position_milli
+                            .prepare(scene.duration, -1_000_000, 1_000_000)
+                            .under(|| at("position_milli"))?,
                         falloff: *falloff,
                         distance: *reference_distance_milli as f64 / 1000.0,
                     }

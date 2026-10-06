@@ -1,5 +1,5 @@
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Sampler},
     error,
     time::Time,
@@ -185,10 +185,17 @@ pub(super) struct ScalarSampler {
 }
 impl Vector {
     pub(super) fn prepare(&self, duration: Time, min: i32, max: i32) -> Result<VectorSampler> {
-        if self.value.iter().any(|v| !(min..=max).contains(v)) {
+        if let Some((i, v)) = self
+            .value
+            .iter()
+            .enumerate()
+            .find(|(_, v)| !(min..=max).contains(*v))
+        {
             return Err(error(
                 "INVALID_GEOMETRY",
-                "Vector value exceeds its declared geometric bounds",
+                format!(
+                    "value[{i}]: {v} is outside {min}..{max}; vector value exceeds its declared geometric bounds"
+                ),
             ));
         }
         let curves = if let Some(c) = &self.animation {
@@ -198,11 +205,12 @@ impl Vector {
                     "Vector animation must contain a curve",
                 ));
             }
-            [&c.x, &c.y, &c.z].map(|curve| {
+            [(&c.x, "x"), (&c.y, "y"), (&c.z, "z")].map(|(curve, axis)| {
                 curve
                     .as_ref()
                     .map(|curve| curve.prepare(duration, min, max))
                     .transpose()
+                    .under(|| format!("animation.{axis}"))
             })
         } else {
             [Ok(None), Ok(None), Ok(None)]
@@ -230,7 +238,10 @@ impl Scalar {
         if !(min..=max).contains(&self.value) {
             return Err(error(
                 "INVALID_GEOMETRY",
-                "Scalar exceeds its declared geometric bounds",
+                format!(
+                    "value: {} is outside {min}..{max}; scalar exceeds its declared geometric bounds",
+                    self.value
+                ),
             ));
         }
         Ok(ScalarSampler {
@@ -239,7 +250,8 @@ impl Scalar {
                 .animation
                 .as_ref()
                 .map(|c| c.prepare(duration, min, max))
-                .transpose()?,
+                .transpose()
+                .under(|| "animation".into())?,
         })
     }
 }

@@ -31,6 +31,31 @@ Verification on Linux, with FFmpeg 7.0.2 first on `PATH`:
 - **The rest.** `export_formats` fails at `png_sequence`, which needs Windows; a scratch copy without its `png_sequence` cases passes (400 frames). `delivery_profiles` needs a CUDA device; a scratch copy with software decodes in place of CUDA passes.
 
 No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit; the Windows quick run of `export_formats` and `delivery_profiles` is still owed.
+## 6 October 2026: rejections name the field, the value and the bound
+
+Six findings of the VFX demo (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`, items 3, 11, 12, 34, 57 and 13) were rejections an agent could not act on without guessing. Error codes are unchanged; the messages now say which rule failed, where and by how much.
+
+- **Curves (`INVALID_ANIMATION`).**
+  - One message used to cover key times past the end, denominators over 1,000,000 and values out of range, with no layer, curve or key. Each rule now has its own message with the full field path, the value and the bound, for example `layers[0] (title).animation.opacity.keys[1].time: 34/5 s (6.8 s) is past the end of the 168/25 s (6.72 s) duration; key times must lie within 0..duration`. Stretched keys name the first one past the end.
+  - Paths cover layer animation, spatial transforms with stabilization compensation, masks, effects (`effects[1].animation.hue_shift_mdeg.keys[1].value: 400000 is outside the property's range -360000..360000`), chroma keys, geometry nodes, camera and lights (`geometry.nodes[0] (card).transform.rotation_mdeg.animation.z.keys[1].value: 720000 ...`), expressions' base curves, audio gain and routing curves, and reframing keys.
+  - Equal-time keys name both keys; retime errors name their field. Static grade, mask, spatial and geometry values out of range name their field as well.
+  - A new `At::under` joins a nested field path to its owner's with a dot, so each level adds only its own field.
+- **Stabilization, tracking and reframing.**
+  - `LIMIT_EXCEEDED` states the requested count and its terms: frames, (2 x search radius + 1)^2 candidates, 26 comparisons per candidate for stabilization's sub-pixel refinement, and patch area, per segment.
+  - Tracking failures state the measurement and the bound it missed: the reference patch's deviation against five levels, correlation and uniqueness margin (now separate messages), step and acceleration lengths, whole-canvas change, an ambiguous seed's match.
+  - In stabilization they are prefixed `segments[i].regions[j]`, in reframing `segments[i].selection` with the request's index (reframing sorts segments by start). Their layer frame is now the layer's: before, a failure at layer frame 35 in a segment starting at 32 said frame 3.
+  - Segment validation names the segment.
+- **Missing output folder.** `IO_ERROR` names the folder, the output and the `output_root` to create it in, instead of the bare OS error. Outputs still never create folders, as documented. `job.start` now rejects a missing folder at submission, as `arguments.output`, rather than in the worker.
+- **Partial tracks (finding 13).** `TRACKING_UNRELIABLE` from `tracking.inspect` carries `error.detail` with `failed_layer_frame` and the observations accepted before it, so a caller can shorten the layer. Errors gain an optional `detail`, omitted when empty. Stabilization and reframing leave it out, because their segment windows have their own clocks. The tracking capability's `failure` reads `reject_without_mask_or_scene_reporting_accepted_observations`.
+
+New unit tests assert the messages: the four demo curve cases end to end through scene preparation, plus retime and key counts, tracking, stabilization, reframing, `render::destination` and `job.start`. These ran in a Linux container, not on the Windows development machine:
+- **Rust.** `cargo fmt --check` passes. `cargo clippy -D warnings` reports only the Windows-only job runner's dead code, as the parent commit does on Linux; with that lint allowed it is clean. `cargo test` passes 194 of 195; `jobs::pool::tests::jobs_writing_the_same_path_keep_submission_order` asserts Windows drive paths and fails identically at the parent commit.
+- **Fixtures.** No fixture asserts the changed messages; those exercising the changed paths ran in quick mode with Python 3.13, NumPy 2.5 and Pillow 12 in place of the pinned Windows versions.
+  - Passed: tracking, stabilization, animation, easing, grading, keying, selection, compositing, spatial, geometry, templates, expressions, audio, scenes.
+  - Passed with a `/proc` stand-in for the Windows working-set probe: reframing, audio_routing.
+  - Not completed: proxies passes its `IO_ERROR` cases, then stops at background jobs, which need Windows. tracks fails a PCM comparison identically with the parent commit's engine.
+
+No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
 
 ## 6 October 2026: scene transitions in production manifests
 

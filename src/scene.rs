@@ -891,7 +891,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
     let mut selections = Vec::new();
     let mut tile_selections = Vec::new();
     let mut alpha_checked = HashSet::new();
-    for layer in &scene.layers {
+    for (li, layer) in scene.layers.iter().enumerate() {
         let selected = exposure
             .times
             .iter()
@@ -906,7 +906,8 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
             &selected,
             &exposure.times,
             expression_samples.as_deref(),
-        )?;
+        )
+        .under(|| format!("layers[{li}] ({})", layer.id))?;
         selections.push(selected.clone());
         let mut total = Time::ZERO;
         let graphic_report = if let Some(graphic) = &layer.graphics {
@@ -1247,13 +1248,15 @@ fn sample_parameters(
         .spatial
         .as_ref()
         .map(|s| s.prepare(layer.duration))
-        .transpose()?;
+        .transpose()
+        .under(|| "transform.spatial".into())?;
     let effects = crate::effects::prepare(&layer.effects, layer.duration)?;
     let mask = layer
         .mask
         .as_ref()
         .map(|m| m.prepare(layer.duration))
-        .transpose()?;
+        .transpose()
+        .under(|| "mask".into())?;
     let (mut x, mut y, mut opacity) = (None, None, None);
     if let Some(animation) = &layer.animation {
         if animation.position_x.is_none()
@@ -1269,17 +1272,20 @@ fn sample_parameters(
             .position_x
             .as_ref()
             .map(|c| c.prepare(layer.duration, -32768, 32768))
-            .transpose()?;
+            .transpose()
+            .under(|| "animation.position_x".into())?;
         y = animation
             .position_y
             .as_ref()
             .map(|c| c.prepare(layer.duration, -32768, 32768))
-            .transpose()?;
+            .transpose()
+            .under(|| "animation.position_y".into())?;
         opacity = animation
             .opacity
             .as_ref()
             .map(|c| c.prepare(layer.duration, 0, 255))
-            .transpose()?;
+            .transpose()
+            .under(|| "animation.opacity".into())?;
     }
     selected
         .iter()
@@ -3333,6 +3339,84 @@ mod tests {
         assert_eq!(
             runs(&[Some(0), Some(0), Some(1), None, None]),
             json!([{"count":2,"value":0},{"count":1,"value":1},{"count":2,"value":null}])
+        );
+    }
+
+    #[test]
+    fn curve_rejections_name_the_layer_curve_key_value_and_bound() {
+        // A 6.72 s title, as in the demos that met these rejections.
+        let mut scene = panel_scene();
+        let length = Time::new(168, 25).unwrap();
+        scene.duration = length;
+        scene.layers[0].duration = length;
+        scene.layers[0].id = "title".into();
+        let key = |num: u64, den: u64, value: i32| json!({"time":{"num":num,"den":den},"value":value,"interpolation":"linear"});
+        let rejected = |scene: &Scene| {
+            let error = prepare(scene, &std::env::temp_dir()).err().unwrap();
+            assert_eq!(error.code, "INVALID_ANIMATION", "{}", error.message);
+            error.message
+        };
+        let animated = |animation: Value| -> Option<Animation> {
+            Some(serde_json::from_value(animation).unwrap())
+        };
+        // A key past the layer's end.
+        scene.layers[0].animation =
+            animated(json!({"opacity":{"keys":[key(0, 1, 0), key(34, 5, 255)]}}));
+        assert_eq!(
+            rejected(&scene),
+            "layers[0] (title).animation.opacity.keys[1].time: 34/5 s (6.8 s) is past the end of the 168/25 s (6.72 s) duration; key times must lie within 0..duration"
+        );
+        // Keys stretched past the end name the first one beyond it.
+        scene.layers[0].animation =
+            animated(json!({"opacity":{"keys":[key(0, 1, 0), key(4, 1, 255)]},
+            "position_y":{"keys":[key(0, 1, 0), key(17, 5, 40), key(42, 5, 80), key(9, 1, 0)]}}));
+        assert_eq!(
+            rejected(&scene),
+            "layers[0] (title).animation.position_y.keys[2].time: 42/5 s (8.4 s) is past the end of the 168/25 s (6.72 s) duration; key times must lie within 0..duration"
+        );
+        // Values, denominators and equal times name their key too.
+        scene.layers[0].animation =
+            animated(json!({"opacity":{"keys":[key(0, 1, 0), key(1, 1, 256)]}}));
+        assert_eq!(
+            rejected(&scene),
+            "layers[0] (title).animation.opacity.keys[1].value: 256 is outside the property's range 0..255"
+        );
+        scene.layers[0].animation =
+            animated(json!({"opacity":{"keys":[key(1, 2, 0), key(0, 1, 9), key(2, 4, 255)]}}));
+        assert_eq!(
+            rejected(&scene),
+            "layers[0] (title).animation.opacity.keys[2].time: 1/2 s (0.5 s) equals keys[0].time; equal-time keys are ambiguous, including equivalent rational times"
+        );
+        scene.layers[0].animation =
+            animated(json!({"opacity":{"keys":[key(0, 1, 0), key(1, 1_000_001, 255)]}}));
+        assert_eq!(
+            rejected(&scene),
+            "layers[0] (title).animation.opacity.keys[1].time: 1/1000001 s (0.000001 s) reduces to denominator 1000001, above the 1000000 limit; use a coarser fraction"
+        );
+        // A hue shift beyond one full turn, inside an effect.
+        scene.layers[0].animation = None;
+        scene.layers[0].effects = vec![
+            serde_json::from_value(json!({"kind":"grade","exposure_milli":0,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000]})).unwrap(),
+            serde_json::from_value(json!({"kind":"grade","exposure_milli":0,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000],
+                "animation":{"hue_shift_mdeg":{"keys":[key(0, 1, 0), key(6, 1, 400_000)]}}})).unwrap(),
+        ];
+        assert_eq!(
+            rejected(&scene),
+            "layers[0] (title).effects[1].animation.hue_shift_mdeg.keys[1].value: 400000 is outside the property's range -360000..360000"
+        );
+        // A geometry rotation beyond one full turn.
+        scene.layers[0].effects.clear();
+        scene.geometry = Some(serde_json::from_value(json!({
+            "nodes":[{"id":"card","transform":{"position_milli":{"value":[0,0,0]},
+                "rotation_mdeg":{"value":[0,0,0],"animation":{"z":{"keys":[key(0, 1, 0), key(6, 1, 720_000)]}}},
+                "scale_milli":{"value":[1000,1000,1000]}},
+                "plane":{"layer":"title","size_milli":[1600,900],"material":"unlit","double_sided":false}}],
+            "camera":{"position_milli":{"value":[0,0,4000]},"target_milli":{"value":[0,0,0]},"up_milli":{"value":[0,1000,0]},
+                "projection":{"kind":"perspective","vertical_fov_mdeg":{"value":40000}},"near_milli":100,"far_milli":100000},
+            "lights":[],"shadows":"none"})).unwrap());
+        assert_eq!(
+            rejected(&scene),
+            "geometry.nodes[0] (card).transform.rotation_mdeg.animation.z.keys[1].value: 720000 is outside the property's range -360000..360000"
         );
     }
 }

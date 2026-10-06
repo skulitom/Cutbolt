@@ -1,6 +1,6 @@
 //! Original camera-motion measurement, rigid compensation and explicit crop decisions.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Interpolation, Keyframe, Sampler as CurveSampler},
     error, scene, spatial,
     time::Time,
@@ -71,10 +71,14 @@ impl Compensation {
             viewport: self.viewport,
             curves: [
                 self.translation_x_milli
-                    .prepare(duration, -32768000, 32768000)?,
+                    .prepare(duration, -32768000, 32768000)
+                    .under(|| "translation_x_milli".into())?,
                 self.translation_y_milli
-                    .prepare(duration, -32768000, 32768000)?,
-                self.rotation_mdeg.prepare(duration, -3600000, 3600000)?,
+                    .prepare(duration, -32768000, 32768000)
+                    .under(|| "translation_y_milli".into())?,
+                self.rotation_mdeg
+                    .prepare(duration, -3600000, 3600000)
+                    .under(|| "rotation_mdeg".into())?,
             ],
         })
     }
@@ -406,8 +410,11 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     }
     let mut boundaries = Vec::new();
     let mut work = 0u64;
-    for segment in &request.segments {
-        let at = segment.start.units(fps)?;
+    for (index, segment) in request.segments.iter().enumerate() {
+        let at = segment
+            .start
+            .units(fps)
+            .at(|| format!("segments[{index}].start"))?;
         if at >= count
             || boundaries.last().is_some_and(|last| at <= *last)
             || !(3..=8).contains(&segment.regions.len())
@@ -419,9 +426,9 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
             })
             || !distributed(&segment.regions)
         {
-            return Err(invalid(
-                "Segments need increasing frame-aligned starts and 3..8 distributed patches inside the canvas, with dimensions 4..64 and a center triangle area >=64 pixels squared",
-            ));
+            return Err(invalid(&format!(
+                "segments[{index}]: segments need increasing frame-aligned starts and 3..8 distributed patches inside the canvas, with dimensions 4..64 and a center triangle area >=64 pixels squared"
+            )));
         }
         boundaries.push(at);
     }
@@ -430,26 +437,45 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     }
     boundaries.push(count);
     if !(1..=32).contains(&request.tracking.search_radius) {
-        return Err(invalid("Search radius must be 1..32"));
+        return Err(invalid(&format!(
+            "tracking.search_radius: {} is outside 1..32",
+            request.tracking.search_radius
+        )));
     }
-    for (segment, range) in request.segments.iter().zip(boundaries.windows(2)) {
+    let candidates = u64::from(2 * request.tracking.search_radius + 1).pow(2);
+    let mut terms = Vec::new();
+    for (index, (segment, range)) in request
+        .segments
+        .iter()
+        .zip(boundaries.windows(2))
+        .enumerate()
+    {
         if range[1] - range[0] < 2 {
-            return Err(invalid(
-                "Each segment must contain at least two output frames",
-            ));
+            return Err(invalid(&format!(
+                "segments[{index}]: each segment must contain at least two output frames, got {}",
+                range[1] - range[0]
+            )));
         }
-        work += (range[1] - range[0])
-            * (u64::from(2 * request.tracking.search_radius + 1).pow(2) * 26)
-            * segment
-                .regions
-                .iter()
-                .map(|r| u64::from(r[2] * r[3]))
-                .sum::<u64>();
+        let area = segment
+            .regions
+            .iter()
+            .map(|r| u64::from(r[2] * r[3]))
+            .sum::<u64>();
+        let segment_work = (range[1] - range[0]) * candidates * 26 * area;
+        work += segment_work;
+        terms.push(format!(
+            "segments[{index}] {} frames x {candidates} x 26 x {area} = {segment_work}",
+            range[1] - range[0]
+        ));
     }
     if work > 128_000_000 {
         return Err(error(
             "LIMIT_EXCEEDED",
-            "Stabilization supports at most 128000000 patch-pixel comparisons",
+            format!(
+                "Stabilization needs {work} patch-pixel comparisons, above the 128000000 limit. Each segment counts frames x {candidates} candidates ((2 x search radius {} + 1)^2) x 26 comparisons per candidate (one whole-pixel and 25 sub-pixel) x the total area of its patches: {}. Reduce the search radius, the patch sizes or count, or the frames",
+                request.tracking.search_radius,
+                terms.join("; ")
+            ),
         ));
     }
     let [cx, cy, cw, ch] = layer.transform.crop;
@@ -518,26 +544,30 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
         window.audio_mix = None;
         let mut tracks = Vec::new();
         let controls = &request.tracking;
-        for region in &segment.regions {
-            let tracked = tracking::measure_precise(&tracking::Inspect {
-                scene: window.clone(),
-                input_root: request.input_root.clone(),
-                layer_id: layer.id.clone(),
-                model: tracking::Model::Translation,
-                region: *region,
-                search_radius: controls.search_radius,
-                maximum_step: controls.maximum_step,
-                maximum_acceleration: controls.maximum_acceleration,
-                minimum_correlation_milli: controls.minimum_correlation_milli,
-                minimum_margin_milli: controls.minimum_margin_milli,
-                maximum_frame_change_milli: controls.maximum_frame_change_milli,
-                mask: crate::composite::RectMask {
-                    rect: [0, 0, 1, 1],
-                    inverted: false,
-                    animation: None,
-                    feather: None,
+        for (region_index, region) in segment.regions.iter().enumerate() {
+            let tracked = tracking::measure_precise(
+                &tracking::Inspect {
+                    scene: window.clone(),
+                    input_root: request.input_root.clone(),
+                    layer_id: layer.id.clone(),
+                    model: tracking::Model::Translation,
+                    region: *region,
+                    search_radius: controls.search_radius,
+                    maximum_step: controls.maximum_step,
+                    maximum_acceleration: controls.maximum_acceleration,
+                    minimum_correlation_milli: controls.minimum_correlation_milli,
+                    minimum_margin_milli: controls.minimum_margin_milli,
+                    maximum_frame_change_milli: controls.maximum_frame_change_milli,
+                    mask: crate::composite::RectMask {
+                        rect: [0, 0, 1, 1],
+                        inverted: false,
+                        animation: None,
+                        feather: None,
+                    },
                 },
-            })?;
+                range[0],
+            )
+            .under(|| format!("segments[{segment_index}].regions[{region_index}]"))?;
             tracks.push(tracked);
         }
         let mut poses = Vec::new();
@@ -709,4 +739,64 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
 
 pub fn capabilities() -> Value {
     json!({"profile":"camera-stabilization-v1","models":["translation","rigid"],"measurement_grid_milli":250,"measurement_filter":"symmetric_binomial_3x3","confidence":"refined_peak_margin_between_distinct_integer_basins","maximum_patch_pixel_comparisons":128000000,"maximum_per_patch_pixel_comparisons":64000000,"maximum_frames":128,"segments":[1,16],"patches_per_segment":[3,8],"maximum_roll_mdeg":15000,"smoothing":["lock","triangular_window"],"crop":["preserve","constant_zoom"],"maximum_zoom_milli":4000,"correction":"editable_source_canvas_rigid_before_authored_mapping","automatic_cut_recovery":false,"rolling_shutter_correction":false,"external_model":false})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tracking::{Scratch, footage, texture};
+
+    fn request(
+        scene: scene::Scene,
+        root: &std::path::Path,
+        segments: Value,
+        radius: u32,
+    ) -> Inspect {
+        serde_json::from_value(json!({"scene":scene,"input_root":root,"layer_id":"shot","model":"translation",
+            "segments":segments,"tracking":{"search_radius":radius,"maximum_step":1,"maximum_acceleration":4,
+            "minimum_correlation_milli":900,"minimum_margin_milli":50,"maximum_frame_change_milli":1000},
+            "maximum_fit_error_milli":500,"maximum_roll_mdeg":0,"smoothing":{"mode":"lock"},"strength_milli":1000,
+            "crop":{"mode":"preserve"},"sampling":"bilinear"}))
+        .unwrap()
+    }
+
+    #[test]
+    fn tracking_failures_name_the_segment_region_and_layer_frame() {
+        let scratch = Scratch::new("stabilization-messages");
+        // From layer frame 2, the second segment's second patch falls on a flat block.
+        let still = texture(64, 48, [0, 0]);
+        let mut blocked = still.clone();
+        for y in 0..16 {
+            blocked[y * 64 + 48..y * 64 + 64].fill(128);
+        }
+        let scene = footage(
+            &scratch.0,
+            64,
+            48,
+            &[still.clone(), still, blocked.clone(), blocked],
+        );
+        let regions = [[4, 4, 8, 8], [52, 4, 8, 8], [4, 36, 8, 8]];
+        let segments = json!([{"start":{"num":0,"den":1},"regions":regions},{"start":{"num":2,"den":25},"regions":regions}]);
+        let error = inspect(&request(scene, &scratch.0, segments, 2)).unwrap_err();
+        assert_eq!(error.code, "TRACKING_UNRELIABLE");
+        assert_eq!(
+            error.message,
+            "segments[1].regions[1]: Layer frame 2: reference patch [52, 4, 8, 8] has 0.00 encoded levels of luminance deviation, less than the five required; choose a more textured region; no frame was tracked, and no mask or replacement scene was produced"
+        );
+        // Observations of a segment's window are not the layer's, so none are attached.
+        assert!(error.detail.is_none());
+    }
+
+    #[test]
+    fn excessive_work_states_the_count_and_each_segments_terms() {
+        let scratch = Scratch::new("stabilization-limit");
+        let scene = footage(&scratch.0, 64, 48, &vec![texture(64, 48, [0, 0]); 2]);
+        let segments = json!([{"start":{"num":0,"den":1},"regions":[[0,0,32,24],[32,0,32,24],[0,24,32,24],[32,24,32,24]]}]);
+        let error = inspect(&request(scene, &scratch.0, segments, 32)).unwrap_err();
+        assert_eq!(error.code, "LIMIT_EXCEEDED");
+        assert_eq!(
+            error.message,
+            "Stabilization needs 674918400 patch-pixel comparisons, above the 128000000 limit. Each segment counts frames x 4225 candidates ((2 x search radius 32 + 1)^2) x 26 comparisons per candidate (one whole-pixel and 25 sub-pixel) x the total area of its patches: segments[0] 2 frames x 4225 x 26 x 3072 = 674918400. Reduce the search radius, the patch sizes or count, or the frames"
+        );
+    }
 }

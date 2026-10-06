@@ -73,11 +73,8 @@ fn create_folder(output: &Path, root: &Path) -> Result<Folder> {
     let name = output
         .file_name()
         .ok_or_else(|| error("INVALID_PATH", "The review folder needs a name"))?;
-    let parent = output
-        .parent()
-        .ok_or_else(|| error("INVALID_PATH", "Missing output parent"))?
-        .canonicalize()?;
-    if !parent.starts_with(root.canonicalize()?) {
+    let parent = crate::render::output_folder(output, root)?;
+    if !parent.starts_with(crate::render::output_root(root)?) {
         return Err(error(
             "PATH_OUTSIDE_ROOT",
             "The review folder must be inside the output root",

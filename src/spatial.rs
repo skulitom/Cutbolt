@@ -1,6 +1,6 @@
 //! Original bounded 2D mapping with exact property clocks and fixed-weight image sampling.
 use crate::{
-    Result,
+    At, Result,
     animation::{Curve, Sampler as CurveSampler},
     composite::{AlphaMode, BlendMode},
     error,
@@ -180,14 +180,22 @@ impl Transform {
             (1, 16000),
             (-3_600_000, 3_600_000),
         ];
-        if values
+        let fields = [
+            "translate_milli[0]",
+            "translate_milli[1]",
+            "scale_milli[0]",
+            "scale_milli[1]",
+            "rotation_mdeg",
+        ];
+        if let Some(((value, (a, b)), field)) = values
             .iter()
             .zip(ranges)
-            .any(|(v, (a, b))| !(a..=b).contains(v))
+            .zip(fields)
+            .find(|((v, (a, b)), _)| !(*a..=*b).contains(*v))
         {
-            return Err(invalid(
-                "Translation supports +/-32768 pixels, scale 0.001..16 and rotation +/-3600 degrees",
-            ));
+            return Err(invalid(&format!(
+                "{field}: {value} is outside {a}..{b}; translation supports +/-32768 pixels, scale 0.001..16 and rotation +/-3600 degrees"
+            )));
         }
         let keys = self
             .animation
@@ -205,10 +213,22 @@ impl Transform {
         if self.animation.is_some() && keys.iter().all(|k| k.is_none()) {
             return Err(invalid("Spatial animation must declare at least one curve"));
         }
+        let names = [
+            "translate_x_milli",
+            "translate_y_milli",
+            "scale_x_milli",
+            "scale_y_milli",
+            "rotation_mdeg",
+        ];
         let curves = keys
             .iter()
             .zip(ranges)
-            .map(|(c, (a, b))| c.map(|c| c.prepare(duration, a, b)).transpose())
+            .zip(names)
+            .map(|((c, (a, b)), name)| {
+                c.map(|c| c.prepare(duration, a, b))
+                    .transpose()
+                    .under(|| format!("animation.{name}"))
+            })
             .collect::<Result<_>>()?;
         Ok(Sampler {
             values,
@@ -217,7 +237,8 @@ impl Transform {
                 .compensation
                 .as_ref()
                 .map(|c| c.prepare(duration))
-                .transpose()?,
+                .transpose()
+                .under(|| "compensation".into())?,
         })
     }
 }
