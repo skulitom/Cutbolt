@@ -12,7 +12,7 @@ One command runs every stage as a durable, resumable job with stage receipts:
 4. scenes with word-cued layers;
 5. `media.prepare`;
 6. assembly;
-7. captions;
+7. captions, burned in as one overlay;
 8. ducking and loudness;
 9. export;
 10. review.
@@ -104,7 +104,7 @@ Unknown fields fail with the field named; nothing is guessed. Times are exact se
 | `delivery` | `captions` (`burn_in` true; `sidecars` `["srt", "vtt"]`; `line_chars` 40; `lines` 2); `loudness_lkfs` (-14); `peak_dbfs` (-1), the delivered file's highest true peak; `review` (`speech` true, `frames` 16, `preview` false, `min_speech_match` 0.95: the share of expected words the speech check must hear) |
 | `review_policy` | `version`, `gates` (from script, storyboard, narration, rough_cut, final_export) and `human_required` (default final_export) |
 | `scenes` | 1-24 scenes: `id`, optional `script` (1-600 characters; omit for a silent scene), `beat` (optional when `overrides.scenes` gives the scene a recipe), optional fixed `duration` (seconds or `{"bars": n}`), optional `transition` into the next scene (see [transitions](#transitions)) |
-| `overrides` | `narration.<scene>.input`: a supplied PCM16 WAV used instead of synthesis. `scenes.<scene>.input`: a [hand-written scene recipe](#hand-written-scenes) (JSON) used instead of the template's, whose layers can start on words of the script and name files by input; captions are still added. |
+| `overrides` | `narration.<scene>.input`: a supplied PCM16 WAV used instead of synthesis. `scenes.<scene>.input`: a [hand-written scene recipe](#hand-written-scenes) (JSON) used instead of the template's, whose layers can start on words of the script and name files by input; burned-in captions play over it. |
 
 ### Beats
 
@@ -143,7 +143,7 @@ The effect starts on the cut and covers the first `frames` of the next scene: it
 A track transition reads the outgoing scene past its end, so the coordinator renders that scene `frames` longer as a tail handle. The clip on the timeline keeps the scene's length; only the rendered asset is longer.
 - **Template scenes.** Every layer that lasts until the scene's end plays on through the handle: Pip keeps moving (after a `travel` beat's last hop, Pip idles), and the clouds keep drifting. The beat's timing still follows the scene's length, so up to its end the scene is exactly what it would be without a handle.
 - **Hand-written recipes.** Every layer whose start plus duration reaches the scene's end, from `{"until": "end"}` or otherwise, lasts `frames` longer and plays on by its own frames, keys and `end` policy. Nothing before the end changes. An `audio_mix`, whose length must be the scene's, is padded with silence.
-- **Captions.** Burned-in captions are taken from the film's caption draft over the whole render, at timeline time. A caption of the next scene that starts inside the handle therefore shows there at the same moment and place as in the next scene, and stays steady through the effect.
+- **Captions.** Burned-in captions are not in the handle: they are [one overlay](#burned-in-captions) above the picture track, so each caption stays steady through the effect, at its own time.
 
 `check` and `build` refuse:
 - an unknown kind or field;
@@ -171,11 +171,13 @@ flowchart LR
     TM --> AU
     AU --> X[mix: meters, duck, normalize, AAC trial]
     V --> L[align-batch: one engine job on the voice assets]
-    L --> C[captions]
+    L --> C[captions: draft and sidecars]
     AU --> C
-    C --> S[scenes: one render per lane]
+    C --> CO[caption overlay: one transparent render]
+    L --> S[scenes: one render per lane]
     A --> S
     S --> CUT[cut: one session revision]
+    CO --> CUT
     X --> CUT
     CUT --> E[export]
     CUT --> SP[speech check on the mix]
@@ -191,8 +193,9 @@ How the [contract's invalidation table](pipeline/CONTRACT.md#reviews-and-invalid
 
 | Change | Runs again | Kept |
 | --- | --- | --- |
-| One scene's script | That line's narration, alignment and voice asset; timing; captions; mix; that scene; the cut and delivery | Art, every other take and every other scene, even scenes that moved: a scene recipe uses its own clock and its own captions, so moving it does not change it |
-| Same script, new take (`--rebuild tts:s2`) | That take's alignment, voice asset, timing, captions, mix, scene, cut and delivery | Script, art and other takes |
+| One scene's script | That line's narration, alignment and voice asset; timing; captions and their overlay; mix; that scene; the cut and delivery | Art, every other take and every other scene, even scenes that moved: a scene recipe uses its own clock, and the captions are a separate overlay, so moving it does not change it |
+| Same script, new take (`--rebuild tts:s2`) | That take's alignment, voice asset, timing, captions and their overlay, mix, scene, cut and delivery | Script, art and other takes |
+| Caption settings (`line_chars`, `lines`) | Captions, their overlay, the cut and delivery | Every take and every scene |
 | Shared palette | Every art recipe and every scene, the cut and delivery | Every take, alignment and voice asset |
 | One label | The labels recipe and the scenes that show labels | Every take |
 | Music, loudness target | Music preparation (new music only), mix, cut and delivery | Takes, scenes |
@@ -205,16 +208,25 @@ The `timing` receipt lists every scene whose start or length changed, with old a
 
 ### The saved project
 
-The timeline is one saved session whose ID is `production_id`. It has a `picture` track, a `voice` track and a `music` track.
+The timeline is one saved session whose ID is `production_id`. It has a `picture` track, a `voice` track, a `music` track and, above the picture, a `captions` track that composites `alpha_over` ([burned-in captions](#burned-in-captions)).
 - **First build.** The coordinator assembles the target arrangement as a pure snapshot and creates the session from it.
 - **Later builds.** It computes the operations that turn the saved head into the new target and applies them as one revision. The target is assembled with `project.create` and `timeline.apply`, and mixed with `timeline.meters`, `audio.duck` and `audio.normalize`.
-  - The operations add new assets, remove and re-place only clips whose placement changed, set the end, set [transitions](#transitions), and set levels and fades.
+  - The operations add new assets and missing tracks, remove and re-place only clips whose placement changed, set the end, set [transitions](#transitions), set levels and fades, and put the tracks in the target's order.
   - Unchanged clips and transitions get no operation, so `session.history` and receipts show what each build changed. Removing a clip removes the transitions at its ends, so those are set again after it is placed. A transition the target no longer has is removed before any is set.
   - Asset IDs name content: scenes are `<scene>-<key>`, takes are `<scene>-<key>` from the file name. A revised scene therefore enters beside the old one rather than replacing it under the same name.
-- **Checked before saving.** The operations are first applied to a pure copy of the head with `timeline.apply`. The result must play exactly as the target: the same settings, referenced assets, clips and transitions by ID with every field, track settings, end, links and limiters. Otherwise nothing is saved, and the build fails with `RECONCILE_INCOMPLETE`, naming each differing track, clip and field. Assets no clip uses, and the order of clips inside a track, do not count.
+- **Checked before saving.** The operations are first applied to a pure copy of the head with `timeline.apply`. The result must play exactly as the target: the same settings, referenced assets, clips and transitions by ID with every field, track settings and order, end, links and limiters. Otherwise nothing is saved, and the build fails with `RECONCILE_INCOMPLETE`, naming each differing track, clip and field. Assets no clip uses, and the order of clips inside a track, do not count.
 - **Request IDs** are derived from the parent revision and the target's digest, so a lost response repeats safely.
 - **Reuse.** The `cut` receipt is reused only when the session head is still the revision it recorded. Otherwise the stage runs again, even for an unchanged manifest, and reconciles the head to the target. Before 6 October 2026 it reused the receipt anyway: the edit stayed in the head, and the export rendered the recorded revision.
 - **The manifest is the source of truth.** An edit made directly to the saved project survives until the next build, which reconciles every clip, level and limiter back to the target in one revision. The edit stays in the session's history and can be restored with `session.restore`. Make lasting changes in the manifest, or as [overrides](#overriding-a-stage).
+
+### Burned-in captions
+
+With `delivery.captions.burn_in` (the default), the caption draft is rendered once, over the whole film, as one transparent overlay with [`captions.render`](CAPTIONS.md#rendering-a-whole-caption-track). It is placed as clip `c-captions` on the `captions` track, from the start to the film's end. Scenes carry no caption layers, so:
+- **Every kind of scene takes captions.** A scene with `geometry` binds every layer to a plane, so caption text layers appended to it (`captions.scene`, which builds did until 6 October 2026) were refused with `INVALID_GEOMETRY`, and the effects reel had to turn `burn_in` off.
+- **Captions use none of a scene's 64 layers.**
+- **The overlay renders while the scenes do**, on its own job lane. A caption change renders it again and leaves every scene alone.
+
+The layout is the template's: bold text in a dark box near the bottom of the frame. Without `burn_in` the track stays empty. A project saved before the track existed gets it on its next build: reconciliation adds it, empty and on top, before placing the overlay. The SRT and WebVTT sidecars are unchanged, and so are the reviews: the delivered file is reviewed with the captions in its picture.
 
 ### Interruption and resumption
 
@@ -230,13 +242,13 @@ The coordinator takes a lock (`state/coordinator.lock`, with its PID). A second 
 - `overrides.scenes` substitutes a whole [hand-written scene recipe](#hand-written-scenes) for the template's.
 - Every intermediate is an ordinary file in the production folder, so an agent can open any of them with the engine's own tools:
   - the PixelForge recipe under `generated/art/`;
-  - the base and captioned scene recipes under `scenes/`;
+  - the scene recipes under `scenes/`;
   - the target snapshots under `generated/timeline/`;
-  - the caption draft under `generated/captions/`.
+  - the caption draft under `generated/captions/`, and its overlay under `renders/`.
 
 ### Hand-written scenes
 
-A scene the template cannot draw takes a recipe of its own: `overrides.scenes.<scene>.input` names a JSON input holding an ordinary [scene recipe](SCENES.md) (the scene itself, or `{"scene": ...}`). The scene then needs no `beat`. A beat given beside a recipe only sets the scene's timing rules (a title's bars, an end card's minimum) and draws no art. The scene keeps its place in the timing plan, its narration and its burned-in captions.
+A scene the template cannot draw takes a recipe of its own: `overrides.scenes.<scene>.input` names a JSON input holding an ordinary [scene recipe](SCENES.md) (the scene itself, or `{"scene": ...}`). The scene then needs no `beat`. A beat given beside a recipe only sets the scene's timing rules (a title's bars, an end card's minimum) and draws no art. The scene keeps its place in the timing plan and its narration, and the burned-in captions play over it.
 
 Like a template beat, a recipe can follow the narration and the production's files. These values may name production data instead of fixed numbers and paths; the coordinator resolves them before the engine sees the recipe:
 
@@ -274,7 +286,7 @@ A 3D gallery whose camera drifts between two words, with footage frames that cha
 ```
 
 - **Checked with the manifest.** `check` and `build` read the recipe and check every cue word and occurrence against the scene's script, every offset, and every input name against `inputs` (a PNG where an image or matte goes, a TrueType or OpenType font in `fonts`; a frame number within its sequence). `check` lists each scene's cue uses, inputs and sequence frames. A cue anywhere else, such as a `retime` start, `temporal` (its shutter angle and phase are degrees, not times) or the scene audio's `start`, is refused with its path. So is a hold given as a bare cue: a hold is a length, so it takes `{"until": <cue time>}`.
-- **Resolved by the build**, from the production's own copy of the recipe and the aligned take. The resolved recipe is the base recipe under `scenes/`. The build log names each cue's frame, and `show scene:<id>` lists, under `request.override`, every cue's word, offset, time and frame, every input identity and sequence frame identity (`frames`), the recipe file's SHA-256 and the scene length.
+- **Resolved by the build**, from the production's own copy of the recipe and the aligned take. The resolved recipe is the base recipe under `scenes/`. The build log names each distinct cue's frame once, and `show scene:<id>` lists, under `request.override`, every cue's word, offset, time and frame, every input identity and sequence frame identity (`frames`), the recipe file's SHA-256 and the scene length.
 - **Keyed by what it resolved to.** The scene's key covers the resolved recipe, the recipe file's SHA-256, every cue time and every input and frame identity. A new take that moves a cue word by a frame re-renders the scene, and so does a changed image or sequence frame it shows; a neighbour's retiming does not.
 - **Refused at build time:** a cue word the take never says (`CUE_NOT_HEARD`); a cue time outside the scene, a keyframe outside its layer, or a geometry key or expression literal outside the scene (`OVERRIDE_TIMING`); a layer that would end where it starts or after the scene (`OVERRIDE_TIMING`); a frame whose hold's word comes no later than the frame starts, or after its layer ends (`OVERRIDE_TIMING`); a recipe whose length is not the scene's (`OVERRIDE_DURATION`); a recipe file that is not valid JSON (`INVALID_OVERRIDE`). Nothing is rendered.
 - **Whole frames.** Cue times land on frames. A hold until a word therefore ends on that word's frame, and lasts whole frames when the layer's start and the earlier holds do, as strict timing requires anyway.
@@ -324,7 +336,7 @@ python tools/production.py resolve my-film.production.json gallery --root C:\DEV
 | `generated/align/` | Aligned transcripts, one per voice asset |
 | `generated/timeline/`, `generated/captions/` | Target snapshots, the combined transcripts and the caption draft |
 | `media/` | Prepared voice and music assets |
-| `scenes/`, `renders/` | Scene recipes (base and captioned) and compiled scene assets |
+| `scenes/`, `renders/` | Scene recipes, compiled scene assets and the caption overlay |
 | `previews/` | Stills from `resolve --still` |
 | `exports/` | The MP4 and the SRT/WebVTT sidecars |
 | `reviews/` | The review (sheet, `review.json`), the speech check (the audio-only mix, transcripts, `review.json`) and the mix's AAC trials (`aac-*.m4a` with their `review.json`) |
@@ -348,6 +360,7 @@ Warnings are derived on every build from the stage results and the review folder
 | `SPEECH_CHECK_INCOMPLETE` | speech-review | The check ran but compared no words. |
 | `SPEECH_MISMATCH` | speech-review | It heard fewer than `min_speech_match` of the expected words. The first five differences are listed. |
 | `UNCOVERED_SPEECH` | speech-review | It heard sounds no word covers: a garbled or extra word in a take, or a word recognition missed. |
+| `SPEECH_WITHOUT_NARRATION` | speech-review | It heard words where no narration clip plays, such as over a music-only end card: vocals in the music bed, or recognition writing text over music. A word counts when its middle is further than the comparison's tolerance (0.5 s) from every narration clip; words less than a second apart are listed as one run. The comparison counts such words as extra, which a high match ratio hides. |
 | `PEAK_OVER_TARGET` | review (or mix) | The delivered file's true peak is above `peak_dbfs`. The message lists the mix's AAC trials. Without a review (`--until`), the mix reports it when no trial got under the target. |
 | `LOUDNESS_OFF_TARGET`, `LOUDNESS_UNMEASURED` | review | The delivered loudness is more than 1 LU from `loudness_lkfs`, or could not be measured. |
 | `AUDIO_CLIPPING`, `BLACK_PICTURE`, `TIMING_MISMATCH`, `CUT_WORDS` | review | The review of the delivered file found clipped runs, black runs, video or audio of a different length than the project, or narrated words cut by clip edges. |
@@ -355,7 +368,11 @@ Warnings are derived on every build from the stage results and the review folder
 | `MUSIC_ENDS_EARLY` | audio-timeline | The prepared bed is shorter than the timed film and `music.loop` is `none`. |
 | `MUSIC_MAY_END_EARLY`, `NARRATION_MAY_OVERFLOW`, `SCENE_TOO_LONG`, `TOO_LONG` | check | From the length estimate below. |
 
-**The length estimate.** `check` reports `estimate`: each narrated line at the speaker's words per second, or a supplied take at its own length, through the same timing plan as a build. Qwen's `ryan` speaks about 2.6 words/s; other speakers use that figure, and `rate_measured` says so. If the music bed is shorter than the estimated film, or within 10% of it, `check` warns `MUSIC_MAY_END_EARLY`. A fixed-duration scene whose estimated narration may not fit warns `NARRATION_MAY_OVERFLOW`.
+**The length estimate.** `check` reports `estimate`. Each narrated line's take is estimated as 1.12 s plus its letters and digits at 11.36 a second (`take_model`), and a supplied take counts at its own length. The film is then planned as a build plans it (`film_seconds`), and planned again with every estimated take 10% shorter and 10% longer (`film_range`, with `narration_range`).
+- **Where the fit comes from.** All 37 `ryan` takes of five productions on the development machine, at seeds 5, 7, 11 and 23. Single takes came within -26% to +32% of it, and each production's whole narration within -3% to +6%.
+- **Why letters.** Words vary in length: the effects reel's 338 words made 147.8 s of takes (2.29 words/s). The earlier fixed 2.6 words/s put them at 130 s and the film at 154.6 s; it lasted 172.3 s. The fit gives 152.0 s of narration and a 176.2 s film (161.3-192.0 s). The part-two film (96.0 s, estimated 86.4-99.8 s) and the proof (44.6 s, 42.7-50.4 s) also fall inside their ranges.
+- **Other speakers** use the same fit, and `rate_measured` says so.
+- **Warnings.** If the music bed is shorter than the top of the range, `check` warns `MUSIC_MAY_END_EARLY`. A fixed-duration scene whose estimated take, 30% longer, would not fit warns `NARRATION_MAY_OVERFLOW`.
 
 ### The delivered peak
 
@@ -395,7 +412,7 @@ What the coordinator does about the 75 minutes and the compute:
   - The worker decodes each line's codes on its own, because decoding a padded batch hits a masking bug in the installed torch 2.3.
 - **Alignment.** Known scripts are aligned in one job instead of recognized, on the prepared voice assets, so the transcripts bind to what the timeline plays. The job starts as soon as those assets exist, without waiting for the music or the audio timeline; captions then wait for both.
 - **Mix.** `audio.normalize` renders the mix once, refines the levels in memory and renders the proposed levels once more to measure them exactly ([USAGE](USAGE.md#normalizing-loudness)). The mix stage therefore ends well before the scenes do.
-- **Running at once.** Art renders while the narration is generated. Music and voice become [audio-only assets](USAGE.md#voice-overs-and-music): 48 kHz stereo WAVs with no picture, used as they are or resampled in a fraction of a second, one job per take on separate lanes. Music starts at once. Scenes render one per lane, and the mix is measured while alignment, captions and scenes run.
+- **Running at once.** Art renders while the narration is generated. Music and voice become [audio-only assets](USAGE.md#voice-overs-and-music): 48 kHz stereo WAVs with no picture, used as they are or resampled in a fraction of a second, one job per take on separate lanes. Music starts at once. Scenes render one per lane beside the caption overlay, and the mix is measured while alignment, captions and scenes run.
 - **The speech check.** It listens to an audio-only render of the same revision while the picture exports. The final review then checks only picture, sound and timing, without the 360p preview copy unless asked.
 
 Measured times are in [pipeline/RESULTS.md](pipeline/RESULTS.md#production-coordinator-5-october-2026).
@@ -428,7 +445,7 @@ Not implemented:
 - **`resolve`** previews from the last build's take and alignment, and its stills leave out the burned-in captions.
 - **Narration.** The CustomVoice preset speakers only; no reference-voice cloning. English alignment only.
 - **Music** plays once, or loops on whole bars without a crossfade. A bed that does not start on a downbeat, or is not in 4/4 at its `bpm`, loops off the beat. See [music beds](#music-beds).
-- **Narration length** is estimated at `check` time at about 2.6 words/s, the rate measured for `ryan` only.
+- **Narration length** is estimated at `check` time from 37 takes of `ryan`; other speakers use the same fit, and a single take can differ from it by a quarter or more (see [the length estimate](#warnings)).
 - **Composition limits.** Scenes last at most 120 s, so long scripts must be split across scenes; films at most 600 s; 24 scenes.
 - **Transitions** start on the cut and read only the outgoing scene's handle, so they cover the start of the next scene. A transition centred on the cut, which would need a head handle on the incoming scene and move its cues, is not offered.
 - **Gates** are recorded but do not block a build.

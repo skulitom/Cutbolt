@@ -7,12 +7,18 @@ and the review folders, so a reused stage still reports what it found, and a cha
 running anything again.
 """
 
-# Narration rate for the length estimate at `check` time, in words per second. Qwen3-TTS CustomVoice `ryan`
-# measured about 2.6 words/s on the progress demos; other speakers use the same figure until measured.
-WORDS_PER_SECOND = {"ryan": 2.6}
-DEFAULT_WORDS_PER_SECOND = 2.6
-# An estimated film within this fraction of the music bed's length counts as possibly longer than the bed.
-ESTIMATE_MARGIN = 0.1
+# Take lengths for the estimate at `check` time: a fixed overhead plus the line's letters and digits at a steady rate,
+# (seconds, letters per second). Fitted to all 37 Qwen3-TTS CustomVoice `ryan` takes of five productions on the dev
+# machine (seeds 5, 7, 11 and 23; 3-36 words). Single takes came within -26% to +32% of the fit (each left out of the
+# fit in turn), each production's whole narration within -3% to +6%. The earlier fixed 2.6 words/s put the effects
+# reel's 338 words at 130 s; its takes made 147.8 s (2.29 words/s), and the fit gives 151.9 s. Letters predict a take
+# better than words: technical words are long. Other speakers use the same fit until measured.
+TAKE_MODEL = {"ryan": (1.12, 11.36)}
+DEFAULT_TAKE_MODEL = (1.12, 11.36)
+# The estimate's range: the film planned with every estimated take this much shorter and longer.
+FILM_SPREAD = 0.1
+# A fixed-duration scene may overflow when its estimated take, this much longer, does not fit.
+TAKE_SPREAD = 0.3
 # Delivered integrated loudness may differ from the target by this much before it is reported.
 LOUDNESS_TOLERANCE_LU = 1.0
 # Listed speech differences per warning; the review folder has them all.
@@ -23,26 +29,30 @@ def warning(code, stage, message, **detail):
     return {"code": code, "stage": stage, "message": message, "detail": detail}
 
 
-def words_per_second(voice):
-    speaker = (voice or {}).get("speaker", "")
-    return WORDS_PER_SECOND.get(str(speaker).lower(), DEFAULT_WORDS_PER_SECOND), str(speaker).lower() in WORDS_PER_SECOND
+def take_model(voice):
+    """The speaker's (overhead seconds, letters per second), and whether that speaker was measured."""
+    speaker = str((voice or {}).get("speaker", "")).lower()
+    return TAKE_MODEL.get(speaker, DEFAULT_TAKE_MODEL), speaker in TAKE_MODEL
 
 
-def music_warnings(stage, music_seconds, film_seconds, loop, estimated=False, basis=None):
-    """A bed that stops before the film ends: from an estimate at `check` time, or measured once timing is known."""
+def music_warnings(stage, music_seconds, film_seconds, loop, estimated=False, basis=None, film_range=None):
+    """A bed that stops before the film ends: from an estimate at `check` time (warned when the bed is shorter than the
+    top of the estimate's range), or measured once timing is known."""
     if loop != "none" or music_seconds is None or film_seconds is None:
         return []
     fix = 'supply a longer bed or set music.loop to "bars"'
     if estimated:
-        if music_seconds >= film_seconds * (1 + ESTIMATE_MARGIN):
+        low, high = film_range or (film_seconds, film_seconds)
+        if music_seconds >= high:
             return []
         gap = film_seconds - music_seconds
         where = (f"would end about {gap:.1f} s before it" if gap > 0 else
-                 f"is within {ESTIMATE_MARGIN:.0%} of that estimate and may end before the film")
+                 f"may end before the film, which could last up to {high:.1f} s")
         return [warning("MUSIC_MAY_END_EARLY", "check",
                         f"the music bed lasts {music_seconds:.2f} s and the film is estimated at {film_seconds:.1f} s "
-                        f"({basis}); the bed {where}; {fix}",
-                        music_seconds=round(music_seconds, 3), estimated_film_seconds=round(film_seconds, 2), basis=basis)]
+                        f"({low:.1f}-{high:.1f} s; {basis}); the bed {where}; {fix}",
+                        music_seconds=round(music_seconds, 3), estimated_film_seconds=round(film_seconds, 2),
+                        estimated_range=[round(low, 2), round(high, 2)], basis=basis)]
     if music_seconds >= film_seconds:
         return []
     return [warning("MUSIC_ENDS_EARLY", stage,
@@ -92,6 +102,46 @@ def speech_warnings(enabled, narrated, review, min_match, stage="speech-review")
         out.append(warning("UNCOVERED_SPEECH", stage, f"the speech check heard {uncovered['count']} sound(s) no word covers "
                            f"(a garbled or extra word in a take, or a word recognition missed): {shown}", listed=listed[:LISTED]))
     return out
+
+
+def heard_words(documents):
+    """Every heard word once, as (start, end, text) in seconds, in time order. Overlapping recognition windows split
+    their overlap at its middle, as the review does."""
+    docs = sorted(documents, key=lambda d: seconds(d.get("range_start")))
+    spans = [(seconds(d.get("range_start")), seconds(d.get("range_start")) + seconds(d.get("range_duration"))) for d in docs]
+    out = []
+    for i, d in enumerate(docs):
+        start, end = spans[i]
+        low = (start + spans[i - 1][1]) / 2 if i and spans[i - 1][1] > start else float("-inf")
+        high = (spans[i + 1][0] + end) / 2 if i + 1 < len(spans) and spans[i + 1][0] < end else float("inf")
+        out += [(seconds(w["start"]), seconds(w["end"]), w["text"].strip()) for w in d.get("words", []) if low <= seconds(w["start"]) < high]
+    return sorted(out)
+
+
+def unnarrated_warnings(review, documents, narration, stage="speech-review"):
+    """Words the speech check heard where no narration clip plays, such as over a music-only end card: a bed with vocals,
+    or recognition writing text over music. Extra words inside the narration are differences, and a high match ratio
+    hides them, so these are reported on their own. `review` is the speech check's review.json, `documents` the
+    transcripts it heard (timeline times), `narration` each narration clip's (start, end) in seconds. A word counts when
+    its middle is further than the comparison's tolerance from every clip. Words less than a second apart form one run."""
+    speech = review.get("speech") or {}
+    if (speech.get("recognition") or {}).get("ok") is False:
+        return []
+    tolerance = seconds((speech.get("comparison") or {}).get("tolerance") or {"num": 1, "den": 2})
+    outside = [(a, b, text) for a, b, text in heard_words(documents)
+               if not any(float(s) - tolerance <= (a + b) / 2 <= float(e) + tolerance for s, e in narration)]
+    if not outside:
+        return []
+    runs = []
+    for a, b, text in outside:
+        if runs and a - runs[-1][1] < 1:
+            runs[-1] = (runs[-1][0], max(b, runs[-1][1]), f"{runs[-1][2]} {text}")
+        else:
+            runs.append((a, b, text))
+    shown = ", ".join(f"\"{t}\" at {a:.2f}-{b:.2f} s" for a, b, t in runs[:LISTED])
+    return [warning("SPEECH_WITHOUT_NARRATION", stage, f"the speech check heard {len(outside)} word(s) where no narration plays: {shown}; "
+                    f"listen there for vocals in the music, or recognition writing text over music",
+                    count=len(outside), runs=[{"start": round(a, 3), "end": round(b, 3), "text": t} for a, b, t in runs[:LISTED]])]
 
 
 def review_warnings(review, target_lkfs, peak_dbfs, music, codec=None, stage="review"):

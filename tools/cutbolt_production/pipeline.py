@@ -13,8 +13,8 @@ Order (independent branches run at the same time; each stage waits only for the 
     tts → timing and voice prepare (one job per take)
     voice prepare → align (one job on the voice assets; it waits for nothing else)
     timing, voice prepare, music → audio timeline → mix (meters, duck, normalize, AAC trial)
-    audio timeline, align → captions → scenes (lanes, with the art)
-    mix, scenes → cut → export → review, beside the speech check (an audio-only render of the same revision)
+    align, art → scenes (lanes); audio timeline, align → captions → caption overlay (one transparent render)
+    mix, scenes, caption overlay → cut → export → review, beside the speech check (an audio-only render of the same revision)
 
 What the checks find (a speech check that failed, a delivered peak over its target, a music bed that ends early)
 becomes a warning: a WARNING line on stderr, the result's `warnings`, the build record and `status`. See quality.py.
@@ -89,6 +89,12 @@ class Production:
     def review_json(self, folder):
         path = self.root / folder / "review.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def heard_documents(self, folder, review):
+        """The transcripts the speech check heard, kept beside its review.json; empty when there are none."""
+        name = ((review or {}).get("speech") or {}).get("transcripts")
+        path = self.root / folder / name if isinstance(name, str) else None
+        return json.loads(path.read_text(encoding="utf-8"))["transcripts"] if path and path.is_file() else []
 
     def unused(self, relative):
         """A workspace-relative path that does not exist yet: <relative>, or <stem>-2, -3 ... beside it."""
@@ -226,13 +232,18 @@ class Production:
             mix_future = pool.submit(self.stage_mix, audio)
             aligned = align_future.result()
             captions = self.stage_captions(audio, aligned)
+            # Burned-in captions are one transparent overlay over the whole film, on a track above the scenes, so they
+            # suit every kind of scene (3D scenes bind every layer to a plane) and render while the scenes do.
+            burn = self.m["delivery"]["captions"]["burn_in"] and captions["result"]["cues"]
+            overlay_future = pool.submit(self.stage_caption_overlay, captions, audio, inputs) if burn else None
             art = art_future.result()
-            rendered = self.stage_scenes(timing, aligned, captions, art, inputs)
+            rendered = self.stage_scenes(timing, aligned, art, inputs)
+            overlay = overlay_future.result() if overlay_future else None
             mixed = mix_future.result()
         self.codec = mixed["result"]["report"].get("codec")
         if self.until == "scenes":
             return self.finish(stopped="scenes")
-        cut = self.stage_cut(mixed, rendered, timing)
+        cut = self.stage_cut(mixed, rendered, timing, overlay)
         if self.until == "cut":
             return self.finish(stopped="cut", cut=cut)
         speech_check = self.m["delivery"]["review"]["speech"] and bool(aligned)
@@ -243,8 +254,11 @@ class Production:
             reviewed = self.stage_review(exported, cut, aligned)
             heard = heard_future.result() if heard_future else None
         review = self.m["delivery"]["review"]
-        self.note(quality.speech_warnings(review["speech"], bool(aligned), self.review_json(heard["result"]["folder"]) if heard else None,
-                                          review["min_speech_match"]))
+        heard_review = self.review_json(heard["result"]["folder"]) if heard else None
+        self.note(quality.speech_warnings(review["speech"], bool(aligned), heard_review, review["min_speech_match"]))
+        if heard_review:
+            narration = [(F(r["voice_start"]), F(r["voice_start"]) + F(r["take"])) for r in timing["result"]["scenes"] if "take" in r]
+            self.note(quality.unnarrated_warnings(heard_review, self.heard_documents(heard["result"]["folder"], heard_review), narration))
         delivered = self.review_json(reviewed["result"]["folder"])
         if delivered is None:
             self.note([quality.warning("REVIEW_MISSING", "review", f"{reviewed['result']['folder']}/review.json is missing")])
@@ -821,19 +835,29 @@ class Production:
             out[scene["id"]] = (transition, following["id"])
         return out
 
-    def stage_scenes(self, timing, aligned, captions, art, inputs):
+    def stage_scenes(self, timing, aligned, art, inputs):
+        """Every scene's recipe, from the template or a hand-written override, rendered one per lane. Captions are not part
+        of a scene: they are one overlay over the film (stage_caption_overlay)."""
         timer = Timer()
         rows = {r["id"]: r for r in timing["result"]["scenes"]}
         transitions = self.transitions(timing)
         patterns = pixel_stage.check_patterns(self.m["patterns"])
         fonts = {k: inputs[v] for k, v in self.m["fonts"].items()}
-        layouts = pixel_stage.caption_layouts(fonts, self.m["colors"])
         self.mkdir("scenes")
 
         def cue_resolver(scene_id):
             return cue_at(scene_id, aligned.get(scene_id, {}).get("words", []), self.m["timing"]["lead"])
 
         def build_one(item):
+            scene_id = item[1]["id"]
+            try:
+                return render_one(item)
+            except ToolError as error:
+                if f"scene {scene_id}" in error.message or f"scenes.{scene_id}" in error.message:
+                    raise
+                raise ToolError(error.tool, error.code, f"scene {scene_id}: {error.message}", error.detail) from None
+
+        def render_one(item):
             number, scene = item
             row = rows[scene["id"]]
             duration = F(row["duration"])
@@ -849,20 +873,9 @@ class Production:
                 base = pixel_stage.SceneBuilder(scene, duration, art, self.art_index, patterns, self.m["colors"], cue_resolver(scene["id"]),
                                                 fonts, number, tail).build()
             base_path = self.save_base(scene["id"], base)
-            final_path = base_path
-            if self.m["delivery"]["captions"]["burn_in"] and captions:
-                captioned = f"scenes/{scene['id']}-{digest([base, captions['key'], row['start']])[:12]}.json"
-                if not (self.root / captioned).exists():
-                    self.engine.call("captions.scene", {"document": {"file": captions["result"]["draft"], "select": "document"},
-                                                        "scene": {"file": base_path}, "scene_id": scene["id"], "offset": rt(F(row["start"])),
-                                                        "layouts": layouts, "sampling": "sample_start", "layer_prefix": "cap", "save_as": captioned},
-                                     label=f"scene:{scene['id']}")
-                final_path = captioned
-            recipe = json.loads((self.root / final_path).read_text(encoding="utf-8"))
-            recipe = recipe.get("scene", recipe)
-            # The key is the recipe's content alone: a neighbour's retiming or a caption change elsewhere leaves it alone.
+            # The key is the recipe's content alone: a neighbour's retiming or a caption change leaves it alone.
             # An override's key also names its source file, every cue time it resolved and every input identity it used.
-            request = {"recipe": digest(recipe)}
+            request = {"recipe": digest(base)}
             if resolved:
                 request["override"] = resolved
             if tail:
@@ -871,12 +884,11 @@ class Production:
 
             def run(attempt):
                 out = f"renders/{scene['id']}-{key[:12]}-{attempt}.mkv"
-                scene_arg = {"file": final_path, "select": "scene"} if final_path != base_path else {"file": final_path}
-                result = self.engine.job("scene.render", {"scene": scene_arg, "output": out}, request_id=f"scene-{scene['id']}-{key[:16]}-{attempt}",
+                result = self.engine.job("scene.render", {"scene": {"file": base_path}, "output": out}, request_id=f"scene-{scene['id']}-{key[:16]}-{attempt}",
                                          lane=f"lane-{number % self.lanes}", label=f"scene:{scene['id']}")
                 # Asset IDs name content, so a revised scene enters the saved project beside the old one, never as it.
                 asset = dict(result["asset"], id=f"{scene['id']}-{key[:12]}")
-                return [self.ident(asset["path"])], {"asset": asset, "recipe": final_path, "layers": len(recipe["layers"]), "handle": fstr(tail)}
+                return [self.ident(asset["path"])], {"asset": asset, "recipe": base_path, "layers": len(base["layers"]), "handle": fstr(tail)}
             receipt = self.stage(f"scene:{scene['id']}", key, request, run, {"engine": self.engine_identity})
             return scene["id"], receipt["result"]["asset"]
 
@@ -885,6 +897,32 @@ class Production:
         built = sum(1 for s in self.m["scenes"] if self.outcomes.get(f"scene:{s['id']}") == "built")
         self.log(f"scenes: {built} rendered, {len(rendered) - built} reused ({timer.seconds():.1f}s)")
         return rendered
+
+    def stage_caption_overlay(self, captions, audio, inputs):
+        """Burned-in captions: the whole caption draft rendered as one transparent overlay (captions.render) for the cut's
+        `captions` track. It needs no scene layers and suits every kind of scene; a caption change renders it again and
+        leaves every scene alone."""
+        timer = Timer()
+        fonts = {k: inputs[v] for k, v in self.m["fonts"].items()}
+        layouts = pixel_stage.caption_layouts(fonts, self.m["colors"])
+        # The captions key covers the draft and the audio timeline (the film's length); the layouts name the font copies by content.
+        request = {"captions": captions["key"], "project": audio["key"], "layouts": layouts}
+        key = self.key("caption-overlay", request, {"engine": self.engine_identity})
+
+        def run(attempt):
+            out = f"renders/captions-{key[:12]}-{attempt}.mkv"
+            result = self.engine.job("captions.render", {"document": {"file": captions["result"]["draft"], "select": "document"},
+                                                         "layouts": layouts, "project": {"file": audio["result"]["snapshot"]}, "output": out,
+                                                         "asset_id": f"captions-{key[:12]}"},
+                                     request_id=f"captions-{key[:20]}-{attempt}", lane="captions", label="captions")
+            asset = dict(result["asset"], path=self.rel_any(result["asset"]["path"]))
+            return [self.ident(asset["path"])], {"asset": asset, "windows": result.get("windows"), "covers": result.get("covers"),
+                                                 "cues": result.get("cues")}
+        receipt = self.stage("caption-overlay", key, request, run, {"engine": self.engine_identity})
+        if self.outcomes.get("caption-overlay") == "built":
+            self.log(f"captions: {captions['result']['cues']} cue(s) rendered as one overlay, {receipt['result']['asset']['path']} "
+                     f"({timer.seconds():.1f}s)")
+        return receipt["result"]["asset"]
 
     def save_base(self, scene_id, base):
         """Write a scene's base recipe (before captions) under scenes/, named by its content; returns its path."""
@@ -914,7 +952,10 @@ class Production:
         except override_module.OverrideError as error:
             raise ToolError("production", "INVALID_OVERRIDE", str(error)) from None
         if report["cues"]:
-            self.log(f"scene {scene['id']}: " + ", ".join(f"{c['word']} at frame {c['frame']}" for c in report["cues"]))
+            # Each distinct cue once: a recipe can use one word for dozens of keys.
+            distinct = list(dict.fromkeys(f"{c['word']} at frame {c['frame']}" for c in report["cues"]))
+            uses = f" ({len(report['cues'])} uses)" if len(report["cues"]) > len(distinct) else ""
+            self.log(f"scene {scene['id']}: " + ", ".join(distinct) + uses)
         return recipe, {"source": self.ident(source)["sha256"], **report}
 
     def preview(self, scene_id, stills=()):
@@ -967,11 +1008,14 @@ class Production:
         return {"scene": scene_id, "recipe": base_path, "alignment": alignment, **resolved, "stills": shown}
 
     # ------------------------------------------------------------------ cut (saved session)
-    def stage_cut(self, mixed, rendered, timing):
+    def stage_cut(self, mixed, rendered, timing, overlay=None):
         timer = Timer()
         rows = {r["id"]: r for r in timing["result"]["scenes"]}
         snapshot = json.loads((self.root / mixed["result"]["snapshot"]).read_text(encoding="utf-8"))
         ops = [{"op": "media.add", "asset": rendered[s["id"]]} for s in self.m["scenes"]]
+        # Burned-in captions: an alpha_over track above the picture, empty when captions are not burned in.
+        ops.append({"op": "tracks.edit", "edit": {"op": "add", "track": {"id": "captions", "kind": "video", "locked": False, "enabled": True,
+                                                                         "clips": [], "composite": "alpha_over"}}})
         for s in self.m["scenes"]:
             row = rows[s["id"]]
             ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "picture", "collision": "reject", "clip": {
@@ -982,6 +1026,10 @@ class Production:
             ops.append({"op": "tracks.edit", "edit": {"op": "transition_set", "track_id": "picture", "transition": {
                 "id": f"x-{scene_id}", "left_id": f"v-{scene_id}", "right_id": f"v-{following}", "before": rt(0),
                 "after": rt(F(transition["frames"], FPS)), "kind": transition["kind"]}}})
+        if overlay:
+            ops.append({"op": "media.add", "asset": overlay})
+            ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "captions", "collision": "reject", "clip": {
+                "id": "c-captions", "asset_id": overlay["id"], "start": rt(0), "source_in": rt(0), "duration": rt(F(timing["result"]["total"]))}}})
         desired = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": ops})
         request = {"desired": digest(strip_revision(desired))}
         key = self.key("cut", request, {"engine": self.engine_identity})
@@ -1216,46 +1264,70 @@ def wav_seconds(path):
 
 
 def estimate(m):
-    """The film's length before anything is synthesized: each narrated line at the speaker's words per second (a supplied
-    take at its own length), through the same timing plan as a build. Warns about a music bed shorter than the estimate,
-    and a fixed-duration scene its estimated narration would overflow."""
-    rate, measured = quality.words_per_second(m["voice"])
-    t, rows, warnings, narration, counted = m["timing"], [], [], F(0), 0
+    """The film's length before anything is synthesized, with a range. Each narrated line is estimated from the
+    speaker's take model (a fixed overhead plus its letters at a measured rate; see quality.TAKE_MODEL), a supplied take
+    at its own length, and the film is planned as a build plans it; the range plans it again with every estimated take
+    FILM_SPREAD shorter and longer. Warns about a music bed shorter than the range's top, and a fixed-duration scene
+    whose estimated take, TAKE_SPREAD longer, would not fit."""
+    (overhead, rate), measured = quality.take_model(m["voice"])
+    t, warnings, takes = m["timing"], [], []
     for s in m["scenes"]:
-        take = None
+        seconds, guessed = None, False
         if s["script"]:
             override = m["overrides"]["narration"].get(s["id"])
             seconds = wav_seconds(m["inputs"][override["input"]]) if override else None
             if seconds is None:
-                counted += 1
-                seconds = F(len(pixel_stage.words_of(s["script"]))) / F(str(rate))
+                guessed = True
+                seconds = F(str(overhead)) + F(sum(len(w) for w in pixel_stage.words_of(s["script"]))) / F(str(rate))
                 if m["voice"] and m["voice"]["split"] == "sentence":
                     seconds += m["voice"]["pause"] * (len(sentences(s["script"])) - 1)
-            narration += seconds
-            if s["duration"] and t["lead"] + seconds > s["duration"]:
+            longest = seconds * F(str(1 + quality.TAKE_SPREAD)) if guessed else seconds
+            if s["duration"] and t["lead"] + longest > s["duration"]:
                 warnings.append(quality.warning("NARRATION_MAY_OVERFLOW", "check", f"scene {s['id']}: its narration is estimated at "
-                                                f"{float(seconds):.1f} s, which may not fit its fixed {float(s['duration']):.2f} s duration"))
-            elif not s["duration"]:
-                take = {"samples": -(-seconds * 24000 // 1), "rate": 24000}
-        rows.append({"id": s["id"], "duration": fstr(s["duration"]) if s["duration"] else None,
-                     "type": s["beat"]["type"] if s["beat"] else "override", "take": take})
-    out = {"words_per_second": rate, "rate_measured": measured, "narration_seconds": round(float(narration), 2)}
+                                                f"{float(seconds):.1f} s" + (f" (up to {float(longest):.1f} s)" if guessed else "")
+                                                + f", which may not fit its fixed {float(s['duration']):.2f} s duration"))
+        takes.append((s, seconds, guessed))
+
+    def plan(scale):
+        """The timing plan and total narration with every estimated take scaled by `scale`."""
+        rows, narration = [], F(0)
+        for s, seconds, guessed in takes:
+            take = None
+            if seconds is not None:
+                seconds = seconds * scale if guessed else seconds
+                narration += seconds
+                if not s["duration"]:
+                    take = {"samples": -(-seconds * 24000 // 1), "rate": 24000}
+            rows.append({"id": s["id"], "duration": fstr(s["duration"]) if s["duration"] else None,
+                         "type": s["beat"]["type"] if s["beat"] else "override", "take": take})
+        return plan_timing(t, rows), narration
+    spread = F(str(quality.FILM_SPREAD))
+    out = {"take_model": {"overhead_seconds": overhead, "letters_per_second": rate}, "rate_measured": measured}
     try:
-        planned = plan_timing(t, rows)
+        planned, narration = plan(F(1))
     except ToolError as error:
         warnings.append(quality.warning(error.code, "check", f"estimated: {error.message}"))
         return out, warnings
-    out["film_seconds"] = round(float(F(planned["total"])), 2)
+    low_plan, low_narration = plan(1 - spread)
+    try:
+        high_plan, high_narration = plan(1 + spread)
+    except ToolError as error:
+        warnings.append(quality.warning(error.code, "check", f"estimated at the top of its range: {error.message}"))
+        high_plan, high_narration = planned, narration
+    total = lambda p: round(float(F(p["total"])), 2)  # noqa: E731
+    out.update(narration_seconds=round(float(narration), 2), narration_range=[round(float(low_narration), 2), round(float(high_narration), 2)],
+               film_seconds=total(planned), film_range=[total(low_plan), total(high_plan)])
     out["scenes"] = [{"id": r["id"], "start": round(float(F(r["start"])), 2), "duration": round(float(F(r["duration"])), 2)} for r in planned["scenes"]]
     music = m["music"]
     if music:
         seconds = wav_seconds(m["inputs"][music["input"]])
         out["music_seconds"] = None if seconds is None else round(float(seconds), 3)
         speaker = (m["voice"] or {}).get("speaker")
-        basis = ("narration from the supplied takes" if not counted else
-                 f"narration at {rate} words/s, " + (f"as measured for {speaker}" if measured else f"the rate measured for ryan; {speaker} is unmeasured"))
-        warnings += quality.music_warnings("check", None if seconds is None else float(seconds), float(F(planned["total"])),
-                                           music["loop"], estimated=True, basis=basis)
+        basis = ("narration from the supplied takes" if not any(g for _, _, g in takes) else
+                 f"each take {overhead:g} s plus {rate:g} letters/s, " + (f"as measured for {speaker}" if measured else
+                                                                          f"as measured for ryan; {speaker} is unmeasured"))
+        warnings += quality.music_warnings("check", None if seconds is None else float(seconds), out["film_seconds"],
+                                           music["loop"], estimated=True, basis=basis, film_range=out["film_range"])
     return out, warnings
 
 
@@ -1299,7 +1371,7 @@ def arrangement(snapshot):
         "settings": {k: v for k, v in snapshot.items() if k not in ("revision", "assets", "tracks", "clips")},
         "sequence": snapshot.get("clips"),
         "assets": {a["id"]: a for a in snapshot.get("assets", []) if a["id"] in used},
-        "end": tracks.get("duration"), "master": tracks.get("master"),
+        "end": tracks.get("duration"), "master": tracks.get("master"), "order": [t["id"] for t in tracks.get("tracks", [])],
         "links": sorted((json.dumps(link, sort_keys=True) for link in tracks.get("links", []))),
         "tracks": {t["id"]: {**{k: v for k, v in t.items() if k not in ("clips", "transitions")}, "clips": {c["id"]: c for c in t["clips"]},
                              "transitions": {x["id"]: x for x in t.get("transitions", [])}}
@@ -1354,6 +1426,14 @@ def reconcile(head, desired):
     ops = [{"op": "media.add", "asset": a} for a in desired.get("assets", []) if a["id"] not in head_assets]
     if desired.get("transfer") and head.get("transfer") != desired.get("transfer"):
         ops.append({"op": "project.transfer", "transfer": desired["transfer"]})
+    # Tracks the target has and the head lacks (a project saved before the captions track) are added empty, on top.
+    order = [t["id"] for t in (head.get("tracks") or {}).get("tracks", [])]
+    for track in desired["tracks"]["tracks"]:
+        if track["id"] not in order:
+            empty = {k: v for k, v in track.items() if k not in ("clips", "transitions", "dynamics")}
+            ops.append({"op": "tracks.edit", "edit": {"op": "add", "track": {**empty, "clips": [],
+                                                                             **({"transitions": []} if "transitions" in track else {})}}})
+            order.append(track["id"])
 
     def clips(snapshot):
         out = {}
@@ -1408,4 +1488,8 @@ def reconcile(head, desired):
     for track in desired["tracks"]["tracks"]:
         if track["kind"] == "audio" and head_tracks.get(track["id"], {}).get("dynamics") != track.get("dynamics"):
             ops.append({"op": "tracks.edit", "edit": {"op": "audio_dynamics", "track_id": track["id"], "dynamics": track.get("dynamics")}})
+    # Video tracks composite bottom to top, so the order is part of what plays.
+    wanted = [t["id"] for t in desired["tracks"]["tracks"]]
+    if order != wanted and sorted(order) == sorted(wanted):
+        ops.append({"op": "tracks.edit", "edit": {"op": "order", "track_ids": wanted}})
     return ops

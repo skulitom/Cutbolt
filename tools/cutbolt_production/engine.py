@@ -41,7 +41,7 @@ class Engine:
         self.calls = 0
         self.lock = threading.Lock()
         self.job_roots = {}
-        for lane in ["speech", "music", "export", "review"] + [f"lane-{i}" for i in range(lanes)]:
+        for lane in ["speech", "music", "export", "review", "captions"] + [f"lane-{i}" for i in range(lanes)]:
             path = Path(root) / "state" / "jobs" / lane
             path.mkdir(parents=True, exist_ok=True)
             self.job_roots[lane] = f"state/jobs/{lane}"

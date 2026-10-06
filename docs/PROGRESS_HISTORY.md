@@ -89,6 +89,45 @@ Tests (`tests/production.py`):
 - **Captions** were checked by hand on that film: rendered 20 frames past its end, scene `one` burns in scene `two`'s first caption at the same timeline time as `two` does.
 
 These fixtures pass in quick mode: production, offline and full. No Rust changed. No points change: the coordinator is agent tooling outside the scored editing coverage. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+## 6 October 2026: productions burn captions as one overlay, report words heard without narration, and estimate length from letters
+
+Four more findings of the effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`), in the coordinator only:
+- **Finding 28.** With `delivery.captions.burn_in`, every scene recipe got the captions as text layers (`captions.scene`). A scene with `geometry` must bind every layer to a plane, so the reel's first build failed after 37 s with `INVALID_GEOMETRY: captions.scene: Geometry must bind every scene layer exactly once`. The message did not name the scene (`depth`), and `check` did not catch it. The reel turned `burn_in` off and burned the captions in by hand in its finishing pass.
+- **Finding 44.** The speech check heard `Thanks for watching!` over the music-only end card and no warning said so. The engine side is the entry below.
+- **Finding 29.** The override log printed every cue use: 104 entries for the grade scene.
+- **Finding 23.** `check` estimated 154.6 s; the takes made a 172.3 s film.
+
+Changes ([PRODUCTION](PRODUCTION.md)):
+- **Burned-in captions** ([burned-in captions](PRODUCTION.md#burned-in-captions)). A new `caption-overlay` stage renders the caption draft once, over the whole film, with `captions.render`, as the reel's finishing pass did. It uses the audio timeline for the canvas, rate and length, the template's layout, and its own job lane, so it runs while the scenes render.
+  - The cut adds a `captions` track (`alpha_over`) above the picture, with clip `c-captions` from the start to the end; without `burn_in` the track stays empty.
+  - Scenes carry no caption layers. Every kind of scene takes captions, captions use none of a scene's 64 layers, and a caption change renders only the overlay. Existing productions render every scene once more, because their recipes lose the caption layers.
+  - `reconcile` adds tracks the saved head lacks, empty and on top, and puts the tracks in the target's order. The pre-save check now compares track order, which decides how video tracks composite.
+  - A scene stage error names its scene when the message does not already.
+- **`SPEECH_WITHOUT_NARRATION`.** A new speech-review warning for words heard where no narration clip plays: a word whose middle is further than the comparison's tolerance from every narration clip. Overlapping recognition windows split their overlap at its middle, as the review does, so shared words count once. Words less than a second apart are listed as one run, such as `"Thanks for watching!" at 165.52-170.85 s`.
+- **The cue log** names each distinct cue once and counts the uses: the reel's grade scene now prints 15 cues and "(88 uses)".
+- **The length estimate.** Each take is estimated as 1.12 s plus its letters and digits at 11.36 a second. This was fitted to all 37 `ryan` takes of five productions on this machine, at seeds 5, 7, 11 and 23. Single takes came within -26% to +32%, each production's narration within -3% to +6%. Words were a worse predictor, because technical words are long: the reel's 338 words made 147.8 s of takes (2.29 words/s), not the assumed 2.6.
+  - `check` reports `film_range` and `narration_range`: the film planned with every estimated take 10% shorter and longer. `MUSIC_MAY_END_EARLY` uses the range's top. A fixed-duration scene warns `NARRATION_MAY_OVERFLOW` when its estimated take, 30% longer, would not fit.
+  - The three measured films fall inside their ranges: the reel 172.3 s (estimated 176.2 s, 161.3-192.0), part two 96.0 s (90.2 s, 86.4-99.8) and the proof 44.6 s (46.6 s, 42.7-50.4).
+
+**The reel rebuilt with `burn_in: true`** into `C:\DEV\CutboltData\captions-overlay-20261006` (a copy of its manifest, and `production-config.json` pointing at a pinned release build of this branch):
+- The build succeeded in 340.6 s with no warnings, including fresh narration (68 s).
+- The overlay of 44 cues took 77.1 s beside the scenes (47.0 s for 13) and the mix (82.3 s), so the cut waited 17.5 s for it after the mix.
+- `depth-44s.png` and `title-3s.png` show captions over both 3D scenes.
+- The speech check heard 335 of 338 words.
+- The machine was 63% busy with other sessions, so the export (128.7 s) and speech check (159.2 s) are not comparable with the demo's 72 s and 65 s.
+- **What the overlay costs** (`ab_export.py`, `split_render.py` in that folder, alternating runs):
+  - **Export.** The same revision exported with and without the captions track took 130.7 and 101.0 s with it, and 109.0 and 106.7 s without, at 31-100% busy: no cost above the load's noise.
+  - **`captions.render`.** The 172 s track alone took 37.3-44.1 s on a lightly loaded machine, and 98.0 s under heavy load. Three parts rendered at once took 23.5-32.3 s, so rendering windows in parallel would save about a third; that is not done here.
+
+Tests, in `production`:
+- **Captions over a 3D scene.** The fixture's 3D gallery override is refused by `captions.scene` with `INVALID_GEOMETRY`. The scene stage renders it, the overlay stage renders a one-cue overlay, and the cut lands on a project saved without the captions track. The tracks then read picture, voice, music, captions (`alpha_over`). A reference export differs from the gallery only inside the caption box (4,004 pixels at frame 40) and equals it at frame 100, after the cue.
+- **Order.** The stubbed build checks that the overlay starts after the captions and finishes after the scenes have started.
+- **Warnings.** The reel's phrase across two overlapping windows: three words in one run. A narration clip over it, or a failed recognition, reports nothing.
+- **The cue log.** A recipe that uses "zooms" four times logs it once, with "(8 uses)".
+- **The estimate** against hand-computed figures for the four-scene fixture film: 10.58 s of narration (9.52-11.64), 21.12 s (20.64-22.08).
+
+No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: the speech check matches British spellings, and speech evidence needs a share of heard frames
 
 The effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`) found two faults in the speech check:

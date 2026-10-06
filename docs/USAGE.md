@@ -91,7 +91,7 @@ Optional `decode` selects [local hardware source decoding](ACCELERATION.md), wit
 
 ## Productions from a manifest
 
-`python tools/production.py build <manifest> --root <folder> --config <local tools>` runs a whole narrated explainer through these commands: PixelForge art, batched Qwen narration, known-text alignment (`media.transcribe`), `media.prepare`, scenes with word-cued layers and burned-in captions (`captions.draft`, `captions.scene`, `scene.render`), one saved-session revision, the mix (`timeline.meters`, `audio.duck`, `audio.normalize`), `export.run` and `export.review`. Each stage leaves a receipt; a repeated build reuses every stage whose inputs are unchanged, and an interrupted one collects its engine jobs by request ID. It is a local tool beside the engine, not an engine command. See [PRODUCTION.md](PRODUCTION.md) for the manifest, the stages and the reasons.
+`python tools/production.py build <manifest> --root <folder> --config <local tools>` runs a whole narrated explainer through these commands: PixelForge art, batched Qwen narration, known-text alignment (`media.transcribe`), `media.prepare`, scenes with word-cued layers (`scene.render`), captions burned in as one overlay (`captions.draft`, `captions.render`), one saved-session revision, the mix (`timeline.meters`, `audio.duck`, `audio.normalize`), `export.run` and `export.review`. Each stage leaves a receipt; a repeated build reuses every stage whose inputs are unchanged, and an interrupted one collects its engine jobs by request ID. It is a local tool beside the engine, not an engine command. See [PRODUCTION.md](PRODUCTION.md) for the manifest, the stages and the reasons.
 
 ## Grading
 

@@ -5,15 +5,17 @@ their invalidation by palette and label changes; every beat type compiled agains
 engine's scene.inspect, with cue layers starting on the exact frame of their word; the timing plan against hand-computed
 boundaries; reconcile() checked by applying its operations with the engine and comparing the result with the target;
 the TTS worker refusing a missing model before loading anything; the build's order, with stubbed stages, starting
-alignment on the voice assets while the music is still being prepared; a hand-written scene override with word cues
-and input references, checked against its script, resolved from a stand-in alignment, rendered by the coordinator's
-scene stage and re-keyed when a cue time or an input changes; delivery warnings from speech checks and reviews
-(an engine-shaped recognition failure, a delivered peak over its target, a short music bed at check and build time);
-music looped on whole bars; the mix's AAC trial encode through the engine, whose decoded audio must equal the
-delivered MP4's, with each correction of the limiter ceiling following the documented rule; and scene transitions:
-their manifest checks, template and recipe handles that leave each scene unchanged up to its end while its motion
-continues, and a cut whose transitions are set, changed and restored after a hand edit with only the scenes they need
-rendered again.
+alignment on the voice assets while the music is still being prepared, and the caption overlay while the scenes render;
+a hand-written scene override with word cues and input references, checked against its script, resolved from a
+stand-in alignment, rendered by the coordinator's scene stage and re-keyed when a cue time or an input changes, with a
+build log that names each distinct cue once; burned-in captions as one transparent overlay over a 3D scene, added on
+top of a project saved without the captions track; delivery warnings from speech checks and reviews (an engine-shaped
+recognition failure, words heard where no narration plays, a delivered peak over its target, a short music bed at check
+and build time); music looped on whole bars; the mix's AAC trial encode through the engine, whose decoded audio must
+equal the delivered MP4's, with each correction of the limiter ceiling following the documented rule; and scene
+transitions: their manifest checks, template and recipe handles that leave each scene unchanged up to its end while its
+motion continues, and a cut whose transitions are set, changed and restored after a hand edit with only the scenes they
+need rendered again.
 
 With CUTBOLT_PRODUCTION_CONFIG (PixelForge, the Qwen worker and the speech runtime installed): a complete four-scene
 production, a repeated build that reuses every stage, a one-line script change that rebuilds only that line's chain
@@ -330,10 +332,12 @@ def check_offline(out, passed):
     passed.append("production.worker_missing_model")
 
     # 8. Order: alignment needs only the voice assets, so it starts while the music is still being prepared; captions
-    #    wait for the audio timeline and the alignment. The stages are stubs: nothing runs, no receipt is written.
-    order, aligning = [], threading.Event()
+    #    wait for the audio timeline and the alignment, and their overlay renders while the scenes do. The stages are
+    #    stubs: nothing runs, no receipt is written.
+    order, aligning, scening = [], threading.Event(), threading.Event()
     # The build reads these fields between stages (music-length and codec warnings), so the stubs return their shapes.
     music_stub, timing_stub, mixed_stub = {"duration": "8/1"}, {"result": {"total": "8/1"}}, {"result": {"report": {}}}
+    captions_stub = {"key": "c" * 64, "result": {"cues": 3}}
 
     class Stubbed(Production):
         def stage_inputs(self):
@@ -374,18 +378,28 @@ def check_offline(out, passed):
         def stage_captions(self, audio, aligned):
             assert audio["music"] is music_stub and aligned == {"one": "aligned"}, (audio, aligned)
             order.append("captions")
-            return "captions"
+            return captions_stub
 
-        def stage_scenes(self, timing, aligned, captions, art, inputs):
-            assert (timing, captions, art) == (timing_stub, "captions", "art")
+        def stage_caption_overlay(self, captions, audio, inputs):
+            assert captions is captions_stub
+            order.append("overlay started")
+            assert scening.wait(30), "the scenes waited for the caption overlay"
+            order.append("overlay done")
+            return "overlay"
+
+        def stage_scenes(self, timing, aligned, art, inputs):
+            assert (timing, art) == (timing_stub, "art")
             order.append("scenes")
+            scening.set()
             return "scenes"
 
     stubbed = Stubbed(m, out / "order", {"engine": str(sources / "music.wav"), "lanes": 2}, until="scenes", log=io.StringIO())
     stubbed.revision = {"revision": 1}
     assert stubbed._build()["stopped_after"] == "scenes"
-    assert order.index("voice") < order.index("align") < order.index("music done") < order.index("audio timeline")         < order.index("captions") < order.index("scenes"), order
-    passed.append("production.align_starts_before_music_finishes")
+    assert order.index("voice") < order.index("align") < order.index("music done") < order.index("audio timeline") \
+        < order.index("captions") < order.index("scenes") < order.index("overlay done"), order
+    assert order.index("captions") < order.index("overlay started"), order
+    passed.append("production.align_starts_before_music_finishes (the caption overlay renders beside the scenes)")
 
     check_overrides(out, inputs, font, passed)
     check_transitions(out, inputs, font, passed)
@@ -608,7 +622,7 @@ def check_overrides(out, inputs, font, passed):
     def scenes(words, copies=copies, length="5/1"):
         production.outcomes.clear()
         production.stage_scenes({"result": {"scenes": [{"id": "effects", "start": "0/1", "duration": length}]}},
-                                {"effects": {"words": words}}, None, {}, copies)
+                                {"effects": {"words": words}}, {}, copies)
         return production.outcomes["scene:effects"], production.state.receipt("scene:effects")
     outcome, receipt = scenes(stand_in_words(EFFECTS_SCRIPT))
     assert outcome == "built", outcome
@@ -619,6 +633,17 @@ def check_overrides(out, inputs, font, passed):
     assert resolved["inputs"]["label"] == {"path": copies["label"], "sha256": sha256_file(files["label"]), "bytes": files["label"].stat().st_size}
     assert resolved["source"] == sha256_file(files["effects"]) and resolved["duration"] == "5/1", resolved
     assert "zooms at frame 21" in log.getvalue(), log.getvalue()
+    # The build log names each distinct cue once (the VFX demo's grade scene printed 104 entries for a few words).
+    repeated = effects_recipe()
+    repeated["scene"]["layers"] += [layer(f"echo-{i}", [64, 16], {"cue": "zooms"}, {"until": "end"}, [0, 20 * i], frames=held("label"))
+                                    for i in range(3)]
+    (root / "sources" / "repeated.json").write_text(json.dumps(repeated), encoding="utf-8")
+    log.seek(0)
+    log.truncate()
+    production.resolve_override(effects, {"input": "repeated"}, F(5), {**copies, "repeated": "sources/repeated.json"},
+                                cue_at("effects", stand_in_words(EFFECTS_SCRIPT), m["timing"]["lead"]))
+    line = log.getvalue()
+    assert line.count("zooms at frame 21") == 1 and line.rstrip().endswith("gold at frame 81 (8 uses)"), line
     base = json.loads(next((root / "scenes").glob("effects-base-*.json")).read_text(encoding="utf-8"))
     placed = {layer["id"]: (layer["start"], layer["duration"]) for layer in base["layers"]}
     assert placed == {"stage": (0, {"num": 5, "den": 1}), "zoom-label": ({"num": 21, "den": 25}, {"num": 28, "den": 25}),
@@ -683,7 +708,7 @@ def check_overrides(out, inputs, font, passed):
     def render(copies, words=gallery_words):
         production.outcomes.clear()
         production.stage_scenes({"result": {"scenes": [{"id": "gallery", "start": "0/1", "duration": "132/25"}]}},
-                                {"gallery": {"words": words}}, None, {}, copies)
+                                {"gallery": {"words": words}}, {}, copies)
         return production.outcomes["scene:gallery"], production.state.receipt("scene:gallery")
     outcome, shown = render(copies)
     assert outcome == "built", outcome
@@ -796,7 +821,7 @@ def check_overrides(out, inputs, font, passed):
     builder.outcomes.clear()
     built = builder.stage_inputs()
     builder.stage_scenes({"result": {"scenes": [{"id": "gallery", "start": "0/1", "duration": "132/25"}]}}, {"gallery": {"words": gallery_words}},
-                         None, {}, built)
+                         {}, built)
     rendered = builder.state.receipt("scene:gallery")["result"]
     assert builder.outcomes["input:track"] == "reused" and rendered["recipe"] == preview["recipe"], (builder.outcomes, rendered, preview["recipe"])
     for still in preview["stills"]:
@@ -812,6 +837,80 @@ def check_overrides(out, inputs, font, passed):
     (out / "override-restated.production.json").write_text(json.dumps(restated), encoding="utf-8")
     assert resolve("gallery", manifest=out / "override-restated.production.json")["error"]["code"] == "STALE_ALIGNMENT"
     passed.append("production.resolve_previews_override (stills at frames 15 and 75 equal the rendered frames)")
+    check_captions_over_3d(out, production, render, recopied, gallery, passed)
+
+
+def check_captions_over_3d(out, production, render, copies, gallery, passed):
+    """Burned-in captions over a 3D scene (VFX demo finding 28). A geometry scene binds every layer to a plane, so captions
+    appended to it as text layers (captions.scene) fail. The coordinator renders the caption document as one transparent
+    overlay (captions.render) on a `captions` track above the picture: the cut shows the gallery with the caption over it,
+    and a project saved before that track gets it added on top."""
+    root = production.root
+    render(copies)
+    gallery_asset = production.state.receipt("scene:gallery")["result"]["asset"]
+    base = json.loads((root / production.state.receipt("scene:gallery")["result"]["recipe"]).read_text(encoding="utf-8"))
+    assert base.get("geometry"), "the gallery is a 3D scene"
+    document = {"schema_version": 1, "id": "captions", "revision": 0, "overlap": "reject", "styles": {"default": {"color": [255, 255, 255]}},
+                "cues": [{"id": "c1", "start": {"num": 1, "den": 2}, "end": {"num": 3, "den": 1}, "text": "THE CAMERA DRIFTS",
+                          "style": "default", "align": "center", "speaker": None}]}
+    (root / "generated" / "captions").mkdir(parents=True, exist_ok=True)
+    draft = "generated/captions/draft-3d.json"
+    (root / draft).write_text(json.dumps({"document": document}), encoding="utf-8")
+    font = copies["bold"]
+    small = {"default": {"fonts": [{"path": font}], "size": 14, "rect": [10, 140, 300, 30], "line_height": 18, "letter_spacing": 0,
+                         "wrap": "none", "overflow": "reject", "valign": "bottom", "background": {"color": [10, 10, 30, 210], "padding": 4}}}
+    # The old way: text layers appended to the 3D scene are refused.
+    refused = subprocess.run([str(ENGINE), "--workspace", str(root)], input=json.dumps({
+        "command": "captions.scene", "document": document, "scene": base, "scene_id": "gallery", "offset": {"num": 0, "den": 1},
+        "layouts": small, "sampling": "sample_start", "layer_prefix": "cap"}).encode(), capture_output=True, timeout=120)
+    assert json.loads(refused.stdout)["error"]["code"] == "INVALID_GEOMETRY", refused.stdout[:400]
+    # A 320 x 180 film of the one scene: its audio timeline (no audio clips) stands in for the mixed one.
+    total = "132/25"
+    project = engine("project.create", root, id="fixture-film", width=320, height=180, frame_rate=25)
+    tracks = [{"op": "tracks.edit", "edit": {"op": "create", "duration": {"num": 132, "den": 25}}}]
+    tracks += [{"op": "tracks.edit", "edit": {"op": "add", "track": {"id": t, "kind": k, "locked": False, "enabled": True, "clips": []}}}
+               for t, k in (("picture", "video"), ("voice", "audio"), ("music", "audio"))]
+    snapshot = engine("timeline.apply", root, project=project, expected_revision=0, operations=tracks)
+    (root / "generated" / "timeline").mkdir(parents=True, exist_ok=True)
+    (root / "generated" / "timeline" / "audio-3d.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    audio = {"key": "a" * 64, "result": {"snapshot": "generated/timeline/audio-3d.json"}}
+    captions = {"key": "c" * 64, "result": {"draft": draft, "cues": 1}}
+    timing = {"result": {"scenes": [{"id": "gallery", "start": "0/1", "duration": total}], "total": total}}
+    production.m = {**production.m, "scenes": [gallery]}
+    template_layouts = pixel_stage.caption_layouts
+    pixel_stage.caption_layouts = lambda fonts, colors: small  # the template's 1080p layout does not fit 320 x 180
+    try:
+        overlay = production.stage_caption_overlay(captions, audio, copies)
+    finally:
+        pixel_stage.caption_layouts = template_layouts
+    assert production.outcomes["caption-overlay"] == "built" and overlay["id"] == f"captions-{production.state.receipt('caption-overlay')['key'][:12]}"
+    # A project saved before the captions track: the picture alone.
+    old = engine("timeline.apply", root, project=snapshot, expected_revision=snapshot["revision"], operations=[
+        {"op": "media.add", "asset": gallery_asset},
+        {"op": "tracks.edit", "edit": {"op": "place", "track_id": "picture", "collision": "reject", "clip": {
+            "id": "v-gallery", "asset_id": gallery_asset["id"], "start": {"num": 0, "den": 1}, "source_in": {"num": 0, "den": 1},
+            "duration": {"num": 132, "den": 25}}}}])
+    engine("session.create", root, project=old, request_id="old-3d")
+    cut = production.stage_cut({"result": {"snapshot": audio["result"]["snapshot"]}}, {"gallery": gallery_asset}, timing, overlay)
+    assert cut["result"]["action"] == "applied", cut["result"]
+    head = engine("session.get", root, project_id="fixture-film")
+    head = head.get("project", head)
+    assert [(t["id"], t.get("composite")) for t in head["tracks"]["tracks"]] == [
+        ("picture", None), ("voice", None), ("music", None), ("captions", "alpha_over")], head["tracks"]["tracks"]
+    (root / "exports").mkdir(exist_ok=True)
+    engine("export.run", root, project={"project_id": "fixture-film"}, output="exports/captions-3d.mkv", profile="reference", streams="audio_video")
+
+    def frame(path, n):
+        return np.frombuffer(subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(root / path), "-vf", f"select=eq(n\\,{n})",
+                                             "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                                            capture_output=True, check=True).stdout, dtype=np.uint8).reshape(180, 320, 3)
+    # Frame 40 (1.6 s) shows the cue: the cut differs from the 3D scene only inside the caption box. Frame 100 (4 s) is past it.
+    shown, scene = frame("exports/captions-3d.mkv", 40), frame(gallery_asset["path"], 40)
+    changed = np.argwhere((shown != scene).any(axis=2))
+    assert len(changed) > 200 and changed[:, 0].min() >= 130, (len(changed), changed[:, 0].min(), changed[:, 0].max())
+    assert (frame("exports/captions-3d.mkv", 100) == frame(gallery_asset["path"], 100)).all()
+    passed.append(f"production.captions_over_3d_scene (one overlay on an alpha_over track, {len(changed)} pixels of caption over the gallery; "
+                  f"captions.scene refuses it with INVALID_GEOMETRY)")
 
 
 def fr(value):
@@ -966,7 +1065,7 @@ def check_transition_cut(out, font, passed):
     def build(transitions):
         production.m = film(transitions)
         production.outcomes.clear()
-        rendered = production.stage_scenes(timing, aligned, None, {}, copies)
+        rendered = production.stage_scenes(timing, aligned, {}, copies)
         cut = production.stage_cut(mixed, rendered, timing)
         return {k: v for k, v in production.outcomes.items()}, cut["result"], head()
     placed = {f"v-{r['id']}": (F(r["start"]), F(r["duration"]), F(0)) for r in rows}
@@ -1077,6 +1176,24 @@ def check_quality(out, passed):
     assert [w["code"] for w in low] == ["SPEECH_MISMATCH"] and 'expected "eighty" heard "80" at 0.50 s' in low[0]["message"], low
     assert quality.speech_warnings(True, True, heard(136, 138, [("pixelforge", "pixel forge")]), 0.95) == []
     assert [w["code"] for w in quality.speech_warnings(True, True, heard(138, 138, uncovered=1), 0.95)] == ["UNCOVERED_SPEECH"]
+    # Words heard where no narration clip plays: the VFX demo's speech check heard "Thanks for watching!" over its music-only
+    # end card, and 333 of 338 words matched, above the threshold. Two recognition windows overlap at 115-120 s and split at
+    # 117.5 s, so the words they share count once; a word within the tolerance (0.5 s) of a clip is the narration's.
+    def said(words):
+        return [{"text": t, "start": {"num": round(a * 100), "den": 100}, "end": {"num": round(b * 100), "den": 100}} for a, b, t in words]
+    documents = [{"range_start": {"num": 0, "den": 1}, "range_duration": {"num": 120, "den": 1},
+                  "words": said([(1.0, 1.4, "Welcome."), (116.9, 117.2, "Pip"), (118.0, 118.3, "phones.")])},
+                 {"range_start": {"num": 115, "den": 1}, "range_duration": {"num": 5732, "den": 100},
+                  "words": said([(116.9, 117.2, "Pip"), (118.0, 118.3, "phones."), (163.3, 163.6, "backwards."),
+                                 (165.52, 168.4, "Thanks"), (168.58, 168.8, "for"), (168.88, 170.85, "watching!")])}]
+    narration = [(F(1, 2), F(2)), (F(110), F(119)), (F(150), F(16345, 100))]
+    assert [w[2] for w in quality.heard_words(documents)] == ["Welcome.", "Pip", "phones.", "backwards.", "Thanks", "for", "watching!"]
+    review = {"speech": {"recognition": {"ok": True}, "comparison": {"tolerance": {"num": 1, "den": 2}}}}
+    found = quality.unnarrated_warnings(review, documents, narration)
+    assert [w["code"] for w in found] == ["SPEECH_WITHOUT_NARRATION"] and found[0]["detail"]["count"] == 3, found
+    assert '"Thanks for watching!" at 165.52-170.85 s' in found[0]["message"], found[0]["message"]
+    assert quality.unnarrated_warnings(review, documents, narration + [(F(165), F(171))]) == []
+    assert quality.unnarrated_warnings({"speech": {"recognition": {"ok": False}}}, documents, narration) == []
 
     # Reviews of the delivered file: each finding is reported, and a clean review reports nothing.
     def delivered(peak=-1.2, lkfs=-14.0, black=0, clipping=0, silence=0, frames_ok=True, cut=0):
@@ -1113,10 +1230,13 @@ def check_quality(out, passed):
     sources.mkdir()
     for name in ("bold.ttf", "regular.ttf"):
         (sources / name).write_bytes(b"stand-in")
-    # The fixture film: title 2 bars (3.84 s); "one" 9 words / 2.6 + 0.24 + 0.4 s -> 9 beats (4.32 s); "two" 8 words -> 8 beats
-    # (3.84 s); the end card at least 4 bars (7.68 s): 19.68 s in all.
-    expected = {"words_per_second": 2.6, "rate_measured": True, "narration_seconds": 7.69, "film_seconds": 19.68}
-    for seconds, loop, codes in ((16, "none", ["MUSIC_MAY_END_EARLY"]), (21, "none", ["MUSIC_MAY_END_EARLY"]), (22, "none", []), (16, "bars", [])):
+    # The fixture film, each take 1.12 s plus its letters at 11.36 a second: "one" has 36 letters (4.289 s), "two" 29 (3.673 s),
+    # "end" 17 (2.616 s), 10.58 s in all. Title 2 bars (3.84 s); "one" 0.24 + 4.289 + 0.4 s -> 11 beats (5.28 s); "two" -> 9 beats
+    # (4.32 s); the end card at least 4 bars (7.68 s): 21.12 s. With every take 10% shorter "one" fills 10 beats (20.64 s); 10%
+    # longer, "one" 12 beats and "two" 10 (22.08 s).
+    expected = {"rate_measured": True, "narration_seconds": 10.58, "narration_range": [9.52, 11.64], "film_seconds": 21.12,
+                "film_range": [20.64, 22.08]}
+    for seconds, loop, codes in ((16, "none", ["MUSIC_MAY_END_EARLY"]), (22, "none", ["MUSIC_MAY_END_EARLY"]), (23, "none", []), (16, "bars", [])):
         bed = sources / f"bed-{seconds}.wav"
         if not bed.exists():
             write_wav(bed, np.zeros(8000 * seconds), 8000)
@@ -1125,7 +1245,7 @@ def check_quality(out, passed):
         length, warnings = estimate(manifest_module.validate(raw))
         assert {k: length[k] for k in expected} == expected and length["music_seconds"] == seconds, length
         assert [w["code"] for w in warnings] == codes, (seconds, loop, warnings)
-    assert "would end about 3.7 s before it" in estimate(manifest_module.validate({**raw, "music": {**raw["music"], "loop": "none"}}))[1][0]["message"]
+    assert "would end about 5.1 s before it" in estimate(manifest_module.validate({**raw, "music": {**raw["music"], "loop": "none"}}))[1][0]["message"]
     path = out / "short-bed.production.json"
     path.write_text(json.dumps({**raw, "music": {**raw["music"], "loop": "none"}}), encoding="utf-8")
     done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "check", str(path)], capture_output=True, timeout=60)
@@ -1324,9 +1444,10 @@ def run(out, config):
         check_full(out, config, passed)
     report = {"passed": passed, "full_run": full,
               "scope": "Production manifest, pixel-stage template, exact timing plan, session reconciliation, worker refusal, build order, "
-                       "hand-written scene overrides with word cues and input references, scene transitions with rendered handles, "
-                       "delivery warnings, music loops and length estimates, the mix's AAC trial; with a production config, a real "
-                       "PixelForge/Qwen/Cutbolt build with stage reuse and selective rebuilds, transitions included",
+                       "hand-written scene overrides with word cues and input references, burned-in captions over a 3D scene, "
+                       "scene transitions with rendered handles, delivery warnings, music loops and length estimates, the mix's AAC "
+                       "trial; with a production config, a real PixelForge/Qwen/Cutbolt build with stage reuse and selective rebuilds, "
+                       "transitions included",
               "oracle": "Hand-computed boundaries, cue frames, loop placements and estimates, the engine's own scene.inspect, "
                         "timeline.apply and export.review, decoded AAC from FFmpeg, recipe digests and stage keys"}
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
