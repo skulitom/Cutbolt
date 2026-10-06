@@ -35,8 +35,9 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from cutbolt_production import manifest as manifest_module, pixel_stage, quality  # noqa: E402
-from cutbolt_production.pipeline import CODEC_CHECK, Production, arrangement_differences, codec_step, estimate, music_clips, plan_timing, reconcile  # noqa: E402
+from cutbolt_production import manifest as manifest_module, override, pixel_stage, quality  # noqa: E402
+from cutbolt_production.pipeline import (CODEC_CHECK, Production, arrangement_differences, codec_step, cue_at, estimate, music_clips,  # noqa: E402
+                                         plan_timing, reconcile)
 from cutbolt_production.engine import Engine, ToolError  # noqa: E402
 from cutbolt_production.state import State, sha256_file  # noqa: E402
 
@@ -418,6 +419,49 @@ def effects_recipe():
     ])
 
 
+GALLERY_SCRIPT = "The camera drifts left, then the lamp warms the second frame."
+
+
+def gallery_recipe():
+    """A hand-written 3D scene timed to the narration: the camera drifts and the lamp warms on words, a numbered footage
+    frame holds until a word, and an expression dims the wall on another."""
+    def vector(value, **curves):
+        return {"value": value, **({"animation": curves} if curves else {})}
+
+    def keys(*pairs):
+        return {"keys": [{"time": t, "value": v, "interpolation": "linear" if i + 1 < len(pairs) else "hold"} for i, (t, v) in enumerate(pairs)]}
+
+    def plane(node, layer, position, size):
+        return {"id": node, "transform": {"position_milli": vector(position), "rotation_mdeg": vector([0, 0, 0]),
+                                          "scale_milli": vector([1000, 1000, 1000])},
+                "plane": {"layer": layer, "size_milli": size, "material": "lambert", "double_sided": False}}
+
+    def node(id, kind, expression):
+        return {"id": id, "kind": kind, "expression": expression}
+
+    def literal(id, value):
+        return node(id, "scalar", {"op": "literal", "value": {"type": "scalar", "value": value}})
+    reel = [{"image": {"input": "track", "frame": 1}, "hold": "4/25", "offset": [0, 0], "anchor": [0, 0]},
+            {"image": {"input": "track", "frame": 2}, "hold": {"until": {"cue": "second"}}, "offset": [0, 0], "anchor": [0, 0]},
+            {"image": {"input": "track", "frame": 3}, "hold": "1/25", "offset": [0, 0], "anchor": [0, 0]}]
+    document = recipe("gallery", [layer("wall", [320, 180], 0, {"until": "end"}, [0, 0], frames=held("stage")),
+                                   layer("reel", [64, 16], {"cue": "camera"}, {"until": "end"}, [0, 0], frames=reel)])
+    document["scene"]["geometry"] = {
+        "nodes": [plane("wall-plane", "wall", [0, 0, 0], [160000, 90000]), plane("reel-plane", "reel", [0, -20000, 10000], [64000, 16000])],
+        "camera": {"position_milli": vector([0, 0, 100000], x=keys(({"cue": "drifts"}, 0), ({"cue": "left"}, -20000))),
+                   "target_milli": vector([0, 0, 0]), "up_milli": vector([0, 1000, 0]),
+                   "projection": {"kind": "perspective", "vertical_fov_mdeg": {"value": 90000}}, "near_milli": 1000, "far_milli": 1000000},
+        "lights": [{"kind": "ambient", "color": [255, 255, 255],
+                    "intensity_milli": {"value": 400, "animation": keys(({"cue": "lamp"}, 400), ({"cue": {"word": "warms", "edge": "end"}}, 1200))}}],
+        "shadows": "none"}
+    document["scene"]["expressions"] = {"schema_version": 1, "seed": 1, "nodes": [
+        node("now", "scalar", {"op": "time"}), literal("dims", {"cue": "frame"}), literal("full", {"num": 255, "den": 1}),
+        literal("dim", {"num": 128, "den": 1}), node("before", "boolean", {"op": "less", "a": "now", "b": "dims"}),
+        node("opacity", "scalar", {"op": "select", "condition": "before", "yes": "full", "no": "dim"})],
+        "bindings": [{"layer": "wall", "property": "opacity", "node": "opacity"}]}
+    return document
+
+
 def stand_in_words(script, moved=None):
     """A stand-in alignment: word k from 0.3 k + 0.013 s to 0.3 k + 0.25 s, off the frame grid; `moved` comes 2 frames later."""
     def rt(x):
@@ -446,15 +490,22 @@ def check_overrides(out, inputs, font, passed):
     (folder / "effects.json").write_text(json.dumps(effects_recipe()), encoding="utf-8")
     (folder / "still.json").write_text(json.dumps(recipe("travel", [layer("stage", [320, 180], 0, {"until": "end"}, [0, 0], frames=held("stage"))])),
                                        encoding="utf-8")
+    (folder / "gallery.json").write_text(json.dumps(gallery_recipe()), encoding="utf-8")
+    (folder / "track").mkdir()
+    for n, color in ((1, (230, 57, 70, 255)), (2, (42, 157, 143, 255)), (3, (244, 162, 97, 255))):
+        Image.new("RGBA", (64, 16), color).save(folder / "track" / f"track_{n:04d}.png")
     files = {name: folder / f"{name}{suffix}" for name, suffix in (("stage", ".png"), ("label", ".png"), ("bold", ".ttf"), ("effects", ".json"),
-                                                                   ("still", ".json"))}
+                                                                   ("still", ".json"), ("gallery", ".json"))}
+    track = str(folder / "track" / "track_####.png")
 
     # 1. The manifest: a scene may have a recipe and no beat; its cues and inputs are checked against the script and inputs.
     def film(recipe_file=None, scene=None):
         raw = every_beat({**inputs, **{k: str(v) for k, v in files.items()}})
         raw["inputs"]["effects"] = str(recipe_file or files["effects"])
+        raw["inputs"]["track"] = {"sequence": track}
         raw["scenes"].append(scene or {"id": "effects", "script": EFFECTS_SCRIPT})
-        raw["overrides"] = {"scenes": {"effects": {"input": "effects"}, "travel": {"input": "still"}}}
+        raw["scenes"].append({"id": "gallery", "script": GALLERY_SCRIPT})
+        raw["overrides"] = {"scenes": {"effects": {"input": "effects"}, "travel": {"input": "still"}, "gallery": {"input": "gallery"}}}
         return raw
     m = manifest_module.validate(film())
     effects = next(s for s in m["scenes"] if s["id"] == "effects")
@@ -470,7 +521,17 @@ def check_overrides(out, inputs, font, passed):
     assert "TRAVEL" not in art_index["labels"], art_index["labels"]
     # check's length estimate plans a scene without a beat as the build's timing does.
     length, _ = estimate(m)
-    assert "scenes" in length and length["scenes"][-1]["id"] == "effects", length
+    assert "scenes" in length and [r["id"] for r in length["scenes"]][-2:] == ["effects", "gallery"], length
+    # A sequence input is every numbered frame of its pattern; a recipe names frames of it, and cue times may sit in
+    # geometry curves, expression literals and frame holds.
+    sequenced = m["overrides"]["scenes"]["gallery"]
+    assert m["inputs"]["track"] == {"sequence": track, "first": 1, "last": 3}, m["inputs"]["track"]
+    assert sequenced["frames"] == {"track": [1, 2, 3]} and sequenced["inputs"] == ["stage"], sequenced
+    assert [(c["word"], c["edge"]) for c in sequenced["cues"]] == [("drifts", "start"), ("left", "start"), ("lamp", "start"), ("warms", "end"),
+                                                                  ("frame", "start"), ("camera", "start"), ("second", "start")], sequenced["cues"]
+    assert [c["at"].removeprefix("overrides.scenes.gallery.") for c in sequenced["cues"][3:]] == [
+        "geometry.lights[0].intensity_milli.animation.keys[1].time", "expressions.nodes[1].expression.value.value", "layers[1] (reel).start",
+        "layers[1] (reel).frames[1].hold.until"], sequenced["cues"]
 
     cases = []
 
@@ -493,13 +554,33 @@ def check_overrides(out, inputs, font, passed):
     broken("cue needs occurrence 3", edit=lambda s: layers(s)[2]["animation"]["position_y"]["keys"][1].update(time={"cue": {"word": "gold", "nth": 2}}))
     broken("not a whole number of 25 fps frames", edit=lambda s: layers(s)[1].update(start={"cue": "zooms", "offset": "1/50"}))
     broken("a cue time has cue and an optional offset", edit=lambda s: layers(s)[1].update(start={"cue": "zooms", "lead": 1}))
-    broken("cue times may be a layer's start", edit=lambda s: layers(s)[1]["frames"][0].update(hold={"cue": "zooms"}))
+    broken("a hold is a length; hold until a word", edit=lambda s: layers(s)[1]["frames"][0].update(hold={"cue": "zooms"}))
+    broken("a hold is an exact time or", edit=lambda s: layers(s)[1]["frames"][0].update(hold={"until": "end"}))
     broken("cue times may be a layer's start", edit=lambda s: s.update(audio={"file": {"input": "stage"}, "start": {"cue": "zooms"}}))
+    broken("cue times may be a layer's start", edit=lambda s: s.update(temporal={"shutter_angle": {"cue": "zooms"}, "phase": {"num": 0, "den": 1},
+                                                                                 "samples": 1, "integration": "encoded_rgb"}))
+    broken("cue times may be a layer's start", edit=lambda s: layers(s)[2]["animation"]["position_y"].update(
+        retime={"start": {"cue": "zooms"}, "rate": 1, "reverse": False}))
     broken('{"until": "end"} or {"until": <cue time>}', edit=lambda s: layers(s)[0].update(duration={"until": "later"}))
     broken("'missing' is not declared in inputs", edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "missing"}))
     broken("input 'bold' must be a .png file here", edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "bold"}))
     broken("input 'stage' must be a .ttf/.otf file here", edit=lambda s: layers(s)[3]["graphics"].update(fonts=[{"input": "stage"}]))
-    broken('an input reference is {"input": name} alone', edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "stage", "bytes": 1}))
+    broken('an input reference is {"input": name}, or', edit=lambda s: layers(s)[0]["frames"][0].update(image={"input": "stage", "bytes": 1}))
+    broken("input 'track' is an image sequence; name one of its frames", edit=lambda s: layers(s)[1]["frames"][0].update(image={"input": "track"}))
+    broken("9 is not a frame of sequence 'track' (1-3)", edit=lambda s: layers(s)[1]["frames"][0].update(image={"input": "track", "frame": 9}))
+    broken("input 'label' is one file, not an image sequence", edit=lambda s: layers(s)[1]["frames"][0].update(image={"input": "label", "frame": 1}))
+    broken("input 'track' is an image sequence; give one file", change=lambda r: r["fonts"].update(bold="track"))
+    for name, names in (("gappy", ["g_0001.png", "g_0003.png"]), ("padded", ["p_001.png"])):
+        (folder / name).mkdir()
+        for file in names:
+            Image.new("RGBA", (64, 16)).save(folder / name / file)
+    broken("frame 2 is missing; a sequence numbers every frame from 1 to 3", change=lambda r: r["inputs"].update(
+        track={"sequence": str(folder / "gappy" / "g_####.png")}))
+    broken("p_001.png does not write its number as the pattern does (4 digits", change=lambda r: r["inputs"].update(
+        track={"sequence": str(folder / "padded" / "p_####.png")}))
+    broken("one run of # in the file name", change=lambda r: r["inputs"].update(track={"sequence": str(folder / "track" / "track_##_##.png")}))
+    broken("an image sequence is numbered .png files", change=lambda r: r["inputs"].update(track={"sequence": str(folder / "track" / "track_####.jpg")}))
+    broken("no file in", change=lambda r: r["inputs"].update(track={"sequence": str(folder / "track" / "reel_####.png")}))
     broken("is not an exact time", edit=lambda s: s.update(duration="whole"))
     broken("cues need narration", scene={"id": "effects"})
     broken("a scene without a beat needs overrides.scenes.effects", change=lambda r: r["overrides"]["scenes"].pop("effects"))
@@ -583,6 +664,149 @@ def check_overrides(out, inputs, font, passed):
     refused("OVERRIDE_TIMING", length="3/1")
     refused("OVERRIDE_TIMING", edit=lambda s: layers(s)[1].update(duration={"until": {"cue": "zooms"}}))
     passed.append("production.override_build_refusals")
+
+    # 5. A 3D gallery: geometry curves and an expression literal on the scene's clock, a footage frame that holds until a word,
+    #    and frames of a sequence input, each copied by content.
+    def at(frame):
+        return {"num": F(frame, 25).numerator, "den": F(frame, 25).denominator}
+    gallery = next(s for s in m["scenes"] if s["id"] == "gallery")
+    production.m = {**m, "scenes": [gallery], "overrides": {"narration": {}, "scenes": {"gallery": sequenced}}}
+    copies = production.stage_inputs()
+    assert copies["track"] == {n: f"sources/track/{n}-{sha256_file(folder / 'track' / f'track_{n:04d}.png')[:12]}.png" for n in (1, 2, 3)}, copies
+    gallery_words = stand_in_words(GALLERY_SCRIPT)
+
+    def render(copies, words=gallery_words):
+        production.outcomes.clear()
+        production.stage_scenes({"result": {"scenes": [{"id": "gallery", "start": "0/1", "duration": "132/25"}]}},
+                                {"gallery": {"words": words}}, None, {}, copies)
+        return production.outcomes["scene:gallery"], production.state.receipt("scene:gallery")
+    outcome, shown = render(copies)
+    assert outcome == "built", outcome
+    resolved = shown["request"]["override"]
+    # Lead 6/25 plus the word's time, to the nearest frame: camera (word 1) -> 14, drifts (2) -> 21, left (3) -> 29, lamp (6) -> 51,
+    # warms (7) ends at 2.35 s -> 65, second (9) -> 74, frame (10) -> 81.
+    cue_frames = [("drifts", 21), ("left", 29), ("lamp", 51), ("warms", 65), ("frame", 81), ("camera", 14), ("second", 74)]
+    assert [(c["word"], c["frame"]) for c in resolved["cues"]] == cue_frames, resolved["cues"]
+    assert resolved["frames"]["track"]["2"] == {"path": copies["track"][2], "sha256": sha256_file(folder / "track" / "track_0002.png"),
+                                                "bytes": (folder / "track" / "track_0002.png").stat().st_size}, resolved["frames"]
+    base = json.loads((root / shown["result"]["recipe"]).read_text(encoding="utf-8"))
+    geometry = base["geometry"]
+    assert [k["time"] for k in geometry["camera"]["position_milli"]["animation"]["x"]["keys"]] == [at(21), at(29)], geometry["camera"]
+    assert [k["time"] for k in geometry["lights"][0]["intensity_milli"]["animation"]["keys"]] == [at(51), at(65)], geometry["lights"]
+    assert base["expressions"]["nodes"][1]["expression"]["value"]["value"] == at(81), base["expressions"]["nodes"][1]
+    reel = base["layers"][1]
+    # The second footage frame starts after the first's 4 frames (18) and holds until "second" (74): 56 frames.
+    assert reel["start"] == at(14) and [f["hold"] for f in reel["frames"]] == ["4/25", at(56), "1/25"], reel
+    assert [f["image"] for f in reel["frames"]] == [resolved["frames"]["track"][str(n)] for n in (1, 2, 3)], reel["frames"]
+    report = engine("scene.inspect", root, scene=base)
+    states = report["geometry"]["sample_states"]
+    assert [states[n]["camera"]["position"][0] for n in (20, 21, 25, 29, 40)] == [0, 0, -10, -20, -20], [states[n]["camera"] for n in (21, 25)]
+    assert [round(states[n]["lights"][0]["gain"][0], 3) for n in (50, 51, 58, 65, 70)] == [0.4, 0.4, 0.8, 1.2, 1.2]
+    assert [b[0]["rounded"] for b in report["expressions"]["frame_bindings"][79:83]] == [[255], [255], [128], [128]]
+    selected = {item["layer_id"]: per_frame(item["selected_frames"]) for item in report["timing"]}
+    assert selected["reel"][13:19] == [None, 0, 0, 0, 0, 1] and selected["reel"][72:76] == [1, 1, 2, 2], selected["reel"][:80]
+    # A tile's frames play from the layer's start too: a hold until "left" (29) on a layer that starts on "camera" (14) lasts 15 frames.
+    tiles = recipe("tiles", [layer("grid", [128, 16], {"cue": "camera"}, {"until": "end"}, [0, 0], frames=[], tilemap={
+        "tile_size": [64, 16], "cells": [[0, 0]], "tiles": [{"timing": "strict", "end": "hold_last", "frames": [
+            {"image": {"input": "track", "frame": 1}, "hold": {"until": {"cue": "left"}}, "offset": [0, 0], "anchor": [0, 0]},
+            {"image": {"input": "track", "frame": 3}, "hold": "1/25", "offset": [0, 0], "anchor": [0, 0]}]}]})])
+    tiled, _ = override.prepare(tiles, gallery, m["inputs"], "tiles", override.Resolution(
+        cue_at("gallery", gallery_words, m["timing"]["lead"]), lambda name, frame=None: {"input": name, "frame": frame}, F(132, 25)))
+    assert [f["hold"] for f in tiled["layers"][0]["tilemap"]["tiles"][0]["frames"]] == [at(15), "1/25"], tiled["layers"][0]["tilemap"]
+    passed.append("production.override_scene_clock_and_holds (camera 21-29, lamp 51-65, dimmed from 81, footage frame 2 held 18-73)")
+
+    # 6. A changed footage frame re-copies that frame alone and re-keys the scene; the same frames reuse it.
+    Image.new("RGBA", (64, 16), (29, 53, 87, 255)).save(folder / "track" / "track_0002.png")
+    production.outcomes.clear()
+    recopied = production.stage_inputs()
+    assert production.outcomes["input:track"] == "built" and recopied["track"][1] == copies["track"][1] and recopied["track"][2] != copies["track"][2]
+    outcome, reshown = render(recopied)
+    assert outcome == "built" and reshown["key"] != shown["key"], outcome
+    assert reshown["request"]["override"]["frames"]["track"]["2"]["path"] == recopied["track"][2]
+    assert render(recopied)[0] == "reused"
+    passed.append("production.override_sequence_frames_rekey")
+
+    # 7. Build-time refusals on the new clocks: a hold that would end before its frame starts or after its layer, a geometry
+    #    key or expression literal outside the scene, and a geometry cue the take never says.
+    def refused_gallery(code, fragment, edit, words=gallery_words):
+        document = gallery_recipe()
+        edit(document["scene"])
+        name = f"sources/refused-{len(cases)}.json"
+        (root / name).write_text(json.dumps(document), encoding="utf-8")
+        production.m["overrides"]["scenes"]["gallery"] = {"input": "refused"}
+        try:
+            render({**recopied, "refused": name}, words)
+        except ToolError as error:
+            assert error.code == code and fragment in str(error), (code, fragment, error)
+            cases.append(str(error))
+            return
+        raise AssertionError(f"a build accepted a gallery that should fail with {code}: {fragment}")
+    refused_gallery("OVERRIDE_TIMING", "no later than the frame starts (0.72 s)", lambda s: s["layers"][1]["frames"][1].update(
+        hold={"until": {"cue": "camera"}}))
+    refused_gallery("OVERRIDE_TIMING", "after the layer ends (5.28 s)", lambda s: s["layers"][1]["frames"][1].update(
+        hold={"until": {"cue": "frame", "offset": "3"}}))
+    refused_gallery("OVERRIDE_TIMING", "outside the scene (0.00-5.28 s)",
+                    lambda s: s["geometry"]["camera"]["position_milli"]["animation"]["x"]["keys"][0].update(time={"cue": "drifts", "offset": "-1"}))
+    refused_gallery("OVERRIDE_TIMING", "outside the scene (0.00-5.28 s)", lambda s: s["expressions"]["nodes"][1]["expression"]["value"].update(
+        value={"cue": "frame", "offset": "3"}))
+    refused_gallery("CUE_NOT_HEARD", "cue word 'lamp'", lambda s: None, words=[w for w in gallery_words if w["text"] != "lamp"])
+    production.m["overrides"]["scenes"]["gallery"] = sequenced
+    passed.append("production.override_scene_clock_refusals")
+
+    # 8. `resolve` previews the scene from the last build's take and alignment, without a build. It writes the recipe the build
+    #    then uses, and its stills are exactly the frames the build renders.
+    manifest_path = out / "override.production.json"
+    manifest_path.write_text(json.dumps(film()), encoding="utf-8")
+    checked = json.loads(subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "check", str(manifest_path)],
+                                        capture_output=True, timeout=120).stdout)["result"]
+    assert checked["sequences"] == {"track": {"sequence": track, "first": 1, "last": 3, "frames": 3}}, checked.get("sequences")
+    assert next(s for s in checked["scenes"] if s["id"] == "gallery")["override"]["frames"] == {"track": [1, 2, 3]}
+    preview_root = out / "override-preview"
+    builder = Production(m, preview_root, {}, log=io.StringIO())
+    record = builder.state.start_revision(m["manifest_sha256"], manifest_module.summary(m))
+    builder.state.finish_revision({**record, "outcome": "stopped"})
+    builder.stage("timing", "stand-in", {"scenes": [{"id": "gallery", "duration": None, "type": "override", "take": {"samples": 108000, "rate": 24000}}]},
+                  lambda attempt: ([], {}))
+    builder.stage("align:gallery", "stand-in", {"text": GALLERY_SCRIPT, "asset_sha256": "0" * 64}, lambda attempt: ([], {"words": gallery_words}))
+    config = out / "override-config.json"
+    config.write_text(json.dumps({"engine": str(ENGINE), "pixelforge": {}, "speech_runtime": {}}), encoding="utf-8")
+
+    def resolve(*extra, manifest=manifest_path, at_root=preview_root):
+        done = subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "tools" / "production.py"), "resolve", str(manifest), *extra,
+                               "--root", str(at_root), "--config", str(config)], capture_output=True, timeout=300)
+        assert done.stdout, done.stderr.decode("utf-8", "replace")[-3000:]
+        return json.loads(done.stdout)
+    reply = resolve("gallery", "--still", "3/5", "--still", "3")
+    assert reply["ok"], reply
+    preview = reply["result"]
+    # The 4.5 s take with its lead and tail fills 11 beats at 125 BPM: 5.28 s.
+    assert preview["duration"] == "132/25" and [(c["word"], c["frame"]) for c in preview["cues"]] == cue_frames, preview
+    assert preview["alignment"]["stage"] == "align:gallery" and [s["frame"] for s in preview["stills"]] == [15, 75], preview["stills"]
+    assert preview["frames"]["track"]["2"]["sha256"] == sha256_file(folder / "track" / "track_0002.png"), preview["frames"]
+    builder.engine = DirectEngine(ENGINE, preview_root, {}, builder.state, 1)
+    builder.engine_identity = {"sha256": sha256_file(ENGINE)}
+    builder.lanes = 1
+    builder.m = production.m
+    builder.mkdir("renders")
+    builder.outcomes.clear()
+    built = builder.stage_inputs()
+    builder.stage_scenes({"result": {"scenes": [{"id": "gallery", "start": "0/1", "duration": "132/25"}]}}, {"gallery": {"words": gallery_words}},
+                         None, {}, built)
+    rendered = builder.state.receipt("scene:gallery")["result"]
+    assert builder.outcomes["input:track"] == "reused" and rendered["recipe"] == preview["recipe"], (builder.outcomes, rendered, preview["recipe"])
+    for still in preview["stills"]:
+        decoded = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(preview_root / rendered["asset"]["path"]), "-vf",
+                                  f"select=eq(n\\,{still['frame']})", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                                 capture_output=True, check=True).stdout
+        assert decoded == Image.open(preview_root / still["path"]).convert("RGB").tobytes(), still
+    assert resolve("one")["error"]["code"] == "NOT_AN_OVERRIDE"
+    assert resolve("gallery", "--still", "6")["error"]["code"] == "INVALID_TIME"
+    assert resolve("gallery", at_root=folder)["error"]["code"] == "NOT_BUILT"
+    restated = film()
+    next(s for s in restated["scenes"] if s["id"] == "gallery")["script"] = GALLERY_SCRIPT + " Twice."
+    (out / "override-restated.production.json").write_text(json.dumps(restated), encoding="utf-8")
+    assert resolve("gallery", manifest=out / "override-restated.production.json")["error"]["code"] == "STALE_ALIGNMENT"
+    passed.append("production.resolve_previews_override (stills at frames 15 and 75 equal the rendered frames)")
 
 
 def write_wav(path, samples, rate):

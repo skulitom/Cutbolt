@@ -6,6 +6,7 @@ Unknown fields fail; nothing is guessed. See docs/PRODUCTION.md for the format.
 """
 import hashlib
 import json
+import os
 import re
 from fractions import Fraction as F
 from pathlib import Path, PureWindowsPath
@@ -15,6 +16,7 @@ from . import CONTRACT_VERSION, override, pixel_stage
 ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 GATES = ("script", "storyboard", "narration", "rough_cut", "final_export")
+SEQUENCE_FRAMES = 10000
 
 
 class ManifestError(ValueError):
@@ -72,6 +74,58 @@ def local_path(value, where):
     return str(Path(value))
 
 
+def split_pattern(pattern):
+    """A sequence pattern's folder, and the text before and after its run of #, whose length is the frame number's
+    minimum digits: C:\\f\\track_####.png -> (C:\\f, "track_", 4, ".png")."""
+    path = Path(pattern)
+    runs = re.findall(r"#+", path.name)
+    prefix, _, suffix = path.name.partition(runs[0]) if len(runs) == 1 else ("", "", "")
+    return path.parent, prefix, len(runs[0]) if len(runs) == 1 else 0, suffix
+
+
+def sequence_frame(spec, number):
+    """The file of frame `number` of a sequence input {"sequence", "first", "last"}."""
+    folder, prefix, digits, suffix = split_pattern(spec["sequence"])
+    return folder / f"{prefix}{number:0{digits}d}{suffix}"
+
+
+def sequence_input(value, where):
+    """An image sequence input, {"sequence": "C:\\...\\track_####.png"}: every PNG the pattern numbers in its folder,
+    which must run from the first number to the last without a gap. Normalized to {"sequence", "first", "last"}."""
+    fields(value, {"sequence"}, where, ["sequence"])
+    pattern = local_path(value["sequence"], f"{where}.sequence")
+    folder, prefix, digits, suffix = split_pattern(pattern)
+    if not digits or "#" in str(folder):
+        raise ManifestError(f"{where}.sequence: name the frames with one run of # in the file name, such as track_####.png")
+    if suffix.lower() != ".png":
+        raise ManifestError(f"{where}.sequence: an image sequence is numbered .png files")
+    numbered = re.compile(re.escape(prefix) + r"(\d+)" + re.escape(suffix), re.IGNORECASE if os.name == "nt" else 0)
+    numbers = {}
+    try:
+        entries = sorted(entry.name for entry in os.scandir(folder) if entry.is_file())
+    except OSError as error:
+        raise ManifestError(f"{where}.sequence: cannot list {folder}: {error}") from None
+    for name in entries:
+        match = numbered.fullmatch(name)
+        if not match:
+            continue
+        number = int(match.group(1))
+        if match.group(1) != f"{number:0{digits}d}":
+            raise ManifestError(f"{where}.sequence: {name} does not write its number as the pattern does ({digits} digits, zero-padded)")
+        if number in numbers:
+            raise ManifestError(f"{where}.sequence: {numbers[number]} and {name} are both frame {number}")
+        numbers[number] = name
+    if not numbers:
+        raise ManifestError(f"{where}.sequence: no file in {folder} matches {Path(pattern).name}")
+    first, last = min(numbers), max(numbers)
+    if len(numbers) != last - first + 1:
+        gap = next(n for n in range(first, last + 1) if n not in numbers)
+        raise ManifestError(f"{where}.sequence: frame {gap} is missing; a sequence numbers every frame from {first} to {last}")
+    if len(numbers) > SEQUENCE_FRAMES:
+        raise ManifestError(f"{where}.sequence: {len(numbers)} frames; a sequence input holds at most {SEQUENCE_FRAMES}")
+    return {"sequence": pattern, "first": first, "last": last}
+
+
 def load(path):
     try:
         text = Path(path).read_text(encoding="utf-8")
@@ -109,11 +163,13 @@ def validate(raw):
     for name, value in inputs.items():
         if not NAME.match(name):
             raise ManifestError(f"inputs.{name}: names are 1-32 lowercase letters, digits, _ or -")
-        out["inputs"][name] = local_path(value, f"inputs.{name}")
+        out["inputs"][name] = sequence_input(value, f"inputs.{name}") if isinstance(value, dict) else local_path(value, f"inputs.{name}")
 
     def input_ref(name, where, suffixes):
         if name not in out["inputs"]:
             raise ManifestError(f"{where}: {name!r} is not declared in inputs ({sorted(out['inputs'])})")
+        if isinstance(out["inputs"][name], dict):
+            raise ManifestError(f"{where}: input {name!r} is an image sequence; give one file")
         if not out["inputs"][name].lower().endswith(suffixes):
             raise ManifestError(f"{where}: input {name!r} must be a {'/'.join(suffixes)} file")
         return name

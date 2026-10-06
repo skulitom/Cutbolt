@@ -31,7 +31,7 @@ from pathlib import Path
 
 from . import COORDINATOR_VERSION, CONTRACT_VERSION, override as override_module, pixel_stage, quality
 from .engine import Engine, PixelForge, Qwen, ToolError
-from .manifest import digest, summary, templated
+from .manifest import digest, sequence_frame, summary, templated
 from .state import State, Timer, now, sha256_file
 
 STAGE_VERSION = "1"
@@ -73,6 +73,7 @@ class Production:
         self.warnings = []
         self.delivery = None
         self.codec = None
+        self.source_ids = {}
 
     # ------------------------------------------------------------------ helpers
     def log(self, message):
@@ -290,9 +291,16 @@ class Production:
         return result
 
     # ------------------------------------------------------------------ inputs
-    def stage_inputs(self):
+    def stage_inputs(self, names=None):
+        """Copy each input (or only `names`) into sources/ by content: name -> its copy's path, or for an image sequence
+        frame number -> path. The copies' identities are kept in `source_ids`, so resolving a recipe hashes nothing again."""
         out = {}
         for name, source in sorted(self.m["inputs"].items()):
+            if names is not None and name not in names:
+                continue
+            if isinstance(source, dict):
+                out[name] = self.stage_sequence(name, source)
+                continue
             path = Path(source)
             if not path.is_file():
                 raise ToolError("production", "INPUT_MISSING", f"inputs.{name}: {source} does not exist")
@@ -301,20 +309,52 @@ class Production:
             key = self.key("input", {"name": name, "sha256": sha, "target": target})
 
             def run(attempt, path=path, target=target, sha=sha):
-                dest = self.root / target
-                if dest.exists():
-                    if sha256_file(dest) != sha:
-                        raise ToolError("production", "SOURCE_CHANGED", f"{target} exists with different content")
-                else:
-                    temp = dest.with_name(f".{dest.name}.partial")
-                    shutil.copyfile(path, temp)
-                    if sha256_file(temp) != sha:
-                        temp.unlink()
-                        raise ToolError("production", "SOURCE_CHANGED", f"{path} changed while it was imported")
-                    os.replace(temp, dest)
-                return [self.ident(target)], {"source": str(path), "path": target}
-            out[name] = self.stage(f"input:{name}", key, {"name": name, "source": str(path), "sha256": sha}, run)["result"]["path"]
+                return [self.import_file(path, target, sha)], {"source": str(path), "path": target}
+            receipt = self.stage(f"input:{name}", key, {"name": name, "source": str(path), "sha256": sha}, run)
+            self.source_ids.update((o["path"], o) for o in receipt["outputs"])
+            out[name] = receipt["result"]["path"]
         return out
+
+    def stage_sequence(self, name, spec):
+        """An image sequence input: every frame copied by content to sources/<name>/<number>-<sha12>.png, in one receipt
+        whose key covers every frame's SHA-256, so a changed frame re-keys exactly the scenes that show it."""
+        numbers = range(spec["first"], spec["last"] + 1)
+        paths = {n: sequence_frame(spec, n) for n in numbers}
+        missing = [str(p) for p in paths.values() if not p.is_file()]
+        if missing:
+            raise ToolError("production", "INPUT_MISSING", f"inputs.{name}: {len(missing)} frame(s) of {spec['sequence']} do not exist, "
+                            f"first {missing[0]}")
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            shas = dict(zip(numbers, pool.map(sha256_file, paths.values())))
+        digits = len(str(spec["last"]))
+        targets = {n: f"sources/{name}/{n:0{digits}d}-{shas[n][:12]}.png" for n in numbers}
+        frames = {str(n): shas[n] for n in numbers}
+        key = self.key("input", {"name": name, "sequence": frames, "targets": {str(n): t for n, t in targets.items()}})
+
+        def run(attempt):
+            self.mkdir(f"sources/{name}")
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                outputs = list(pool.map(lambda n: self.import_file(paths[n], targets[n], shas[n]), numbers))
+            return outputs, {"source": spec["sequence"], "frames": {str(n): targets[n] for n in numbers}}
+        receipt = self.stage(f"input:{name}", key, {"name": name, "source": spec["sequence"], "first": spec["first"], "last": spec["last"],
+                                                    "sha256": digest(frames)}, run)
+        self.source_ids.update((o["path"], o) for o in receipt["outputs"])
+        return {int(n): path for n, path in receipt["result"]["frames"].items()}
+
+    def import_file(self, path, target, sha):
+        """Copy `path` to the workspace-relative `target` unless an identical copy is there; returns its identity."""
+        dest = self.root / target
+        if dest.exists():
+            if sha256_file(dest) != sha:
+                raise ToolError("production", "SOURCE_CHANGED", f"{target} exists with different content")
+        else:
+            temp = dest.with_name(f".{dest.name}.partial")
+            shutil.copyfile(path, temp)
+            if sha256_file(temp) != sha:
+                temp.unlink()
+                raise ToolError("production", "SOURCE_CHANGED", f"{path} changed while it was imported")
+            os.replace(temp, dest)
+        return self.ident(target)
 
     # ------------------------------------------------------------------ art
     def stage_art(self):
@@ -769,17 +809,7 @@ class Production:
         self.mkdir("scenes")
 
         def cue_resolver(scene_id):
-            words = aligned.get(scene_id, {}).get("words", [])
-            norm = [(pixel_stage.words_of(w["text"]) or [""])[0] for w in words]
-
-            def at(cue):
-                hits = [i for i, w in enumerate(norm) if w == cue["word"]]
-                if len(hits) <= cue["nth"]:
-                    raise ToolError("production", "CUE_NOT_HEARD", f"scene {scene_id}: cue word {cue['word']!r} is not in the aligned narration")
-                word = words[hits[cue["nth"]]]
-                t = fr(word["start"] if cue["edge"] == "start" else word["end"])
-                return pixel_stage.snap(self.m["timing"]["lead"] + t)
-            return at
+            return cue_at(scene_id, aligned.get(scene_id, {}).get("words", []), self.m["timing"]["lead"])
 
         def build_one(item):
             number, scene = item
@@ -792,9 +822,7 @@ class Production:
             else:
                 base = pixel_stage.SceneBuilder(scene, duration, art, self.art_index, patterns, self.m["colors"], cue_resolver(scene["id"]),
                                                 fonts, number).build()
-            base_path = f"scenes/{scene['id']}-base-{digest(base)[:12]}.json"
-            if not (self.root / base_path).exists():
-                write_new(self.root / base_path, base)
+            base_path = self.save_base(scene["id"], base)
             final_path = base_path
             if self.m["delivery"]["captions"]["burn_in"] and captions:
                 captioned = f"scenes/{scene['id']}-{digest([base, captions['key'], row['start']])[:12]}.json"
@@ -830,6 +858,13 @@ class Production:
         self.log(f"scenes: {built} rendered, {len(rendered) - built} reused ({timer.seconds():.1f}s)")
         return rendered
 
+    def save_base(self, scene_id, base):
+        """Write a scene's base recipe (before captions) under scenes/, named by its content; returns its path."""
+        base_path = f"scenes/{scene_id}-base-{digest(base)[:12]}.json"
+        if not (self.root / base_path).exists():
+            write_new(self.root / base_path, base)
+        return base_path
+
     def resolve_override(self, scene, override, duration, inputs, at):
         """A hand-written recipe with its cue times, input identities and scene length filled in (see override.py).
         It is read from the production's own copy and checked again, so the build uses exactly what it hashed."""
@@ -837,10 +872,12 @@ class Production:
         where = f"overrides.scenes.{scene['id']}"
         identities = {}
 
-        def identity(name):
-            if name not in identities:
-                identities[name] = {k: v for k, v in self.ident(inputs[name]).items() if k in ("path", "sha256", "bytes")}
-            return identities[name]
+        def identity(name, frame=None):
+            path = inputs[name] if frame is None else inputs[name][frame]
+            if path not in identities:
+                known = self.source_ids.get(path) or self.ident(path)
+                identities[path] = {k: known[k] for k in ("path", "sha256", "bytes")}
+            return identities[path]
         try:
             document = json.loads((self.root / source).read_text(encoding="utf-8"))
             recipe, report = override_module.prepare(document, scene, self.m["inputs"], where, override_module.Resolution(at, identity, duration))
@@ -851,6 +888,52 @@ class Production:
         if report["cues"]:
             self.log(f"scene {scene['id']}: " + ", ".join(f"{c['word']} at frame {c['frame']}" for c in report["cues"]))
         return recipe, {"source": self.ident(source)["sha256"], **report}
+
+    def preview(self, scene_id, stills=()):
+        """`production.py resolve`: one hand-written scene resolved without a build, from the last build's take and
+        alignment and the current copies of its inputs. The recipe is written where a build writes it, so the next build
+        finds it; each still is the frame on screen at a scene time, rendered by the engine's scene.still."""
+        scene = next((s for s in self.m["scenes"] if s["id"] == scene_id), None)
+        if scene is None:
+            raise ToolError("production", "SCENE_NOT_FOUND", f"no scene {scene_id!r}; scenes: {[s['id'] for s in self.m['scenes']]}")
+        override = self.m["overrides"]["scenes"].get(scene_id)
+        if override is None:
+            raise ToolError("production", "NOT_AN_OVERRIDE", f"scene {scene_id!r} has no hand-written recipe in overrides.scenes; "
+                            f"a build writes the template's recipes under scenes/")
+        words, take, alignment = [], None, None
+        if scene["script"]:
+            aligned, timing = self.state.receipt(f"align:{scene_id}"), self.state.receipt("timing")
+            rows = timing["request"]["scenes"] if timing and timing.get("state") == "completed" else []
+            row = next((r for r in rows if r["id"] == scene_id), None)
+            if not aligned or aligned.get("state") != "completed" or not row or not row["take"]:
+                raise ToolError("production", "NOT_ALIGNED", f"scene {scene_id!r} has no timed and aligned take yet; build first "
+                                f"(build --until scenes is enough, and a build that failed on this recipe has done it)")
+            if aligned["request"]["text"] != scene["script"]:
+                raise ToolError("production", "STALE_ALIGNMENT", f"scene {scene_id!r}: the last aligned take says {aligned['request']['text']!r}, "
+                                f"not the manifest's script; build again (--until scenes) to narrate and align it")
+            words, take = aligned["result"]["words"], row["take"]
+            alignment = {"stage": f"align:{scene_id}", "key": aligned["key"], "asset_sha256": aligned["request"]["asset_sha256"]}
+        # The scene's length is planned as a build plans it, from the manifest's timing rules and the take's length.
+        planned = plan_timing(self.m["timing"], [{"id": scene_id, "duration": fstr(scene["duration"]) if scene["duration"] else None,
+                                                  "type": scene["beat"]["type"] if scene["beat"] else "override", "take": take}])
+        duration = F(planned["scenes"][0]["duration"])
+        for d in ("sources", "scenes"):
+            self.mkdir(d)
+        inputs = self.stage_inputs({override["input"], *override["inputs"], *override.get("frames", {})})
+        base, resolved = self.resolve_override(scene, override, duration, inputs, cue_at(scene_id, words, self.m["timing"]["lead"]))
+        base_path = self.save_base(scene_id, base)
+        shown = []
+        for t in stills:
+            if not t < duration:
+                raise ToolError("production", "INVALID_TIME", f"--still {fstr(t)}: the scene lasts {fstr(duration)} s")
+            frame = int(t * FPS)
+            out = f"previews/{scene_id}-{digest(base)[:12]}-f{frame:04d}.png"
+            if not (self.root / out).exists():
+                self.mkdir("previews")
+                self.engine.call("scene.still", {"scene": {"file": base_path}, "output": out, "time": rt(F(frame, FPS))}, label=f"still:{scene_id}")
+            shown.append({"time": fstr(t), "frame": frame, "path": out})
+        self.state.event({"event": "resolved", "scene": scene_id, "recipe": base_path, "stills": [s["path"] for s in shown]})
+        return {"scene": scene_id, "recipe": base_path, "alignment": alignment, **resolved, "stills": shown}
 
     # ------------------------------------------------------------------ cut (saved session)
     def stage_cut(self, mixed, rendered, timing):
@@ -983,6 +1066,21 @@ class Production:
 
 
 # ---------------------------------------------------------------------------------------- helpers
+def cue_at(scene_id, words, lead):
+    """A scene's cue resolver: a checked cue's time in the scene, on the frame nearest the aligned word's start (or end)
+    plus the lead."""
+    norm = [(pixel_stage.words_of(w["text"]) or [""])[0] for w in words]
+
+    def at(cue):
+        hits = [i for i, w in enumerate(norm) if w == cue["word"]]
+        if len(hits) <= cue["nth"]:
+            raise ToolError("production", "CUE_NOT_HEARD", f"scene {scene_id}: cue word {cue['word']!r} is not in the aligned narration")
+        word = words[hits[cue["nth"]]]
+        t = fr(word["start"] if cue["edge"] == "start" else word["end"])
+        return pixel_stage.snap(lead + t)
+    return at
+
+
 def plan_timing(t, scenes):
     """Scene boundaries from measured takes, exactly.
 

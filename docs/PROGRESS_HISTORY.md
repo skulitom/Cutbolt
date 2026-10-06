@@ -1,5 +1,29 @@
 # Progress history
 
+## 6 October 2026: hand-written scenes cue scene-level curves and frame holds, preview without a build, and take numbered footage
+
+The VFX demo (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`) wrote its scenes as [hand-written recipes](PRODUCTION.md#hand-written-scenes) and hit four limits:
+- **Finding 4.** Word cues worked for a layer's start and end and the keyframes inside it, but `geometry` and `expressions` were walked with no clock, so a cue there was refused. The 3D gallery hard-coded its camera and lamp times to one narration pass.
+- **Finding 5.** Frame holds were fixed lengths, so a pose sequence could only be anchored by its layer's start.
+- **Finding 2.** `scene.still` needs plain times and only `build` resolved cues, so the demo re-implemented the resolver (`scenes\lib.py`, `scenes\preview.py`).
+- **Finding 7.** The reel's manifest declared 527 inputs, 375 of them numbered footage frames, one `{"input": name}` each.
+
+Changes, in the coordinator only (no engine change):
+- **Scene-clock cues** (`override.py`). A cue time may be any `time` in `geometry` (node transforms, the camera, lights) and the `value` of a scalar `literal` in `expressions`. Both resolve to scene time, since geometry curves and the expression `time` run on the scene's clock. They must land inside the scene (`OVERRIDE_TIMING`), and they appear in the report as layer cues do. `temporal` takes none: its shutter angle and phase are degrees, not times.
+- **Holds until a word.** A frame's `hold`, in a layer's `frames` or a tile's, may be `{"until": <cue time>}`. The frame lasts from where it starts (the layer's start plus the earlier holds) until the word, so the next frame starts on that word's frame. A word no later than the frame's start, or after the layer's end, fails with `OVERRIDE_TIMING`; a bare cue as a hold is refused with a hint.
+- **`production.py resolve MANIFEST SCENE --root DIR [--still T ...]`** resolves a hand-written scene from the last build's alignment (`align:<scene>`) and take length (`timing`), with the current manifest, recipe and inputs. It writes the recipe under the name the build gives it, and renders stills with `scene.still` to `previews/`. It refuses a changed script (`STALE_ALIGNMENT`), a scene with no aligned take yet (`NOT_ALIGNED`), a template scene and a time past the scene's end, and holds the coordinator lock. The build's cue resolver is now one function both use.
+- **Sequence inputs** (`manifest.py`, `pipeline.py`). An input may be `{"sequence": "C:\\...\\track_####.png"}`: every PNG the pattern numbers, without gaps, at most 10,000. A recipe names a frame as `{"input": "track", "frame": 12}`. The build copies each frame by content to `sources/track/<number>-<sha12>.png` in one receipt keyed by every frame's SHA-256. The scene's key holds the identity of every frame it shows (`request.override.frames`), so a changed frame re-keys only those scenes.
+
+Recipes that use none of this resolve to the same bytes and report as before, so existing scene keys are unchanged.
+
+Tests, in `production`:
+- **A 3D gallery override.** The camera drifts between "drifts" and "left" (frames 21-29) and the lamp warms from "lamp" to the end of "warms" (51-65). An expression literal dims the wall from "frame" (81). The second footage frame holds from 18 until "second" (74). `scene.inspect` confirms each one. A tile's hold until a word is checked on the resolved recipe.
+- **Keys.** Changing footage frame 2 re-copies that frame alone and re-keys the scene; the same frames reuse it.
+- **Refusals.** 28 manifest-time rejections, up from 16. Among the new ones: a bare-cue or `"end"` hold, cues in `temporal` or a `retime`, sequence patterns with gaps, wrong padding, no `#` or no match, and sequence references without a frame or out of range. Five new build-time refusals cover holds before their frame or after their layer, geometry and expression cues outside the scene, and an unheard geometry cue.
+- **`resolve`.** From stand-in `timing` and `align` receipts, the CLI plans the 4.5 s take at 5.28 s, lists the same cue frames, and writes the recipe the scene stage then renders under the same name. Its stills at frames 15 and 75 equal those frames decoded from the render. `check` lists the sequence, and `resolve` returns `NOT_AN_OVERRIDE`, `INVALID_TIME`, `NOT_BUILT` and `STALE_ALIGNMENT` where it should.
+
+The production fixture passes in quick mode on Linux, in a cloud session, where it needed three local changes that were not committed: manifest paths without a drive letter, check_quality's engine calls made directly (the job queue needs Windows), and Liberation Sans standing in for Arial. It has not run on Windows. No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: AAC at 320 kb/s codes up to 20 kHz
 
 With noise substitution off (see "lossy deliveries meet their true-peak target" below), heavily limited mixes strong near the top of the band still decoded up to 1.2 dB over their own true peak. The production fixture's square-wave bed missed its target and stopped `not_better`. A `-cutoff 20000` encoder setting had halved that on five mixes, so it was measured more widely.
