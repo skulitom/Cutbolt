@@ -310,7 +310,7 @@ def unresolved_failures():
             data = json.loads(result.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        for stage in data.get("passes", {}):
+        for stage in [*data.get("passes", {}), *data.get("unmapped_passes", [])]:
             latest[stage] = None
         for stage in data.get("failures", []):
             latest[stage] = f"{data.get('run')} run of {str(data.get('commit') or '?')[:10]}, {result.name[:15]}"

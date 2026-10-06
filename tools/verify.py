@@ -56,7 +56,7 @@ if args.status:
     print(f"Impact map: {summary}")
     for name, data in impact.recent(12):
         problems = data.get("failures") or []
-        print(f"  {name[:15]} {data.get('run'):10} {str(data.get('commit') or '')[:10]:10} passed {len(data.get('passes', {}))}"
+        print(f"  {name[:15]} {data.get('run'):10} {str(data.get('commit') or '')[:10]:10} passed {len(data.get('passes', {})) + len(data.get('unmapped_passes', []))}"
               + (f", FAILED {', '.join(problems)}" if problems else "") + (f", deferred {len(data.get('deferred', []))}" if data.get("deferred") else ""))
     for stage, where in impact.unresolved_failures().items():
         print(f"  unresolved failure: {stage} ({where})")
@@ -488,9 +488,11 @@ if rust_outcome.get("error"):
     failures["rust"] = {"ok": False, "log": rust_outcome["error"], "seconds": 0, "budget_misses": []}
 commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 passed_fingerprints = {name: fingerprints[name] for name, o in outcomes.items() if o["ok"] and fingerprints.get(name)}
+# Passes the map cannot fingerprint are never reused, but they still resolve an earlier failure.
+unmapped_passes = sorted(name for name, o in outcomes.items() if o["ok"] and not fingerprints.get(name))
 if run_rust and "rust" not in failures:
     passed_fingerprints["rust"] = "passed"
-impact.record(RUN, passed_fingerprints,
+impact.record(RUN, passed_fingerprints, unmapped_passes=unmapped_passes,
               commit=commit, failures=sorted(failures), deferred=deferred, reused=reused,
               not_impacted=len(not_impacted), skipped=sorted(skipped))
 if args.report:
