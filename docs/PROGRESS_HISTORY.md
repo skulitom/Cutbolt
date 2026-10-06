@@ -1,5 +1,15 @@
 # Progress history
 
+## 6 October 2026: passes of unmapped fixtures clear earlier failures
+
+`tools/verify.py --status` kept reporting `production` as an unresolved failure from a quick run of `f02c9f18bb` on 5 October, although it passed on 6 October: in the gate run that shipped `5d26a3d`, and in a quick run. A run record kept a pass only with its impact-map fingerprint. The development machine's map was built at `bd84caf6fb` on 4 October, before `production` and `dynamics` existed, and a fixture the map does not cover has no fingerprint. Their passes were never written, so they could never clear an older failure.
+
+- **The record.** A pass without a fingerprint is now recorded as `unmapped`. It clears earlier failures in `--status` and in the gate's warnings. The gate still reuses only a pass whose fingerprint matches, and `unmapped` never matches one, so these passes are never reused.
+- **Older records.** Records written before this change still lack those passes. The next passing run of `production` clears its failure.
+- **The map.** Rebuilding it with `python tools/impact.py build` maps the newer fixtures, so the gate selects them by the functions they execute and can reuse their passes. The map is kept per machine, so the rebuild runs on the Windows machine.
+
+Checked on Linux with scratch run records and a map that covers only `tracks`, seeded with a failed quick record for `easing`. A quick run of `easing` and `editing` recorded both as `unmapped`, and `--status` no longer listed the failure. The same run with the previous `tools/verify.py` recorded no pass and kept the failure. A simulation with the `impact` functions showed that the gate still reuses only fingerprinted passes. `tests/repository.py` and the material check pass. `tools/ship.py` did not run here: `cargo clippy -D warnings` fails on Linux, on Windows-only code in `src/jobs.rs`, and the fixtures and run records are on the Windows machine. No points change. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: AAC at 320 kb/s codes up to 20 kHz
 
 With noise substitution off (see "lossy deliveries meet their true-peak target" below), heavily limited mixes strong near the top of the band still decoded up to 1.2 dB over their own true peak. The production fixture's square-wave bed missed its target and stopped `not_better`. A `-cutoff 20000` encoder setting had halved that on five mixes, so it was measured more widely.

@@ -487,7 +487,9 @@ if deadline_passed.is_set():  # Never started because the gate's time ran out: t
 if rust_outcome.get("error"):
     failures["rust"] = {"ok": False, "log": rust_outcome["error"], "seconds": 0, "budget_misses": []}
 commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-passed_fingerprints = {name: fingerprints[name] for name, o in outcomes.items() if o["ok"] and fingerprints.get(name)}
+# A pass the impact map cannot fingerprint (a fixture added after the map was built) is still recorded, so it
+# clears earlier failures; "unmapped" never matches a fingerprint, so the gate cannot reuse it.
+passed_fingerprints = {name: fingerprints.get(name) or "unmapped" for name, o in outcomes.items() if o["ok"]}
 if run_rust and "rust" not in failures:
     passed_fingerprints["rust"] = "passed"
 impact.record(RUN, passed_fingerprints,
