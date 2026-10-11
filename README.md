@@ -111,6 +111,7 @@ The current renderer accepts FFV1/bgr0 video with matching dimensions and 48 kHz
 
 ## Plan
 
+- [Draft 1.0 roadmap: release gates, comparative benchmark and proposed v2 criteria](docs/ROADMAP_1_0.md)
 - [Local jobs and MCP setup](docs/AGENT_INTERFACE.md)
 - [Implementation plan and milestones](docs/PLAN.md)
 - [Research implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md) and [combined completion percentage](docs/IMPLEMENTATION_PROGRESS.md)

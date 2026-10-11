@@ -1818,6 +1818,19 @@ Every request field, shared type and tagged variant now has a description taken 
 
 The MCP fixtures' tool-count assertions move from 64 to 65. No baseline, criteria, evidence, weights, exclusions or denominators changed. The recorded source fingerprints are stale until the next full verification.
 
+## 4 October 2026: drafted 1.0 roadmap
+
+The user defined 1.0 as features and quality high enough that agents prefer Cutbolt over any other available video software: the fastest and most efficient option, with the best output quality. Windows and Linux are the 1.0 platforms; macOS follows 1.0. No headline demonstration is fixed in advance.
+
+The [draft roadmap](ROADMAP_1_0.md) turns this into:
+- five release gates;
+- a growing comparative benchmark, which replaces a fixed demonstration;
+- phases 0.5–0.9;
+- interface planning for the sister Inkbolt engine;
+- a proposed `cutbolt-local-v2` baseline of 152 checkpoints.
+
+None of it is adopted yet. No baseline, criteria, evidence, weights, exclusions or denominators changed. The core and combined trackers remain 100/100 and 108/108.
+
 ## 4 October 2026: verified 108/108 implementation completion
 
 The complete verifier passes **466 unique checks**, reaching **100/100 core, 8/8 supplemental and 108/108 total (100.0%)**. Both original checkpoints now pass for X01 3D planes/cameras/lighting, X02 exact shutter sampling, X03 typed property expressions/links and X04 optional local annotated segmentation. The supplemental fixtures add 28 acceptance checks and one exact-arithmetic Rust test to the 437-check core milestone. No criterion, weight, exclusion, performance gate or denominator was relaxed. Agent foundations remain separate at 10/10.
