@@ -1,12 +1,14 @@
 # Cutbolt
 
-An original, local video editing engine for agents. Designed to let agents pick up where they left off.
+An original, local video editing engine for agents. Edit recorded footage, add captions, mix audio and export through structured commands, with saved revisions, retries and undo.
 
-**Verified acceptance coverage: 100/100 core and 108/108 total (100%), with 466 passing checks.** See the [implementation tracker](docs/IMPLEMENTATION_PROGRESS.md) for the unchanged scope and documented limits.
+Qualifying [H.264 and HEVC originals](docs/DIRECT_SOURCES.md) now feed frame previews, track renders and exports directly. Other formats still need explicit conversion within the [supported matrix](docs/CONFORM.md). The compact MCP catalog and [20 original graphics templates](docs/TEMPLATES.md) reduce setup work; packaged installation and tested intent skills remain in development.
 
-Full verification includes [typed property expressions](docs/EXPRESSIONS.md), [shutter sampling and motion blur](docs/TEMPORAL.md), [3D planes, cameras and lighting](docs/GEOMETRY.md), and [local annotated foreground masks](docs/SEGMENTATION.md). These use the existing scene and saved-edit workflows; the optional segmentation worker keeps its pinned dependencies external.
+**Development status: v0.4.0, 11 October 2026.** A Rust library and JSON command-line program create project snapshots, validate and edit timelines, inspect local media, plan renders and produce verified output. Local sessions persist revisions, reject conflicting edits, replay successful requests, preview edit diffs and support undo/restoration with history.
 
-**Status: v0.4 native tracks, scenes, audio mixes, media conversion and previews, 4 October 2026.** An original Rust library and JSON command-line program can create project snapshots, validate timelines, append/trim/split/reorder/remove clips, inspect local media, plan renders, and produce verified lossless output. Local sessions now persist revisions, reject conflicting edits, replay successful requests safely, preview edit diffs, and support undo/restoration with history. See the [live progress checklist](docs/PROGRESS.md).
+The last full acceptance run, **4 October 2026**, passed 466 checks for the bounded v1 checklist (100/100 core, 108/108 total). This is dated checklist evidence, not a comparative claim or full verification of the newer work. See the [implementation tracker](docs/IMPLEMENTATION_PROGRESS.md), [full evidence](docs/PROGRESS.md) and [subsequent targeted checks and open work](docs/PROGRESS_HISTORY.md).
+
+That full run covered [typed property expressions](docs/EXPRESSIONS.md), [shutter sampling and motion blur](docs/TEMPORAL.md), [3D planes, cameras and lighting](docs/GEOMETRY.md), and [local annotated foreground masks](docs/SEGMENTATION.md). These use the scene and saved-edit workflows; optional workers keep their dependencies external.
 
 [Productions from a manifest](docs/PRODUCTION.md): `tools/production.py` builds a narrated, captioned and mixed pixel-art explainer from one JSON manifest (script lines, one visual beat per scene, palette, music, delivery). It drives PixelForge, a local Qwen narration worker and this engine with resumable stage receipts, so a new video in that style takes a handful of agent calls instead of about 170.
 

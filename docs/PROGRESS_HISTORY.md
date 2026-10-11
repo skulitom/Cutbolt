@@ -1,5 +1,28 @@
 # Progress history
 
+## 11 October 2026: evidence follow-up and installation-first priorities
+
+The b910d49 standalone recording rerun passed in 43 seconds with its original timestamp-gap
+threshold. The earlier 506114f failure is therefore superseded in verify --status; no capture
+code or acceptance bound changed. Commits 13807bb and b910d49 passed the shipping gate and
+reached main. Their remaining background checks and the long-source export oracle still need
+completion checks. No missing result is counted as a pass.
+
+Following review of the two fix plans, installation, tested intent skills and fresh-agent
+measurements take priority over the larger clip-effect/generated-clip/precision changes after
+the current direct-source acceptance. Both plans retain their complete scope. Scripted agent
+replays remain regression evidence, not independent model trials. The approved 15-call/40000
+received-token talking-head target still requires an actual fresh-agent result. A small,
+repeatable footage comparison against plain FFmpeg will inform subsequent priorities; it is
+not evidence for an unmeasured lead or a replacement for the draft comparative release gate.
+
+README now leads with supported footage work and explicitly dates the 4 October full v1
+checklist evidence. The draft 1.0 roadmap, G2 wording and unadopted v2 points are unchanged.
+The five retained external verification selections were located and checked: both Python
+environments import their pinned packages, speech model paths exist, and the original legacy
+engine and native-capture fixture identities match. CUDA device 0 is available. This prepares
+an inclusive verification run; it is not yet a refreshed full-verification claim or release.
+
 ## 11 October 2026: one final source hash for direct frame publication
 
 The approved identity cache now serves the preliminary checks of a single-frame direct
