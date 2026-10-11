@@ -16,7 +16,11 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
-Compressed-source inspection includes a cached presented-frame and decoded-audio index. Eligible H.264/HEVC originals report `timeline.ready: true` and `direct: true`, with a bound asset for `media.add`; `media.prepare` returns them without conversion. See [direct footage](DIRECT_SOURCES.md) for the exact profiles, audio policy, source preservation and remaining long-source/nested-picture limits.
+Compressed-source inspection includes a cached presented-frame and decoded-audio index. Eligible H.264/HEVC originals report `timeline.ready: true` and `direct: true`, with a bound asset for `media.add`; `media.prepare` returns them without conversion. See [direct footage](DIRECT_SOURCES.md) for the exact profiles, audio policy, source preservation and long-source measurements and remaining nested-picture limits.
+
+`cutbolt doctor` checks local media-tool discovery and required features before an edit. Add
+`--workspace DIR` before `doctor` to inspect workspace structure without creating state. See
+[installation checks](INSTALLATION.md) for the result and exit-code contract.
 
 ## Project snapshots
 

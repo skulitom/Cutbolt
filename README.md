@@ -36,7 +36,7 @@ Sequential editing includes explicit insert, overwrite and ripple deletion, plus
 
 Explicit timeline gaps produce black video and silence, including in previews and queued renders. They can be split, trimmed, moved, inserted or overwritten through the same editing commands. Mixed-rate compressed video and audio-only sources use the declared conversion path before precise timeline trimming; first/last-frame and keyframe boundaries are covered by independent output checks.
 
-[Direct footage](docs/DIRECT_SOURCES.md) uses eligible H.264/HEVC 8-bit originals in sequential and placed-track previews and exports, with indexed frame order, exact audio normalization and content verification. Inspection returns the original asset ready for `media.add`; no converted video is created. The documented long-source performance gate and nested direct pictures remain open.
+[Direct footage](docs/DIRECT_SOURCES.md) uses eligible H.264/HEVC 8-bit originals in sequential and placed-track previews and exports, with indexed frame order, exact audio normalization and content verification. Inspection returns the original asset ready for `media.add`; no converted video is created. The documented long-source performance gate passes; nested direct pictures and later stages remain open.
 
 [Validated media conversion](docs/CONFORM.md) brings a bounded matrix of FFV1/PCM MKV, tagged BT.709 H.264/AAC MP4/MOV and PCM16 WAV into the reference timeline. It preserves source files, checks identities and decoded timestamps, and provides constant speed, reverse and freeze recipes with an explicit audio policy. Sources up to 16 GiB and outputs up to 30 minutes stream only the frames they need; reverse mappings use a bounded random-access window. Converted assets use ordinary saved-session editing and export.
 
@@ -86,11 +86,14 @@ Explicit timeline gaps produce black video and silence, including in previews an
 
 ## Run locally
 
+See [installation and setup checks](docs/INSTALLATION.md) for source installation and MCP setup.
+
 Requires Rust/Cargo with a C build toolchain for SQLite, Python 3 with the development packages in [the dependency ledger](docs/DEPENDENCIES.md) for verification, and separately installed FFmpeg/ffprobe on PATH. The tested environment is recorded in [verification/latest.json](verification/latest.json); dependency details are in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
 ```powershell
 cargo build --locked
 .\target\debug\cutbolt.exe --version
+.\target\debug\cutbolt.exe doctor
 .\target\debug\cutbolt.exe capabilities
 .\target\debug\cutbolt.exe examples/create-project.json
 python tools/verify.py                              # quick pre-commit check

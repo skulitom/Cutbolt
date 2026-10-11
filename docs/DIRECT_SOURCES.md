@@ -5,7 +5,8 @@ The source index, saved direct bindings and exact frame previews implement part 
 single-frame previews, placed-track base pictures, top-level transitions and cropped/faded
 overlays, together with exact sound in sequential/placed-track renders and range exports.
 Eligible files report `timeline.ready: true`, `timeline.direct: true` and
-`source_index.direct_decode_available: true`. Long-source performance and later stages remain open.
+`source_index.direct_decode_available: true`. The long-source preview/range gate passes as recorded
+below. Inclusive stage-1 verification and later stages remain open.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame
@@ -142,7 +143,20 @@ source. These are warm-cache measurements, not cold indexing latency. The curren
 index, including audio anchors, is 2,134,638 bytes for the 2,768,314,141-byte source. The original
 index-foundation measurement above used the earlier, smaller index schema. The reproducible
 driver is `tests/direct_long.py`; generated sources, frozen binaries, counted-tool helpers and
-raw reports stay external. The independent late-export comparison remains pending.
+raw reports stay external.
+
+The same source also passes the independent late-export proof: a queued H.264/AAC export of
+1190–1200 seconds seeks its sole original-video decoder to 1187.988888 seconds. Its counted
+commands perform no full original-video scan; exact audio comes from the verified AAC cache.
+Decoded RGB (1,866,240,000 bytes) and PCM (1,921,024 bytes, including identical encoder padding)
+match an independently produced full-source-conform reference export byte for byte. The final
+preview also equals reference frame 299, and the original file identity is unchanged.
+
+The first combined driver's assertion accidentally counted the encoded output's required
+verification scan as an original-source scan. The corrected source-only check reran the export
+proof after rechecking both frozen executable hashes and all ten recorded preview hashes;
+none of the preview timings was rerun or discarded. This completes the declared long-source
+performance gate. It does not substitute for the inclusive stage-1 regression/milestone run.
 
 Both open-GOP fixtures now span six GOPs (360 frames), so the near-end windows exercise later
 random-access points beyond initial preroll. Existing frame-digest oracles remain unchanged.

@@ -10,6 +10,10 @@ The ten foundational checks cover local commands, saved editing sessions, render
 
 ## Local background renders
 
+For installation and a read-only setup check before starting MCP, see
+[INSTALLATION.md](INSTALLATION.md). `cutbolt doctor` is a CLI command and does not enlarge the
+MCP catalog.
+
 Create an existing absolute local `job_root` outside the repository. It contains `jobs.sqlite3` and `worker.lock`, separate from the editing-session store. The queue migrates its own schema from version 1 to 2 transactionally; it does not migrate editing sessions. Do not delete or replace the lock file while workers run. Use trusted local storage with normal file locks, not network shares.
 
 | Command | Arguments besides `command` | Result |

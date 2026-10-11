@@ -152,7 +152,7 @@ if args.engine:
     source_engine = args.engine.resolve()
 else:
     command(["cargo", "build", "--locked"])
-    source_engine = ROOT / "target" / "debug" / ENGINE_NAME
+    source_engine = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "debug" / ENGINE_NAME
 # Fixtures run a private copy of the engine, so target/debug stays free to rebuild during verification.
 run_directory = Path(tempfile.mkdtemp(prefix="cutbolt-verify-run-"))
 engine_copy = run_directory / ENGINE_NAME
@@ -205,6 +205,7 @@ STAGES = [
      "results": {"integration": "verification.json", "agents": "agents/verification.json"}},
     fixture("direct_sources"),
     fixture("agent_costs"),
+    fixture("doctor"),
     fixture("native_timing", long=["--long-form"], check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
     fixture("image_sequences", long=["--long-form"], check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
     fixture("queue_recovery"),
@@ -673,6 +674,12 @@ report["passed"] += large_imports["passed"]
 report["passed"] += agent_ergonomics["passed"]
 report["passed"] += agent_costs["passed"]
 report["passed"] += direct_sources["passed"]
+report["passed"] += doctor["passed"]
+report["doctor_evidence"] = doctor
+report["passed"] += builtin_templates["passed"]
+report["builtin_templates_evidence"] = builtin_templates
+report["passed"] += fonts["passed"]
+report["fonts_evidence"] = fonts
 (ROOT / "verification").mkdir(exist_ok=True)
 (ROOT / "verification/latest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 print(command([sys.executable, "tools/progress.py"]).strip())

@@ -115,7 +115,8 @@ def gate_and_push(args):
 
     subprocess.run(["cargo", "build", "--locked"], cwd=ROOT, check=True)
     engine = STATE / "engines" / f"{run_id}-{ENGINE_NAME}"
-    shutil.copy2(ROOT / "target" / "debug" / ENGINE_NAME, engine)
+    build = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target")
+    shutil.copy2(build / "debug" / ENGINE_NAME, engine)
     report = STATE / "reports" / f"{run_id}-gate.json"
     device = ["--decode-device", str(args.decode_device)] if args.decode_device is not None else []
     gate = subprocess.run([sys.executable, "-X", "utf8", "tools/verify.py", "--gate", "--engine", str(engine), "--budget", str(args.budget),

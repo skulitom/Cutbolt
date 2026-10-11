@@ -6,10 +6,10 @@ use std::{
     path::PathBuf,
 };
 
-const USAGE: &str = "Usage: cutbolt --version | [--workspace DIR] [capabilities | mcp [--tools core|full] | request.json]";
+const USAGE: &str = "Usage: cutbolt --version | [--workspace DIR] [doctor | capabilities | mcp [--tools core|full] | request.json]";
 
 /// An optional leading `--workspace DIR`, else CUTBOLT_WORKSPACE.
-fn workspace(args: &mut Vec<OsString>) -> Result<Option<Workspace>> {
+fn workspace_path(args: &mut Vec<OsString>) -> Result<Option<PathBuf>> {
     let path = if args.first().is_some_and(|a| a == "--workspace") {
         if args.len() < 2 {
             return Err(error("INVALID_ARGUMENT", USAGE));
@@ -22,7 +22,7 @@ fn workspace(args: &mut Vec<OsString>) -> Result<Option<Workspace>> {
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
-    path.map(|p| Workspace::open(&p)).transpose()
+    Ok(path)
 }
 
 fn execute(args: &[OsString], workspace: Option<&Workspace>) -> Result<Value> {
@@ -91,7 +91,11 @@ fn main() {
         }
         return;
     }
-    let outcome = workspace(&mut args).and_then(|workspace| {
+    let outcome = workspace_path(&mut args).and_then(|path| {
+        if args.len() == 1 && args[0] == "doctor" {
+            return Ok(Some(cutbolt::doctor::inspect(path.as_deref())));
+        }
+        let workspace = path.map(|p| Workspace::open(&p)).transpose()?;
         // A workspace keeps verified source inspections beside its other engine state, unless the
         // environment names a cache already. Queue workers inherit the setting.
         if let Some(workspace) = &workspace
@@ -123,7 +127,12 @@ fn main() {
     });
     let (response, code) = match outcome {
         Ok(None) => return,
-        Ok(Some(result)) => (json!({"ok":true,"result":result}), 0),
+        Ok(Some(result)) => {
+            // Diagnostics succeeded even if setup needs attention. Keep the report available,
+            // and use a nonzero exit status so installation scripts can stop before rendering.
+            let failed = args.len() == 1 && args[0] == "doctor" && result["ready"] != true;
+            (json!({"ok":true,"result":result}), i32::from(failed))
+        }
         Err(error) if args.first().is_some_and(|a| a == "mcp") => {
             eprintln!("{}: {}", error.code, error.message);
             exit(1);

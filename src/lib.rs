@@ -21,6 +21,7 @@ pub mod cut_review;
 pub mod delivery;
 mod digest;
 pub mod direct;
+pub mod doctor;
 pub mod documents;
 pub mod duck;
 pub mod dynamics;

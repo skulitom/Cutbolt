@@ -1,5 +1,43 @@
 # Progress history
 
+## 11 October 2026: installation diagnostics and completed long-source proof
+
+Added the local `cutbolt doctor` CLI command. It reports the selected external FFmpeg/ffprobe
+versions, executable identities and required feature listings, compiled platform features, and
+optional existing-workspace structure. It creates no workspace state, checks ancestor links as
+well as final directories, and reports failures with repair guidance and exit status 1. It does
+not claim a render, GPU, optional-model, write-permission or database-integrity test. The MCP
+catalog stays at 18 core / 86 full tools. Source-install instructions now distinguish runtime
+requirements from development and optional dependencies.
+
+Five original diagnostic checks pass on Windows and Linux, including real tool identities,
+missing/failed/malformed tools, exact missing codec/muxer names, unchanged workspace contents,
+escaping state ancestors, and the compact MCP first command. Both platforms also installed the
+debug executable into a fresh external directory using `cargo install --path . --locked --debug`
+and passed the same five checks against that installed executable. These are local source-install
+checks with existing toolchains/media tools, not the clean-container binary-release gate. Rust
+tests pass (229 Windows / 228 Linux), with format/lint and the Windows agent-ergonomics regression.
+The targeted doctor verifier passes while using an isolated Cargo target directory. Both verifier
+and ship now select that directory's executable instead of accidentally copying an older default
+build. Thorough reports now retain doctor, built-in-template and font-discovery results, whose
+fixtures are separate from editing points.
+
+The frozen long-source proof now passes in full: five alternating after-build previews all meet
+the predeclared ten-second limit (median 5.073 seconds, versus 12.298 before). A queued ten-second
+export at 1190 seconds seeks the original-video decoder to 1187.988888 seconds without a full
+original-video scan; decoded RGB and PCM equal the explicit full-source-conform reference. The
+original identity and all ten before/after preview digests remain unchanged. The driver's first
+export assertion mistakenly included the encoded output's required verification scan. Its
+corrected source-only check reran the export proof after checking the frozen binaries and preview
+digests, without retiming or discarding preview samples. Details are in DIRECT_SOURCES.md; the
+retained report is `footage-long-exact/ws/remeasure/direct-preview-hashes/runs/20261011T222440/verification-recovered.json`
+under the external `plan-fixes-20261011` data root.
+
+The inclusive full quick run of c108fd9 and deferred shipping runs still need their final results
+checked. A milestone thorough run remains required before refreshing progress evidence or
+declaring stage 1 complete. The 4 October full evidence remains dated and unchanged. No release
+tag, comparative lead, roadmap adoption, v2 points or completion of either full plan is claimed.
+
 ## 11 October 2026: evidence follow-up and installation-first priorities
 
 The b910d49 standalone recording rerun passed in 43 seconds with its original timestamp-gap
