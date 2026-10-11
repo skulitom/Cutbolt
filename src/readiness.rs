@@ -4,7 +4,7 @@ use crate::{media, render, time::Time};
 use serde_json::{Value, json};
 use std::path::Path;
 
-/// Sequential timeline rates; placed tracks use 25 fps.
+/// Exact frame rates for both sequential timelines and placed tracks.
 const RATES: [(u64, u64); 8] = [
     (24, 1),
     (25, 1),
@@ -20,6 +20,51 @@ const RATES: [(u64, u64); 8] = [
 const CONFORM_FRAMES: u64 = 45_000;
 /// Audio-only media.conform output: at most one hour at 48 kHz.
 const AUDIO_ONLY_SAMPLES: u64 = 48_000 * 3600;
+
+/// Shared inspection/preparation decision. An indexed asset binds the original's complete
+/// identity and index key; the reference profile retains its strict packet/PCM checks.
+pub(crate) fn inspect(
+    path: &Path,
+    identity: &Value,
+    metadata: &Value,
+) -> crate::Result<(Value, Option<Value>)> {
+    let relative = identity["path"].as_str().expect("identity path");
+    let mut readiness = timeline(path, relative, metadata);
+    readiness["direct"] = json!(false);
+    let candidate = metadata["streams"].as_array().and_then(|streams| {
+        streams.iter().find(|s| {
+            s["codec_type"] == "video"
+                && matches!(s["codec_name"].as_str(), Some("h264" | "hevc" | "prores"))
+        })
+    });
+    let Some(video) = candidate else {
+        return Ok((readiness, None));
+    };
+    let source = crate::registry::Identity {
+        bytes: identity["bytes"].as_u64().expect("identity bytes"),
+        sha256: identity["sha256"].as_str().expect("identity hash").into(),
+    };
+    let mut index = match crate::source_index::inspect(path, source.clone(), metadata) {
+        Ok(index) => index,
+        Err(failure) => {
+            json!({"eligible":false,"direct":false,"direct_decode_available":false,"error":failure})
+        }
+    };
+    if index["eligible"] == true {
+        crate::registry::check_file(path, relative, &source, crate::registry::RELINK_ASSET)?;
+        let duration = index["audio_policy"]["video_duration"].clone();
+        let asset = json!({"id":asset_id(relative),"path":relative,"duration":duration,
+            "identity":source,"decode":{"mode":"direct","index":index["key"]}});
+        readiness = json!({"ready":true,"direct":true,"profile":"indexed",
+            "width":video["width"],"height":video["height"],"frame_rate":index["frame_rate"],
+            "frames":index["frames"],"duration":duration,"alpha":false,"asset":asset,
+            "audio_policy":index["audio_policy"],
+            "use":"sequential timelines and top-level video/audio tracks with this size and frame rate"});
+        index["asset"] = asset;
+        index["frame_preview_available"] = json!(true);
+    }
+    Ok((readiness, Some(index)))
+}
 
 /// Timeline readiness of `path`, whose metadata was already probed; `relative` is its path under
 /// `input_root`. Ready sources are checked by the renderer's own packet-timed source inspection.
@@ -209,7 +254,7 @@ pub fn prepare(
         Ok(json!(follow(&transcripts, recipe, receipt, output_root)?))
     };
     let metadata = media::probe(&path)?;
-    let readiness = timeline(&path, &relative, &metadata);
+    let (readiness, _) = inspect(&path, &identity, &metadata)?;
     let fits = |r: &Value| match project {
         None => true,
         Some(p) => {

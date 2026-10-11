@@ -16,7 +16,7 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
-Compressed H.264/HEVC/ProRes inspection now includes a cached presented-frame and decoded-audio index. See [the source-index contract](DIRECT_SOURCES.md) for qualification reasons and bounds. Direct playback remains in development; the index does not change timeline readiness.
+Compressed-source inspection includes a cached presented-frame and decoded-audio index. Eligible H.264/HEVC originals report `timeline.ready: true` and `direct: true`, with a bound asset for `media.add`; `media.prepare` returns them without conversion. See [direct footage](DIRECT_SOURCES.md) for the exact profiles, audio policy, source preservation and remaining long-source/nested-picture limits.
 
 ## Project snapshots
 
@@ -28,7 +28,7 @@ The [transcript editing contract](TRANSCRIPTS.md) adds `transcript.inspect`, `tr
 
 | Operation | Additional fields | Meaning |
 | --- | --- | --- |
-| `media.add` | `asset`: `id`, `path`, `duration`; optional `input_root` | Declare an external source; an explicit root binds an eligible compressed original for [direct frame previews](DIRECT_SOURCES.md) |
+| `media.add` | `asset`: `id`, `path`, `duration`; optional `input_root` | Declare an external source; an explicit root binds an eligible compressed original for [direct previews and exports](DIRECT_SOURCES.md) |
 | `media.index` | `asset_id`, `input_root` | Verify the unchanged bound original and refresh its direct index; diffable and undoable |
 | `clip.append` | `clip`: `id`, `asset_id`, `source_in`, `duration` | Append a source interval |
 | `clip.trim` | `clip_id`, `source_in`, `duration` | Replace a clip's selected source interval |

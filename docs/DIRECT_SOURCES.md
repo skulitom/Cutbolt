@@ -4,8 +4,8 @@ The source index, saved direct bindings and exact frame previews implement part 
 [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md). Original compressed clips can now supply
 single-frame previews, placed-track base pictures, top-level transitions and cropped/faded
 overlays, together with exact sound in sequential/placed-track renders and range exports.
-`timeline.ready` and `source_index.direct_decode_available` remain false pending the shared
-readiness gate and the remaining stage-1 acceptance work.
+Eligible files report `timeline.ready: true`, `timeline.direct: true` and
+`source_index.direct_decode_available: true`. Long-source performance and later stages remain open.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame
@@ -96,7 +96,7 @@ The preliminary check can reuse an unchanged source's verified hash as described
 fully hashes the source before returning success. Callback output is provisional until `read`
 succeeds; a caller must delay publication accordingly. The API creates no intermediate media and
 does not publish files. Saved bindings, previews and full timeline renders/exports use this
-library. The general CLI/MCP readiness flags remain false pending the shared readiness gate.
+library. Inspection and explicit preparation report when the original needs no conversion.
 
 The 26 original short fixtures include all eight native rates, full-range YUV and both H.264 and
 HEVC open GOPs. For each of the 21 qualifying sources, the fixture compares nine decoded windows
@@ -171,9 +171,8 @@ complete decode with those same index checks and retain no PCM on disk.
 Receipts distinguish `silence`, `verified_seek`, `canonical_cache` and `canonical_decode`, report
 sought seconds where applicable, native decoded samples, matched seek blocks, cached chunks and
 rebuilt chunks. `cache.inspect`/`cache.prune` accept the explicit audio sub-cache root. A prune or
-source/tool/engine change cannot authorize stale PCM reuse. This library work does not yet make
-direct sources ready for saved timeline rendering; the stage-1 integration and long-source
-performance gates remain open.
+source/tool/engine change cannot authorize stale PCM reuse. These audio primitives supply the
+renderer windows described below. The long-source performance gate remains open.
 
 Windows and Linux pass all 189 audio windows across the 21 qualifying synthetic sources against
 complete explicit-conform PCM, including offset/short/long audio and 44.1 kHz mono. Tests also cover
@@ -275,4 +274,20 @@ GOP boundaries, gain/fades, range previews, reference ranges, audio-only ranges 
 ranges. Additional H.264 cases cover an internal gap, simultaneous picture/audio transitions
 and queued export with request replay. Each process must remove its own temporary audio inputs,
 and original identities must remain unchanged. These exactness checks do not claim a completed
-readiness/long-source gate or support for nested direct pictures.
+long-source gate or support for nested direct pictures.
+
+## Readiness and accepted profiles
+
+`media.inspect` and `media.prepare` share the same readiness decision. Eligible compressed files
+return `ready: true`, `direct: true`, `profile: "indexed"`, exact dimensions/rate/duration, the
+audio policy, and the bound original asset in their timeline/readiness object. `media.prepare`
+returns `converted: false` and that asset; it creates no output file, including when given an
+output filename. Matching transcript documents remain attached unchanged. Files that do not
+qualify keep explicit reasons and the existing preparation guidance.
+
+Renders and previews use two explicit source profiles through one inspection gate. The
+reference profile keeps the existing FFV1/PCM checks and RGB graph. The indexed profile checks
+the saved original identity, index key and project dimensions/rate, and returns its native-YUV
+reader alongside the source receipt. A compressed file without its `decode` binding cannot
+enter the reference profile. This keeps indexed conversion and exact audio policy coupled to
+the decoder that implements them.

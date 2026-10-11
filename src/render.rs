@@ -40,7 +40,7 @@ pub struct Plan {
         serialize_with = "chunk_summary"
     )]
     pub chunks: Vec<Plan>,
-    /// Gain streams and limited mixes this graph reads, written when it runs.
+    /// Gain streams, direct audio windows and limited mixes, written when the graph runs.
     #[serde(skip)]
     pub(crate) generated: Vec<Generated>,
     /// When top-level `alpha_over` clips show: the engine compositor whose frames `arguments`
@@ -512,20 +512,77 @@ fn parameters(width: u32, height: u32, rate: Time, alpha: bool, timing: Timing) 
 }
 /// A source with its video pixel format, or why its inspection failed.
 pub(crate) type Inspected = Result<(Source, String)>;
+/// Acceptance and decoding are paired: indexed YUV must never enter a native RGB graph.
+enum SourceProfile<'a> {
+    Reference {
+        path: &'a Path,
+        check: Check,
+    },
+    Indexed {
+        project: &'a Project,
+        asset: &'a crate::model::Asset,
+        root: &'a Path,
+    },
+}
+enum AcceptedSource {
+    Reference(Source, String),
+    Indexed(Source, std::sync::Arc<crate::direct::Video>),
+}
+fn inspect_source_with(
+    profile: SourceProfile<'_>,
+    control: &dyn media::Control,
+) -> Result<AcceptedSource> {
+    match profile {
+        SourceProfile::Reference { path, check } => {
+            let (source, format) = inspect_reference_with(
+                path,
+                check.width,
+                check.height,
+                check.rate,
+                control,
+                check.alpha,
+                check.timing,
+            )?;
+            Ok(AcceptedSource::Reference(source, format))
+        }
+        SourceProfile::Indexed {
+            project,
+            asset,
+            root,
+        } => {
+            let (video, source) = crate::direct::bound_video(project, asset, root, control)?;
+            Ok(AcceptedSource::Indexed(source, std::sync::Arc::new(video)))
+        }
+    }
+}
+pub(crate) fn inspect_indexed(
+    project: &Project,
+    asset: &crate::model::Asset,
+    root: &Path,
+    control: &dyn media::Control,
+) -> Result<(Source, std::sync::Arc<crate::direct::Video>)> {
+    match inspect_source_with(
+        SourceProfile::Indexed {
+            project,
+            asset,
+            root,
+        },
+        control,
+    )? {
+        AcceptedSource::Indexed(source, video) => Ok((source, video)),
+        AcceptedSource::Reference(..) => unreachable!("requested indexed profile"),
+    }
+}
 /// Inspect as `check` says.
 pub(crate) fn inspect_checked(
     path: &Path,
     check: Check,
     control: &dyn media::Control,
 ) -> Inspected {
-    let Check {
-        width,
-        height,
-        rate,
-        alpha,
-        timing,
-    } = check;
-    inspect_source_with(path, width, height, rate, control, alpha, timing)
+    match inspect_source_with(SourceProfile::Reference { path, check }, control)? {
+        AcceptedSource::Reference(source, format) => Ok((source, format)),
+        AcceptedSource::Indexed(..) => unreachable!("requested reference profile"),
+    }
 }
 /// Inspect several sources: largest file first and up to `inspection_cache::LANES` at a time
 /// when `control` can be shared between threads, otherwise one after another. A cold timeline
@@ -581,8 +638,17 @@ pub(crate) fn inspect_overlay(
     rate: Time,
     control: &dyn media::Control,
 ) -> Result<(Source, bool)> {
-    let (source, pix_fmt) =
-        inspect_source_with(path, width, height, rate, control, true, Timing::Decoded)?;
+    let (source, pix_fmt) = inspect_checked(
+        path,
+        Check {
+            width,
+            height,
+            rate,
+            alpha: true,
+            timing: Timing::Decoded,
+        },
+        control,
+    )?;
     Ok((source, pix_fmt == "bgra"))
 }
 fn inspect_source_at(
@@ -594,7 +660,18 @@ fn inspect_source_at(
     allow_alpha: bool,
     timing: Timing,
 ) -> Result<Source> {
-    inspect_source_with(path, width, height, rate, control, allow_alpha, timing).map(|(s, _)| s)
+    inspect_checked(
+        path,
+        Check {
+            width,
+            height,
+            rate,
+            alpha: allow_alpha,
+            timing,
+        },
+        control,
+    )
+    .map(|(s, _)| s)
 }
 /// One packet listing supplies the metadata, FFV1 video timing and exact PCM16 sample counts without
 /// decoding; strict (`Decoded`) inspection then also decodes every video frame. Metadata is validated
@@ -603,7 +680,7 @@ fn inspect_source_at(
 /// hashed, and identical bytes with identical parameters, ffprobe and engine skip the probe.
 /// A pass also records the other parameters it proves (see `implied`).
 /// Returns the video pixel format with the source.
-fn inspect_source_with(
+fn inspect_reference_with(
     path: &Path,
     width: u32,
     height: u32,

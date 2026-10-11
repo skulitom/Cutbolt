@@ -181,8 +181,8 @@ pub(crate) fn read_frame(
     }
     let path = media::project_file(Path::new(&asset.path), input_root)?;
     let (source, direct) = if asset.decode.is_some() {
-        let (video, source) =
-            crate::direct::bound_video(project, asset, input_root, &media::Uncontrolled)?;
+        let (source, video) =
+            render::inspect_indexed(project, asset, input_root, &media::Uncontrolled)?;
         (source, Some(video))
     } else {
         (

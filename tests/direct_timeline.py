@@ -31,6 +31,12 @@ def verify(root, case, asset, client):
         assert process.returncode == 0 and response['ok'], (case['name'], command, response)
         return response['result']
 
+    unused = out/(case['name']+'-unneeded-conversion.mkv')
+    prepared = call('media.prepare',path=str(root/source['path']),input_root=str(root),
+                    output_root=str(out),output=str(unused))
+    assert not prepared['converted'] and prepared['readiness']['ready'] and prepared['readiness']['direct']
+    assert prepared['asset'] == source and not unused.exists(), prepared
+
     # These windows cross a keyframe and start mid-GOP. Multiples of five frames are
     # also exact 48 kHz sample positions at all eight accepted fractional/native rates.
     project = dict(schema_version=1, id='direct-timeline', revision=0,

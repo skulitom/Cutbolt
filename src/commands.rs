@@ -2175,44 +2175,11 @@ pub fn handle(request: Request) -> Result<Value> {
             let path = media::allowed_file(&path, &input_root)?;
             let identity = crate::identity::relative(&path, &input_root)?;
             let metadata = media::probe(&path)?;
-            let relative = identity["path"].as_str().expect("identity path");
-            let timeline = crate::readiness::timeline(&path, relative, &metadata);
+            let (timeline, index) = crate::readiness::inspect(&path, &identity, &metadata)?;
             let mut result =
                 json!({"path":path,"identity":identity,"timeline":timeline,"metadata":metadata});
-            if metadata["streams"].as_array().is_some_and(|streams| {
-                streams.iter().any(|s| {
-                    s["codec_type"] == "video"
-                        && matches!(s["codec_name"].as_str(), Some("h264" | "hevc" | "prores"))
-                })
-            }) {
-                let source = crate::registry::Identity {
-                    bytes: identity["bytes"].as_u64().expect("identity bytes"),
-                    sha256: identity["sha256"].as_str().expect("identity hash").into(),
-                };
-                result["source_index"] = match crate::source_index::inspect(
-                    &path,
-                    source.clone(),
-                    &metadata,
-                ) {
-                    Ok(index) => index,
-                    Err(failure) => {
-                        json!({"eligible":false,"direct_decode_available":false,"error":failure})
-                    }
-                };
-                if result["source_index"]["eligible"] == true {
-                    crate::registry::check_file(
-                        &path,
-                        relative,
-                        &source,
-                        crate::registry::RELINK_ASSET,
-                    )?;
-                    let index = &result["source_index"];
-                    let duration = index["audio_policy"]["video_duration"].clone();
-                    let asset = json!({"id":crate::readiness::asset_id(relative),"path":relative,"duration":duration,
-                        "identity":source,"decode":{"mode":"direct","index":index["key"]}});
-                    result["source_index"]["asset"] = asset;
-                    result["source_index"]["frame_preview_available"] = json!(true);
-                }
+            if let Some(index) = index {
+                result["source_index"] = index;
             }
             Ok(result)
         }
@@ -2311,7 +2278,7 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
         .map(rate)
         .collect();
     let essentials = [
-        "Timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio at the project size (the reference profile); convert other media with media.conform into editing assets.".to_owned(),
+        "Timelines accept the strict FFV1/PCM reference profile and bound indexed H.264/HEVC 8-bit originals at the project size/rate. media.inspect returns eligible original assets; media.prepare converts supported files that need preparation.".to_owned(),
         format!(
             "Timelines (sequential or placed tracks) run at {} fps; scenes, captions and H.264 delivery follow the timeline's rate, while proxies and camera groups stay at 25 fps.",
             rates.join(", ")

@@ -1,5 +1,38 @@
 # Progress history
 
+## 11 October 2026: shared indexed-source gate and truthful readiness
+
+The renderer's source gate now has explicit Reference and Indexed profiles. Native callers
+retain the existing FFV1/RGB/PCM validator and graph; indexed callers receive the checked
+original plus its native-YUV reader. Frame previews and track renders use that gate. A
+compressed file without its saved decode binding still fails the reference profile.
+
+media.inspect and media.prepare share a readiness decision. Eligible originals return ready,
+direct and indexed-profile metadata with exact duration/rate/size, audio policy, original
+identity and index-bound asset. Preparation returns converted:false and creates no output
+file, including with a supplied filename. Nonmatching project rates/sizes still take the
+explicit preparation path. The agent instructions and capability summary now describe both
+profiles; existing FFV1 restrictions and unsupported-source reasons remain in place.
+
+The conform fixture initially expected an eligible fractional-rate original to be converted.
+It now verifies unchanged-original/no-output preparation, while retaining exact explicit-conform
+comparison for preparation to a different project rate. Final conform, integration and
+agent_costs fixtures pass on Windows (134 seconds) and Linux (54 seconds). Final Rust tests
+pass 228/227 respectively; formatting and Windows warning-free lint pass. The final Windows
+H.264 readiness smoke passes all 11 comparisons, including exact RGB/PCM, gaps, gain/fades,
+audio/video transitions, range and audio-only delivery, queued export replay and source/scratch
+preservation. Linux's preceding full audio/video checkpoint passed all nine selected fixtures,
+including all 21 eligible source profiles, in 615 seconds. The broader Windows audio/video run
+and the expanded readiness direct_sources runs remain in progress and must be checked after
+this commit; the earlier conform expectation failure is superseded by the corrected fixture.
+
+Catalogs remain 18 core tools (21,262 bytes; 21,104 in a workspace) and 86 full tools. Scripted
+workflow calls remain 15/6/12/8/8 with zero failed calls or schema lookups. Windows received
+wire bytes are 209539/46618/62675/40809/185670; these are not token counts or fresh-agent trials.
+No budgets were relaxed. Long-source latency/identity-cost acceptance and later footage and
+agent-cost stages remain open. No v2 scope or points are adopted. Thorough evidence and
+PROGRESS.md remain unchanged and stale for these new capabilities.
+
 ## 11 October 2026: exact audio windows in original-footage timelines
 
 Bound compressed originals now supply exact sound as well as pictures to sequential and

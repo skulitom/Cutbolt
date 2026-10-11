@@ -230,12 +230,17 @@ def run(root):
     # An earlier conversion is timeline-ready at 25 fps and fits p25, so it comes back unchanged.
     ready=request({"command":"media.prepare","path":str(output/"rgb25.mkv"),"input_root":str(output),"output_root":str(output),"project":p25})
     assert ready["converted"] is False and ready["asset"]["path"]=="rgb25.mkv" and ready["asset"]["duration"]==time(1),ready
-    for name,label,project,rate in [("fractional.mp4","prepared-own",None,time(30000,1001)),("rgb25.mkv","prepared-30",p30,time(30))]:
+    for name,label,project,rate in [("fractional.mp4","prepared-25",p25,time(25)),("rgb25.mkv","prepared-30",p30,time(30))]:
         prepared=prepare(name,label,project)
         assert prepared["converted"] and prepared["frame_rate"]==rate and prepared["recipe"]["width"]==W,prepared
         again=render(prepared["recipe"],label+"-explicit")
         assert frame_digests(output/(label+".mkv"))==frame_digests(output/(label+"-explicit.mkv")) and again["frames"]==prepared["frames"]
-    assert prepare("fractional.mp4")["converted"] and (output/"fractional-prepared.mkv").exists()
+    direct = prepare("fractional.mp4","prepared-own")
+    assert not direct['converted'] and direct['readiness']['direct'] and direct['readiness']['frame_rate']==time(30000,1001),direct
+    assert direct['asset']['decode']['mode']=='direct' and direct['asset']['path']=='fractional.mp4'
+    assert direct['asset']['identity']=={k:v for k,v in identity(sources/'fractional.mp4',sources).items() if k!='path'}
+    assert not (output/'prepared-own.mkv').exists()
+    assert prepare('fractional.mp4')['asset']==direct['asset'] and not (output/'fractional-prepared.mkv').exists()
     # A 48 kHz stereo PCM16 WAV is an audio-only asset as it is, bound to its content; another PCM16
     # WAV is resampled into <id>-prepared.wav, with or without a project. No picture is made.
     ready_wav=prepare("audio-48000-2.wav")

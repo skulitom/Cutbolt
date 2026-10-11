@@ -59,7 +59,7 @@ struct Graph<'a> {
     prefetched: Vec<(PathBuf, render::Check, render::Inspected)>,
     /// Inputs so far, media and generated gain streams alike.
     inputs: usize,
-    /// Gain streams for clips with gain curves, written when the graph runs.
+    /// Direct audio windows, gain streams and limited mixes written when the graph runs.
     generated: Vec<render::Generated>,
     /// Distinguishes this graph's generated file names.
     nonce: u128,
@@ -183,10 +183,9 @@ impl<'a> Graph<'a> {
                 .expect("validated asset");
             let path = media::project_file(Path::new(&asset.path), self.root)?;
             let source = if asset.decode.is_some() {
-                let (video, source) =
-                    crate::direct::bound_video(self.project, asset, self.root, self.control)?;
-                self.indexed
-                    .insert(asset.id.clone(), std::sync::Arc::new(video));
+                let (source, video) =
+                    render::inspect_indexed(self.project, asset, self.root, self.control)?;
+                self.indexed.insert(asset.id.clone(), video);
                 if overlay {
                     self.overlay_assets.insert(asset.id.clone());
                 }

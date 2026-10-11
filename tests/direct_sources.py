@@ -61,7 +61,8 @@ def verify(root, manifest, long=False):
         assert process.returncode == 0 and result['ok'], result
         indexed = result['result']['source_index']
         assert 'error' not in indexed, indexed
-        assert indexed['direct_decode_available'] is False and result['result']['timeline']['ready'] is False
+        assert indexed['direct_decode_available'] == indexed['direct'] == indexed['eligible']
+        assert result['result']['timeline']['ready'] == indexed['eligible']
         return indexed
     for name, case in manifest["cases"].items():
         path = root / "sources" / case["path"]
@@ -139,8 +140,9 @@ def verify(root, manifest, long=False):
     decoded_ranges = direct_decode.verify(root, manifest, results)
     decoded_audio = direct_audio.verify(root, manifest, results)
     bindings = direct_bindings.verify(root, manifest, results)
-    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference", "direct_sources.library_native_yuv_exact_sought_frames", "direct_sources.library_sample_exact_audio_ranges", "direct_sources.saved_bindings_exact_frame_previews", "direct_sources.exact_composited_original_pictures", "direct_sources.composition_decoder_failure_cleanup", "direct_sources.exact_original_av_timelines_and_exports"], "stage": "indexed_av_library",
-              "direct_decode_verified": False, "sources_preserved": True, "cases": results,
+    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference", "direct_sources.library_native_yuv_exact_sought_frames", "direct_sources.library_sample_exact_audio_ranges", "direct_sources.saved_bindings_exact_frame_previews", "direct_sources.exact_composited_original_pictures", "direct_sources.composition_decoder_failure_cleanup", "direct_sources.exact_original_av_timelines_and_exports"], "stage": "indexed_timeline",
+              "direct_decode_verified": True, "stage_one_complete": False, "long_source_latency_verified": False,
+              "sources_preserved": True, "cases": results,
               "tools": manifest["tools"], "long_source_generated": long, "conform_references":conformed,
               "library_video_ranges":decoded_ranges,"library_audio_ranges":decoded_audio,"saved_frame_previews":bindings}
     (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

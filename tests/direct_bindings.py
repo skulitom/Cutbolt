@@ -33,10 +33,11 @@ def verify(root, manifest, indexed):
                 continue
             path = root/'sources'/case['path']
             inspected = client.call('media.inspect', path=str(path), input_root=str(root/'sources'))
-            assert not inspected['timeline']['ready']  # full timeline rendering still pending
+            assert inspected['timeline']['ready'] and inspected['timeline']['direct']
             source = inspected['source_index']
-            assert source['frame_preview_available'] and not source['direct_decode_available']
+            assert source['frame_preview_available'] and source['direct_decode_available'] and source['direct']
             asset = source['asset']
+            assert inspected['timeline']['asset'] == asset
             assert asset['identity'] == identity(path)
             assert asset['decode'] == {'mode':'direct', 'index':source['key']}
             rate, count = F(case['rate']), source['frames']
@@ -109,6 +110,13 @@ def lifecycle(client, root, project, cache, output):
     wrong['assets'][0]['duration'] = time(100)
     client.call('preview.frame', expected_error='INVALID_MEDIA', project=wrong,
         input_root=str(sources), output_root=str(output), output=str(denied), time=time(0))
+    # Index acceptance is explicit: a compressed file cannot sneak through the unchanged
+    # reference profile merely by omitting its binding.
+    unbound = deepcopy(project)
+    unbound['assets'][0].pop('decode')
+    client.call('preview.frame', expected_error='UNSUPPORTED_MEDIA', project=unbound,
+        input_root=str(sources), output_root=str(output), output=str(denied), time=time(0))
+    assert not denied.exists()
     # A declared working transfer reaches the converter; compare it with the unchanged f64 conform path.
     srgb_reference = output/'srgb-reference.mkv'
     recipe = {'schema_version':1,'id':'srgb-reference','source':{'file':{'path':asset['path'],**asset['identity']},

@@ -1,5 +1,5 @@
-//! Compressed-source inspection. This index describes decoded presentation order; it does not
-//! yet enable the timeline's direct decoder. Cache files and decoded PCM stay outside projects.
+//! Compressed-source inspection and direct decoding in presentation order.
+//! Cache files and decoded PCM stay outside projects.
 use crate::{
     Result, error, inspection_cache,
     media::{self, Control},
@@ -718,7 +718,7 @@ impl Loaded {
         "time_base":index.time_base,"frame_rate":index.rate,"keyframes":keys.len(),"maximum_gop_frames":longest_gop,
         "b_frames":index.frames.iter().filter(|f| f.2 == b'B').count(),"audio":audio_policy,"audio_policy":index.audio_policy()?,
         "square_pixels_assumed":!matches!(index.video["sample_aspect_ratio"].as_str(),Some("1:1")),
-        "direct_decode_available":false}),
+        "direct":index.reasons.is_empty(),"direct_decode_available":index.reasons.is_empty()}),
         )
     }
 }
