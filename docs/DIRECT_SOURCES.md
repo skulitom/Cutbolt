@@ -1,6 +1,6 @@
 # Compressed-source inspection
 
-The source index is the first part of [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md).
+The source index and video library implement part of [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md).
 It does **not yet enable direct timeline playback**. Continue to use the existing preparation
 workflow; `timeline.ready` and `source_index.direct_decode_available` remain false for these files.
 
@@ -8,7 +8,7 @@ workflow; `timeline.ready` and `source_index.direct_decode_available` remain fal
 order, rather than treating compressed packets as frames. The summary includes the presented frame
 count, first timestamp and stream time base, native frame rate when detected, keyframe count,
 maximum GOP length, B-frame count, qualification reasons and cache key/hit/bytes. `eligible` reports
-qualification for the planned decoder, not current render support. An indexing error is nested in
+qualification for the indexed decoder, not current timeline support. An indexing error is nested in
 this summary, leaving the metadata inspection available.
 
 One incremental ffprobe pass reads frame timestamps, key flags, picture types and decoded format
@@ -53,7 +53,7 @@ probing. These are storage/correctness observations, not a preview or seek-perfo
 
 ## Exact color conversion foundation
 
-The library's `color::Yuv420Converter` provides the planned direct decoder's exact lookup path.
+The library's `color::Yuv420Converter` provides the indexed decoder's exact lookup path.
 It converts native planar 8-bit 4:2:0 to packed RGB with the same nearest-2x2 chroma interpretation,
 BT.709 matrix, full/limited range, clipping and rounding as `color::Input::convert`. The f64
 converter remains unchanged and is still used by explicit conform. This component is not yet wired
@@ -70,3 +70,33 @@ The ordinary Rust unit suite exhaustively compares every table entry with the un
 converter for all eight range/input-transfer/output-transfer declarations on Windows and Linux.
 A separate planar 4:2:0 frame test checks layout/chroma addressing, bounds and invalid buffers.
 This proves numerical equality; renderer wiring and measured preview performance remain open.
+
+## Indexed video library
+
+`direct::Video::open(input_root, identity, control)` opens a pinned relative source using its cached
+presentation index. `read(first, count, output_transfer, control, callback)` streams packed RGB24
+frames to the callback with their source frame indices. It retains at most one native YUV frame
+and one RGB frame, plus the index and shared color table. Dimensions are limited to 4096 per axis
+and 8,000,000 pixels. Empty, overflowing and out-of-source ranges fail before a decoder starts.
+
+The decoder preserves native `yuv420p` or `yuvj420p`, disables autorotation, retains the source's
+absolute timestamps and trims in the index's integer time base. Seeking uses the existing
+one-third-frame margin with the signed first-video timestamp added before microsecond rounding.
+B pictures conservatively require a preceding GOP as preroll, covering open-GOP references. The
+receipt records the index key, requested range, selected seek frame and actual seek seconds. The
+decoder must end successfully with exactly the expected number of frames; no frame-count output
+limit hides extra frames. Its raw bytes pass through the exact Rust table, never FFmpeg RGB scaling.
+
+The source is fully hashed before and after each read. Callback output is provisional until `read`
+succeeds; a caller must delay publication accordingly. The API creates no intermediate media and
+does not publish files. Approved metadata reuse is still pending. Audio decoding, saved direct
+asset bindings and timeline/render/preview/export integration are also pending; the video library
+does not change the CLI/MCP readiness flags.
+
+The 26 original short fixtures include all eight native rates, full-range YUV and both H.264 and
+HEVC open GOPs. For each of the 21 qualifying sources, the fixture compares nine decoded windows
+with full explicit conform RGB, including first/key/B/last frames, a cut across a GOP and the whole
+source. It inspects actual decoder arguments, exercises invalid ranges, and checks that sources
+changed before or during reading cannot return success. The explicit conform reference also
+checks every RGB byte and PCM sample against independent arithmetic. These are correctness checks;
+long-source seek latency and direct timeline acceptance remain unverified.

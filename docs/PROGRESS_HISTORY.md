@@ -1,5 +1,30 @@
 # Progress history
 
+## 11 October 2026: indexed native video reads and exact GOP seeking
+
+The public `direct::Video` library now opens pinned H.264/HEVC sources under an explicit input
+root and streams exact presentation-order RGB ranges without intermediate media. It reuses the
+compressed source index, retains absolute timestamps through the decoder, trims in native integer
+PTS and converts native YUV420/YUVJ420 in Rust with the verified table. Signed-origin seeking uses
+the existing third-frame margin; B pictures conservatively retain a preceding GOP. Reads require
+an exact frame count and clean decoder exit, reject invalid ranges, and fully hash the source
+before and after decoding. Callback output remains provisional until success. See
+[DIRECT_SOURCES.md](DIRECT_SOURCES.md) for the library contract and limits.
+
+The original fixture generator now has 26 short sources: all eight native frame rates, full-range
+YUV and open GOPs in H.264 and HEVC are included. Every one of 21 qualifying sources passes nine
+RGB range comparisons against full explicit conform (189 windows), including first/key/B/last
+frames, a cross-GOP range and the whole source. The independent float64/Fraction reference still
+checks all RGB bytes and PCM samples of conform. Five unsupported profiles reject explicitly;
+source mutations before and during a library read return MEDIA_CHANGED. Actual decoder arguments
+prove native YUV output and late-range input seeking. No long-source latency claim is made.
+
+Windows/Linux pass 220/219 Rust tests, formatting and lint, plus direct_sources and unchanged
+native_timing. The preceding e2fe6d6 background run completed all 44 deferred fixtures successfully.
+This is a stage-1 library increment: direct audio, saved asset binding, timeline integration and
+approved metadata hash reuse remain pending. CLI/MCP direct readiness is still false. No points,
+scope change, v2 baseline adoption or new thorough evidence; PROGRESS.md retains older evidence.
+
 ## 11 October 2026: explicit compressed-source clock and audio reference
 
 Explicit SDR conform now accepts H.264/HEVC Main 8-bit YUV420 in MP4/MOV/MKV and AAC, PCM,

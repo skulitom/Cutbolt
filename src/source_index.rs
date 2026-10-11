@@ -558,7 +558,23 @@ fn cache_write(path: &Path, key: &str, index: &Index) -> Result<()> {
 /// Source identity must be freshly verified by the calling inspection. Both decoder builds and
 /// the engine producer participate in the key; indexes never enter the project JSON.
 pub(crate) fn inspect(path: &Path, source: Identity, metadata: &Value) -> Result<Value> {
-    let control = &media::Uncontrolled;
+    load(path, source, metadata, &media::Uncontrolled)?.summary()
+}
+
+pub(crate) struct Loaded {
+    pub key: String,
+    pub index: Index,
+    cache_hit: bool,
+    cache_bytes: Option<u64>,
+}
+
+pub(crate) fn load(
+    path: &Path,
+    source: Identity,
+    metadata: &Value,
+    control: &dyn Control,
+) -> Result<Loaded> {
+    control.check()?;
     source.validate()?;
     let mut tools = Vec::new();
     for name in ["ffprobe", "ffmpeg"] {
@@ -586,31 +602,43 @@ pub(crate) fn inspect(path: &Path, source: Identity, metadata: &Value) -> Result
             index
         }
     };
-    let keys: Vec<_> = index
-        .frames
-        .iter()
-        .enumerate()
-        .filter_map(|(i, f)| f.1.then_some(i))
-        .collect();
-    let longest_gop = keys
-        .iter()
-        .copied()
-        .chain([index.frames.len()])
-        .collect::<Vec<_>>()
-        .windows(2)
-        .map(|p| p[1] - p[0])
-        .max();
-    let audio_policy = index.audio.as_ref().map(|a| json!({"decoded_samples":a.samples,"sample_rate":a.rate,"channels":a.channels,
+    Ok(Loaded {
+        key,
+        index,
+        cache_hit: hit,
+        cache_bytes: cache.and_then(|p| fs::metadata(p).ok()).map(|m| m.len()),
+    })
+}
+
+impl Loaded {
+    fn summary(&self) -> Result<Value> {
+        let index = &self.index;
+        let keys: Vec<_> = index
+            .frames
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| f.1.then_some(i))
+            .collect();
+        let longest_gop = keys
+            .iter()
+            .copied()
+            .chain([index.frames.len()])
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|p| p[1] - p[0])
+            .max();
+        let audio_policy = index.audio.as_ref().map(|a| json!({"decoded_samples":a.samples,"sample_rate":a.rate,"channels":a.channels,
         "first_pts":a.first_pts,"time_base":{"num":1,"den":a.rate},"continuous":a.continuous,"timestamp_tolerance":{"num":1,"den":1000},"codec_initial_padding":a.codec_initial_padding,
         "mono_to_stereo":a.channels == 1,"resample_to_48000":a.rate != 48000}));
-    Ok(
-        json!({"schema_version":SCHEMA,"key":key,"cache_hit":hit,"cache_bytes":cache.and_then(|p| fs::metadata(p).ok()).map(|m| m.len()),
+        Ok(
+            json!({"schema_version":SCHEMA,"key":self.key,"cache_hit":self.cache_hit,"cache_bytes":self.cache_bytes,
         "eligible":index.reasons.is_empty(),"reasons":index.reasons,"frames":index.frames.len(),"first_timestamp":index.frames[0].0,
         "time_base":index.time_base,"frame_rate":index.rate,"keyframes":keys.len(),"maximum_gop_frames":longest_gop,
         "b_frames":index.frames.iter().filter(|f| f.2 == b'B').count(),"audio":audio_policy,"audio_policy":index.audio_policy()?,
         "square_pixels_assumed":!matches!(index.video["sample_aspect_ratio"].as_str(),Some("1:1")),
         "direct_decode_available":false}),
-    )
+        )
+    }
 }
 
 #[cfg(test)]

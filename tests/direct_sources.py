@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import source_clocks
+import direct_decode
 
 from engine import ENGINE
 from footage_sources import ROOT, FFMPEG, FFPROBE, generate, identity, probe
@@ -133,9 +134,11 @@ def verify(root, manifest, long=False):
             conformed[name] = source_clocks.verify(root,name,case,data)
             offset = conformed[name]['audio_sample_offset']
             assert F(offset['num'],offset['den']) == -relative * decoded['sample_rate'], (name, offset, relative)
-    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference"], "stage": "source_index_and_reference",
+    decoded_ranges = direct_decode.verify(root, manifest, results)
+    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference", "direct_sources.library_native_yuv_exact_sought_frames"], "stage": "indexed_video_library",
               "direct_decode_verified": False, "sources_preserved": True, "cases": results,
-              "tools": manifest["tools"], "long_source_generated": long, "conform_references":conformed}
+              "tools": manifest["tools"], "long_source_generated": long, "conform_references":conformed,
+              "library_video_ranges":decoded_ranges}
     (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
 

@@ -109,11 +109,14 @@ def generate(root, long=False):
     assert root != ROOT and ROOT not in root.parents, "Keep generated media outside the checkout"
     root.mkdir(parents=True, exist_ok=False)
     cases = {}
-    for rate in [Fraction(25), Fraction(30), Fraction(60), Fraction(30000, 1001)]:
+    for rate in [Fraction(24), Fraction(25), Fraction(30), Fraction(50), Fraction(60),
+                 Fraction(24000,1001), Fraction(30000,1001), Fraction(60000,1001)]:
         name = "h264-" + str(rate).replace('/', '-')
         cases[name] = encode(root, name, rate=rate)
     for name, fields in {
         "h264-mono-44100": {"audio_rate": 44100, "channels": 1},
+        "h264-full-range": {"pix_fmt":"yuvj420p", "extra":["-color_range","pc"]},
+        "h264-open-gop": {"open_gop":True},
         "h264-edit-list": {"extra": ["-output_ts_offset", "0.4", "-use_editlist", "1"]},
         "h264-sar": {"extra": ["-vf", "setsar=4/3"]},
         "h264-vfr": {"extra": ["-vf", "select='not(eq(mod(n,7),3))'", "-fps_mode", "vfr"]},

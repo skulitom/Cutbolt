@@ -27,20 +27,21 @@ def call(request, code=None):
 
 
 def decoded(path, video, native=False):
-    args = ['-map','0:v:0','-an','-fps_mode','passthrough','-pix_fmt','yuv420p' if native else 'rgb24','-f','rawvideo'] if video else [
+    fmt = native if isinstance(native,str) else 'yuv420p' if native else 'rgb24'
+    args = ['-map','0:v:0','-an','-fps_mode','passthrough','-pix_fmt',fmt,'-f','rawvideo'] if video else [
         '-map','0:a:0','-vn','-c:a','pcm_s16le','-f','s16le']
     return subprocess.check_output([FFMPEG,'-v','error','-nostdin','-noautorotate','-i',str(path),*args,'pipe:1'],timeout=600)
 
 
-def rgb_reference(native, width, height):
+def rgb_reference(native, width, height, full=False):
     # Independent full-frame vector arithmetic. Chroma expands in separate dimensions; no
     # engine table or converter is used. Transfer stays BT.709 on both sides, bypassing gamma.
     n = width * height
     planes = np.frombuffer(native, dtype=np.uint8).reshape(-1, n * 3 // 2)
-    y = (planes[:,:n].reshape(-1,height,width).astype(np.float64) - 16) / 219
+    y = (planes[:,:n].reshape(-1,height,width).astype(np.float64) - (0 if full else 16)) / (255 if full else 219)
     def chroma(first):
         small = planes[:,first:first+n//4].reshape(-1,height//2,width//2)
-        return (small.repeat(2,axis=1).repeat(2,axis=2).astype(np.float64) - 128) / 224
+        return (small.repeat(2,axis=1).repeat(2,axis=2).astype(np.float64) - 128) / (255 if full else 224)
     cb, cr = chroma(n), chroma(n+n//4)
     red, blue = y + 1.5748 * cr, y + 1.8556 * cb
     green = (y - 0.2126 * red - 0.0722 * blue) / 0.7152
@@ -85,7 +86,7 @@ def verify(root, name, case, data):
     output = root/'conform'
     output.mkdir(exist_ok=True)
     recipe = {'schema_version':1,'id':name,'source':{'file':{'path':case['path'],**identity(path)},
-        'sdr':{'matrix':'bt709','range':'limited','transfer':'bt709','missing_tags':'reject'},
+        'sdr':{'matrix':'bt709','range':'full' if video['color_range']=='pc' else 'limited','transfer':'bt709','missing_tags':'reject'},
         'clock':'first_video_frame'},'source_in':time(0),'duration':time(duration),'rate':time(1),
         'reverse':False,'freeze':False,'width':case['size'][0],'height':case['size'][1],
         'audio':'resample','working_transfer':'bt709','frame_rate':time(rate)}
@@ -95,8 +96,8 @@ def verify(root, name, case, data):
     assert receipt['clock']['video_first_timestamp'] == time(video_zero), receipt['clock']
     assert receipt['clock']['audio_sample_offset_at_video_zero'] == time(offset), receipt['clock']
     assert receipt['source_frame_indices'] == list(range(len(frames))), name
-    native = decoded(path,True,True)
-    expected_rgb = rgb_reference(native,*case['size'])
+    native = decoded(path,True,video['pix_fmt'])
+    expected_rgb = rgb_reference(native,*case['size'],full=video['color_range']=='pc')
     expected_pcm = pcm_reference(decoded(path,False),case['channels'],audio_rate,offset,int(duration*48000))
     actual_rgb, actual_pcm = decoded(request['output'],True), decoded(request['output'],False)
     assert actual_rgb == expected_rgb, (name,'RGB mismatch')
