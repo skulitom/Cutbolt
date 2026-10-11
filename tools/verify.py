@@ -202,6 +202,8 @@ STAGES = [
     {"name": "integration", "lane": "pool", "check": None, "needs": [],
      "commands": [[sys.executable, "tests/integration.py", "--output", "{dir}"], [sys.executable, "tests/agents.py", "--fixture", "{dir}"]],
      "results": {"integration": "verification.json", "agents": "agents/verification.json"}},
+    fixture("direct_sources"),
+    fixture("agent_costs"),
     fixture("native_timing", long=["--long-form"], check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
     fixture("image_sequences", long=["--long-form"], check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
     fixture("queue_recovery"),
@@ -503,10 +505,16 @@ if run_rust and "rust" not in failures:
 impact.record(RUN, passed_fingerprints, unmapped_passes=unmapped_passes,
               commit=commit, failures=sorted(failures), deferred=deferred, reused=reused,
               not_impacted=len(not_impacted), skipped=sorted(skipped))
+cost_measurements = outcomes.get("agent_costs", {}).get("values", {}).get("agent_costs")
+if cost_measurements:
+    print("Agent-cost replay (wire bytes; tool calls exclude initialize/list):", flush=True)
+    for name, row in cost_measurements["workflows"].items():
+        print(f"  {name:14} {row['calls']:3} calls  {row['sent_bytes']:8} sent  {row['received_bytes']:8} received"
+              f"  {row['failed_calls']} failed  {row['schema_lookups']} schema lookups", flush=True)
 if args.report:
     args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN,
                                        "ran": sorted(outcomes), "failed": sorted(failures), "deferred": deferred, "reused": reused,
-                                       "not_impacted": not_impacted, "skipped": skipped}, indent=1), encoding="utf-8")
+                                       "not_impacted": not_impacted, "skipped": skipped, "agent_costs": cost_measurements}, indent=1), encoding="utf-8")
 if args.cleanup_worktree:
     common = Path(subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
     main_checkout = (ROOT / common).resolve().parent
@@ -618,6 +626,8 @@ report = {
     "overlay_evidence": overlays,
     "large_import_evidence": large_imports,
     "agent_ergonomics_evidence": agent_ergonomics,
+    "agent_costs_evidence": agent_costs,
+    "direct_sources_evidence": direct_sources,
 }
 report["passed"] += cache_previews["passed"]
 report["passed"] += expressions["passed"]
@@ -661,6 +671,8 @@ report["passed"] += native_scenes["passed"]
 report["passed"] += overlays["passed"]
 report["passed"] += large_imports["passed"]
 report["passed"] += agent_ergonomics["passed"]
+report["passed"] += agent_costs["passed"]
+report["passed"] += direct_sources["passed"]
 (ROOT / "verification").mkdir(exist_ok=True)
 (ROOT / "verification/latest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 print(command([sys.executable, "tools/progress.py"]).strip())

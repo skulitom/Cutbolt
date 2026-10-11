@@ -105,6 +105,16 @@ def run(root,long_form):
             call('preview.frame',project=p,input_root=str(sources),output_root=str(output),output=str(target),time=t(F(index,1)/rate))
             n=([*range(5,15)]+[None]*5+[*range(20,35)])[index]
             with Image.open(target) as image:assert image.convert('RGB').tobytes()==(bytes(w*h*3) if n is None else rgb(n))
+        # Exercise the opaque single-clip fast path and gaps at every native clock.
+        tracked=call('timeline.apply',project=p,expected_revision=p['revision'],operations=[{
+            'op':'tracks.edit','edit':{'op':'promote','video_track_id':'v','audio_track_id':'a'}}])
+        for index in [0,9,10,14,15,29]:
+            target=output/(label+'-track-frame-'+str(index)+'.png')
+            preview=call('preview.frame',project=tracked,input_root=str(sources),output_root=str(output),output=str(target),time=t(F(index,1)/rate))
+            n=([*range(5,15)]+[None]*5+[*range(20,35)])[index]
+            assert preview['timeline_frame']==index and preview['time']==t(F(index,1)/rate)
+            assert preview['track_id']==(None if n is None else 'v')
+            with Image.open(target) as image:assert image.convert('RGB').tobytes()==(bytes(w*h*3) if n is None else rgb(n))
         selected=output/(label+'-range.mkv');call('preview.range',project=p,input_root=str(sources),output_root=str(output),output=str(selected),start=t(F(5,1)/rate),duration=t(F(20,1)/rate))
         compare(selected,rate,[(10,5),(None,5),(20,10)])
         if rate.denominator==1001:
@@ -227,6 +237,7 @@ def run(root,long_form):
         call('render.plan',error=code,project=bad,input_root=str(sources),output_root=str(output),output=str(target))
         assert not target.exists()
     passed.extend(['native_timing.fractional_and_integer_rates_decoded_pixels_samples_and_pts','native_timing.fractional_saved_edits_undo_previews_and_queued_output'])
+    passed.append('native_timing.single_clip_track_and_gap_previews_at_every_native_rate')
     # Declared VFR input conversion uses its observed source clock, never nominal frame labels.
     create(F(25),75,'vfr-reference')
     variable=sources/'variable.mkv'

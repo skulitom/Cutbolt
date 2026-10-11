@@ -241,6 +241,13 @@ Existing local paths: `C:\ffmpeg\bin\ffmpeg.exe` and `C:\ffmpeg\bin\ffprobe.exe`
 
 The reference renderer uses FFV1 and PCM. The bounded [media-conform matrix](CONFORM.md) additionally selects this same build's H.264/AAC decoders for MP4/MOV inputs, with explicit color, timestamp and audio constraints. Original acceptance fixtures use its external libx264 encoder and native AAC encoder; neither is bundled. The fixed [delivery profile](EXPORT.md) also selects libx264 and native AAC for engine exports, using `lutrgb` for original public transfer expressions and `scale` for declared BT.709 matrix/range/chroma conversion. The recorded local build has libavcodec 61.3.100, libavformat 61.1.100, libavfilter 10.1.100 and libswscale 8.1.100; its emitted encoder identity is x264 core 164 r3190 7ed753b. These components remain within the separately installed GPL/version-3-enabled build and are not redistributed. Public interfaces are described in the [FFmpeg codec](https://ffmpeg.org/ffmpeg-codecs.html) and [filter](https://ffmpeg.org/ffmpeg-filters.html) documentation. Public sRGB and BT.709 facts and the independent numerical reference are cited in the export contract; no implementation or specification copy is included.
 
+The 11 October direct-footage preparation corpus additionally exercises this same external build's
+libx265 and prores_ks encoders (HEVC Main/Main10 and ProRes 422 HQ). Linux uses the already recorded
+conda-forge FFmpeg 7.0.2. Exact command lines and executable version strings are retained in each
+external fixture manifest; no binary, source, media or new runtime package is bundled. These are
+fixture encoders and do not yet expand the engine's accepted timeline-source matrix. See
+[the corpus contract](FOOTAGE_FIXTURES.md).
+
 Other formats/encoders present in the build remain outside the declared engine contract. No dependency version changed for these additions.
 
 The [animated GIF profile](EXPORT_FORMATS.md#animated-gif) encodes with original Rust written from the public [GIF89a specification](https://www.w3.org/Graphics/GIF/spec-gif89a.txt). It uses no GIF library, palette filter or encoder from the FFmpeg build. Verification decodes the result with the same build's GIF demuxer and decoder. Its fixture also decodes every frame with an original Python reader. No dependency was added.

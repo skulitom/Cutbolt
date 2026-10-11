@@ -121,7 +121,7 @@ pub(crate) fn read_frame(
         if let Some((track, clip)) = a.visible(time)? {
             let mut c = clip.legacy();
             c.source_in = c.source_in.plus(time.minus(clip.start)?)?;
-            c.duration = Time::new(1, 25)?;
+            c.duration = Time::new(project.frame_rate.den, project.frame_rate.num)?;
             single.clips.push(c);
             track_id = Some(track.id.clone());
         } else {
@@ -130,7 +130,7 @@ pub(crate) fn read_frame(
                 asset_id: None,
                 gap: true,
                 source_in: Time::ZERO,
-                duration: Time::new(1, 25)?,
+                duration: Time::new(project.frame_rate.den, project.frame_rate.num)?,
             });
         }
         let (pixels, mut receipt) = read_frame(&single, input_root, Time::ZERO)?;

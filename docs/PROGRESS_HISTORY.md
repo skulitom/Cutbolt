@@ -1,5 +1,52 @@
 # Progress history
 
+## 11 October 2026: direct-footage and agent-cost preparation
+
+Started both [direct-footage](plans/DIRECT_FOOTAGE_PLAN.md) and
+[agent-cost](plans/AGENT_COST_PLAN.md) plans from `c4064df`, which includes the Linux port.
+This entry covers preparation, not completion of the plans' later stages.
+
+- Fixed opaque single-clip and gap previews that constructed a 1/25-second temporary clip
+  regardless of the project rate. The unmodified release failed the new 24 fps case with
+  `UNALIGNED_TIME`. The temporary duration now uses the project's exact frame period.
+  `native_timing` independently compares 48 additional PNG previews (clip and gap boundaries
+  at all eight native rates) to authored pixels.
+- Added the original [footage corpus](FOOTAGE_FIXTURES.md): 14 short codec/clock cases,
+  including deliberately reordered B-frames, an offset edit list, VFR, SAR, display rotation,
+  HEVC Main/Main10, open/closed GOPs, a 250-frame H.264 GOP and ProRes 422 HQ. The opt-in
+  20-minute 1080p30 case has been decoded and checked at exactly 36,000 frames. No generated
+  media enters Git. The fixture explicitly reports that direct timeline decoding is not verified yet.
+- Added [five SDK workflow replays](AGENT_COSTS.md), with exact JSON-RPC request/response bytes,
+  initialization/listing bytes, calls, failures and schema/capability lookups. Both Windows and
+  Linux complete all five with no failed calls or lookups. Calls are 15 / 6 / 12 / 8 / 8 for talking
+  head / interview / tutorial / revision / handoff. Windows received bytes are 412,758 / 249,511 /
+  265,568 / 243,704 / 388,563; the workspace tool listing alone is 224,321 bytes. The title needs
+  four calls and 5,043 sent bytes. Explicit per-workflow ceilings now fail regressions.
+  These are scripted recipes on six-second synthetic sources, not model trials or recognition claims.
+- Registered `direct_sources` and `agent_costs` with the verifier; cost tables print in quick runs,
+  and `--report` retains their measurements. Thorough runs can retain the fixture reports without
+  assigning new capability points. A fixtures-only mode prepares clean inputs for later fresh-agent trials.
+- Rebuilt the shared impact map at `c4064df`: 59 passing fixtures, 2,969 executed functions in
+  103 files. It now includes `track_composite.rs`, `readiness.rs`, `delivery/stream.rs` and
+  `inspection_cache.rs`. Five optional external-runtime fixtures were not configured.
+- Retained the unmodified release externally at
+  `C:\DEV\CutboltData\plan-fixes-20261011\baseline-c4064df\cutbolt.exe`, SHA-256
+  `cebe27f0f86d126bfb4faec982017041194582ad66b7f89cf2cc81a6c47204b4`.
+  Future speed comparisons will alternate before/after runs, record system busy fractions and
+  avoid compilation during measured runs. No speed improvement is claimed here.
+
+**User decisions recorded in this chat.** Metadata-gated reuse of a verified source hash is approved
+when path, byte count, modification time and OS file ID match, with a full re-hash before publication;
+implementation belongs to direct-footage stage 1.6. The final talking-head model trial targets are
+approved: at most 15 calls, at most 40,000 received tokens, and no schema lookup. Wire bytes above
+are not a substitute for actual model token measurements.
+
+**Verification so far.** Windows `cargo test` passes 206 tests; Linux passes 205. Formatting,
+Windows clippy and the material check pass. `native_timing`, `direct_sources` and `agent_costs`
+pass on Windows and Linux. The complete generated long source passes on Windows. The end-of-stage
+full quick check and ship gate are pending. No v1/v2 points or scope change; `verification/latest.json`
+and generated progress remain stale until a milestone thorough run.
+
 ## 11 October 2026: background jobs, image directories and speech on Linux
 
 Agents on Linux could not finish a job over MCP:
