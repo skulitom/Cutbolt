@@ -1,0 +1,13 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.skulitom/cutbolt",
+  "title": "Cutbolt video editing engine",
+  "description": "Local video editing engine for agents: exact timelines, saved sessions, rendering and FFmpeg export.",
+  "version": "0.4.0",
+  "websiteUrl": "https://github.com/skulitom/Cutbolt#readme",
+  "repository": {
+    "url": "https://github.com/skulitom/Cutbolt",
+    "source": "github",
+    "id": "1404146840"
+  }
+}
