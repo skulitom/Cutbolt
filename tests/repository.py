@@ -69,6 +69,17 @@ class RepositoryBoundary(unittest.TestCase):
         self.write("Blocked_Brand.md", "No restricted words in body.\n")
         self.assertTrue(any("restriction in path" in x for x in self.issues()))
 
+    def test_release_automation_types_only_in_their_folders(self):
+        self.write(".github/workflows/release.yml", "name: Release\n")
+        self.write("mcpb/build.mjs", "export {};\n")
+        self.assertEqual(self.issues(), [])
+        stray = ["notes.yml", "src/tool.mjs", ".github/workflows/nested/extra.yml", "mcpb/build.yml"]
+        for name in stray:
+            self.write(name, "x\n")
+        issues = self.issues()
+        for name in stray:
+            self.assertIn(f"Unreviewed file type: {name}", issues)
+
     def test_required_policy_missing(self):
         (self.root / ".git/private-content-policy.json").unlink()
         with self.assertRaisesRegex(ValueError, "policy is missing"):
