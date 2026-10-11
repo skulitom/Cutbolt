@@ -216,3 +216,25 @@ for durable generated-asset ownership and interrupted-job recovery.
 
 Scene shorthand and fresh-agent/model token measurements remain open. These replay bytes do
 not establish the approved talking-head received-token target or a comparative engine lead.
+
+## Stage 4 shorthand acceptance, 12 October 2026
+
+The explicit `form:short` text/shape form now expands into ordinary scenes for inspection,
+stills, queued compilation and inline templates, including project-sized placement. It covers
+exact numeric seconds, hex colors, default transforms, safe-area anchors, named easings and
+installed font names. The original title example is **384 bytes**, versus the earlier 6,420-byte
+template. Expanded recipes retain pinned font identities and use the existing renderer.
+
+Six synthetic acceptance groups pass on Windows and Linux, comparing 40 decoded frames plus
+their complete PCM across shorthand/full, transparent/opaque, fractional-clock and placed
+template cases. Scene and template digests agree, still pixels agree, invalid clocks/colors/
+bounds/identities are rejected, and placement retries return the same receipt. The original
+example renders. See [SCENE_SHORTHAND.md](SCENE_SHORTHAND.md) for the supported shorthand fields.
+
+Both platforms also pass the scene, template, font, placement and agent-cost regressions.
+The five replays retain 15/6/10/8/8 calls, 8850/4223/3619/2320/2351 sent bytes, zero failures
+and zero schema lookups. Received bytes are 209841/46918/53491/41111/185972 on Windows and
+209705/46790/53357/40983/185840 on Linux; updated initialization guidance accounts for the
+increase. The default workspace tool listing stays 21198 bytes, with 18 core / 86 full tools.
+No budget is relaxed. Together with two-call title placement, this satisfies stage 4's bounded
+scripted acceptance. Stage 5's tested skills/plugin and independent agent token trials remain.

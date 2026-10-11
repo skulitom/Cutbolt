@@ -1,0 +1,13 @@
+{
+  "form": "short",
+  "id": "opening-title",
+  "size": [640, 360],
+  "duration": 3,
+  "background": "#142030",
+  "layers": [{
+    "id": "title",
+    "anchor": "center",
+    "content": {"type": "text", "text": "Opening title", "font": {"path": "font.ttf"}, "size": 32, "color": "#fff"},
+    "animation": {"opacity": {"from": 0, "to": 255, "duration": 0.4, "ease": "ease_out"}}
+  }]
+}

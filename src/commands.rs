@@ -817,14 +817,22 @@ pub enum Request {
     #[serde(rename = "scene.inspect")]
     SceneInspect {
         /// Scene to validate and sample.
+        #[schemars(with = "crate::scene_short::SceneInput")]
         scene: scene::Scene,
+        /// Optional target for shorthand size/project and default frame rate; full scenes remain explicit.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "scene.render")]
     SceneRender {
         /// Scene to compile, normally checked first with scene.inspect.
+        #[schemars(with = "crate::scene_short::SceneInput")]
         scene: scene::Scene,
+        /// Optional shorthand target canvas/clock, snapshot or saved reference.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
@@ -835,7 +843,11 @@ pub enum Request {
     #[serde(rename = "scene.still")]
     SceneStill {
         /// Scene to show, as for scene.inspect and scene.render.
+        #[schemars(with = "crate::scene_short::SceneInput")]
         scene: scene::Scene,
+        /// Optional shorthand target canvas/clock, snapshot or saved reference.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory containing the scene's media and fonts.
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
@@ -1230,7 +1242,9 @@ pub fn handle_json_as(
         }
     };
     crate::documents::load(&mut request, workspace)?;
+    let short_scene = crate::scene_short::is_short(&request);
     let mut completed = prepare(&mut request, workspace)?;
+    let mut expanded_scene = short_scene.then(|| request["scene"].clone());
     // A queued command's arguments get the same preparation now, in the caller's workspace.
     if request["command"] == "job.start"
         && let Some(run) = request["run"].as_str()
@@ -1249,10 +1263,14 @@ pub fn handle_json_as(
     {
         let mut queued = Value::Object(std::mem::take(arguments));
         queued["command"] = request["run"].clone();
+        let short_scene = crate::scene_short::is_short(&queued);
         completed.extend(prepare(&mut queued, workspace).map_err(|mut failure| {
             failure.path = crate::prefixed_path("arguments", failure.path.as_deref());
             failure
         })?);
+        if short_scene {
+            expanded_scene = Some(queued["scene"].clone());
+        }
         parse(queued.clone()).at(|| "arguments".into())?;
         // The command would reject a missing output folder only once the job ran.
         if let (Some(output), Some(root)) =
@@ -1275,6 +1293,11 @@ pub fn handle_json_as(
     let schema = matches!(request, Request::Schema { .. });
     let capabilities = matches!(&request, Request::Capabilities { section } if section.as_deref().is_none_or(|s| s == "all"));
     let mut result = handle(request)?;
+    if let Some(scene) = expanded_scene {
+        // The queued request is already expanded and pinned; return that exact recipe at enqueue.
+        result["expanded_scene"] =
+            serde_json::to_value(serde_json::from_value::<scene::Scene>(scene)?)?;
+    }
     if !completed.is_empty() && result.is_object() {
         result["resolved_identities"] = Value::Array(completed);
     }
@@ -1313,6 +1336,7 @@ fn prepare(
     }
     let store = workspace.map(crate::workspace::Workspace::store_root);
     crate::reference::resolve(request, store.as_deref())?;
+    crate::scene_short::prepare(request)?;
     let mut completed = crate::fonts::prepare(request)?;
     completed.extend(crate::identity::complete(request)?);
     Ok(completed)
@@ -1734,9 +1758,14 @@ pub fn handle(request: Request) -> Result<Value> {
         }
         Request::TemplatesList { template_id } => crate::templates::list(template_id.as_deref()),
         Request::ExpressionInspect { request } => crate::expressions::inspect(&request),
-        Request::SceneInspect { scene, input_root } => scene::inspect(&scene, &input_root),
+        Request::SceneInspect {
+            scene,
+            input_root,
+            project: _,
+        } => scene::inspect(&scene, &input_root),
         Request::SceneRender {
             scene,
+            project: _,
             input_root,
             output_root,
             output,
@@ -2095,6 +2124,7 @@ pub fn handle(request: Request) -> Result<Value> {
         }),
         Request::SceneStill {
             scene,
+            project: _,
             input_root,
             output_root,
             output,
@@ -2233,6 +2263,7 @@ fn all_capabilities() -> Value {
     "export":crate::delivery::capabilities(),
     "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
     "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
+    result["scenes"]["shorthand"] = json!({"form":"short","content":["text","rectangle","ellipse"],"project_size":true,"expanded_recipe":true,"guide":"docs/SCENE_SHORTHAND.md"});
     result["build"] = json!(
         crate::BUILD_COMMIT
             .map(|(commit, modified)| json!({"commit": commit, "sources_modified": modified}))

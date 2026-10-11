@@ -8,10 +8,11 @@ use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, sync::OnceLock};
 
 /// Shared types abbreviated in tool listings, by public lookup name and definition name.
-pub const DEFERRED: [(&str, &str); 7] = [
+pub const DEFERRED: [(&str, &str); 8] = [
     ("project", "Project"),
     ("operation", "Operation"),
     ("scene", "Scene"),
+    ("scene_short", "ShortScene"),
     ("template", "Template"),
     ("audio_routing", "Routing"),
     ("transcript", "Document"),

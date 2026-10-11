@@ -69,6 +69,7 @@ pub mod remap;
 pub mod render;
 pub mod review;
 pub mod scene;
+pub mod scene_short;
 pub mod schema;
 pub mod scopes;
 pub mod selection;

@@ -1,5 +1,8 @@
 # Pixel scenes and timeline previews (v0.4)
 
+Text and geometric titles can use [explicit scene shorthand](SCENE_SHORTHAND.md), which expands
+to this same scene format with resolved inputs. The full format below retains its existing defaults.
+
 Each image frame may additionally provide a content-bound binary `matte` PNG. Its black pixels clear source RGBA before effects and transforms, while white preserves it. The matte follows the same source hold and uses the existing source/derived-pixel budgets; see [foreground masks](SEGMENTATION.md).
 
 Optional [3D plane geometry](GEOMETRY.md) projects source layers with cameras, depth and declared lighting. Geometry replaces neutral 2D placement; opacity, masks, effects, source timing and shutter samples remain supported.

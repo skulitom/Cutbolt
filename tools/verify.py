@@ -207,6 +207,7 @@ STAGES = [
     fixture("agent_costs"),
     fixture("doctor"),
     fixture("graphics_place"),
+    fixture("scene_short"),
     fixture("native_timing", long=["--long-form"], check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
     fixture("image_sequences", long=["--long-form"], check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
     fixture("queue_recovery"),
@@ -679,6 +680,8 @@ report["passed"] += doctor["passed"]
 report["doctor_evidence"] = doctor
 report["passed"] += graphics_place["passed"]
 report["graphics_place_evidence"] = graphics_place
+report["passed"] += scene_short["passed"]
+report["scene_short_evidence"] = scene_short
 report["passed"] += builtin_templates["passed"]
 report["builtin_templates_evidence"] = builtin_templates
 report["passed"] += fonts["passed"]

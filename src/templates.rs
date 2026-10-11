@@ -316,6 +316,7 @@ pub struct Template {
     /// Nonblank template ID, at most 128 bytes.
     pub id: String,
     /// Base scene recipe; bound fields may hold placeholders, and layer IDs must be unique.
+    #[schemars(with = "crate::scene_short::SceneInput")]
     pub scene: Scene,
     /// Up to 64 parameters with at most 256 bindings in total.
     pub parameters: Vec<Parameter>,

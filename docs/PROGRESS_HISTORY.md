@@ -1,5 +1,41 @@
 # Progress history
 
+## 12 October 2026: explicit scene shorthand and agent-cost stage 4 acceptance
+
+Added an explicit `form:short` text/shape scene syntax, accepted by scene inspection, stills,
+rendering and inline templates. Exact numeric seconds, hex colors, safe-area anchors, default
+transforms and two-key named easing curves expand to the existing scene contract. Installed
+font names and path-only identities use the existing resolver. Project dimensions and native
+clock can default from a supplied snapshot/reference or graphics.place's requested revision.
+Successful direct scene requests return the expanded recipe; queued renders return it at
+enqueue and persist the pinned form. Full scene semantics and renderer defaults remain intact.
+The original title example is 384 bytes. MCP guidance now points to built-in placement and
+shorthand before schema study. Shorthand intentionally covers text, rectangles and ellipses;
+advanced sources, audio, effects and geometry retain the full format.
+
+Six shorthand acceptance groups pass on Windows and Linux. Independently authored full scenes
+match decoded RGB/alpha, complete PCM, stills and serialized scene digests. Fractional project
+clocks, inline parameter/template digests, named fonts, project-sized saved placement and retry
+are covered, along with invalid colors, fields, bounds, clocks, curves and bound identities.
+The tests compare 40 frames and render the compact example. Initial failures found omitted font
+identity fields being serialized as empty values; expansion now preserves their omission so
+ordinary preparation binds the actual file. The fixture's initial assumptions about inspection
+digests, terminal job status and unaligned-time errors were corrected to the existing contracts.
+Those failed development runs are superseded by the complete passing runs.
+
+Format/lint and Rust tests pass (229 Windows / 228 Linux). The final six-fixture regressions
+pass on each platform: shorthand, scenes, templates, fonts, graphic placement and agent costs
+(80 seconds Windows / 82 seconds Linux). Call counts remain 15/6/10/8/8, including two calls /
+775 sent bytes for the tutorial title, with zero failures or schema lookups. All budgets are
+unchanged; the core workspace listing remains 21198 bytes. Updated received wire counts are
+recorded in AGENT_COSTS.md. This completes agent-cost stage 4's scripted acceptance, not stage 5's
+fresh-model/token trial or either complete plan. No editing points or comparative lead is claimed.
+
+Graphic placement commit 206209d reached main after its gate passed 15 fixtures; its 49 deferred
+checks are still running and require follow-up. The fixed 633fde0 thorough milestone has passed
+direct footage and its optional runtime checks so far, with long-form and quiet acceptance still
+pending. Progress evidence remains the unchanged 4 October run until that milestone succeeds.
+
 ## 12 October 2026: one-job graphic placement and verification follow-up
 
 `graphics.place` expands an original built-in or inline template against a saved project,

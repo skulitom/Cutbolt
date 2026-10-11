@@ -55,7 +55,7 @@ For example, after choosing an available font:
 }
 ```
 
-The font name and directory above are placeholders to replace with local inputs. This returns an expanded, inspectable scene. Scene shorthand remains planned.
+The font name and directory above are placeholders to replace with local inputs. This returns an expanded, inspectable scene. Inline templates can use [explicit scene shorthand](SCENE_SHORTHAND.md) as their base scene; parameter bindings apply to its expanded layers.
 
 ## Place a graphic in one job
 
