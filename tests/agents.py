@@ -260,8 +260,8 @@ def run(executable, fixture):
         assert {"cutbolt_job_cancel", "cutbolt_cache_prune"}.issubset(core_names)
         for name in ("cutbolt_job_cancel", "cutbolt_cache_prune"):
             assert next(t for t in core if t["name"] == name)["annotations"].get("destructiveHint", True) is True
-        direct_routed = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"capabilities"}})["result"]
-        assert direct_routed["structuredContent"]["result"] == normal.call("capabilities")
+        direct_routed = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"files.list", "arguments":{"input_root":str(root)}}})["result"]
+        assert direct_routed["structuredContent"]["result"] == normal.call("files.list", input_root=str(root))
         made = normal.call("project.create", id="compact", width=16, height=16, frame_rate={"num":25, "den":1})
         routed_call = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"project.validate", "arguments":{"project":made}}})["result"]
         assert routed_call["structuredContent"]["result"] == normal.call("project.validate", project=made) and not routed_call["isError"]

@@ -231,6 +231,267 @@ The [transcript editing tools](TRANSCRIPTS.md), `transcript.inspect`, `transcrip
 
 The [local cache](CACHE_PREVIEWS.md) exposes `cache.inspect` and `cache.prune` over stdio. Inspection is read-only; pruning removes only derived cache entries under caller-specified payload/count limits. Cache production runs through `job.start run: "cache.run"`; contact sheets use the direct `preview.sheet` tool. Both remain available through the CLI/library. Cache hits return checked results and proxy attachment proposals without silently changing a saved project.
 
+## Structured error recovery
+
+Errors keep `{code, message, detail?}` and add optional `retry`, `path` and `hint`. Existing messages
+remain for people; agents should use the structured fields instead of parsing prose. `path` names
+the first known request field, including nested operations and `job.start`'s `arguments` prefix.
+`hint` explains the repair. `detail` can provide `current_revision`, `suggested_output`, or bounded
+`available` IDs and their `total`. A suggested filename is advisory and is rechecked at publication.
+
+- `same`: a transient failure may clear without changing the underlying operation. Use a bounded
+  retry. Inspect a persisted job first: `job.resume` runs queued or opted-in interrupted attempts
+  within their saved limit; it does not restart terminal failures. Replaying `job.start` with the
+  same ID retrieves the existing ticket. Diagnose a terminal failure before an explicit new submission.
+- `changed`: repair the request or local configuration first. A revision conflict belongs here:
+  refreshing cannot make the same stale `expected_revision` valid. Read the current snapshot,
+  reconsider the edit, and submit the corrected revision; never blindly overwrite newer work.
+- `never`: stop automatic retries and diagnose the integrity/invariant/platform failure.
+
+The table below is checked against `src/errors.rs` and error codes in the source tree. A library
+caller may construct an unregistered private code; it receives no guessed retry advice. MCP keeps
+the same `isError` and `{ok:false,error:...}` envelope. Queued command failures preserve the same
+structured guidance in the durable job result.
+
+<!-- error-registry:start -->
+| Code | Retry | Meaning |
+| --- | --- | --- |
+| `ADJACENT_WORD_CUT` | `changed` | A word cut touches another boundary without the required adjacency policy. |
+| `AMBIGUOUS_MEDIA` | `changed` | More than one candidate matches the requested media identity. |
+| `ANALYSIS_CLOCK` | `never` | Analysis output disagrees with the requested sample clock. |
+| `ANGLE_COVERAGE` | `changed` | A camera angle does not cover the required interval. |
+| `ANGLE_IN_USE` | `changed` | An angle still has saved cut decisions referencing it. |
+| `AUDIO_IO` | `changed` | A PCM stream could not be read or written. |
+| `AUDIO_OVERFLOW` | `changed` | The scene audio operation exceeds its bounded sample range. |
+| `AUDIO_PROCESSING_OVERFLOW` | `changed` | Audio processing arithmetic or work exceeds its limit. |
+| `AUDIO_ROUTING_OVERFLOW` | `changed` | Audio routing arithmetic or work exceeds its limit. |
+| `CACHE_CORRUPT` | `never` | A derived cache entry fails integrity validation; inspect or rebuild it explicitly. |
+| `CACHE_MISSING` | `changed` | The requested derived cache entry does not exist. |
+| `CAPTION_OVERLAP` | `changed` | Caption intervals overlap contrary to the selected policy. |
+| `CAPTURE_DEVICE_CHANGED` | `changed` | The selected capture device changed during recording. |
+| `CAPTURE_DEVICE_ERROR` | `same` | The local capture backend reported a device error. |
+| `CAPTURE_DISCONTINUITY` | `changed` | Capture packets contain a sample gap or discontinuity. |
+| `CAPTURE_PROCESS_EXITED` | `changed` | The selected process ended during capture; select a running process. |
+| `CAPTURE_TIMEOUT` | `same` | Capture did not produce data before the deadline. |
+| `CAPTURE_TIMESTAMP_ERROR` | `never` | Capture timestamps violate the declared clock. |
+| `CAPTURE_VALIDATION_FAILED` | `never` | Recorded output failed independent decoded validation. |
+| `CLIP_COLLISION` | `changed` | A placement overlaps another clip under the reject policy. |
+| `CLOCK_ERROR` | `never` | The system clock could not provide a required timestamp. |
+| `COMMAND_FAILED` | `changed` | A child command ended without a valid successful result. |
+| `CUT_OUTSIDE_CLIP` | `changed` | A requested word cut lies outside the clip interval. |
+| `DEVICE_UNAVAILABLE` | `same` | The selected local compute or capture device is unavailable. |
+| `DISK_FULL` | `changed` | Storage is full; free space before retrying. |
+| `DUPLICATE_ID` | `changed` | An identifier duplicates another object in the same scope. |
+| `ENCODE_FAILED` | `changed` | The external encoder did not complete the requested output. |
+| `ESTIMATED_BOUNDARY` | `changed` | A word boundary needs explicit acknowledgement of estimated timing. |
+| `EXPORT_VALIDATION_FAILED` | `never` | Exported data did not pass independent validation. |
+| `EXPRESSION_CYCLE` | `changed` | Expression dependencies contain a cycle. |
+| `EXPRESSION_DOMAIN` | `changed` | An expression operation is outside its mathematical domain. |
+| `EXPRESSION_PRECISION` | `changed` | Expression arithmetic exceeds the exact precision contract. |
+| `EXPRESSION_RANGE` | `changed` | An expression result exceeds its permitted range. |
+| `EXPRESSION_TYPE` | `changed` | An expression value or connection has an incompatible type. |
+| `GEOMETRY_CYCLE` | `changed` | Geometry parent dependencies contain a cycle. |
+| `GEOMETRY_PRECISION` | `changed` | Geometry evaluation exceeds its numeric precision bound. |
+| `IDENTITY_MISMATCH` | `changed` | A supplied identity conflicts with the asset or proxy it describes. |
+| `IDENTITY_REQUIRED` | `changed` | The operation requires an explicit bound content identity. |
+| `INCOMPLETE_CAPTURE` | `changed` | Capture ended before all required samples arrived. |
+| `INPUT_LIMIT` | `changed` | Speech input exceeds the configured worker input bound. |
+| `INSUFFICIENT_HANDLES` | `changed` | A transition requires source frames outside available handles. |
+| `INTERNAL_ERROR` | `never` | An engine invariant failed; retain the request for diagnosis. |
+| `INVALID_ACCELERATION` | `changed` | The acceleration value or structure violates its declared constraints. |
+| `INVALID_ALIGNMENT` | `changed` | The alignment value or structure violates its declared constraints. |
+| `INVALID_ALPHA` | `changed` | The alpha value or structure violates its declared constraints. |
+| `INVALID_ANIMATION` | `changed` | The animation value or structure violates its declared constraints. |
+| `INVALID_ARGUMENT` | `changed` | The argument value or structure violates its declared constraints. |
+| `INVALID_AUDIO` | `changed` | The audio value or structure violates its declared constraints. |
+| `INVALID_AUDIO_EFFECT` | `changed` | The audio effect value or structure violates its declared constraints. |
+| `INVALID_AUDIO_REPAIR` | `changed` | The audio repair value or structure violates its declared constraints. |
+| `INVALID_AUDIO_ROUTING` | `changed` | The audio routing value or structure violates its declared constraints. |
+| `INVALID_BATCH` | `changed` | The batch value or structure violates its declared constraints. |
+| `INVALID_BINDING` | `changed` | The binding value or structure violates its declared constraints. |
+| `INVALID_CACHE` | `changed` | The cache value or structure violates its declared constraints. |
+| `INVALID_CAPTIONS` | `changed` | The captions value or structure violates its declared constraints. |
+| `INVALID_CAPTURE_INPUT` | `changed` | The capture input value or structure violates its declared constraints. |
+| `INVALID_CAPTURE_PACKET` | `changed` | The capture packet value or structure violates its declared constraints. |
+| `INVALID_CAPTURE_PLACEMENT` | `changed` | The capture placement value or structure violates its declared constraints. |
+| `INVALID_CLIP_SOURCE` | `changed` | The clip source value or structure violates its declared constraints. |
+| `INVALID_COLOR` | `changed` | The color value or structure violates its declared constraints. |
+| `INVALID_CONFORM` | `changed` | The conform value or structure violates its declared constraints. |
+| `INVALID_EDIT` | `changed` | The edit value or structure violates its declared constraints. |
+| `INVALID_EFFECT` | `changed` | The effect value or structure violates its declared constraints. |
+| `INVALID_EXPORT` | `changed` | The export value or structure violates its declared constraints. |
+| `INVALID_EXPRESSION` | `changed` | The expression value or structure violates its declared constraints. |
+| `INVALID_GAP` | `changed` | The gap value or structure violates its declared constraints. |
+| `INVALID_GEOMETRY` | `changed` | The geometry value or structure violates its declared constraints. |
+| `INVALID_GRAPHIC` | `changed` | The graphic value or structure violates its declared constraints. |
+| `INVALID_HDR` | `changed` | The hdr value or structure violates its declared constraints. |
+| `INVALID_ID` | `changed` | The id value or structure violates its declared constraints. |
+| `INVALID_IDENTITY` | `changed` | The identity value or structure violates its declared constraints. |
+| `INVALID_IMAGE_SEQUENCE` | `changed` | The image sequence value or structure violates its declared constraints. |
+| `INVALID_INDEX` | `changed` | The index value or structure violates its declared constraints. |
+| `INVALID_JSON` | `changed` | The json value or structure violates its declared constraints. |
+| `INVALID_LIMIT` | `changed` | The limit value or structure violates its declared constraints. |
+| `INVALID_LOSS_ACKNOWLEDGEMENT` | `changed` | The loss acknowledgement value or structure violates its declared constraints. |
+| `INVALID_LUT` | `changed` | The lut value or structure violates its declared constraints. |
+| `INVALID_MASK` | `changed` | The mask value or structure violates its declared constraints. |
+| `INVALID_MATTE` | `changed` | The matte value or structure violates its declared constraints. |
+| `INVALID_MEDIA` | `changed` | The media value or structure violates its declared constraints. |
+| `INVALID_METADATA` | `changed` | The metadata value or structure violates its declared constraints. |
+| `INVALID_MULTICAM` | `changed` | The multicam value or structure violates its declared constraints. |
+| `INVALID_NATIVE_TRANSFER` | `changed` | The native transfer value or structure violates its declared constraints. |
+| `INVALID_PARAMETER` | `changed` | The parameter value or structure violates its declared constraints. |
+| `INVALID_PATH` | `changed` | The path value or structure violates its declared constraints. |
+| `INVALID_PROXY` | `changed` | The proxy value or structure violates its declared constraints. |
+| `INVALID_QUERY` | `changed` | The query value or structure violates its declared constraints. |
+| `INVALID_RANGE` | `changed` | The range value or structure violates its declared constraints. |
+| `INVALID_REFRAME` | `changed` | The reframe value or structure violates its declared constraints. |
+| `INVALID_REMAP` | `changed` | The remap value or structure violates its declared constraints. |
+| `INVALID_RESULT` | `changed` | The result value or structure violates its declared constraints. |
+| `INVALID_RETRY` | `changed` | The retry value or structure violates its declared constraints. |
+| `INVALID_REVISION` | `changed` | The revision value or structure violates its declared constraints. |
+| `INVALID_SCENE` | `changed` | The scene value or structure violates its declared constraints. |
+| `INVALID_SCOPE` | `changed` | The scope value or structure violates its declared constraints. |
+| `INVALID_SELECTION` | `changed` | The selection value or structure violates its declared constraints. |
+| `INVALID_SEQUENCE` | `changed` | The sequence value or structure violates its declared constraints. |
+| `INVALID_SEQUENCE_EDIT` | `changed` | The sequence edit value or structure violates its declared constraints. |
+| `INVALID_SHEET` | `changed` | The sheet value or structure violates its declared constraints. |
+| `INVALID_SPATIAL` | `changed` | The spatial value or structure violates its declared constraints. |
+| `INVALID_STABILIZATION` | `changed` | The stabilization value or structure violates its declared constraints. |
+| `INVALID_SYNC` | `changed` | The sync value or structure violates its declared constraints. |
+| `INVALID_TEMPLATE` | `changed` | The template value or structure violates its declared constraints. |
+| `INVALID_TEMPORAL` | `changed` | The temporal value or structure violates its declared constraints. |
+| `INVALID_TIME` | `changed` | The time value or structure violates its declared constraints. |
+| `INVALID_TIMECODE` | `changed` | The timecode value or structure violates its declared constraints. |
+| `INVALID_TRACKING` | `changed` | The tracking value or structure violates its declared constraints. |
+| `INVALID_TRACKS` | `changed` | The tracks value or structure violates its declared constraints. |
+| `INVALID_TRACK_EDIT` | `changed` | The track edit value or structure violates its declared constraints. |
+| `INVALID_TRANSCRIPT` | `changed` | The transcript value or structure violates its declared constraints. |
+| `INVALID_TRANSCRIPTION` | `changed` | The transcription value or structure violates its declared constraints. |
+| `INVALID_TRANSITION` | `changed` | The transition value or structure violates its declared constraints. |
+| `IO_ERROR` | `changed` | A local filesystem operation failed; repair the named path or permissions. |
+| `ISOLATION_REQUIRED` | `changed` | The speech worker requires the configured process isolation. |
+| `JOB_CANCELLED` | `changed` | The durable job was cancelled; the same start request will replay its ticket. |
+| `JOB_LAUNCH_FAILED` | `same` | A local job worker could not be launched. |
+| `JOB_NOT_FOUND` | `changed` | The requested job ID is absent from the queue. |
+| `JOB_STALLED` | `changed` | A worker stopped reporting progress; inspect its terminal ticket before a new submission. |
+| `JOB_TIMEOUT` | `changed` | A job exceeded its deadline; inspect its terminal ticket before a new submission. |
+| `LIMIT_EXCEEDED` | `changed` | The requested work exceeds a declared engine limit. |
+| `LINKED_SELECTION` | `changed` | The edit requires the complete linked clip selection. |
+| `LOSSY_CAPTION_EXPORT` | `changed` | Caption export would lose unsupported semantics without acknowledgement. |
+| `LOUDNESS_UNMEASURED` | `changed` | The selected sound has no usable loudness measurement. |
+| `MANAGED_SEQUENCE` | `changed` | A managed sequence must be edited through its owning camera group. |
+| `MEDIA_CHANGED` | `changed` | Current source bytes differ from the bound identity; inspect and rebind explicitly. |
+| `MEDIA_DURATION_MISMATCH` | `changed` | Probed media duration disagrees with the declared source duration. |
+| `MIGRATION_REQUIRED` | `changed` | The old store needs explicit session.migrate before new writes. |
+| `MISSING_ANGLE` | `changed` | The requested angle is absent; use available IDs or provide the required input. |
+| `MISSING_ASSET` | `changed` | The requested asset is absent; use available IDs or provide the required input. |
+| `MISSING_CLIP` | `changed` | The requested clip is absent; use available IDs or provide the required input. |
+| `MISSING_CUT` | `changed` | The requested cut is absent; use available IDs or provide the required input. |
+| `MISSING_GLYPH` | `changed` | The requested glyph is absent; use available IDs or provide the required input. |
+| `MISSING_LINK` | `changed` | The requested link is absent; use available IDs or provide the required input. |
+| `MISSING_MEDIA` | `changed` | The requested media is absent; use available IDs or provide the required input. |
+| `MISSING_NEIGHBOR` | `changed` | The requested neighbor is absent; use available IDs or provide the required input. |
+| `MISSING_PARAMETER` | `changed` | The requested parameter is absent; use available IDs or provide the required input. |
+| `MISSING_SEQUENCE` | `changed` | The requested sequence is absent; use available IDs or provide the required input. |
+| `MISSING_TRACK` | `changed` | The requested track is absent; use available IDs or provide the required input. |
+| `MISSING_TRANSCRIPT` | `changed` | The requested transcript is absent; use available IDs or provide the required input. |
+| `MISSING_TRANSITION` | `changed` | The requested transition is absent; use available IDs or provide the required input. |
+| `MISSING_WORD` | `changed` | The requested word is absent; use available IDs or provide the required input. |
+| `MODEL_CHANGED` | `changed` | Speech model bytes differ from the configured identity. |
+| `MODEL_UNAVAILABLE` | `changed` | The configured local speech model is missing or unavailable. |
+| `MULTICAM_PROJECTION_MISMATCH` | `never` | Saved camera decisions and their projected sequence disagree. |
+| `NATIVE_ADAPTER_MISMATCH` | `changed` | The declared native-project adapter identity does not match. |
+| `NATIVE_SOURCE_MISMATCH` | `changed` | Native-project source identities do not match the supplied bindings. |
+| `NOTHING_TO_UNDO` | `changed` | The saved session has no earlier edit to undo. |
+| `NO_WORDS` | `changed` | Speech analysis returned no usable words in the requested interval. |
+| `OUTPUT_EXISTS` | `changed` | The output path already exists and will not be overwritten. |
+| `OUTPUT_RESERVED` | `changed` | Another queued job already reserves this output path. |
+| `OWNER_GONE` | `same` | The process owning the speech request ended. |
+| `PATH_OUTSIDE_ROOT` | `changed` | A resolved path leaves the explicitly allowed file root. |
+| `PATH_OUTSIDE_WORKSPACE` | `changed` | A resolved path leaves the configured workspace. |
+| `PROJECT_EXISTS` | `changed` | A saved project with this ID already exists. |
+| `PROJECT_NOT_FOUND` | `changed` | The requested saved project is absent. |
+| `PROXY_MISSING` | `changed` | An enabled bound proxy cannot be found. |
+| `PUBLICATION_CONFLICT` | `never` | Existing publication bytes or receipts conflict; preserve them for diagnosis. |
+| `PUBLISH_FAILED` | `changed` | The verified temporary output could not be published without overwrite. |
+| `QUEUE_FULL` | `same` | The local queue has reached its outstanding-job bound. |
+| `REFRAME_INFEASIBLE` | `changed` | The authored boxes and crop constraints have no feasible framing. |
+| `REFRAME_UNAVAILABLE` | `changed` | The requested reframing mode cannot use this source. |
+| `RENDER_VALIDATION_FAILED` | `never` | Rendered pixels, samples, metadata or counts failed validation. |
+| `REQUEST_ID_CONFLICT` | `changed` | An idempotency key was already used with different arguments. |
+| `REQUEST_NOT_FOUND` | `changed` | No saved receipt exists for this request ID. |
+| `RESOURCE_LIMIT` | `changed` | The speech worker exceeds its configured resource bound. |
+| `RESULT_LIMIT` | `changed` | The worker result exceeds its declared bounded size. |
+| `REVISION_CONFLICT` | `changed` | The expected revision is stale; refresh, reconsider, and change the request. |
+| `REVISION_NOT_FOUND` | `changed` | The requested saved revision does not exist. |
+| `RUNTIME_UNAVAILABLE` | `changed` | The configured local speech runtime is unavailable. |
+| `RUNTIME_VERSION` | `changed` | The installed speech runtime does not match the required version. |
+| `SEQUENCE_CYCLE` | `changed` | Nested sequence references contain a cycle. |
+| `SEQUENCE_IN_USE` | `changed` | A sequence still has references and cannot be removed. |
+| `SPLIT_ID_REQUIRED` | `changed` | The edit creates a surviving clip that needs an explicit ID. |
+| `STABILIZATION_CROP_LIMIT` | `changed` | Stabilization would exceed the declared crop or zoom limit. |
+| `STABILIZATION_UNRELIABLE` | `changed` | Measured camera motion does not meet the declared confidence limits. |
+| `STORE_BUSY` | `same` | Another local transaction holds the store lock. |
+| `STORE_CORRUPT` | `never` | Saved storage fails integrity checks; use explicit recovery, not blind retries. |
+| `STORE_ERROR` | `changed` | A database operation failed for a non-transient storage reason. |
+| `STORE_NOT_FOUND` | `changed` | The requested saved store does not exist. |
+| `SYNC_AMBIGUOUS` | `changed` | Multiple synchronization offsets fit the measured signal. |
+| `SYNC_CONFLICT` | `changed` | Linked or synchronized clip placements disagree. |
+| `SYNC_DRIFT_EXCEEDED` | `changed` | Measured clock drift exceeds the allowed correction bound. |
+| `SYNC_INCONSISTENT` | `changed` | Independent synchronization windows disagree. |
+| `SYNC_INSUFFICIENT_SIGNAL` | `changed` | The selected sound does not provide enough synchronization evidence. |
+| `TEXT_OVERFLOW` | `changed` | Text exceeds its declared box, line or glyph bound. |
+| `TEXT_PLAN_STALE` | `changed` | The transcript edit proposal no longer matches the saved timeline. |
+| `TIME_OVERFLOW` | `changed` | Exact time arithmetic exceeds the supported integer range. |
+| `TOOL_ABORTED` | `changed` | An external tool was cancelled by the controlling operation. |
+| `TOOL_CHANGED` | `changed` | An external executable differs from the identity pinned to the job. |
+| `TOOL_FAILED` | `changed` | An external tool returned an unsuccessful result. |
+| `TOOL_TIMEOUT` | `same` | An external tool exceeded its deadline. |
+| `TOOL_UNAVAILABLE` | `changed` | A required external executable could not be started. |
+| `TOO_MANY_COLORS` | `changed` | The lossless palette output exceeds the supported color count. |
+| `TRACKING_UNRELIABLE` | `changed` | Tracking confidence failed; detail may retain accepted observations. |
+| `TRACK_LOCKED` | `changed` | The edit would alter a locked track. |
+| `TRANSCRIPTION_FAILED` | `changed` | The speech worker reported an unrecognized failure. |
+| `TRANSCRIPT_CONFLICT` | `changed` | The transcript revision or fingerprint differs from the expected value. |
+| `TRANSCRIPT_SOURCE_MISMATCH` | `changed` | Transcript words refer to a different bound media source. |
+| `TRANSITION_COLLISION` | `changed` | Transition intervals overlap contrary to the supported layout. |
+| `TRANSITION_CONFLICT` | `changed` | The edit would invalidate an existing transition without a policy. |
+| `UNALIGNED_TIME` | `changed` | A time does not fall on the required exact frame or sample boundary. |
+| `UNKNOWN_PARAMETER` | `changed` | A template value names a parameter the template does not declare. |
+| `UNKNOWN_SCHEMA` | `changed` | The requested schema name or selection is absent. |
+| `UNKNOWN_SECTION` | `changed` | The requested capabilities section is absent. |
+| `UNSUPPORTED_ACCELERATION` | `changed` | The requested acceleration is outside the supported profile. |
+| `UNSUPPORTED_ALIGNMENT_TEXT` | `changed` | The requested alignment text is outside the supported profile. |
+| `UNSUPPORTED_AUDIO` | `changed` | The requested audio is outside the supported profile. |
+| `UNSUPPORTED_CAPTIONS` | `changed` | The requested captions is outside the supported profile. |
+| `UNSUPPORTED_FONT` | `changed` | The requested font is outside the supported profile. |
+| `UNSUPPORTED_GEOMETRY` | `changed` | The requested geometry is outside the supported profile. |
+| `UNSUPPORTED_IMAGE` | `changed` | The requested image is outside the supported profile. |
+| `UNSUPPORTED_INTERCHANGE` | `changed` | The requested interchange is outside the supported profile. |
+| `UNSUPPORTED_JOB` | `changed` | The requested job is outside the supported profile. |
+| `UNSUPPORTED_MEDIA` | `changed` | The requested media is outside the supported profile. |
+| `UNSUPPORTED_MULTICAM` | `changed` | The requested multicam is outside the supported profile. |
+| `UNSUPPORTED_NATIVE_BUILD` | `changed` | The requested native build is outside the supported profile. |
+| `UNSUPPORTED_OUTPUT` | `changed` | The requested output is outside the supported profile. |
+| `UNSUPPORTED_PLATFORM` | `never` | The requested platform is outside the supported profile. |
+| `UNSUPPORTED_PREVIEW` | `changed` | The requested preview is outside the supported profile. |
+| `UNSUPPORTED_SCENE` | `changed` | The requested scene is outside the supported profile. |
+| `UNSUPPORTED_SCHEMA` | `changed` | The requested schema is outside the supported profile. |
+| `UNSUPPORTED_STORE` | `changed` | The requested store is outside the supported profile. |
+| `UNSUPPORTED_TEXT` | `changed` | The requested text is outside the supported profile. |
+| `UNSUPPORTED_TIMECODE` | `changed` | The requested timecode is outside the supported profile. |
+| `UNSUPPORTED_TIMELINE` | `changed` | The requested timeline is outside the supported profile. |
+| `UNSUPPORTED_TRANSCRIPT_BINDING` | `changed` | The requested transcript binding is outside the supported profile. |
+| `UNUSED_SPLIT_ID` | `changed` | The edit supplied a split ID but produces no corresponding survivor. |
+| `WORD_OUTSIDE_CLIP` | `changed` | A selected transcript word lies outside the clip source interval. |
+| `WORKER_CHANGED` | `changed` | The local speech worker differs from its configured identity. |
+| `WORKER_FAILED` | `changed` | The speech worker process did not return a valid result. |
+| `WORKER_INTERRUPTED` | `same` | The durable worker was interrupted; inspect and resume its ticket. |
+| `WORKER_LIFETIME` | `never` | The worker could not be contained within the required process lifetime. |
+| `WORKER_SETUP_FAILED` | `changed` | The background worker could not initialize its required local environment. |
+| `WORKER_TIMEOUT` | `same` | The local speech worker exceeded its request deadline. |
+<!-- error-registry:end -->
+
 ## Editorial interchange
 
 The [interchange tools](INTERCHANGE.md), `interchange.import`, `interchange.export.inspect` and `interchange.export`, use the same typed JSON requests over MCP stdio. The first two are read-only and idempotent. Export writes a new bounded file, is not marked idempotent, and rejects existing output. Media references require explicit local bindings and content identities; no URLs are fetched. Inspect `ready`, `losses` and `required_acknowledgements` before using a proposed result. Blocking losses cannot be acknowledged away. Import does not write a saved session; explicitly create one from the ready `project`.

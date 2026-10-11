@@ -801,6 +801,13 @@ pub(crate) fn output_folder(output: &Path, root: &Path) -> Result<PathBuf> {
                 output.display()
             ),
         )
+        .with_path("output")
+        .with_hint(if e.kind() == std::io::ErrorKind::NotFound {
+            "Create detail.directory inside detail.output_root, then retry with the same output path."
+        } else {
+            "Check the output parent directory and access permissions."
+        })
+        .with_detail(json!({"directory":parent,"output_root":root}))
     })
 }
 
@@ -811,6 +818,11 @@ pub(crate) fn output_root(root: &Path) -> Result<PathBuf> {
             "IO_ERROR",
             format!("output_root {} cannot be resolved ({e})", root.display()),
         )
+        .with_path("output_root")
+        .with_hint(
+            "Choose an existing output_root directory, or create the intended directory first.",
+        )
+        .with_detail(json!({"directory":root}))
     })
 }
 
@@ -835,8 +847,8 @@ pub(crate) fn destination_extension(
             .ok_or_else(|| error("INVALID_PATH", "Missing filename"))?,
     );
     if output.try_exists()? {
-        return Err(error(
-            "OUTPUT_EXISTS",
+        return Err(crate::errors::output_exists(
+            &output,
             "Existing outputs are never overwritten",
         ));
     }

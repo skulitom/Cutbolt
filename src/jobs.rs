@@ -918,13 +918,13 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
                 deadline.as_secs()
             ),
         )),
-        (Some(message), _) => Err(error(
+        (Some(message), _) => Err(crate::Error::reported(
             intern(
                 message["error"]["code"]
                     .as_str()
                     .unwrap_or("COMMAND_FAILED"),
             ),
-            message["error"]["message"].as_str().unwrap_or_default(),
+            &message["error"],
         )),
         (None, Some(Stop::Cancelled)) => Err(error(
             "JOB_CANCELLED",

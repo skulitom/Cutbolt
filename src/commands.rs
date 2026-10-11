@@ -1233,9 +1233,11 @@ pub fn handle_json_as(
     {
         let mut queued = Value::Object(std::mem::take(arguments));
         queued["command"] = request["run"].clone();
-        completed.extend(prepare(&mut queued, workspace)?);
-        parse(queued.clone())
-            .map_err(|e| crate::error(e.code, format!("arguments: {}", e.message)))?;
+        completed.extend(prepare(&mut queued, workspace).map_err(|mut failure| {
+            failure.path = crate::prefixed_path("arguments", failure.path.as_deref());
+            failure
+        })?);
+        parse(queued.clone()).at(|| "arguments".into())?;
         // The command would reject a missing output folder only once the job ran.
         if let (Some(output), Some(root)) =
             (queued["output"].as_str(), queued["output_root"].as_str())
@@ -1310,7 +1312,7 @@ fn parse(request: Value) -> Result<Request> {
             (Some(field), Some(original)) if !field.is_empty() => {
                 let message = e.to_string();
                 let note = crate::schema::given(&original, &field, &message).unwrap_or_default();
-                crate::error("INVALID_JSON", format!("{field}: {message}{note}"))
+                crate::error("INVALID_JSON", format!("{field}: {message}{note}")).with_path(field)
             }
             _ => crate::Error::from(e),
         }
@@ -2288,6 +2290,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn queued_parse_errors_expose_the_arguments_field_path() {
+        let scratch = crate::tracking::Scratch::new("job-field-path");
+        let root = &scratch.0;
+        let mut scene: Value =
+            serde_json::from_str::<Value>(include_str!("../examples/title-card-template.json"))
+                .unwrap()["scene"]
+                .clone();
+        scene["width"] = json!("wide");
+        let failure = handle_json(
+            json!({"command":"job.start","job_root":root,"request_id":"bad-width","run":"scene.render",
+                "arguments":{"scene":scene,"input_root":root,"output_root":root,"output":root.join("title.mkv")}}),
+            None,
+        ).unwrap_err();
+        assert_eq!(failure.code, "INVALID_JSON");
+        assert_eq!(failure.path.as_deref(), Some("arguments.scene.width"));
+        assert_eq!(failure.retry, Some(crate::errors::Retry::Changed));
+        assert!(failure.message.starts_with("arguments: scene.width: "));
+        assert!(!root.join("title.mkv").exists());
+    }
+
+    #[test]
     fn queued_jobs_reject_a_missing_output_folder_at_submission() {
         let scratch = crate::tracking::Scratch::new("job-output-folder");
         let root = &scratch.0;
@@ -2302,6 +2325,10 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.code, "IO_ERROR");
+        assert_eq!(error.retry, Some(crate::errors::Retry::Changed));
+        assert_eq!(error.path.as_deref(), Some("arguments.output"));
+        assert_eq!(error.detail.as_ref().unwrap()["directory"], json!(folder));
+        assert!(error.hint.as_ref().unwrap().contains("Create"));
         let expected = format!(
             "arguments.output: Output folder {} for {} does not exist (",
             folder.display(),

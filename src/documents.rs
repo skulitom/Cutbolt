@@ -87,10 +87,11 @@ pub fn save(result: &Value, file: &str, workspace: &Workspace) -> Result<Value> 
     }
     let bytes = serde_json::to_vec(result)?;
     let mut output = fs::File::create_new(&path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::AlreadyExists => error(
-            "OUTPUT_EXISTS",
+        std::io::ErrorKind::AlreadyExists => crate::errors::output_exists(
+            &path,
             format!("{file:?} already exists; documents are never overwritten"),
-        ),
+        )
+        .with_path("save_as"),
         _ => error("INVALID_PATH", format!("save_as {file:?}: {e}")),
     })?;
     output.write_all(&bytes)?;

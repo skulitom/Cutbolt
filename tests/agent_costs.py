@@ -102,16 +102,30 @@ class Replay:
         self.project = {'project_id': name}
         self.commands = []
 
-    async def call(self, command, **fields):
+    async def request(self, command, fields):
         self.commands.append(command)
         name = 'cutbolt_' + command.replace('.', '_')
         if name not in self.names:
             assert 'cutbolt_run' in self.names, command
             name, fields = 'cutbolt_run', {'command': command, 'arguments': fields}
         response = await self.session.call_tool(name, fields)
+        return response
+
+    async def call(self, command, **fields):
+        response = await self.request(command, fields)
         data = response.structuredContent
         assert not response.isError and data['ok'], (command, data)
         return data['result']
+
+    async def mistake(self, command, **fields):
+        response = await self.request(command, fields)
+        data = response.structuredContent
+        assert response.isError and not data['ok'], (command, data)
+        # Recovery deliberately cannot read either legacy field. Keep the complete envelope
+        # on the wire for byte accounting, but expose only structured guidance to this recipe.
+        guidance = {k: v for k, v in data['error'].items() if k not in {'code', 'message'}}
+        assert guidance['retry'] == 'changed' and guidance['path'] and guidance['hint'], guidance
+        return guidance
 
     async def apply(self, operations):
         result = await self.call('session.apply', project_id=self.name, expected_revision=self.revision,
@@ -164,6 +178,34 @@ async def workflow(name, workspace, assets, font, executable):
             listing = await session.list_tools()
             replay = Replay(session, {t.name for t in listing.tools}, name)
             title_commands = []
+            if name == 'recovery':
+                intended = {'id': name, 'width': 160, 'height': 90, 'frame_rate': 25, 'request_id': 'create'}
+                bad = await replay.mistake('session.create', **{**intended, 'width': 'wide'})
+                assert bad['path'] == 'width'
+                await replay.call('session.create', **intended)
+                await replay.apply([{'op': 'clip.append', 'clip': {'id': 'first', 'gap': True, 'source_in': 0, 'duration': 1}}])
+                edit = {'project_id': name, 'expected_revision': 0, 'request_id': 'stale',
+                        'operations': [{'op': 'clip.append', 'clip': {'id': 'second', 'gap': True, 'source_in': 0, 'duration': 1}}]}
+                bad = await replay.mistake('session.apply', **edit)
+                assert bad['path'] == 'expected_revision'
+                refreshed = await replay.call('session.get', project_id=name)
+                assert refreshed['revision'] == bad['detail']['current_revision']
+                # Reconsider the append against the actual head before applying it once.
+                assert len(refreshed['clips']) == 1 and refreshed['clips'][0]['id'] == 'first'
+                applied = await replay.call('session.apply', **{**edit, bad['path']: refreshed['revision']})
+                assert applied['revision'] == 2
+                frame = {'project': replay.project, 'time': 0, 'output': 'frame.png'}
+                await replay.call('preview.frame', **frame)
+                original = identity(workspace / frame['output'])
+                bad = await replay.mistake('preview.frame', **frame)
+                assert bad['path'] == 'output'
+                candidate = Path(bad['detail']['suggested_output'])
+                if not candidate.is_absolute():
+                    candidate = workspace / candidate
+                assert candidate.parent.samefile(workspace) and not candidate.exists()
+                await replay.call('preview.frame', **{**frame, bad['path']: str(candidate)})
+                assert identity(candidate) == original == identity(workspace / frame['output'])
+                return replay.commands, []
             await replay.setup(assets if name in {'revision', 'interview'} else assets[:1], placed=name != 'revision')
             if name == 'talking-head':
                 doc = transcript(assets[0])
@@ -341,10 +383,18 @@ def run(root, executable, fixtures_only=False):
         print(f"{name:14} {results[name]['calls']:3} calls  {results[name]['sent_bytes']:8} sent  {results[name]['received_bytes']:8} received", flush=True)
     if fixtures_only:
         return
-    report = {'passed': ['agent_costs.five_sdk_workflows_with_wire_budgets'], 'kind': 'scripted_replay',
+    recovery_workspace = root / 'recovery'
+    recovery_workspace.mkdir()
+    commands, title_commands = asyncio.run(workflow('recovery', recovery_workspace, [], None, executable))
+    recovery = measure(recovery_workspace, commands, title_commands)
+    assert recovery['calls'] == 9 and recovery['failed_calls'] == 3
+    assert recovery['schema_lookups'] == recovery['capabilities_lookups'] == 0
+    assert recovery['sent_bytes'] <= 4000 and recovery['received_bytes'] <= LIST_BUDGET + 35_000
+    print(f"Recovery: {recovery['calls']} calls, 3 deliberate mistakes repaired using structured guidance", flush=True)
+    report = {'passed': ['agent_costs.five_sdk_workflows_with_wire_budgets', 'agent_costs.structured_error_recovery'], 'kind': 'scripted_replay',
               'sdk_version': importlib.metadata.version('mcp'), 'engine': subprocess.check_output([str(executable), '--version']).decode().strip(),
               'catalog': os.environ.get('CUTBOLT_COST_CATALOG', 'default'),
-              'sources_preserved': True, 'budgets': BUDGETS, 'workflows': results}
+              'sources_preserved': True, 'budgets': BUDGETS, 'workflows': results, 'recovery': recovery}
     (root / 'verification.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     for name, result in results.items():
         calls, sent, received = BUDGETS[name]

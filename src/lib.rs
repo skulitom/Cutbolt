@@ -23,6 +23,7 @@ pub mod documents;
 pub mod duck;
 pub mod dynamics;
 pub mod effects;
+pub mod errors;
 pub mod expressions;
 pub mod files;
 pub mod fillers;
@@ -104,10 +105,19 @@ pub fn version() -> String {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Error {
     pub code: &'static str,
     pub message: String,
+    /// Advisory recovery class, derived centrally from the stable code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<errors::Retry>,
+    /// Known request field path; human labels remain in message only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<Box<str>>,
+    /// Mechanical repair guidance, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<Box<str>>,
     /// Structured data a caller can act on, such as the observations accepted before a tracking
     /// failure; most errors carry none.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,10 +127,46 @@ pub struct Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn error(code: &'static str, message: impl Into<String>) -> Error {
+    let message = message.into();
+    let path = message
+        .split_once(": ")
+        .and_then(|(prefix, _)| machine_path(prefix));
     Error {
         code,
-        message: message.into(),
-        detail: None,
+        message,
+        retry: errors::retry_class(code),
+        path: path.map(String::into_boxed_str),
+        hint: errors::hint(code).map(Box::from),
+        detail: errors::detail(code),
+    }
+}
+
+impl Error {
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(path.into().into_boxed_str());
+        self
+    }
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into().into_boxed_str());
+        self
+    }
+    pub fn with_detail(mut self, detail: serde_json::Value) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+    /// Preserve structured errors across the engine's child-process boundary.
+    pub(crate) fn reported(code: &'static str, value: &serde_json::Value) -> Self {
+        let mut result = error(code, value["message"].as_str().unwrap_or_default());
+        if let Some(path) = value["path"].as_str() {
+            result.path = Some(Box::from(path));
+        }
+        if let Some(hint) = value["hint"].as_str() {
+            result.hint = Some(Box::from(hint));
+        }
+        if let Some(detail) = value.get("detail").filter(|v| !v.is_null()) {
+            result.detail = Some(detail.clone());
+        }
+        result
     }
 }
 
@@ -161,7 +207,9 @@ pub(crate) fn missing_listed(
     if total > first.len() {
         message += &format!(" … and {} more", total - first.len());
     }
-    error(code, message)
+    error(code, message).with_detail(serde_json::json!({
+        "available":first.iter().map(AsRef::as_ref).collect::<Vec<&str>>(), "total":total
+    }))
 }
 
 /// Prefix an error with the JSON path of the request field that caused it, keeping its code.
@@ -174,9 +222,13 @@ pub(crate) trait At<T> {
 }
 impl<T> At<T> for Result<T> {
     fn at(self, path: impl FnOnce() -> String) -> Result<T> {
-        self.map_err(|e| Error {
-            message: format!("{}: {}", path(), e.message),
-            ..e
+        self.map_err(|e| {
+            let prefix = path();
+            Error {
+                path: prefixed_path(&prefix, e.path.as_deref()),
+                message: format!("{prefix}: {}", e.message),
+                ..e
+            }
         })
     }
     fn under(self, path: impl FnOnce() -> String) -> Result<T> {
@@ -186,12 +238,39 @@ impl<T> At<T> for Result<T> {
                 .split_once(": ")
                 .is_some_and(|(head, _)| relative_path(head));
             let separator = if nested { "." } else { ": " };
+            let prefix = path();
             Error {
-                message: format!("{}{separator}{}", path(), e.message),
+                path: prefixed_path(&prefix, e.path.as_deref()),
+                message: format!("{prefix}{separator}{}", e.message),
                 ..e
             }
         })
     }
+}
+
+/// Remove human layer labels, while refusing to invent a path for arbitrary prose.
+fn machine_path(text: &str) -> Option<String> {
+    let mut result = String::new();
+    let mut rest = text;
+    while let Some((prefix, label)) = rest.split_once(" (") {
+        result.push_str(prefix);
+        rest = label.split_once(')')?.1;
+    }
+    result.push_str(rest);
+    relative_path(&result).then_some(result)
+}
+
+fn prefixed_path(prefix: &str, nested: Option<&str>) -> Option<Box<str>> {
+    let prefix = machine_path(prefix)?;
+    Some(
+        match nested {
+            Some(path) if path != prefix && !prefix.ends_with(&format!(".{path}")) => {
+                format!("{prefix}.{path}")
+            }
+            _ => prefix,
+        }
+        .into_boxed_str(),
+    )
 }
 
 /// A field path relative to some object, such as `animation.opacity` or `keys[3].time`.
@@ -245,6 +324,14 @@ mod tests {
         );
         let some = missing("MISSING_CLIP", "clip", "nope", ["c2", "c1", "c2"]);
         assert_eq!(
+            none.detail,
+            Some(serde_json::json!({"available":[],"total":0}))
+        );
+        assert_eq!(
+            some.detail,
+            Some(serde_json::json!({"available":["c1","c2"],"total":2}))
+        );
+        assert_eq!(
             some.message,
             r#"Unknown clip "nope"; available clip IDs: "c1", "c2""#
         );
@@ -262,6 +349,14 @@ mod tests {
             "{}",
             many.message
         );
+        assert_eq!(
+            many.detail.as_ref().unwrap()["available"]
+                .as_array()
+                .unwrap()
+                .len(),
+            LISTED_IDS
+        );
+        assert_eq!(many.detail.as_ref().unwrap()["total"], 25);
     }
 
     #[test]
@@ -269,12 +364,20 @@ mod tests {
         let nested: Result<()> = Err(error("X", "keys[3].time: 7 s is late"));
         let joined = nested.under(|| "animation.opacity".into()).unwrap_err();
         assert_eq!(
+            joined.path.as_deref(),
+            Some("animation.opacity.keys[3].time")
+        );
+        assert_eq!(
             joined.message,
             "animation.opacity.keys[3].time: 7 s is late"
         );
         let layer = Err::<(), _>(joined)
             .under(|| "layers[2] (title)".into())
             .unwrap_err();
+        assert_eq!(
+            layer.path.as_deref(),
+            Some("layers[2].animation.opacity.keys[3].time")
+        );
         assert_eq!(
             layer.message,
             "layers[2] (title).animation.opacity.keys[3].time: 7 s is late"
@@ -284,5 +387,10 @@ mod tests {
             plain.under(|| "segments[1]".into()).unwrap_err().message,
             "segments[1]: Layer frame 3: lost"
         );
+        let queued =
+            Err::<(), _>(error("IO_ERROR", "Output parent is missing").with_path("output"))
+                .at(|| "arguments.output".into())
+                .unwrap_err();
+        assert_eq!(queued.path.as_deref(), Some("arguments.output"));
     }
 }

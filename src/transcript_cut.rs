@@ -395,8 +395,9 @@ pub fn plan(
 ) -> Result<Value> {
     document.verify_source(input_root)?;
     if project.revision != expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            expected_revision,
+            project.revision,
             "Expected project revision does not match",
         ));
     }

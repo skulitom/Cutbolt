@@ -758,7 +758,7 @@ pub fn run_many(
             }
             Err(e) => {
                 for (index, _) in &prepared {
-                    outcomes[*index] = Some(Err(error(e.code, e.message.clone())));
+                    outcomes[*index] = Some(Err(e.clone()));
                 }
             }
         }

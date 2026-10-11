@@ -161,8 +161,8 @@ pub fn propose(request: &Request) -> Result<Value> {
     let target = media::allowed_file(&inside(request.target), request.input_root)?;
     let output = crate::render::destination_extension(request.output, request.output_root, "cube")?;
     if output.try_exists()? {
-        return Err(error(
-            "OUTPUT_EXISTS",
+        return Err(crate::errors::output_exists(
+            &output,
             format!("{} already exists", output.display()),
         ));
     }

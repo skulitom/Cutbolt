@@ -198,7 +198,7 @@ pub(super) fn inputs() -> Result<Value> {
             })();
             result.push(match report {
                 Ok(v) => v,
-                Err(e) => json!({"id":id,"error":{"code":e.code,"message":e.message}}),
+                Err(e) => json!({"id":id,"error":e}),
             });
         }
         Ok(

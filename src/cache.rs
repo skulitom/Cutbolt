@@ -290,7 +290,11 @@ pub fn run(request: &Request) -> Result<Value> {
             project.validate()?;
             proxy::dimensions(project, *scale)?;
             if project.revision != *expected_revision {
-                return Err(error("REVISION_CONFLICT", "Expected revision differs"));
+                return Err(crate::errors::revision(
+                    *expected_revision,
+                    project.revision,
+                    "Expected revision differs",
+                ));
             }
             let asset = project.asset(asset_id)?;
             if asset.identity.is_none() {

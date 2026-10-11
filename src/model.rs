@@ -492,8 +492,9 @@ impl Project {
     pub fn apply(&self, expected_revision: u64, operations: Vec<Operation>) -> Result<Self> {
         self.validate()?;
         if expected_revision != self.revision {
-            return Err(error(
-                "REVISION_CONFLICT",
+            return Err(crate::errors::revision(
+                expected_revision,
+                self.revision,
                 "Expected revision does not match supplied snapshot",
             ));
         }

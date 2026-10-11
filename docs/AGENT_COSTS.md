@@ -101,6 +101,34 @@ Every default listing must also stay at most 40,000 bytes. Explicit `CUTBOLT_COS
 retains the original ceilings for compatibility and saved-baseline runs. No baseline ceiling
 was raised. Use that setting when replaying an older binary that defaults to the full catalog.
 
+## Structured recovery, stage 3
+
+A separate replay deliberately supplies a string for `width`, uses a stale `expected_revision`,
+and requests an already occupied preview filename. Its recovery helper removes both `code` and
+`message` before acting: `retry`, `path` and `hint` identify the repair, while structured `detail`
+supplies the current revision and unused filename. It reads the saved head and reconsiders the
+append before resubmitting. The original preview remains byte-identical after the repaired call.
+
+| Platform | Calls | Deliberate failures, repaired | Sent bytes | Received bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Windows | 9 | 3 | 2,235 | 34,120 |
+| Linux | 9 | 3 | 2,191 | 33,974 |
+
+There are no schema/capability lookups. The recovery replay has its own ceilings (nine calls,
+4,000 sent bytes, listing ceiling plus 35,000 received bytes); it does not relax any of the five
+normal-workflow budgets. Their calls stay 15/6/12/8/8. Current Windows received bytes are
+209,471/46,552/62,607/40,745/185,606; Linux receives 209,341/46,426/62,479/40,619/185,476.
+Their 21,043-byte workspace listing is unchanged; the tiny total-result differences from stage 2
+are variable receipt fields. No extra error fields appear on successful responses.
+
+The [error contract and registry](AGENT_INTERFACE.md#structured-error-recovery) classify 234 engine
+codes. A source scan checks registration and the documentation table. Existing codes/messages and
+the MCP envelope remain. Optional fields survive queued command processes, persisted job errors and
+batch failures. Separate queue tests retain an occupied output and verify the persisted repair
+suggestion. Nested request paths, bounded missing-ID lists, revision details and non-overwriting
+filename suggestions have Rust checks. A terminal failed job is not resumable merely because its
+cause was transient; the guidance distinguishes eligible queued attempts from a new submission.
+
 ## Independent model trials
 
 1. Build/save the exact engine and record its commit, executable identity, OS, FFmpeg build,

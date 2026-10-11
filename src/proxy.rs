@@ -88,8 +88,9 @@ pub fn generate(request: &Generate) -> Result<Value> {
     let project = &request.project;
     project.validate()?;
     if project.revision != request.expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            request.expected_revision,
+            project.revision,
             "Expected revision does not match supplied snapshot",
         ));
     }

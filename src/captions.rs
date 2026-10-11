@@ -588,8 +588,9 @@ pub fn apply(
 ) -> Result<Value> {
     document.validate()?;
     if document.revision != expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            expected_revision,
+            document.revision,
             "Caption revision differs from expected_revision",
         ));
     }

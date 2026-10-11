@@ -716,8 +716,9 @@ pub fn mutate(
     }
     let current = head(&tx, project_id)?;
     if current != expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            expected_revision,
+            current,
             format!("Expected {expected_revision}; current revision is {current}"),
         ));
     }

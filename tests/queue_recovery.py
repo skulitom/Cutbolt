@@ -279,6 +279,24 @@ fn main(){
         until(tool.exited, bool, seconds=5)
         assert not target.exists() and set(output.glob('.cutbolt-*')) == retained, list(output.glob('.cutbolt-*'))
         passed.append('recovery.command_progress_cancellation_and_stall_watchdog')
+        # A queued command fails in its child process, then preserves the optional recovery
+        # fields through supervision, persistence and the job.status API.
+        queue, env = setup('command-guidance', 'pass')
+        existing = output/'retained.mkv'
+        existing.write_bytes(b'original occupied output')
+        arguments = {'project':project, 'input_root':str(sources), 'output_root':str(output),
+                     'output':str(existing), 'start':0, 'duration':time(1, 25)}
+        ticket = call('job.start', env=env, job_root=str(queue), request_id='guidance', run='preview.range', arguments=arguments)
+        jobs.append((queue, ticket['job_id']))
+        result = terminal(queue, ticket)
+        assert result['status'] == 'failed', result
+        failure = result['error']
+        assert failure.get('retry') == 'changed' and failure.get('path') == 'output' and failure.get('hint'), failure
+        candidate = Path(failure['detail']['suggested_output'])
+        assert candidate.parent.samefile(output) and not candidate.exists()
+        assert existing.read_bytes() == b'original occupied output'
+        assert status(queue, ticket)['error'] == failure
+        passed.append('recovery.child_error_guidance_persists_without_overwrite')
         assert original=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
         report={'passed':passed,'frames_compared':compared,'stereo_sample_frames_compared':samples,'rejections':rejected,'reference':'Original generated RGB/PCM slices; real encoded output, transient failures, killed worker/process tree, pinned source mutation and all 32 queue slots. Publication crash points have separate Rust child-process evidence.'}
         (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')

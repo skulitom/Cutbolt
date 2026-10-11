@@ -362,7 +362,7 @@ pub fn prepare_many(
                 results.push(json!({"path":path,"asset_id":id,"result":result}));
             }
             Err(e) => {
-                results.push(json!({"path":path,"error":{"code":e.code,"message":e.message}}));
+                results.push(json!({"path":path,"error":e}));
             }
         }
     }

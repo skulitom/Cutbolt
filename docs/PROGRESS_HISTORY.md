@@ -1,5 +1,36 @@
 # Progress history
 
+## 11 October 2026: agent-cost stage 3, structured error recovery
+
+Errors now add optional `retry`, `path` and `hint`, with repair values in `detail`. One sorted
+registry classifies all 234 engine codes; a Rust source scan checks registration and the exact
+public code/class/meaning table. Existing codes and messages, MCP envelopes and successful
+responses remain. Paths cover parser failures, nested field prefixes and queued arguments.
+Missing references carry up to 20 available IDs and their count; conflicts report both revisions;
+occupied outputs suggest an unused sibling; missing folders, migration and unsupported queued
+commands provide mechanical guidance. Child-process supervision, saved failures and batch reports
+preserve the optional fields. Compact boxed strings avoid enlarging every Result's error variant.
+
+A revision conflict is classified `changed`, refining the plan's ambiguous "same after refresh"
+example: an identical stale expected_revision cannot succeed. The recipe must read and reconsider
+the current head. Job guidance also respects existing attempt limits: job.resume runs eligible
+queued/interrupted attempts and cannot restart terminal failures. No retry policy was expanded.
+
+The separate official-SDK recovery replay fixes three deliberate mistakes in nine calls, without
+reading error code/message or looking up schemas. It checks `retry`/`path`/`hint` and uses structured
+revision/filename details. Windows sends 2,235 and receives 34,120 bytes; Linux sends 2,191 and
+receives 33,974. All five normal recipes retain their 15/6/12/8/8 calls and budgets, zero failures
+and zero schema/capability lookups. The compact workspace listing stays 21,043 bytes; normal result
+sizes remain within six bytes of stage 2. See [AGENT_COSTS.md](AGENT_COSTS.md) for exact measurements.
+
+Windows/Linux pass 212/211 Rust tests, formatting and lint, integration/SDK, all workflow/recovery
+replays and real queue-recovery fixtures. Windows agent-ergonomics also passes. The new queued
+failure test proves repair details survive an actual child process and store round-trip while
+retaining existing output bytes. The material check passes 301 candidate files. The prior compact
+catalog commit's 44 deferred fixtures all passed; this commit uses the usual gate/background loop.
+Thorough progress evidence remains the prior milestone; no v1/v2 points or scope changed. Agent-cost
+stages 4–5 and direct-footage stages 1–6 remain open; this is not completion of either full plan.
+
 ## 11 October 2026: agent-cost stage 2, compact MCP by default
 
 Bare `cutbolt mcp` now lists 17 direct shared-workflow/recovery tools plus `cutbolt_run`.
