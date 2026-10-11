@@ -23,7 +23,33 @@ WIDTH, HEIGHT, RATE = 3840, 2160, 25
 
 
 def process_tree(root_pid, child_program=None):
-    """A read-only Windows process snapshot; never terminate by a sampled PID."""
+    """A read-only process snapshot; never terminate by a sampled PID."""
+    entries, names = linux_processes() if os.name != 'nt' else windows_processes()
+    # Queue workers retain their own console host while running the next job.
+    # For cancellation evidence, select only the active tool scope descendants.
+    result = ({pid for pid,parent in entries.items() if parent==root_pid and names[pid].lower()==child_program.lower()}
+              if child_program else {root_pid})
+    while True:
+        expanded = result | {pid for pid, parent in entries.items() if parent in result}
+        if expanded == result:
+            return result & entries.keys()
+        result = expanded
+
+
+def linux_processes():
+    """Every process's parent and program name, from /proc."""
+    entries = {}; names = {}
+    for stat in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            text = stat.read_text()
+        except OSError:  # It exited during the scan.
+            continue
+        name, rest = text[text.index('(') + 1:text.rindex(')')], text[text.rindex(')') + 2:].split()
+        pid = int(stat.parent.name); entries[pid] = int(rest[1]); names[pid] = name
+    return entries, names
+
+
+def windows_processes():
     class Entry(ctypes.Structure):
         _fields_ = [('size', wintypes.DWORD), ('usage', wintypes.DWORD), ('pid', wintypes.DWORD),
                     ('heap', ctypes.c_size_t), ('module', wintypes.DWORD), ('threads', wintypes.DWORD),
@@ -48,20 +74,12 @@ def process_tree(root_pid, child_program=None):
             more = api.Process32NextW(handle, ctypes.byref(e))
     finally:
         api.CloseHandle(handle)
-    # Queue workers retain their own console host while running the next job.
-    # For cancellation evidence, select only the active tool scope descendants.
-    result = ({pid for pid,parent in entries.items() if parent==root_pid and names[pid].lower()==child_program.lower()}
-              if child_program else {root_pid})
-    while True:
-        expanded = result | {pid for pid, parent in entries.items() if parent in result}
-        if expanded == result:
-            return result & entries.keys()
-        result = expanded
+    return entries, names
 
 
 def monitored(command, request, seconds, env=None):
     p = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+                         env=env, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     stop = threading.Event(); peaks = {}; totals = []; errors = []
     def sample():
         while not stop.is_set():

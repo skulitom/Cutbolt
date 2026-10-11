@@ -127,6 +127,7 @@ Original [LUT conversion and numerical scopes](LUTS_SCOPES.md) use project-owned
 | windows (Windows target only) | 0.62.2 | MIT OR Apache-2.0 |
 | windows-core (Windows target only) | 0.62.2 | MIT OR Apache-2.0 |
 | windows-sys (Windows target only) | 0.61.2 | MIT OR Apache-2.0 |
+| libc (Unix targets only) | 0.2.189 | MIT OR Apache-2.0 |
 
 The 91-package lockfile includes the project and build/transitive/other-target dependencies. The tested Windows metadata includes 77 external packages. SQLite 3.53.2 is compiled through `libsqlite3-sys` 0.38.2 from Cargo's external package cache; neither the SQLite source nor compiled binary is vendored in this repository. The bundled build removes the need for a runtime SQLite installation and requires a C compiler when building. SQLite's embedded source declares public-domain status; the Rust wrapper has its own MIT license.
 
@@ -223,10 +224,14 @@ Original fixture generation uses Python's standard library and external tools. T
 
 Graphics verification additionally uses external FontTools 4.25.0 (MIT) to generate original abstract rectangle glyphs into external TrueType fixtures. No existing font or font implementation is copied into this repository. The pixel reference uses analytic rectangle coverage and known original advances; it does not call the engine's rasterizer.
 
-Install these exact direct development versions into an external environment when needed: `python -m pip install jsonschema==4.25.0 mcp==1.12.3 Pillow==10.3.0 fonttools==4.25.0`. The original controlled media-tool fixture compiles with rustc into an external test directory; its executable is never committed. The optional, explicit model-setup helper described below additionally uses the separately installed `huggingface-hub` package; it is never called by the engine or verification suite.
+Install these exact direct development versions into an external environment when needed: `python -m pip install jsonschema==4.25.0 mcp==1.12.3 Pillow==10.3.0 fonttools==4.25.0 psutil==7.1.0`. `tools/verify.py` and `tools/ship.py` use psutil to check run markers. The original controlled media-tool fixture compiles with rustc into an external test directory; its executable is never committed. The optional, explicit model-setup helper described below additionally uses the separately installed `huggingface-hub` package; it is never called by the engine or verification suite.
 
 
 The local recording backend selects **windows 0.62.2** and **windows-core 0.62.2** (MIT OR Apache-2.0) for typed COM/audio bindings and callback support. These remain in Cargo’s external package cache. Original project code implements input selection, packet accounting, streaming WAV output and placement; it uses the installed Windows shared audio engine for explicitly requested format conversion. Public [audio initialization](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize), [packet capture](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiocaptureclient-getbuffer) and [process-specific activation](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-activateaudiointerfaceasync) describe the called interfaces. The original playback fixture uses its own nonpersistent audio session. No driver, SDK implementation, binary or generated recording is vendored.
+
+The Linux job backend, image-directory publication and speech launch select **libc 0.2.189** (MIT OR Apache-2.0), already in the lockfile as a transitive dependency, for `setsid`, `prctl`, `waitid`, `kill`, `fork`, `sigwait` and `renameat2`. Original project code implements the process groups, parent-death binding and tool guardian; no implementation is copied.
+
+Linux verification on 11 October 2026 used WSL2 Ubuntu 22.04 (kernel 6.18.40.1-microsoft-standard-WSL2) with Rust 1.98.1 and conda-forge FFmpeg/ffprobe **7.0.2** (a GPL build with libx264, installed in its own external environment and not redistributed). Its Python was CPython 3.12.1 with the development packages above, plus pydantic 2.11.7: mcp 1.12.3 imports an interface that newer pydantic releases removed. That FFmpeg build has no NVDEC, so the hardware-decode fixtures were not run on Linux. Speech used the existing external runtime's `/usr/bin/python3` and package directories directly.
 
 ## External media tools
 

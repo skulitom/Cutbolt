@@ -1,5 +1,70 @@
 # Progress history
 
+## 11 October 2026: background jobs, image directories and speech on Linux
+
+Agents on Linux could not finish a job over MCP:
+- `job.start` and `render.start` returned `UNSUPPORTED_PLATFORM`, so media preparation, scene compilation and export were out of reach;
+- speech recognition and PNG-sequence export needed Windows.
+
+All of these now run on Linux. This covers strategy item A1 and most of A2 in [HYPERFRAMES_STRATEGY](HYPERFRAMES_STRATEGY.md).
+
+**Changes.**
+
+The job queue ([AGENT_INTERFACE](AGENT_INTERFACE.md), [RENDER_RECOVERY](RENDER_RECOVERY.md)) replaces the Windows job objects on Linux as follows:
+- The worker starts in its own session (`setsid`) with null standard handles.
+- Each `job-tool` wrapper it starts is killed when the thread that started it ends (`PR_SET_PDEATHSIG`).
+- `job-tool` runs its tool as the leader of a new process group, with a forked guardian:
+  - the guardian kills the group if the wrapper is killed;
+  - once the tool exits, the wrapper kills whatever the tool left running, before collecting the tool's status, so the group ID cannot be reused in between.
+- A queued command (`job-command`) leads its own process group:
+  - its supervisor ends the group once the command exits (again before collecting it), or after the grace period on cancellation;
+  - the stall watchdog sums the CPU time of the group's processes from `/proc`;
+  - when its worker goes (input ends without a stop line), the command cancels itself and kills its own group after the grace period.
+- Named events stay Windows-only. Linux waits use the existing polling fallback.
+
+Other areas:
+- **Image directories** ([EXPORT_FORMATS](EXPORT_FORMATS.md)). `png_sequence` exports publish with `renameat2(RENAME_NOREPLACE)`, then flush the parent directory.
+- **Speech** ([TRANSCRIPTS](TRANSCRIPTS.md)).
+  - On Linux the supervisor starts directly under `unshare -Urnpf` and reads files by their own paths.
+  - `runtime.distribution` is now optional: required on Windows, rejected on Linux.
+  - Capabilities list `platforms` for jobs and recognition.
+- **Not ported.**
+  - Audio recording (WASAPI) stays Windows-only; the draft 1.0 roadmap lists this as an open decision.
+  - macOS still reports `UNSUPPORTED_PLATFORM` for all of these.
+- **Dependency.** New direct dependency libc 0.2.189 (Unix only), already in the lockfile ([DEPENDENCIES](DEPENDENCIES.md)).
+- **Production coordinator.** It accepts POSIX manifest paths, and runs the narration worker directly on Linux. Its fixture's offline checks pass on Linux; the narration launch itself has not been run there.
+
+**Fixtures made platform-neutral** (test code only):
+- process handles use pidfd system calls;
+- peak memory and process trees are read from `/proc`;
+- disk-full codes accept 28 (`ENOSPC`) as well as 112;
+- the copied-ffprobe case keeps the execute bit and names the build's libraries;
+- the production stand-in font is chosen per platform;
+- `CREATE_NO_WINDOW` is used only on Windows.
+
+Two tests now check the Linux behaviour itself:
+- On Linux, file names are exact, so the queue's "same file, other spelling" case becomes an immediate `OUTPUT_RESERVED` at submission.
+- A speech runtime that names a WSL distribution is refused on Linux.
+
+Off Windows, `tools/verify.py` skips three fixtures and names the reason:
+- `recording`: Windows audio capture;
+- `audio_repair` and `transcription`: their fixture speech is synthesized with Windows System.Speech voices.
+
+**Verification.**
+- **Windows.** `cargo test` (206) and clippy pass. These fixtures pass: integration, queue_recovery, render_failures, transcripts, cache_previews, registry, production, unicode_text, audio_routing, reframing, audio_repair, long_form_4k, long_form_stress, recording. Transcription was not run (no runtime configured for this run).
+- **Linux.** WSL2 Ubuntu 22.04; the environment is in [DEPENDENCIES](DEPENDENCIES.md). Clippy `-D warnings` and `cargo test` (205) pass. Every fixture was listed with `--only`:
+  - 54 passed, including integration (MCP jobs, tree cancellation, worker crash), queue_recovery and render_failures;
+  - 9 were skipped:
+    - external runtimes not configured: interchange, native_projects, portable_projects, segmentation;
+    - no `--decode-device`: delivery_profiles, acceleration;
+    - Windows-only: transcription, recording, audio_repair;
+  - 1 failed: `hdr`. Its independent reference uses FFmpeg's `zscale`, which this FFmpeg build lacks.
+
+  A full run stops earlier, at `tests/repository.py`: Git 2.34 has no `worktree add --orphan`.
+- **Speech, both platforms.** The same `media.transcribe` job ran on the 5 October demo narration `s1.wav`: 25.1 s through WSL from Windows, 21.9 s natively on Linux. Both returned the same 23 words, with identical starts, ends, alignment records and probabilities.
+
+No points change. Platform parity is a separately reported score in the draft v2 baseline, which is not adopted. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: track renders and previews seek their sources
 
 Findings 38 and 41 of the effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`): every picture input of a track render was opened at its start and cut with `trim=start_frame=...`, so a late range or frame decoded every earlier frame of its sources. A 12-frame export at 111.6 s took 4.0 s against 1.65 s at 13.2 s, because the full-length caption overlay was decoded up to the range, and `preview.frame` took 2.3-7.4 s per frame.

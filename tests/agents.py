@@ -10,6 +10,8 @@ import json
 import os
 from pathlib import Path
 import queue
+import select
+import signal
 import subprocess
 import sys
 import threading
@@ -113,7 +115,7 @@ def decoded_hash(path, audio=False):
     return digest
 
 
-class ProcessHandle:
+class WindowsProcessHandle:
     """Hold a real process handle so PID reuse cannot affect interruption tests."""
     def __init__(self, pid):
         self.api = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -133,6 +135,29 @@ class ProcessHandle:
 
     def close(self):
         self.api.CloseHandle(self.handle)
+
+
+class LinuxProcessHandle:
+    """The same on Linux: a pidfd names the process, never a reused PID. The system calls are
+    made directly, since Python builds against older C libraries lack os.pidfd_open; their
+    numbers are the same on every architecture."""
+    def __init__(self, pid):
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        self.fd = self.libc.syscall(434, pid, 0)  # pidfd_open
+        assert self.fd >= 0, os.strerror(ctypes.get_errno())
+
+    def stop(self):
+        sent = self.libc.syscall(424, self.fd, signal.SIGKILL, None, 0)  # pidfd_send_signal
+        assert sent == 0, os.strerror(ctypes.get_errno())
+
+    def exited(self):
+        return bool(select.select([self.fd], [], [], 0)[0])
+
+    def close(self):
+        os.close(self.fd)
+
+
+ProcessHandle = WindowsProcessHandle if os.name == "nt" else LinuxProcessHandle
 
 
 async def sdk_roundtrip(executable):

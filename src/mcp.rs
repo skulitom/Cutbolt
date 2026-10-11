@@ -208,7 +208,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Validate the narrow reference media profile and inspect an export plan. Requires absolute input/output roots and an unused .mkv output. May take time to decode source metadata."
         }
         "render.start" => {
-            "Submit an asynchronous local Windows render. render contains a fixed snapshot and absolute input/output roots/path, with optional retry.max_attempts (1..3 total). Retry applies only to transient tool failures and interruptions. Reuse request_id only with identical arguments. Returns a durable ticket; poll job.status."
+            "Submit an asynchronous local render (Windows or Linux). render contains a fixed snapshot and absolute input/output roots/path, with optional retry.max_attempts (1..3 total). Retry applies only to transient tool failures and interruptions. Reuse request_id only with identical arguments. Returns a durable ticket; poll job.status."
         }
         "job.status" => {
             "Read saved state, frame progress, attempt history and completion/error receipt. An exited worker triggers checked publication reconciliation or an opted-in retry within its saved limit. This can update internal job metadata but does not start a worker."
@@ -217,7 +217,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Request cancellation of a queued/running job without deleting final output. Poll until cancelled or completed; publication can win a simultaneous cancellation. Safe to repeat for the same job."
         }
         "job.resume" => {
-            "Reconcile saved publication and wake a Windows worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
+            "Reconcile saved publication and wake the queue worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
         }
         "timeline.meters" => {
             "Measure a timeline range's loudness without exporting: sample peak, RMS and BS.1770 integrated loudness (LKFS) of the mix of enabled audio tracks and, by default, of each enabled audio track alone. Use it to set clip gain_milli against a target such as -14 LKFS. With curve, also loudness per second and the silent and clipped runs, to find dead air, music that buries speech, or distortion. Read-only; at most 4 hours per call."

@@ -45,15 +45,18 @@ const MAX_TEXT: usize = 32 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Runtime {
-    /// WSL distribution name: 1-64 ASCII letters, digits, `-`, `_` or `.`.
-    pub distribution: String,
-    /// Absolute Linux path of the Python interpreter inside the distribution.
+    /// Windows only, where it is required: WSL distribution name, 1-64 ASCII letters, digits,
+    /// `-`, `_` or `.`. Omit it on Linux, where the worker runs directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distribution: Option<String>,
+    /// Absolute Linux path of the Python interpreter (inside the distribution on Windows).
     pub python: String,
     /// 1-8 absolute Linux package directories added to the Python path.
     pub python_paths: Vec<String>,
-    /// Absolute Windows path of the profile's pinned speech model file.
+    /// Absolute path of the profile's pinned speech model file; on Windows, on a local drive.
     pub model: PathBuf,
-    /// Absolute Windows directory holding the acoustic alignment model for `language`.
+    /// Absolute directory holding the acoustic alignment model for `language`; on Windows, on a
+    /// local drive.
     pub alignment_root: PathBuf,
     /// Worker thread count, 1-8.
     pub threads: u32,
@@ -174,10 +177,10 @@ pub(crate) fn check_vocabulary(vocabulary: &[String], aligning: bool) -> Result<
 }
 /// Cheap checks of a runtime configuration, before any media work.
 pub(crate) fn check_runtime(runtime: &Runtime) -> Result<()> {
-    if !cfg!(windows) {
+    if !cfg!(any(windows, target_os = "linux")) {
         return Err(error(
             "UNSUPPORTED_PLATFORM",
-            "This optional speech profile uses Windows with explicitly configured WSL/CUDA",
+            "This optional speech profile uses Linux, or Windows with explicitly configured WSL, with CUDA",
         ));
     }
     if !runtime.model.is_absolute()
@@ -190,12 +193,18 @@ pub(crate) fn check_runtime(runtime: &Runtime) -> Result<()> {
             "Explicit local speech model and alignment directory are required",
         ));
     }
-    if runtime.distribution.is_empty()
-        || runtime.distribution.len() > 64
-        || !runtime
-            .distribution
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+    if cfg!(not(windows)) && runtime.distribution.is_some() {
+        return Err(invalid(
+            "runtime.distribution names a WSL distribution, used only on Windows; omit it on Linux",
+        ));
+    }
+    let distribution = runtime.distribution.as_deref().unwrap_or_default();
+    if (cfg!(windows)
+        && (distribution.is_empty()
+            || distribution.len() > 64
+            || !distribution
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))))
         || !posix(&runtime.python)
         || runtime.python_paths.is_empty()
         || runtime.python_paths.len() > 8
@@ -228,6 +237,22 @@ fn posix(path: &str) -> bool {
             .skip(1)
             .all(|p| !p.is_empty() && p != "." && p != "..")
 }
+/// The worker's view of a local path: the path itself on Linux.
+#[cfg(not(windows))]
+fn linux_path(path: &Path) -> Result<String> {
+    let path = path.canonicalize()?;
+    let text = path
+        .to_str()
+        .ok_or_else(|| invalid("Speech worker paths require Unicode"))?;
+    if !posix(text) {
+        return Err(invalid(
+            "Speech worker paths must be absolute, without control characters or ':'",
+        ));
+    }
+    Ok(text.to_owned())
+}
+/// The worker's view of a local path: its WSL mount under /mnt/<drive>.
+#[cfg(windows)]
 fn linux_path(path: &Path) -> Result<String> {
     let path = path.canonicalize()?;
     let text = path
@@ -354,13 +379,14 @@ fn reader(mut input: impl Read + Send + 'static, limit: usize) -> mpsc::Receiver
     rx
 }
 fn capture(
+    program: &str,
     args: &[String],
     request: &Value,
     timeout: u32,
     control: &dyn media::Control,
 ) -> Result<Value> {
     control.check()?;
-    let mut command = control.command(&control.tool("wsl"), args)?;
+    let mut command = control.command(&control.tool(program), args)?;
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -563,10 +589,10 @@ pub fn run_many(
     requests: &[Transcribe],
     control: &dyn media::Control,
 ) -> Result<Vec<Result<Value>>> {
-    if !cfg!(windows) {
+    if !cfg!(any(windows, target_os = "linux")) {
         return Err(error(
             "UNSUPPORTED_PLATFORM",
-            "This optional speech profile uses Windows with explicitly configured WSL/CUDA",
+            "This optional speech profile uses Linux, or Windows with explicitly configured WSL, with CUDA",
         ));
     }
     let first = requests
@@ -671,11 +697,22 @@ pub fn run_many(
             .map(|(index, _)| requests[*index].timeout_seconds)
             .sum::<u32>()
             .min(600);
-        let args = vec![
-            "--distribution".into(),
-            runtime.distribution.clone(),
-            "--exec".into(),
-            "unshare".into(),
+        // The supervisor runs as PID 1 of new user, network and PID namespaces: directly on
+        // Linux, and inside the selected WSL distribution on Windows (which `check_runtime`
+        // requires there).
+        let (program, mut args): (&str, Vec<String>) = match &runtime.distribution {
+            Some(distribution) if cfg!(windows) => (
+                "wsl",
+                vec![
+                    "--distribution".into(),
+                    distribution.clone(),
+                    "--exec".into(),
+                    "unshare".into(),
+                ],
+            ),
+            _ => ("unshare", Vec::new()),
+        };
+        args.extend([
             "-Urnpf".into(),
             "--kill-child=KILL".into(),
             "--mount-proc".into(),
@@ -685,9 +722,10 @@ pub fn run_many(
             runtime.python.clone(),
             "-B".into(),
             format!("{root}/transcribe_supervisor.py"),
-        ];
+        ]);
         control.check()?;
         let launched = capture(
+            program,
             &args,
             &json!({"request":payload,"worker_sha256":worker_hash,"timeout_seconds":timeout}),
             timeout,

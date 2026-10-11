@@ -109,6 +109,7 @@ dependencies = [
  "fontdue",
  "harfrust",
  "hound",
+ "libc",
  "png",
  "rusqlite",
  "schemars",

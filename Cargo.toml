@@ -27,6 +27,9 @@ windows = { version = "=0.62.2", features = ["Win32_Media_Audio", "Win32_System_
 windows-core = "=0.62.2"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
+
 # Content checks remain mandatory in development; optimize the selected hash
 # implementation so verifying large external tools does not dominate previews.
 [profile.dev.package.sha2]

@@ -371,7 +371,7 @@ mod tests {
         ]);
         assert_eq!(schedule(8, &[&review], &queued), ["sibling"]);
         assert!(overlaps("c:/w", "c:/w/x") && !overlaps("c:/w/a", "c:/w/ab"));
-        assert!(overlaps("c:/", "c:/w") && overlaps(&normalize("C:\\w\\"), "c:/w/x"));
+        assert!(overlaps("c:/", "c:/w") && overlaps(&normalize("c:\\w\\"), "c:/w/x"));
         assert_eq!(normalize(r"\\?\C:\W\Out\"), normalize("C:/W/Out"));
     }
 

@@ -274,8 +274,12 @@ def run(root):
     # Identical executable bytes at a new location reuse; changed bytes invalidate,
     # even when the external executable reports the same version and media facts.
     tool_copy = moved / 'ffprobe.exe'
-    shutil.copyfile(shutil.which('ffprobe'), tool_copy)
+    shutil.copy(shutil.which('ffprobe'), tool_copy)  # with its execute permission
     env = {**os.environ, 'CUTBOLT_FFPROBE': str(tool_copy)}
+    # A shared-library build finds its libraries beside its own folder; the copy needs them named.
+    libraries = Path(os.path.realpath(shutil.which('ffprobe'))).parent.parent / 'lib'
+    if os.name != 'nt' and libraries.is_dir():
+        env['LD_LIBRARY_PATH'] = os.pathsep.join(filter(None, [str(libraries), os.environ.get('LD_LIBRARY_PATH')]))
     tool_same = cached(probe, hit=True, env=env)
     with tool_copy.open('ab') as f:
         f.write(b'original cache identity fixture trailer\n')

@@ -96,6 +96,13 @@ if args.decode_device is not None and not 0 <= args.decode_device < 31:
 if args.thorough and args.decode_device is None:
     raise SystemExit("Full verification requires --decode-device; there is no software substitution for hardware-decode acceptance.")
 available["device"] = None if args.decode_device is None else str(args.decode_device)
+# Windows-only facilities: elsewhere the fixtures that need them are skipped, and say why.
+WINDOWS_ONLY = {
+    "capture": "Windows audio capture (no local capture backend on this platform)",
+    "voices": "Windows speech voices (fixture speech is synthesized with System.Speech)",
+}
+for key in WINDOWS_ONLY:
+    available[key] = "windows" if os.name == "nt" else None
 # Tools on PATH, checked in seconds rather than discovered by a failing fixture an hour later.
 TOOLS = {"ffmpeg": None, "ffprobe": None, "cargo": None, "pwsh": "speech"}
 for tool, needed_by in TOOLS.items():
@@ -211,12 +218,12 @@ STAGES = [
     fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
-    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech"]), fixture("remapping"),
+    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech", "voices"]), fixture("remapping"),
     # Offline checks always; the full companion build only with CUTBOLT_PRODUCTION_CONFIG, _MUSIC and _FONT set.
     fixture("production"),
     # Real-time capture is rejected (correctly) when a busy machine delays a packet; outside the thorough
     # run's quiet phase it may retry once, and the record says so.
-    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"], retry=True,
+    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"], retry=True, needs=["capture"],
             check=require("sustained.long_gate_passed", "Full recording verification requires the sustained native capture gate")),
     fixture("long_form_4k", lane="long", long=["--long-form"],
             check=require("long_gate_passed", "Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")),
@@ -224,7 +231,7 @@ STAGES = [
     fixture("geometry", lane="gated"), fixture("segmentation", "--runtime-python", segmentation_python or "", lane="gated", needs=["segmentation"]),
     fixture("registry", lane="quiet"), fixture("acceleration", "--device", device, lane="gated", needs=["device"]),
     fixture("unicode_text", lane="gated"), fixture("reframing", lane="gated"), fixture("cache_previews", lane="gated"),
-    fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated"),
+    fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated", needs=["voices"]),
     fixture("native_scenes", lane="gated", result="run/verification.json", long=["--long-form"],
             check=require("long_form", "Full native scene verification requires the two-minute long scene")),
     fixture("agent_ergonomics", lane="gated", result="run/verification.json"),
@@ -248,7 +255,8 @@ skipped = {}
 for stage in list(STAGES):
     missing = [need for need in stage["needs"] if not available[need]]
     if missing:
-        reason = "needs " + ", ".join(EXTERNAL[m][0] if m in EXTERNAL else "--decode-device" if m == "device" else m for m in missing)
+        reason = "needs " + ", ".join(EXTERNAL[m][0] if m in EXTERNAL else "--decode-device" if m == "device"
+                                      else WINDOWS_ONLY.get(m, m) for m in missing)
         if args.strict:
             raise SystemExit(f"{stage['name']} {reason} (--strict)")
         skipped[stage["name"]] = reason

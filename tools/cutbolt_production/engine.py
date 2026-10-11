@@ -27,7 +27,9 @@ class ToolError(RuntimeError):
 
 
 def linux_path(path):
-    """C:\\DEV\\x -> /mnt/c/DEV/x for a WSL process."""
+    """C:\\DEV\\x -> /mnt/c/DEV/x for a WSL process; on Linux the path itself."""
+    if os.name != "nt":
+        return str(path)
     win = PureWindowsPath(path)
     if not win.drive or len(win.drive) != 2:
         raise ToolError("tts", "INVALID_PATH", f"{path} is not on a lettered drive")
@@ -117,7 +119,9 @@ class Qwen:
 
     def synthesize(self, request_path, timeout=1800):
         cfg = self.config
-        command = ["wsl", "-d", cfg["distribution"], "--exec", "env", "PYTHONPATH=" + ":".join(cfg["python_paths"]),
+        # Through the configured WSL distribution on Windows; directly on Linux.
+        wsl = ["wsl", "-d", cfg["distribution"], "--exec"] if os.name == "nt" else []
+        command = [*wsl, "env", "PYTHONPATH=" + ":".join(cfg["python_paths"]),
                    cfg.get("python", "/usr/bin/python3"), linux_path(self.worker), linux_path(request_path)]
         started = time.perf_counter()
         env = {**os.environ, "MSYS_NO_PATHCONV": "1"}

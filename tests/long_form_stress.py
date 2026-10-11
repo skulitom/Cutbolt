@@ -67,7 +67,7 @@ def run(root):
         failure=until(lambda:call('job.status',job_root=str(failed),job_id=ticket['job_id']),lambda r:r['status'] in {'failed','completed','interrupted'},seconds=120)
         assert failure['status']=='failed' and failure['attempts']['current']==2,failure
         for n in [1,2]:
-            record=json.loads((failed/f'failure-{n}.json').read_text());assert record=={'written':8192,'raw_os_error':112,'injected':True},record
+            record=json.loads((failed/f'failure-{n}.json').read_text());assert record=={'written':8192,'raw_os_error':112 if os.name=='nt' else 28,'injected':True},record  # ERROR_DISK_FULL or ENOSPC
             assert (failed/f'encoded-{n}.mkv').stat().st_size==8192
         assert not Path(failed_request['output']).exists() and not list(output.glob('.cutbolt-*'))
         large=call('project.create',id='cancel-long-4k',width=3840,height=2160,frame_rate=time(25))

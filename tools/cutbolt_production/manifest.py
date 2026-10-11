@@ -68,6 +68,10 @@ def exact_time(value, where, minimum=F(0), maximum=F(600)):
 def local_path(value, where):
     if not isinstance(value, str) or not value:
         raise ManifestError(f"{where}: give an absolute local file path")
+    if os.name != "nt":
+        if not value.startswith("/") or value.startswith("//") or "://" in value:
+            raise ManifestError(f"{where}: {value!r} must be an absolute local path (no network or relative paths)")
+        return str(Path(value))
     win = PureWindowsPath(value)
     if value.startswith(("\\\\", "//")) or "://" in value or not win.is_absolute() or not win.drive:
         raise ManifestError(f"{where}: {value!r} must be an absolute local path (no network or relative paths)")
