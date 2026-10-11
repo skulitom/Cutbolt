@@ -4,12 +4,15 @@ import { execFileSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, mkdtemp, rm, stat, link, readdir } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import path from 'node:path';
-import { root, BUNDLE, cargoVersion, json, readJSON, assembleMcpb, buildMcpb, registryEntry } from './build.mjs';
+import { root, BUNDLE, cargoVersion, json, readJSON, assembleMcpb, buildMcpb, registryEntry, mergeTools, discoverTools } from './build.mjs';
 import { readZip, writeZip, crc32, sha256 } from './zip.mjs';
 import { checkManifest, verifyMcpb } from './verify.mjs';
 import { packageBinary, TARGETS } from './package.mjs';
 
-let temp, base, binary, notices, build, template, metadata;
+let temp, base, binary, notices, build, template, metadata, fixtureTools;
+// Packaging fixtures need no executable; the real-binary test covers discovery.
+const assembleFixture = options => assembleMcpb(options, async () => fixtureTools);
+const buildFixture = options => buildMcpb(options, async () => fixtureTools);
 const version = '7.8.9';
 const writeJSON = (file, value) => writeFile(file, json(value));
 const writeCargo = value => writeFile(path.join(base, 'Cargo.toml'), `[package]\nname = "fixture"\nversion = "${value}"\n\n[dependencies]\n`);
@@ -20,6 +23,7 @@ before(async () => {
   await mkdir(path.join(base, 'mcpb'), { recursive: true });
   await mkdir(path.join(base, 'docs'));
   template = await readJSON(path.join(root, 'mcpb/manifest.json'));
+  fixtureTools = [...template.tools.slice(1).reverse(), { name: 'cutbolt_new', description: 'New tool sentence. More detail.' }];
   metadata = { ...await readJSON(path.join(root, 'server.json')), version: '0.0.1' };
   await writeJSON(path.join(base, 'mcpb/manifest.json'), template);
   await writeJSON(path.join(base, 'server.json'), metadata);
@@ -28,7 +32,7 @@ before(async () => {
   notices = path.join(base, 'THIRD_PARTY_NOTICES.md');
   binary = path.join(base, 'stand-in.exe');
   await writeFile(binary, Buffer.from([77, 90, 0, 13, 10, 255, 0, 1]));
-  build = await buildMcpb({ base, binary, notices, out: path.join(temp, 'first') });
+  build = await buildFixture({ base, binary, notices, out: path.join(temp, 'first') });
 });
 after(async () => {
   if (!temp) return;
@@ -47,18 +51,82 @@ test('source metadata is short and metadata-only; manifest template is valid and
   checkManifest({ ...template, version: await cargoVersion() }, await cargoVersion());
 });
 
+test('tool merge keeps curated descriptions, drops absent tools and follows live order without mutation', () => {
+  const overrides = [
+    { name: 'cutbolt_first', description: 'Curated first.' },
+    { name: 'cutbolt_dropped', description: 'Retired.' },
+    { name: 'cutbolt_last', description: 'Curated last.' }
+  ];
+  const live = [
+    { name: 'cutbolt_last', description: 'Server last.', inputSchema: {} },
+    { name: 'cutbolt_first', description: 'Server first.' }
+  ];
+  const before = structuredClone({ overrides, live });
+  assert.deepEqual(mergeTools(overrides, live), {
+    tools: [overrides[2], overrides[0]], added: [], dropped: ['cutbolt_dropped']
+  });
+  assert.deepEqual({ overrides, live }, before);
+});
+
+test('new tool descriptions use the first sentence and normalize whitespace', () => {
+  for (const [description, expected] of [
+    ['  Make a\nsmall image. Keep the source.  ', 'Make a small image.'],
+    ['Inspect it! Then edit.', 'Inspect it!'],
+    ['Ready? More details.', 'Ready?'],
+    ['Render at 1.5 scale. More details.', 'Render at 1.5 scale.'],
+    ['  No final punctuation  ', 'No final punctuation']
+  ]) {
+    assert.deepEqual(mergeTools([], [{ name: 'cutbolt_new', description }]), {
+      tools: [{ name: 'cutbolt_new', description: expected }], added: ['cutbolt_new'], dropped: []
+    });
+  }
+});
+
+test('new tool descriptions stop at a whole word within 160 characters', () => {
+  const merge = description => mergeTools([], [{ name: 'cutbolt_new', description }]).tools[0].description;
+  const exact = 'word '.repeat(31) + 'final';
+  assert.equal(exact.length, 160);
+  assert.equal(merge(exact), exact);
+  assert.equal(merge(exact + ' more words.'), exact);
+  assert.equal(merge('word '.repeat(31) + 'longerword.'), 'word '.repeat(31).trim());
+  assert.throws(() => merge('x'.repeat(161)), /word boundary/);
+});
+
+test('tool merge rejects empty catalogs, invalid names and duplicates', () => {
+  for (const live of [[], undefined, {}]) assert.throws(() => mergeTools([], live), /no tools/);
+  for (const name of ['', 'cutbolt_', 'other_tool', 'cutbolt_bad-name', 'cutbolt_bad.name', 'cutbolt_é', 'cutbolt_bad\n', ' cutbolt_bad', 7, null, undefined]) {
+    assert.throws(() => mergeTools([], [{ name, description: 'Description.' }]), /Invalid tool name/);
+  }
+  assert.throws(() => mergeTools([], [null]), /Invalid tool name/);
+  const tool = { name: 'cutbolt_valid_123', description: 'Description.' };
+  assert.deepEqual(mergeTools([], [tool]).tools, [tool]);
+  assert.throws(() => mergeTools([], [tool, tool]), /Duplicate tool name/);
+});
+
+test('new tools require usable descriptions while curated descriptions remain exact', () => {
+  for (const description of [undefined, null, '', ' \n ']) {
+    assert.throws(() => mergeTools([], [{ name: 'cutbolt_new', description }]), /server description/);
+  }
+  const override = { name: 'cutbolt_known', description: 'Curated text. A second sentence is retained.' };
+  assert.deepEqual(mergeTools([override], [{ name: override.name }]).tools, [override]);
+});
+
 test('two builds have the exact entries, binary bytes, checksum and deterministic LF text', async () => {
-  const second = await buildMcpb({ base, binary, notices, out: path.join(temp, 'second') });
+  const second = await buildFixture({ base, binary, notices, out: path.join(temp, 'second') });
   assert.deepEqual(second.bytes, build.bytes);
   const entries = readZip(build.bytes);
   assert.deepEqual([...entries.keys()], ['DEPENDENCIES.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'manifest.json', 'server/cutbolt.exe']);
   assert.deepEqual(entries.get('server/cutbolt.exe').read(), await readFile(binary));
   assert.deepEqual(entries.get('THIRD_PARTY_NOTICES.md').read(), await readFile(notices));
-  assert.equal(JSON.parse(entries.get('manifest.json').read()).version, version);
+  const generated = JSON.parse(entries.get('manifest.json').read());
+  assert.equal(generated.version, version);
+  assert.deepEqual(generated.tools, mergeTools(template.tools, fixtureTools).tools);
+  assert.deepEqual(build.added, ['cutbolt_new']);
+  assert.deepEqual(build.dropped, [template.tools[0].name]);
   assert.equal(await readFile(`${build.bundle}.sha256`, 'utf8'), `${sha256(build.bytes)}  ${BUNDLE}\n`);
   for (const name of ['LICENSE', 'docs/DEPENDENCIES.md', 'mcpb/manifest.json', 'THIRD_PARTY_NOTICES.md']) {
     const file = path.join(base, name), original = await readFile(file, 'utf8');
-    try { await writeFile(file, original.replaceAll('\n', '\r\n')); assert.deepEqual((await assembleMcpb({ base, binary, notices })).bytes, build.bytes); }
+    try { await writeFile(file, original.replaceAll('\n', '\r\n')); assert.deepEqual((await assembleFixture({ base, binary, notices })).bytes, build.bytes); }
     finally { await writeFile(file, original); }
   }
 });
@@ -66,17 +134,17 @@ test('two builds have the exact entries, binary bytes, checksum and deterministi
 test('builder rejects template versions, invalid Cargo versions, missing binary and changed existing output', async () => {
   try {
     await writeJSON(path.join(base, 'mcpb/manifest.json'), { ...template, version });
-    await assert.rejects(assembleMcpb({ base, binary, notices }), /must not contain version/);
+    await assert.rejects(assembleFixture({ base, binary, notices }), /must not contain version/);
   } finally { await writeJSON(path.join(base, 'mcpb/manifest.json'), template); }
   try {
     for (const value of ['1.0', 'v1.2.3', '01.2.3', '1.2.3-beta', '1.2.3+build']) {
       await writeCargo(value);
-      await assert.rejects(assembleMcpb({ base, binary, notices }), /version must have the form X.Y.Z/);
+      await assert.rejects(assembleFixture({ base, binary, notices }), /version must have the form X.Y.Z/);
     }
   } finally { await writeCargo(version); }
-  await assert.rejects(assembleMcpb({ base, binary: path.join(base, 'absent.exe'), notices }), /Missing binary/);
+  await assert.rejects(assembleFixture({ base, binary: path.join(base, 'absent.exe'), notices }), /Missing binary/);
   const out = path.join(temp, 'occupied'); await mkdir(out); await writeFile(path.join(out, BUNDLE), 'keep');
-  await assert.rejects(buildMcpb({ base, binary, notices, out }), /already exists with different contents/);
+  await assert.rejects(buildFixture({ base, binary, notices, out }), /already exists with different contents/);
   assert.equal(await readFile(path.join(out, BUNDLE), 'utf8'), 'keep');
 });
 
@@ -94,7 +162,7 @@ test('registry entry stamps Cargo version despite stale metadata and hashes the 
 test('a Cargo version bump requires no distribution metadata edits', async () => {
   try {
     await writeCargo('12.34.56');
-    const newer = await buildMcpb({ base, binary, notices, out: path.join(temp, 'bumped') });
+    const newer = await buildFixture({ base, binary, notices, out: path.join(temp, 'bumped') });
     checkManifest(newer.manifest, '12.34.56');
     const entry = await registryEntry({ base, tag: 'v12.34.56', bundle: newer.bundle, out: path.join(temp, 'bumped-entry.json') });
     assert.equal(entry.version, '12.34.56');
@@ -172,7 +240,7 @@ test('native archives contain binary and notices, and tar preserves execute perm
 test('bundle and archive builders require a readable, nonempty notices file', async () => {
   const empty = path.join(temp, 'empty-notices.md');
   await writeFile(empty, ' \r\n\t');
-  for (const create of [assembleMcpb, packageBinary]) {
+  for (const create of [assembleFixture, packageBinary]) {
     const options = { base, binary, target: TARGETS[0], out: path.join(temp, 'missing-notices') };
     await assert.rejects(create(options), /--notices <file> is required/);
     await assert.rejects(create({ ...options, notices: empty }), /Empty notices file/);
@@ -180,7 +248,7 @@ test('bundle and archive builders require a readable, nonempty notices file', as
   }
 });
 
-test('bundle and archive CLIs accept --notices and reject its omission', async () => {
+test('bundle and archive CLIs accept --notices and reject its omission before discovery', async () => {
   const run = (script, args) => execFileSync(process.execPath, [path.join(root, 'mcpb', script), ...args], {
     cwd: temp, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -189,10 +257,21 @@ test('bundle and archive CLIs accept --notices and reject its omission', async (
     ['package.mjs', [TARGETS[0], binary, path.join(temp, 'cli-archive')], `cutbolt-v${await cargoVersion()}-${TARGETS[0]}.zip`]
   ]) {
     assert.throws(() => run(script, args), error => error.status === 1 && /--notices <file> is required/.test(error.stderr));
+    if (script === 'build.mjs') {
+      // The stand-in reaches discovery only after --notices is accepted and read.
+      // Successful bundle CLI packaging is covered by the real-binary test below.
+      assert.throws(() => run(script, [...args, '--notices', notices]), error => error.status === 1 && /spawn|exited|UNKNOWN|EINVAL/.test(error.stderr));
+      continue;
+    }
     run(script, [...args, '--notices', notices]);
     const out = args.at(-1);
     assert.deepEqual(readZip(await readFile(path.join(out, filename))).get('THIRD_PARTY_NOTICES.md').read(), await readFile(notices));
   }
+});
+
+test('discovery cleans up when a stand-in executable cannot start', async () => {
+  await assert.rejects(discoverTools({ manifest: { ...template, version }, binary, base }), /spawn|exited|UNKNOWN|EINVAL/);
+  assert.deepEqual(await readdir(path.join(base, 'target')), []);
 });
 
 test('verifier rejects manifest drift before starting a server', () => {
@@ -223,6 +302,17 @@ test('real release binary passes the standalone bundle verifier', async t => {
     t.skip('Local release binary predates Cargo.toml; rebuild to test it'); return;
   }
   const real = await buildMcpb({ binary: realBinary, notices, out: path.join(temp, 'real') });
+  execFileSync(process.execPath, [path.join(root, 'mcpb/build.mjs'), '--binary', realBinary, '--notices', notices, '--out', path.dirname(real.bundle)], {
+    encoding: 'utf8', timeout: 20000, windowsHide: true
+  });
+  assert.deepEqual(readZip(await readFile(real.bundle)).get('THIRD_PARTY_NOTICES.md').read(), await readFile(notices));
   const output = execFileSync(process.execPath, [path.join(root, 'mcpb/verify.mjs'), real.bundle], { encoding: 'utf8', timeout: 20000, windowsHide: true });
-  assert.match(output, /MCPB verified:.*32 tools, 5 files/);
+  assert.ok(output.includes(`MCPB verified: Cutbolt ${real.manifest.version}, ${real.manifest.tools.length} tools, 5 files; capabilities and write guards passed.`));
+  const changed = new Map([...readZip(real.bytes)].map(([name, entry]) => [name, entry.read()]));
+  changed.set('manifest.json', json({ ...real.manifest, tools: [
+    ...real.manifest.tools.slice(1), { name: 'cutbolt_not_in_binary', description: 'Synthetic mismatch.' }
+  ] }));
+  const mismatched = path.join(temp, 'mismatched.mcpb');
+  await writeFile(mismatched, writeZip(changed));
+  await assert.rejects(verifyMcpb(mismatched), /Core catalog differs from manifest tools/);
 });

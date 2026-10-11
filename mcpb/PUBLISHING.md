@@ -1,6 +1,6 @@
 # Publishing Cutbolt
 
-Pushing a version tag runs **Release**: native Windows x64, Linux x64 and macOS ARM64 builds with Rust 1.98.1, archives, the Windows MCPB smoke test, manifest validation, checksums, provenance attestations and a GitHub release. Only the highest stable tag becomes Latest. Reruns skip identical assets and fail on different bytes; they never replace assets. The `cutbolt-mcpb` workflow artifact also contains `server.registry.json`. Pull requests touching the distribution files run the build and verification as a dry run, without attesting or releasing. Branch pushes do not trigger Release.
+Pushing a version tag runs **Release**: native Windows x64, Linux x64 and macOS ARM64 builds with Rust 1.98.1 (Windows links the C runtime statically, so no Visual C++ Redistributable is needed), archives, the Windows MCPB smoke test, manifest validation, checksums, provenance attestations and a GitHub release. Only the highest stable tag becomes Latest. Reruns skip identical assets and fail on different bytes; they never replace assets. The `cutbolt-mcpb` workflow artifact also contains `server.registry.json`. Pull requests touching the distribution files run the build and verification as a dry run, without attesting or releasing. Branch pushes do not trigger Release.
 
 **Published registry versions are immutable. Publishing metadata-only permanently prevents that version from ever getting its bundle.** Registry publication is a separate manual dispatch after testing. It uses GitHub OIDC, requires an existing release and skips versions already listed. An attached bundle takes precedence over `metadata_only`.
 
@@ -14,6 +14,8 @@ git push origin vX.Y.Z
 ```
 
 Leave `mcpb/manifest.json` versionless. Both the manifest builder and registry entry writer use Cargo.toml. The entry writer stamps the release version into a copy of `server.json`; the source metadata's version may be stale and needs no release edit. The tag, Cargo version and bundle manifest must agree. Metadata-only publication stamps the same release version. Never move an existing release tag to changed bytes.
+
+The builder discovers every page of the binary's core tool catalog and logs added or dropped names; `mcpb/manifest.json` keeps curated descriptions as display overrides, not a fixed tool inventory. New tools use the first sentence of the server description, shortened to at most 160 characters on a word boundary.
 
 From a Windows checkout of that tag (the verifier compares against its Cargo.toml), download into a fresh directory and test:
 

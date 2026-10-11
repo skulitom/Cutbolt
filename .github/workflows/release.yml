@@ -79,12 +79,17 @@ jobs:
       - name: Install the verified Rust toolchain and build
         env:
           EXPECTED_TARGET: ${{ matrix.target }}
+          # Link the C runtime statically on Windows, so the download runs without the Visual C++ Redistributable.
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
         run: |
           set -euo pipefail
           rustup toolchain install 1.98.1 --profile minimal
           host=$(rustc +1.98.1 -vV | sed -n 's/^host: //p' | tr -d '\r')
           test "$host" = "$EXPECTED_TARGET" || { echo "::error::Runner host $host differs from $EXPECTED_TARGET"; exit 1; }
           cargo +1.98.1 build --release --locked
+          if [[ "$RUNNER_OS" == Windows ]] && grep -qai 'vcruntime140' target/release/cutbolt.exe; then
+            echo "::error::cutbolt.exe still imports the Visual C++ runtime"; exit 1
+          fi
       - name: Run version, generate dependency notices and package the native CLI
         env:
           TARGET: ${{ matrix.target }}

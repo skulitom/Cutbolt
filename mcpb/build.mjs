@@ -1,8 +1,9 @@
 // Node 20+, no dependencies. All paths are local; this script makes no network requests.
-import { readFile, writeFile, mkdir, stat, realpath } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, mkdtemp, rm, stat, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { writeZip, readZip, sha256 } from './zip.mjs';
+import { inside, mcpFolders, startMcp } from './mcp-client.mjs';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
 export const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![\s\S])/;
@@ -36,26 +37,72 @@ export async function readNotices(notices) {
   return bytes;
 }
 
-export async function assembleMcpb({ base = root, binary, notices } = {}) {
+function shortDescription(description) {
+  if (typeof description !== 'string' || !description.trim()) throw new Error('New tools need a server description.');
+  const line = description.trim().replace(/\s+/g, ' ');
+  const sentence = /^.*?[.!?](?=\s|$)/u.exec(line)?.[0] ?? line;
+  if (sentence.length <= 160) return sentence;
+  const end = sentence.lastIndexOf(' ', 160);
+  if (end < 1) throw new Error('Tool description has no word boundary within 160 characters.');
+  return sentence.slice(0, end);
+}
+
+export function mergeTools(overrides, liveTools) {
+  if (!Array.isArray(liveTools) || liveTools.length === 0) throw new Error('MCP server lists no tools.');
+  const curated = new Map(overrides.map(tool => [tool.name, tool.description]));
+  const names = new Set(), added = [];
+  const tools = liveTools.map(tool => {
+    const name = tool?.name;
+    if (typeof name !== 'string' || name !== name.trim() || !/^cutbolt_\w+$/.test(name)) throw new Error(`Invalid tool name: ${JSON.stringify(name)}`);
+    if (names.has(name)) throw new Error(`Duplicate tool name: ${name}`);
+    names.add(name);
+    if (!curated.has(name)) added.push(name);
+    return { name, description: curated.has(name) ? curated.get(name) : shortDescription(tool.description) };
+  });
+  return { tools, added, dropped: overrides.filter(tool => !names.has(tool.name)).map(tool => tool.name) };
+}
+
+export async function discoverTools({ manifest, binary, base = root }) {
+  const tempRoot = path.resolve(base, 'target');
+  await mkdir(tempRoot, { recursive: true });
+  const temp = await mkdtemp(path.join(tempRoot, 'mcpb-build-'));
+  let client;
+  try {
+    client = startMcp({ manifest, binary, ...await mcpFolders(temp) });
+    await client.initialize();
+    return await client.listTools();
+  } finally {
+    try { await client?.stop(); } finally {
+      if (!inside(tempRoot, temp)) throw new Error('Refusing to remove a folder outside target/');
+      await rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }
+}
+
+export async function assembleMcpb({ base = root, binary, notices } = {}, discover = discoverTools) {
   const template = await readJSON(path.join(base, 'mcpb/manifest.json'));
   if (Object.hasOwn(template, 'version')) throw new Error('mcpb/manifest.json must not contain version; Cargo.toml supplies it.');
   const version = await cargoVersion(base);
   if (!binary || !(await stat(binary).catch(error => { if (error.code !== 'ENOENT') throw error; return null; }))?.isFile()) {
     throw new Error(`Missing binary: ${binary ?? '(provide --binary target/release/cutbolt.exe)'}`);
   }
+  const noticeBytes = await readNotices(notices);
   const manifest = { ...template, version };
+  const catalog = mergeTools(template.tools, await discover({ manifest, binary, base }));
+  manifest.tools = catalog.tools;
+  console.log(`Core tools: added ${catalog.added.join(', ') || '(none)'}; dropped ${catalog.dropped.join(', ') || '(none)'}`);
   const files = new Map([
     ['manifest.json', json(manifest)], ['server/cutbolt.exe', await readFile(binary)],
     ['LICENSE', await readText(path.join(base, 'LICENSE'))],
     ['DEPENDENCIES.md', await readText(path.join(base, 'docs/DEPENDENCIES.md'))],
-    ['THIRD_PARTY_NOTICES.md', await readNotices(notices)]
+    ['THIRD_PARTY_NOTICES.md', noticeBytes]
   ]);
   const bytes = writeZip(files);
-  return { bytes, manifest, files: [...files.keys()].sort(), hash: sha256(bytes) };
+  return { bytes, manifest, files: [...files.keys()].sort(), hash: sha256(bytes), added: catalog.added, dropped: catalog.dropped };
 }
 
-export async function buildMcpb({ base = root, binary, notices, out = path.join(base, 'target/dist/mcpb') } = {}) {
-  const build = await assembleMcpb({ base, binary, notices });
+export async function buildMcpb({ base = root, binary, notices, out = path.join(base, 'target/dist/mcpb') } = {}, discover = discoverTools) {
+  const build = await assembleMcpb({ base, binary, notices }, discover);
   const bundle = path.resolve(out, BUNDLE);
   await writeUnchangedOrNew(bundle, build.bytes);
   await writeUnchangedOrNew(`${bundle}.sha256`, Buffer.from(`${build.hash}  ${BUNDLE}\n`));
