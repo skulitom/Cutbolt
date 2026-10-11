@@ -175,7 +175,7 @@ impl Writer<File> {
     }
 }
 impl<W: Write + Seek> Writer<W> {
-    fn new(mut file: W, target: u64) -> Result<Self> {
+    pub(crate) fn new(mut file: W, target: u64) -> Result<Self> {
         if target == 0 || target > MAX_FRAMES {
             return Err(error(
                 "LIMIT_EXCEEDED",

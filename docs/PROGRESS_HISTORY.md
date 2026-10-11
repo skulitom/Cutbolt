@@ -1,5 +1,34 @@
 # Progress history
 
+## 11 October 2026: exact audio windows in original-footage timelines
+
+Bound compressed originals now supply exact sound as well as pictures to sequential and
+placed-track renders, range previews and reference/H.264-AAC exports. Sequential originals
+compile through an internal promoted copy; saved snapshots and revisions are unchanged.
+The verified direct audio reader writes only requested normalized windows into exclusively
+created temporary PCM16 WAV inputs. Existing gain, fades, transitions and mixing consume those
+samples. Owned inputs are removed on success/failure; creation collisions preserve existing
+files. A graph rejects more than 1 GiB of requested direct PCM payload. This render scratch
+space is distinct from the approved bounded AAC cache; no video intermediate is created,
+original sources are preserved, and publication retains full source hashing.
+
+The new direct_timeline comparison runs inside direct_sources for all 21 eligible profiles.
+It compares decoded RGB/PCM against complete explicit-conform sources for sequential/track
+cuts, linked slip and roll across GOP boundaries, gain/fades, range previews, reference ranges,
+audio-only ranges and H.264/AAC delivery. Extra H.264 cases cover a gap, simultaneous audio/video
+transitions and queued export replay. Each CLI process is checked for owned WAV cleanup.
+The first Windows H.264 comparison passed all eight initial render/export cases exactly.
+Windows Rust checks pass 228 tests, formatting and warning-free lint; Linux Rust checks pass
+227 tests. Linux's eight selected existing timing/render/delivery/integration fixtures pass.
+The expanded all-profile direct_sources run and corresponding Windows regression run are
+still in progress at this commit; their results must be checked and failures fixed forward.
+The previous picture-composition checkpoint's final Windows direct_sources run also passed.
+
+The shared indexed/readiness gate, media.prepare no-conversion response, long-source latency
+and further plan stages remain open. Readiness flags remain conservative for this checkpoint.
+This is implementation progress, not a completed stage-1 acceptance or v2 scope/points award.
+Thorough evidence and PROGRESS.md remain unchanged and stale for these new capabilities.
+
 ## 11 October 2026: indexed original pictures in the track compositor
 
 Bound originals now supply placed-track base pictures, incoming/outgoing transition sides and

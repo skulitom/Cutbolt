@@ -3,15 +3,16 @@
 The source index, saved direct bindings and exact frame previews implement part of
 [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md). Original compressed clips can now supply
 single-frame previews, placed-track base pictures, top-level transitions and cropped/faded
-overlays. Full direct audio/video rendering still needs integration; `timeline.ready` and
-`source_index.direct_decode_available` remain false until that complete path is verified.
+overlays, together with exact sound in sequential/placed-track renders and range exports.
+`timeline.ready` and `source_index.direct_decode_available` remain false pending the shared
+readiness gate and the remaining stage-1 acceptance work.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame
 count, first timestamp and stream time base, native frame rate when detected, keyframe count,
 maximum GOP length, B-frame count, qualification reasons and cache key/hit/bytes. `eligible` reports
 qualification for the indexed decoder. Eligible files also return a bound `source_index.asset`
-and `frame_preview_available: true`; these fields do not claim range/export support. An indexing
+and `frame_preview_available: true`. The complete render path is described below. An indexing
 error is nested in this summary, leaving the metadata inspection available.
 
 One incremental ffprobe pass reads frame timestamps, key flags, picture types and decoded format
@@ -23,7 +24,7 @@ optional codec initial padding, and mono duplication/resampling needs. Packet co
 this measurement for AAC. `audio_policy` now reports the exact first-audio offset relative to video,
 leading/trailing padding or trimming, mono duplication and linear 48 kHz resampling choices.
 These policies are verified by [explicit conform clock normalization](CONFORM.md#explicit-source-clock);
-range rendering remains subsequent work.
+the same policies now supply direct timeline audio windows.
 
 Qualification currently requires one video stream, at most one mono/stereo audio stream and no
 other stream types; MP4/MOV/MKV; H.264 or HEVC Main, even-sized 8-bit 4:2:0 progressive pictures;
@@ -73,7 +74,7 @@ nonpositive/odd dimensions and buffers whose lengths do not match one complete f
 The ordinary Rust unit suite exhaustively compares every table entry with the unchanged f64
 converter for all eight range/input-transfer/output-transfer declarations on Windows and Linux.
 A separate planar 4:2:0 frame test checks layout/chroma addressing, bounds and invalid buffers.
-This proves numerical equality; range-renderer wiring and measured long-source performance remain open.
+This proves numerical equality; measured long-source performance remains open.
 
 ## Indexed video library
 
@@ -94,8 +95,8 @@ limit hides extra frames. Its raw bytes pass through the exact Rust table, never
 The preliminary check can reuse an unchanged source's verified hash as described below; every read
 fully hashes the source before returning success. Callback output is provisional until `read`
 succeeds; a caller must delay publication accordingly. The API creates no intermediate media and
-does not publish files. Saved bindings and single-frame previews use this library. Full timeline
-render/export integration remains pending; the general CLI/MCP readiness flags remain false.
+does not publish files. Saved bindings, previews and full timeline renders/exports use this
+library. The general CLI/MCP readiness flags remain false pending the shared readiness gate.
 
 The 26 original short fixtures include all eight native rates, full-range YUV and both H.264 and
 HEVC open GOPs. For each of the 21 qualifying sources, the fixture compares nine decoded windows
@@ -238,10 +239,9 @@ queue and abort/timeout supervision as native readers. They require exactly the 
 and a clean decoder exit. Preview/render publication still fully verifies every original source.
 The public library reader shares this implementation and retains its final full-hash receipt check.
 
-This is a picture-path checkpoint. A placed timeline with silent or separately prepared audio
-can render its direct pictures; direct audio-track inputs and nested direct pictures still fail
-explicitly. Sequential range rendering, the complete direct audio/video export workflow and
-the long-source performance gate remain pending. Use preparation for those workflows.
+The picture compositor also participates in complete direct audio/video renders, described
+below. Nested direct pictures still fail explicitly. The long-source performance gate remains
+pending; this checkpoint does not complete all of stage 1.
 
 The composition fixture compares 28 twenty-frame renders (560 frames) and 140 PNG previews
 against complete explicit-conform sources across the 21 eligible files on Windows and Linux.
@@ -251,3 +251,28 @@ Its audio is silence: these comparisons do not claim direct audio integration. S
 short/excess raw output, late decoder failure and a changed source copy all fail without a
 published file or surviving partial output; the original fixture remains unchanged. Decoder
 failures retain their original code even when stopping the encoder during cleanup.
+
+## Complete direct audio/video timelines
+
+Bound originals now play both pictures and sound in `render.run`, `preview.range` and
+`export.run`, including reference and H.264/AAC delivery and audio-only ranges. A sequential
+snapshot containing originals is compiled through an internal placed-track copy. The saved
+snapshot, its IDs, revision and gaps are unchanged. Explicit placed tracks use the same path.
+
+Each required direct audio window is normalized by `Video::read_audio` into an exclusively
+created temporary stereo PCM16 WAV. The existing graph then applies clip gain, fades,
+transitions and mixing to those exact samples. The owned file is removed when that render
+finishes or fails; file creation collisions do not remove an existing file. Payloads are limited
+to 1 GiB of requested direct PCM per render graph, plus WAV headers; larger requests fail with
+`LIMIT_EXCEEDED`, a field path and a shorter-range hint. Chunked renders prepare their windows
+separately. This temporary render input is separate from the approved bounded AAC cache.
+Neither path writes a converted video, and full source hashes remain mandatory before output
+publication. Job controls supervise audio decoding as well as pictures.
+
+The direct timeline fixture compares decoded RGB and PCM with the complete explicit-conform
+reference for all 21 eligible sources: sequential and placed-track cuts, linked slip/roll across
+GOP boundaries, gain/fades, range previews, reference ranges, audio-only ranges and H.264/AAC
+ranges. Additional H.264 cases cover an internal gap, simultaneous picture/audio transitions
+and queued export with request replay. Each process must remove its own temporary audio inputs,
+and original identities must remain unchanged. These exactness checks do not claim a completed
+readiness/long-source gate or support for nested direct pictures.

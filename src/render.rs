@@ -60,6 +60,13 @@ pub(crate) enum Generated {
         start: Time,
         samples: u64,
     },
+    /// Only the requested normalized audio window, owned for this render like gain/mix inputs.
+    DirectAudio {
+        path: PathBuf,
+        video: std::sync::Arc<crate::direct::Video>,
+        first: u64,
+        samples: u64,
+    },
     /// A window's audio mixed through track and master limiters.
     Mix(Box<crate::dynamics::Premix>),
 }
@@ -67,6 +74,21 @@ impl Generated {
     fn write(&self, control: &dyn media::Control, timeout: Duration) -> Result<TempFile> {
         use std::io::Write;
         let (path, curve, start, samples) = match self {
+            Generated::DirectAudio {
+                path,
+                video,
+                first,
+                samples,
+            } => {
+                control.check()?;
+                // Establish ownership before arming cleanup; a collision must preserve its file.
+                let output = fs::File::create_new(path)?;
+                let file = TempFile(path.clone());
+                let mut wave = crate::pcm_stream::Writer::new(output, *samples)?;
+                video.read_audio(*first, *samples, control, |bytes| wave.push(bytes))?;
+                wave.finish_file()?;
+                return Ok(file);
+            }
             Generated::Gain {
                 path,
                 curve,
@@ -876,6 +898,31 @@ pub fn plan(
     )
 }
 
+/// Reuse the placed-track streaming pipeline for sequential originals without editing the snapshot.
+fn direct_tracks(project: &Project) -> Result<Option<Project>> {
+    if project.tracks.is_some()
+        || !project.assets.iter().any(|asset| {
+            asset.decode.is_some()
+                && project
+                    .clips
+                    .iter()
+                    .any(|c| c.asset_id.as_ref() == Some(&asset.id))
+        })
+    {
+        return Ok(None);
+    }
+    let mut mapped = project.clone();
+    crate::tracks::edit(
+        &mut mapped,
+        crate::tracks::Edit::Promote {
+            video_track_id: "direct-video".into(),
+            audio_track_id: "direct-audio".into(),
+        },
+    )?;
+    mapped.validate()?;
+    Ok(Some(mapped))
+}
+
 fn plan_controlled(
     project: &Project,
     input_root: &Path,
@@ -886,6 +933,9 @@ fn plan_controlled(
     control.phase("inspecting")?;
     project.validate()?;
     media::input_root(input_root)?;
+    if let Some(mapped) = direct_tracks(project)? {
+        return plan_controlled(&mapped, input_root, output_root, output, control);
+    }
     if let Some(plan) = chunked(
         project,
         output_root,
@@ -1219,6 +1269,9 @@ pub(crate) fn plan_audio_range(
     duration: Time,
 ) -> Result<Plan> {
     project.validate()?;
+    if let Some(mapped) = direct_tracks(project)? {
+        return plan_audio_range(&mapped, input_root, output_root, output, start, duration);
+    }
     media::input_root(input_root)?;
     start.units(project.frame_rate)?;
     if duration.units(project.frame_rate)? == 0

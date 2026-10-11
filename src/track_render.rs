@@ -34,6 +34,7 @@ struct Graph<'a> {
     sources: BTreeMap<String, Source>,
     indexed: BTreeMap<String, std::sync::Arc<crate::direct::Video>>,
     direct_runs: Vec<track_composite::DirectRun>,
+    direct_audio_bytes: u64,
     /// This graph's FFmpeg input index of each asset it reads.
     indices: BTreeMap<String, usize>,
     /// Where each media input's options start in `args`, by input index.
@@ -85,6 +86,7 @@ impl<'a> Graph<'a> {
             sources: BTreeMap::new(),
             indexed: BTreeMap::new(),
             direct_runs: Vec::new(),
+            direct_audio_bytes: 0,
             indices: BTreeMap::new(),
             starts: BTreeMap::new(),
             sounds: BTreeSet::new(),
@@ -692,7 +694,46 @@ impl<'a> Graph<'a> {
                 &raw,
             )?;
         } else {
-            let (input, first, end) = self.input(clip, at, duration, Kind::Audio)?;
+            let source = self.inspect(clip, Kind::Audio, false)?;
+            let (input, first, end) = if let Some(video) = self.indexed.get(&clip.asset_id).cloned()
+            {
+                let (first, end) = self.span(clip, at, duration, Kind::Audio, &source)?;
+                let samples = end - first;
+                let bytes = samples
+                    .checked_mul(4)
+                    .and_then(|n| self.direct_audio_bytes.checked_add(n));
+                if bytes.is_none_or(|n| n > 1_073_741_824) {
+                    return Err(error(
+                        "LIMIT_EXCEEDED",
+                        "Direct audio windows exceed 1073741824 PCM bytes in one render graph",
+                    )
+                    .with_path("project.tracks")
+                    .with_hint("Render a shorter range or fewer overlapping audio clips."));
+                }
+                self.direct_audio_bytes = bytes.expect("bounded audio size");
+                let input = self.inputs;
+                self.inputs += 1;
+                let path = std::env::temp_dir().join(format!(
+                    ".cutbolt-direct-audio-{}-{}-{input}.wav",
+                    std::process::id(),
+                    self.nonce
+                ));
+                self.args.extend([
+                    "-protocol_whitelist".into(),
+                    "file,pipe".into(),
+                    "-i".into(),
+                    path.to_string_lossy().into_owned(),
+                ]);
+                self.generated.push(render::Generated::DirectAudio {
+                    path,
+                    video,
+                    first,
+                    samples,
+                });
+                (input, 0, samples)
+            } else {
+                self.input(clip, at, duration, Kind::Audio)?
+            };
             self.sounds.insert(input);
             self.filters.push(format!("[{input}:a:0]atrim=start_sample={first}:end_sample={end},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{raw}]"));
         }
