@@ -96,7 +96,7 @@ python tools/verify.py --thorough --decode-device 0  # evidence run
 # Or bind one workspace: roots default inside it and paths may be relative.
 .\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp
 # The default is compact (17 shared/recovery tools plus cutbolt_run).
-# Opt into all 84 direct tools when needed.
+# Opt into all 85 direct tools when needed.
 .\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp --tools full
 ```
 

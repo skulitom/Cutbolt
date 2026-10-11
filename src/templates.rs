@@ -41,7 +41,8 @@ pub enum ParameterValue {
     ),
     /// Value for a `fonts` parameter.
     Fonts(
-        /// Ordered external font identities, 1..=4.
+        /// Ordered external font identities or unambiguous installed family/full names, 1..=4.
+        #[schemars(with = "Vec<crate::fonts::Input>")]
         Vec<Identity>,
     ),
     /// Value for a `curve` parameter.
@@ -101,7 +102,8 @@ pub enum Definition {
     },
     /// Ordered font list parameter.
     Fonts {
-        /// Default 1..=4 font identities; omit or null to require a value.
+        /// Default 1..=4 font identities or unambiguous installed family/full names; omit or null to require a value.
+        #[schemars(with = "Option<Vec<crate::fonts::Input>>")]
         default: Option<Vec<Identity>>,
     },
     /// Keyframe curve parameter.

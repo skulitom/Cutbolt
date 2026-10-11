@@ -1,9 +1,6 @@
 //! Original bounded layout and shape coverage; fontdue supplies glyph rasterization.
 mod unicode;
-use crate::{
-    Result, error,
-    scene::{self, Identity},
-};
+use crate::{Result, error, scene::Identity};
 use fontdue::{Font, FontSettings, Metrics};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -110,7 +107,8 @@ pub enum Graphic {
     Text {
         /// Text with LF line breaks; 1..=1024 Unicode scalars and at most 4096 UTF-8 bytes.
         text: String,
-        /// Ordered font identities under `input_root`, 1..=4; each scalar or grapheme uses the first font that has it.
+        /// Ordered font identities or unambiguous installed family/full names, 1..=4. Relative files stay under input_root; absolute identities from fonts.find read installed files in place. Each scalar/grapheme uses the first font that has it.
+        #[schemars(with = "Vec<crate::fonts::Input>")]
         fonts: Vec<Identity>,
         /// Font em size in pixels, 1..=512; the first baseline is `rect` y plus size.
         size: u16,
@@ -187,7 +185,7 @@ impl Cache {
                 "Fonts require at most 8 files, 8 MiB each and 32 MiB total",
             ));
         }
-        let (path, bytes) = scene::identity_bytes(identity, root)?;
+        let (path, bytes) = crate::fonts::identity_bytes(identity, root)?;
         // This profile deliberately accepts ordinary TrueType outline fonts only.
         if bytes.get(..4) != Some(&[0, 1, 0, 0]) {
             return Err(error(

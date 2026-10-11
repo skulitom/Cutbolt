@@ -841,7 +841,8 @@ pub fn export(
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Layout {
-    /// 1-4 font file identities `{path, bytes, sha256}` under `input_root`, in fallback order.
+    /// 1-4 font identities or unambiguous installed family/full names in fallback order. Relative files stay under input_root; absolute identities from fonts.find read installed files in place.
+    #[schemars(with = "Vec<crate::fonts::Input>")]
     pub fonts: Vec<Identity>,
     /// Font em size in pixels, 1-512.
     pub size: u16,

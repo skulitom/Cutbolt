@@ -1,5 +1,32 @@
 # Progress history
 
+## 11 October 2026: installed fonts without copying or manual hashing
+
+Implemented agent-cost plan section 4.2: `fonts.find` lists bounded OS-font-folder scans with
+family/full-name filtering, pagination, exact identities and explicit rendering-support reasons.
+Scene text, caption layouts and template font parameters/defaults accept an unambiguous exact
+family or full name. Preparation resolves it to a content identity before a queued job is saved,
+and reports the original name and file. Absolute installed fonts are read in place and fully
+checked before publication; other image/audio containment rules and legacy path-error codes
+remain unchanged. No typefaces are bundled or installed. Existing ttf-parser 0.25.1 is now an
+exact direct dependency for font names and table inspection; its license is already in the ledger.
+
+Original synthetic-font checks cover filtering, pagination, malformed/unsupported collections,
+ambiguous names, exact glyph pixels, named/explicit equivalence and scene digests, captions,
+templates, path-only identities, changed hashes, containment, core/full MCP, workspace defaults,
+source preservation and durable job pinning. Windows/Linux pass 223/222 Rust tests, formatting
+and lint, and fonts, graphics, templates, captions, unicode_text and agent_costs fixtures. macOS
+folder selection is implemented but has not been run on a macOS host. The prior 9315989 background
+run passed all 44 deferred fixtures.
+
+The default MCP catalog remains 18 tools: discovery uses its router. It grew by 30 bytes to
+21,231 bytes (21,073 with a workspace), below the unchanged 40,000-byte ceiling; the optional full
+catalog has 85 tools. Replay workflows remain at 15/6/12/8/8 calls, with zero failed calls or
+schema lookups. No fresh-model token or title-workflow claim is made. Built-in templates,
+one-job placement and scene shorthand remain unfinished stage-4 work; direct audio still awaits
+the requested cache decision. No scope change, points or new thorough evidence: PROGRESS.md
+retains older evidence.
+
 ## 11 October 2026: approved preliminary identity reuse
 
 Implemented the user's approval to reuse hashes when path, size, modification time and OS file

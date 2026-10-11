@@ -150,3 +150,13 @@ cause was transient; the guidance distinguishes eligible queued attempts from a 
 
 The user approved the final talking-head trial targets: at most **15 calls**, at most **40,000 received
 tokens**, and **no schema lookup** in a skill-driven run. There are no completed model trials yet.
+
+## Stage 4 font discovery
+
+`fonts.find` adds one read-only tool to the full catalog (85 total); the default core catalog still
+has 18 tools and routes discovery through `cutbolt_run`. Its listing is now 21,231 bytes without
+a workspace and 21,073 bytes with one: 30 bytes above stage 2, within the unchanged 40,000-byte
+ceiling. Fonts remain external, with exact content identities resolved before queueing. See
+[FONTS.md](FONTS.md) and the synthetic `fonts` fixture. Original built-in templates, placement
+and scene shorthand remain separate unfinished stage-4 work; this does not establish the final
+model-driven title workflow or talking-head token target.

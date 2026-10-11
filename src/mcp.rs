@@ -117,6 +117,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         "captions.scene" => {
             "Append caption layers to a supplied scene using explicit per-style fonts/boxes and exact frame-start sampling. Reports unsampled and out-of-window cues. Returns an editable scene and inspection; does not render or save it."
         }
+        "fonts.find" => {
+            "List installed TrueType/OpenType files in OS font folders, with optional family/full-name substring and pagination. Returns content identities and rendering support; pass a usable entry's identity directly to scene or caption fonts. Exact family/full names also work when unambiguous. Files are read in place; output contains rasterized glyphs and font licensing remains the user's responsibility."
+        }
         "graphics.instantiate" => {
             "Expand an original scene template using explicit typed parameters. Validates bindings, complete scene semantics and external source identities; returns a fresh editable scene and inspection. No files or saved sessions are changed. Compile the returned scene with job.start run scene.render, then follow its ticket with job.wait."
         }
@@ -428,7 +431,7 @@ pub fn core_tools(workspace: Option<&Workspace>) -> Vec<Value> {
             "Run a command from the enum with its usual arguments. Prefer direct tools when listed. Routed commands never delete files or cancel jobs; use direct job.cancel/cache.prune. Long-running work uses job.start. cutbolt_schema returns complete arguments.\n",
             "Editing: project, timeline, sessions and transcript assembly.\n",
             "Media: source images, registry, proxy, conform and synchronization inspection.\n",
-            "Graphics: scenes, templates, captions, effects, tracking and stabilization.\n",
+            "Graphics: scenes, templates, installed fonts, captions, effects, tracking and stabilization.\n",
             "Audio: levels, loudness, pause/filler edits, routing and recording inspection.\n",
             "Delivery: render/export planning, interchange, portability and backups."),
         "inputSchema":{"type":"object","additionalProperties":false,"required":["command"],"properties":{
@@ -473,7 +476,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 input["properties"]["save_as"] = json!({"type":"string","description":"Write the result to this new workspace .json file and return a summary; pass it on as {\"file\": path, \"select\": field}."});
             }
         }
-        let read_only=matches!(command,"timeline.check"|"transcript.assemble"|"transcript.fillers"|"audio.beats"|"captions.draft"|"audio.tighten"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
+        let read_only=matches!(command,"fonts.find"|"timeline.check"|"transcript.assemble"|"transcript.fillers"|"audio.beats"|"captions.draft"|"audio.tighten"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         let text = match workspace {
             Some(_) => crate::schema::workspace_wording(description(command)),
             None => description(command).to_owned(),

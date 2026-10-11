@@ -57,11 +57,11 @@ pub(crate) fn limits() -> Value {
         "encoding":"streamed_rgb24_frames_parallel_composition_deterministic_order"})
 }
 
-/// A source file inside the input root, pinned by its SHA-256 and size.
+/// A source file pinned by its SHA-256 and size; source files stay inside the input root, with an OS-font-folder exception only for font fields.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Identity {
-    /// Path relative to `input_root`; no `..`, drive or absolute parts.
+    /// Normal-component path relative to input_root. Only font fields additionally accept absolute installed-font paths returned by fonts.find; image/audio fields require relative paths.
     pub path: PathBuf,
     /// Lowercase hex SHA-256 of the contents. When omitted, the file is hashed as the request runs.
     #[serde(default)]
@@ -2575,7 +2575,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         ));
     }
     for (_, identity) in &prepared.sources {
-        identity_bytes(identity, root)?;
+        crate::fonts::identity_bytes(identity, root)?;
     }
     let mut report = prepared.report;
     report["output"] = json!(output);
@@ -2641,7 +2641,7 @@ pub fn still(
     let (out_w, out_h) = ((width * scale) as u32, (height * scale) as u32);
     write_png_channels(&temp, out_w, out_h, &enlarged, scene.transparent)?;
     for (_, identity) in &prepared.sources {
-        identity_bytes(identity, root)?;
+        crate::fonts::identity_bytes(identity, root)?;
     }
     media::publish(&temp, &output)?;
     Ok(

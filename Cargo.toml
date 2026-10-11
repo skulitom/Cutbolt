@@ -17,6 +17,7 @@ png = "=0.18.1"
 flate2 = "=1.1.10"
 hound = "=3.5.1"
 fontdue = { version = "=0.9.4", default-features = false, features = ["std"] }
+ttf-parser = "=0.25.1"
 harfrust = "=0.13.3"
 unicode-bidi = "=0.3.18"
 unicode-segmentation = "=1.13.3"

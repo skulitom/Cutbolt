@@ -28,6 +28,7 @@ pub mod errors;
 pub mod expressions;
 pub mod files;
 pub mod fillers;
+pub mod fonts;
 pub mod geometry;
 pub mod graphics;
 pub mod hdr;
