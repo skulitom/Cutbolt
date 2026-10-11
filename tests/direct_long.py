@@ -107,6 +107,48 @@ def decoded_digest(ffmpeg, path, video):
     return dict(sha256=digest.hexdigest(),bytes=size)
 
 
+def verify_export(c, sources, case, original, expected, config):
+    """Verify the late export separately, so a failed reference can resume without retiming."""
+    source=sources/case['path']
+    def rows(path):
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    target=c['target'];queue=target/'jobs';queue.mkdir()
+    direct=target/'late-range.mp4';start_calls=len(rows(c['launches']))
+    ticket=c['client'].call('job.start',job_root=str(queue),request_id='late-range',run='export.run',
+        arguments=dict(project=c['project'],input_root=str(sources),output_root=str(target),output=str(direct),
+            profile='h264_aac',streams='audio_video',input_transfer='bt709',range=dict(start=time(1190),duration=time(10))))
+    while True:
+        job=c['client'].call('job.wait',job_root=str(queue),job_ids=[ticket['job_id']],timeout_seconds=30)
+        if job['finished']:break
+    assert job['counts']=={'completed':1},job
+    commands=rows(c['launches'])[start_calls:]
+    reads=[r for r in commands if r['tool']=='ffmpeg' and any(a.endswith(case['path']) for a in r['args'])]
+    assert len(reads)==1 and 'rawvideo' in reads[0]['args'] and 'yuv420p' in reads[0]['args'],reads
+    args=reads[0]['args'];assert '-ss' in args and float(args[args.index('-ss')+1])>1100,args
+    source_probes=[r for r in commands if r['tool']=='ffprobe' and any(a.endswith(case['path']) for a in r['args'])]
+    assert not any('-show_frames' in r['args'] for r in source_probes),source_probes
+    reference=target/'reference';reference.mkdir()
+    recipe=dict(schema_version=1,id='long-window',source=dict(file=dict(path=case['path'],**original),
+        sdr=dict(matrix='bt709',range='limited',transfer='bt709',missing_tags='reject'),clock='first_video_frame'),
+        source_in=time(1190),duration=time(10),rate=time(1),reverse=False,freeze=False,width=1920,height=1080,
+        audio='resample',working_transfer='bt709',frame_rate=time(30))
+    conformed=cli(c['exe'],c['env'],'media.conform',recipe=recipe,input_root=str(sources),
+                  output_root=str(reference),output=str(reference/'window.mkv'))
+    p=dict(c['project'],assets=[conformed['asset']],clips=[dict(id='shot',asset_id=conformed['asset']['id'],source_in=time(0),duration=time(10))])
+    cli(c['exe'],c['env'],'export.run',project=p,input_root=str(reference),output_root=str(reference),
+        output=str(reference/'window.mp4'),profile='h264_aac',streams='audio_video',input_transfer='bt709')
+    digests={}
+    for video in [True,False]:
+        actual=decoded_digest(config['COUNTED_FFMPEG'],direct,video)
+        assert actual==decoded_digest(config['COUNTED_FFMPEG'],reference/'window.mp4',video)
+        digests['video' if video else 'audio']=actual
+    final=subprocess.check_output([config['COUNTED_FFMPEG'],'-v','error','-threads','16','-i',str(reference/'window.mkv'),
+        '-an','-vf','select=eq(n\\,299)','-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'],timeout=180)
+    assert len(final)==1920*1080*3 and hashlib.sha256(final).hexdigest()==expected
+    assert identity(source)==original
+    return dict(commands=commands,digests=digests,job=job,reference=conformed)
+
+
 def run(before, after, sources, output):
     before,after,sources,output=[p.resolve() for p in (before,after,sources,output)]
     assert output!=ROOT and ROOT not in output.parents and not output.is_relative_to(sources)
@@ -175,44 +217,12 @@ def run(before, after, sources, output):
                 (run_root/'preview-runs.json').write_text(json.dumps(records,indent=2))
                 assert not observed,('Compiler activity invalidated this run; its measurements are retained',sorted(observed))
                 print(json.dumps({k:records[-1][k] for k in ('build','round','seconds','busy_fraction')}),flush=True)
-        c=contexts['after'];target=c['target'];queue=target/'jobs';queue.mkdir()
-        direct=target/'late-range.mp4';start_calls=len(rows(c['launches']))
-        ticket=c['client'].call('job.start',job_root=str(queue),request_id='late-range',run='export.run',
-            arguments=dict(project=c['project'],input_root=str(sources),output_root=str(target),output=str(direct),
-                profile='h264_aac',streams='audio_video',input_transfer='bt709',range=dict(start=time(1190),duration=time(10))))
-        while True:
-            job=c['client'].call('job.wait',job_root=str(queue),job_ids=[ticket['job_id']],timeout_seconds=30)
-            if job['finished']:break
-        assert job['counts']=={'completed':1},job
-        commands=rows(c['launches'])[start_calls:]
-        reads=[r for r in commands if r['tool']=='ffmpeg' and any(a.endswith(case['path']) for a in r['args'])]
-        assert len(reads)==1 and 'rawvideo' in reads[0]['args'] and 'yuv420p' in reads[0]['args'],reads
-        args=reads[0]['args'];assert '-ss' in args and float(args[args.index('-ss')+1])>1100,args
-        assert not any('-show_frames' in r['args'] for r in commands),commands
-        reference=run_root/'reference';reference.mkdir()
-        recipe=dict(schema_version=1,id='long-window',source=dict(file=dict(path=case['path'],**original),
-            sdr=dict(matrix='bt709',range='limited',transfer='bt709',missing_tags='reject'),clock='first_video_frame'),
-            source_in=time(1190),duration=time(10),rate=time(1),reverse=False,freeze=False,width=1920,height=1080,
-            audio='resample',working_transfer='bt709',frame_rate=time(30))
-        conformed=cli(after,c['env'],'media.conform',recipe=recipe,input_root=str(sources),
-                      output_root=str(reference),output=str(reference/'window.mkv'))
-        p=dict(c['project'],assets=[conformed['asset']],clips=[dict(id='shot',asset_id=conformed['asset']['id'],source_in=time(0),duration=time(10))])
-        cli(after,c['env'],'export.run',project=p,input_root=str(reference),output_root=str(reference),
-            output=str(reference/'window.mp4'),profile='h264_aac',streams='audio_video',input_transfer='bt709')
-        digests={}
-        for video in [True,False]:
-            actual=decoded_digest(config['COUNTED_FFMPEG'],direct,video)
-            assert actual==decoded_digest(config['COUNTED_FFMPEG'],reference/'window.mp4',video)
-            digests['video' if video else 'audio']=actual
-        final=subprocess.check_output([config['COUNTED_FFMPEG'],'-v','error','-threads','16','-i',str(reference/'window.mkv'),
-            '-an','-vf','select=eq(n\\,299)','-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'],timeout=180)
-        assert len(final)==1920*1080*3 and hashlib.sha256(final).hexdigest()==expected
-        assert identity(source)==original
+        export=verify_export(contexts['after'],sources,case,original,expected,config)
         timing={label:dict(median=statistics.median(r['seconds'] for r in records if r['build']==label),
                           range=[min(r['seconds'] for r in records if r['build']==label),max(r['seconds'] for r in records if r['build']==label)])
                 for label in contexts}
         report=dict(policy=policy,python=sys.version,psutil=psutil.__version__,engines={label:dict(identity=c['engine'],build=c['build']) for label,c in contexts.items()},
-                    previews=records,timing=timing,export=dict(commands=commands,digests=digests,job=job,reference=conformed),
+                    previews=records,timing=timing,export=export,
                     originals_preserved=True,last_frame_matches_conform=True,
                     after_ceiling_met=timing['after']['range'][1]<=10)
         (run_root/'verification.json').write_text(json.dumps(report,indent=2))

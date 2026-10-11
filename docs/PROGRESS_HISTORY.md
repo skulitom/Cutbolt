@@ -32,6 +32,10 @@ Every request reads frame 35999 through a sought native-YUV decoder and produces
 no compilation occurs during a measured request. The benchmark excludes a known noncompiler
 name collision (Gigabyte Control Center's GCC.exe); its initial warmup-only run was retained.
 The explicit-conform comparison for the queued final ten-second export is still running.
+The first export completed with sought original decoding; a harness assertion incorrectly
+counted required output-file validation as a source scan. The assertion now selects the
+original source, and the export/reference proof can rerun separately with the same frozen
+release while retaining all ten timed samples. This test correction changes no engine code.
 No complete long-source acceptance, stage-1 completion, v2 adoption or points are claimed here.
 Thorough evidence and PROGRESS.md remain unchanged and stale for the new capabilities.
 
