@@ -817,6 +817,7 @@ pub fn file_hash(path: &Path) -> Result<String> {
 }
 pub fn file_hash_controlled(path: &Path, control: &dyn Control) -> Result<String> {
     let mut input = File::open(path)?;
+    let before = crate::identity_cache::fingerprint(path, &input);
     let mut hash = Sha256::new();
     let mut buf = [0; 65536];
     loop {
@@ -827,7 +828,21 @@ pub fn file_hash_controlled(path: &Path, control: &dyn Control) -> Result<String
         }
         hash.update(&buf[..count]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    let digest = format!("{:x}", hash.finalize());
+    crate::identity_cache::remember(path, &input, before, &digest);
+    Ok(digest)
+}
+
+/// Preliminary checks only. Publishing outputs and receipts must use `file_hash_controlled`.
+pub(crate) fn file_hash_reused_controlled(path: &Path, control: &dyn Control) -> Result<String> {
+    control.check()?;
+    let file = File::open(path)?;
+    if let Some(fingerprint) = crate::identity_cache::fingerprint(path, &file)
+        && let Some(digest) = crate::identity_cache::lookup(&fingerprint)
+    {
+        return Ok(digest);
+    }
+    file_hash_controlled(path, control)
 }
 
 pub fn version(name: &str) -> Result<String> {

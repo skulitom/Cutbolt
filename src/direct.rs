@@ -18,7 +18,8 @@ use std::{
 };
 
 /// A verified compressed source and its presentation index. The source must remain in place
-/// while reading. Every read checks its full content identity before and after decoding.
+/// while reading. Preliminary identity checks can reuse an unchanged file's verified hash;
+/// every successful read fully hashes its source again before returning a receipt.
 pub struct Video {
     path: PathBuf,
     loaded: source_index::Loaded,
@@ -111,11 +112,15 @@ impl Video {
         self.loaded.index.frames.len() as u64
     }
 
-    fn verify(&self, control: &dyn Control) -> Result<()> {
+    fn verify(&self, control: &dyn Control, full: bool) -> Result<()> {
         control.check()?;
         let expected = &self.loaded.index.source;
         if fs::metadata(&self.path)?.len() != expected.bytes
-            || media::file_hash_controlled(&self.path, control)? != expected.sha256
+            || if full {
+                media::file_hash_controlled(&self.path, control)?
+            } else {
+                media::file_hash_reused_controlled(&self.path, control)?
+            } != expected.sha256
             || fs::metadata(&self.path)?.len() != expected.bytes
         {
             return Err(error(
@@ -146,7 +151,7 @@ impl Video {
                     "Direct video range must contain frames inside the indexed source",
                 )
             })?;
-        self.verify(control)?;
+        self.verify(control, false)?;
         let index = &self.loaded.index;
         let seek = seek_frame(&index.frames, first as usize);
         let mut args: Vec<String> = [
@@ -232,7 +237,7 @@ impl Video {
             consume(frame, &rgb)?;
         }
         decoder.finish()?;
-        self.verify(control)?;
+        self.verify(control, true)?;
         Ok(Decoded {
             index: self.loaded.key.clone(),
             first,

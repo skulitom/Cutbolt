@@ -87,9 +87,10 @@ receipt records the index key, requested range, selected seek frame and actual s
 decoder must end successfully with exactly the expected number of frames; no frame-count output
 limit hides extra frames. Its raw bytes pass through the exact Rust table, never FFmpeg RGB scaling.
 
-The source is fully hashed before and after each read. Callback output is provisional until `read`
+The preliminary check can reuse an unchanged source's verified hash as described below; every read
+fully hashes the source before returning success. Callback output is provisional until `read`
 succeeds; a caller must delay publication accordingly. The API creates no intermediate media and
-does not publish files. Approved metadata reuse is still pending. Audio decoding, saved direct
+does not publish files. Audio decoding, saved direct
 asset bindings and timeline/render/preview/export integration are also pending; the video library
 does not change the CLI/MCP readiness flags.
 
@@ -100,3 +101,40 @@ source. It inspects actual decoder arguments, exercises invalid ranges, and chec
 changed before or during reading cannot return success. The explicit conform reference also
 checks every RGB byte and PCM sample against independent arithmetic. These are correctness checks;
 long-source seek latency and direct timeline acceptance remain unverified.
+
+## Approved identity reuse
+
+The user approved metadata-based reuse with a full hash before publication. The process now
+remembers up to 4,096 full file hashes, evicting the least recently used entry when needed. Reuse
+requires the same canonical path, byte count, modification time and OS file identity: the volume
+serial and full 128-bit file ID on Windows, or device and inode on Linux. Missing metadata or file
+ID support disables reuse. A full hash is remembered only if both its open handle and current
+path retain the original fingerprint after hashing.
+
+The direct video library uses reuse only for its preliminary read check. Its final verification,
+all existing publication checks and public file-hash functions still read every byte. Other
+render gates retain full preliminary hashing until their publication paths are integrated and
+audited. The cache is in memory; a new process starts empty. No source bytes or identities enter a
+new persistent file. Same-size in-place edits with deliberately restored modification times can
+pass the preliminary check; the mandatory full hash detects them before a successful receipt.
+The unit test covers this approved tradeoff, modified metadata, replacement file IDs and refresh
+after a full hash.
+
+Both open-GOP fixtures now span six GOPs (360 frames), so the near-end windows exercise later
+random-access points beyond initial preroll. Existing frame-digest oracles remain unchanged.
+
+## Pending audio storage decision
+
+Direct audio experiments found a reproducible AAC seek counterexample with the original fixture
+and FFmpeg 7.0-full_build-www.gyan.dev: for samples 283,200 through 287,999 of `h264-25`, a late
+seek changed 1,949 channel samples compared with full decoding, by at most 13 PCM16 levels. Extra
+preroll did not make every later block equal. The proposed audio reader detects this with indexed
+PCM block hashes and rejects the range rather than returning different samples. It also handles
+Opus container-clock rounding by matching block content and sample positions.
+
+That audio work is not shipped. A bounded, content-verified audio cache would preserve the exact
+full-decode reference and allow later ranges to read locally, but would change stage 1.1's rule
+against storing PCM on disk. The user has been asked to choose between allowing that cache and
+retaining disk-free audio with decoding from the source beginning. Direct video decoding and
+source preservation remain part of either choice. No direct-audio or stage-1 completion claim
+is made while the decision and implementation remain pending.

@@ -34,6 +34,7 @@ pub mod hdr;
 pub mod hdr_color;
 mod hdr_metadata;
 pub mod identity;
+mod identity_cache;
 pub mod image_sequence;
 pub mod inspection_cache;
 pub mod interchange;

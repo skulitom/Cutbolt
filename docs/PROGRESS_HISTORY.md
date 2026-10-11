@@ -1,5 +1,33 @@
 # Progress history
 
+## 11 October 2026: approved preliminary identity reuse
+
+Implemented the user's approval to reuse hashes when path, size, modification time and OS file
+identity are unchanged, with a full hash before publication. A bounded process-local cache keeps
+4,096 verified hashes and evicts the least recently used. Windows compares volume serial plus
+128-bit file ID; Linux compares device/inode. Missing metadata disables reuse, and insertion
+checks both the held file and current path after hashing. No persistent cache or media is added.
+
+The direct video library reuses a hash only in its preliminary read check. Its final check,
+existing publication checks and public file-hash functions still read the full content. Other
+render gates retain full preliminary hashing pending their direct-source integration. Tests cover
+mtime changes, replacement IDs despite equal size/time, and the explicitly approved limitation:
+a same-size in-place edit with restored mtime can reuse a preliminary hash, while the mandatory
+full hash detects it and refreshes the cache. The existing windows-sys 0.61.2 dependency enables
+its file-information feature; no dependency version or license changes.
+
+Both open-GOP fixtures now span six GOPs (360 frames), extending late-seek validation beyond
+initial preroll. Windows/Linux pass 221/220 Rust tests, formatting and lint, plus direct_sources,
+cache_previews and render_failures. The preceding d2f8b7b background run passed all 44 deferred
+fixtures. No latency claim, scope change, points or new thorough evidence; PROGRESS.md retains
+older evidence.
+
+Separately, unshipped audio-reader experiments found a reproducible AAC seek mismatch against
+full decoding even after preroll. Exact block-hash checks reject it. The user has been asked
+whether to allow a bounded canonical audio cache (changing stage 1.1's disk-free PCM rule) or
+retain disk-free audio with decoding from the beginning. This decision remains pending and the
+experimental audio work is saved separately. See DIRECT_SOURCES.md for the measured counterexample.
+
 ## 11 October 2026: indexed native video reads and exact GOP seeking
 
 The public `direct::Video` library now opens pinned H.264/HEVC sources under an explicit input
