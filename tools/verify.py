@@ -123,6 +123,7 @@ def command(args):
 
 
 starting_hashes = source_hashes()
+commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
 
 def rust_checks():
@@ -496,7 +497,6 @@ if deadline_passed.is_set():  # Never started because the gate's time ran out: t
     not_run = []
 if rust_outcome.get("error"):
     failures["rust"] = {"ok": False, "log": rust_outcome["error"], "seconds": 0, "budget_misses": []}
-commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 passed_fingerprints = {name: fingerprints[name] for name, o in outcomes.items() if o["ok"] and fingerprints.get(name)}
 # Passes the map cannot fingerprint are never reused, but they still resolve an earlier failure.
 unmapped_passes = sorted(name for name, o in outcomes.items() if o["ok"] and not fingerprints.get(name))
@@ -512,7 +512,7 @@ if cost_measurements:
         print(f"  {name:14} {row['calls']:3} calls  {row['sent_bytes']:8} sent  {row['received_bytes']:8} received"
               f"  {row['failed_calls']} failed  {row['schema_lookups']} schema lookups", flush=True)
 if args.report:
-    args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN,
+    args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN, "commit": commit,
                                        "ran": sorted(outcomes), "failed": sorted(failures), "deferred": deferred, "reused": reused,
                                        "not_impacted": not_impacted, "skipped": skipped, "agent_costs": cost_measurements}, indent=1), encoding="utf-8")
 if args.cleanup_worktree:

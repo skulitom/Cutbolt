@@ -1,5 +1,43 @@
 # Progress history
 
+## 11 October 2026: agent-cost stage 2, compact MCP by default
+
+Bare `cutbolt mcp` now lists 17 direct shared-workflow/recovery tools plus `cutbolt_run`.
+`--tools full` and `CUTBOLT_MCP_TOOLS=full` retain all 84 direct tools; a flag overrides the
+variable. Selection follows the five recorded workflows: five commands occur in multiple
+workflows and twelve support discovery/repair, missing media, session recovery, interrupted
+jobs or cache capacity. The [measurement document](AGENT_COSTS.md) records the rationale.
+
+The exact compact JSON-RPC listing is 21,201 bytes without a workspace and 21,043 with one,
+against preparation's 224,321-byte full workspace response: 90.6% fewer bytes. The largest
+compact tool is 2,191 bytes. Tests enforce 40,000 bytes for both listings and 4 KiB per tool;
+full listing budgets remain unchanged. An A/B read of the saved `f8d680d` executable and this
+build found identical full-mode tool arrays, both with and without a workspace.
+
+Compact schemas omit the default dialect, use a 96-byte exact-time shape summary and bound
+optional field descriptions to one clause/120 characters. Required descriptions, full lookups
+and strict parsing remain. Default annotation values are omitted, with equivalent effective
+hints tested through the wire client and official Python SDK 1.12.3. The SDK retains absent
+hints as None, so clients must apply the documented protocol defaults. No universal host claim.
+
+Windows and Linux pass the updated integration/SDK tests and all five workflow replays with
+unchanged 15 / 6 / 12 / 8 / 8 calls, zero failures and zero schema/capability lookups. Windows
+received bytes are 209,465 / 46,552 / 62,609 / 40,745 / 185,604, versus preparation's 412,758 /
+249,511 / 265,568 / 243,704 / 388,563. Linux receives 209,341 / 46,426 / 62,479 / 40,619 /
+185,476. The title still costs four calls and 5,073 sent bytes; title simplification remains
+stage 4. Default/core byte and call ceilings were tightened; explicit full-mode compatibility
+runs retain the original ceilings. No token or speed claim is inferred from byte counts.
+
+Rust tests pass 208 on Windows and 207 on Linux; formatting, Windows clippy and material checks
+pass. The preparation engine snapshot's full quick run finished with 61 fixtures passing and
+five unconfigured external-runtime fixtures skipped (OTIO, native projects, legacy stores,
+speech and segmentation). The old verifier stamped that long run with the newer HEAD at its
+end; its per-fixture fingerprints still describe the original snapshot. Quick summaries now
+capture the starting revision and include it in `--report`, preventing that misleading label.
+Stage 1 commit `f8d680d` passed its shipping gate and was pushed; its deferred checks continue.
+No v1/v2 points or scope change. Generated progress/thorough evidence remain stale until a
+milestone run, and the remaining stages of both plans stay open.
+
 ## 11 October 2026: agent-cost stage 1, consistent instructions and named errors
 
 Completed the quick fixes in [the agent-cost plan](plans/AGENT_COST_PLAN.md).

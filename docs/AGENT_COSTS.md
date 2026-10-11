@@ -1,6 +1,6 @@
 # Agent workflow cost measurements
 
-11 October 2026. Preparation stage of [the agent-cost plan](plans/AGENT_COST_PLAN.md).
+11 October 2026. Measurements through stage 2 of [the agent-cost plan](plans/AGENT_COST_PLAN.md).
 These are scripted recipes through official Python MCP SDK **1.12.3**, not independent model trials.
 They establish regression ceilings and an input corpus; they do not prove a model can discover the recipes.
 
@@ -62,7 +62,44 @@ all five recipes. Small byte differences include paths, build strings, worker id
 All five have zero failed calls, schema requests and capabilities requests. The full workspace
 listing response costs **224,321 bytes** per workflow. Windows initialization is about **4.5 KB**.
 The title portion of the tutorial takes **4 calls / 5,043 sent bytes**. These are initial values;
-the plan's compact catalog and two-call/1.5-KB title targets remain unimplemented.
+the compact-catalog measurements below supersede the listing cost; the two-call/1.5-KB title target remains unimplemented.
+
+## Compact default, stage 2
+
+The default now lists 17 direct tools and one router. Five direct tools occur in at least two
+baseline workflows: `session.create`, `session.get`, `session.apply`, `job.start`, `job.wait`.
+The other twelve support recovery: `schema` repairs invalid requests; `files.list` and
+`media.inspect` find and diagnose sources; `timeline.check` diagnoses the edit; session
+undo/history/receipt recover edits or lost responses; job status/cancel/resume recover interrupted
+work; cache inspect/prune diagnose and free derived storage. Other exposed tools remain available
+through the router; long-running commands still use `job.start`. Grouped routing hints and forthcoming skills supply intent-level guidance.
+
+Only the compact listings change. They omit redundant dialect/default hints, use a 96-byte exact-time
+shape summary, preserve required descriptions and shorten optional descriptions. Strict parsing and
+full lookups remain. Full-mode tool arrays are byte-identical to `f8d680d`, with and without a
+workspace. Official SDK and wire tests cover both modes, bare default, environment selection,
+flag precedence, schema validation and annotation defaults.
+
+| Workflow | Calls | Sent bytes | Received, Windows | Received, Linux |
+| --- | ---: | ---: | ---: | ---: |
+| Talking head | 15 | 8,850 | 209,465 | 209,341 |
+| Interview | 6 | 4,223 | 46,552 | 46,426 |
+| Tutorial | 12 | 7,920 | 62,609 | 62,479 |
+| Revision | 8 | 2,320 | 40,745 | 40,619 |
+| Handoff | 8 | 2,351 | 185,604 | 185,476 |
+
+Both platforms have zero failed calls or schema/capability lookups. The workspace listing costs
+21,043 response bytes, versus preparation's 224,321 (90.6% fewer). Without a workspace it is
+21,201 bytes. The largest compact tool is 2,191 bytes. Initialization is about 4.8 KB.
+Talking-head total received bytes fall 49.3%; inline image/result bytes remain in these totals.
+Calls stay equal; routed arguments add 30 bytes for each routed call. The title still needs four
+calls and 5,073 bytes. There is no model-token or wall-time improvement claim.
+
+Default/core ceilings are now the actual 15/6/12/8/8 calls, with sent-byte limits
+9,500/4,500/8,500/2,500/2,600 and received-byte limits 235,000/55,000/75,000/48,000/210,000.
+Every default listing must also stay at most 40,000 bytes. Explicit `CUTBOLT_COST_CATALOG=full`
+retains the original ceilings for compatibility and saved-baseline runs. No baseline ceiling
+was raised. Use that setting when replaying an older binary that defaults to the full catalog.
 
 ## Independent model trials
 

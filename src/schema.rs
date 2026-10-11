@@ -1,5 +1,8 @@
 //! Request schemas sized for agents. Each command's schema carries only the definitions it
 //! uses, and listings abbreviate the largest shared types; `schema` returns any of them in full.
+mod compact;
+pub(crate) use compact::listing as compact_listing;
+
 use crate::{Result, commands::Request, error};
 use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, sync::OnceLock};

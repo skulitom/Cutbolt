@@ -106,9 +106,9 @@ fn main() {
             };
         }
         if args.first().is_some_and(|a| a == "mcp") {
-            // `--tools core` (or CUTBOLT_MCP_TOOLS=core) lists the everyday tools and cutbolt_run.
+            // Compact by default; a flag overrides CUTBOLT_MCP_TOOLS. Full remains opt-in.
             let choice = match args.len() {
-                1 => std::env::var("CUTBOLT_MCP_TOOLS").unwrap_or_else(|_| "full".into()),
+                1 => std::env::var("CUTBOLT_MCP_TOOLS").unwrap_or_else(|_| "core".into()),
                 3 if args[1] == "--tools" => args[2].to_string_lossy().into_owned(),
                 _ => return Err(error("INVALID_ARGUMENT", USAGE)),
             };

@@ -19,15 +19,26 @@ from engine import ENGINE
 from footage_sources import FFMPEG, ROOT, encode, identity
 from graphics import PRIMARY, make_font
 
-# Stage-0 Windows/Linux baselines plus explicit headroom. Tighten as each stage lands;
-# do not silently relax these when a regression adds calls or context.
-BUDGETS = {  # calls, request bytes, received bytes (including initialize/list and image blocks)
+# The explicit full catalog retains stage-0 ceilings for compatibility comparisons.
+# Default/core budgets were tightened after stage 2 on Windows and Linux.
+FULL_BUDGETS = {  # calls, request bytes, received bytes (including initialize/list and image blocks)
     'talking-head': (17, 10_000, 455_000),
     'interview': (7, 5_000, 280_000),
     'tutorial': (14, 9_000, 300_000),
     'revision': (9, 3_000, 275_000),
     'handoff': (9, 3_000, 430_000),
 }
+
+
+COMPACT_BUDGETS = {
+    'talking-head': (15, 9_500, 235_000),
+    'interview': (6, 4_500, 55_000),
+    'tutorial': (12, 8_500, 75_000),
+    'revision': (8, 2_500, 48_000),
+    'handoff': (8, 2_600, 210_000),
+}
+BUDGETS = FULL_BUDGETS if os.environ.get('CUTBOLT_COST_CATALOG') == 'full' else COMPACT_BUDGETS
+LIST_BUDGET = 250_000 if os.environ.get('CUTBOLT_COST_CATALOG') == 'full' else 40_000
 
 
 def relay(executable, workspace, wire):
@@ -338,7 +349,7 @@ def run(root, executable, fixtures_only=False):
     for name, result in results.items():
         calls, sent, received = BUDGETS[name]
         assert result['calls'] <= calls and result['sent_bytes'] <= sent and result['received_bytes'] <= received, (name, result)
-        assert result['initialize_bytes'] <= 6000 and result['tools_list_bytes'] <= 250_000, (name, result)
+        assert result['initialize_bytes'] <= 6000 and result['tools_list_bytes'] <= LIST_BUDGET, (name, result)
         assert result['failed_calls'] == result['schema_lookups'] == result['capabilities_lookups'] == 0
 
 

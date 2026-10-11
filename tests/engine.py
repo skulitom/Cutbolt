@@ -10,6 +10,7 @@ from pathlib import Path
 
 # MCP tools the engine lists; fixtures compare tools/list against this one number.
 MCP_TOOLS = 84
+MCP_CORE_TOOLS = 18
 
 
 def per_frame(runs):

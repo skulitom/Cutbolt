@@ -381,40 +381,26 @@ const SUMMARIZED: [&str; 7] = [
 
 /// The everyday tools a compact catalog (`mcp --tools core`) lists in full; `cutbolt_run` runs
 /// every other tool command by name.
-pub(crate) const CORE: [&str; 33] = [
-    "capabilities",
-    "schema",
-    "files.list",
-    "project.create",
+pub(crate) const CORE: [&str; 17] = [
+    // Used by at least two measured workflows.
     "session.create",
     "session.get",
     "session.apply",
-    "session.preview",
-    "session.undo",
-    "session.history",
-    "job.cancel",
-    "cache.prune",
-    "media.inspect",
-    "media.sheet",
-    "preview.frame",
-    "preview.sheet",
-    "preview.cuts",
-    "timeline.outline",
-    "timeline.check",
-    "timeline.meters",
     "job.start",
     "job.wait",
+    // Recovery: discover valid input, find media, inspect state, undo, or resume interrupted work.
+    "schema",
+    "files.list",
+    "media.inspect",
+    "timeline.check",
+    "session.undo",
+    "session.history",
+    "session.receipt",
     "job.status",
-    "transcript.assemble",
-    "transcript.fillers",
-    "captions.draft",
-    "audio.duck",
-    "audio.normalize",
-    "audio.tighten",
-    "audio.beats",
-    "scene.inspect",
-    "scene.still",
-    "export.inspect",
+    "job.cancel",
+    "job.resume",
+    "cache.inspect",
+    "cache.prune",
 ];
 
 /// The compact catalog: the core tools, plus `cutbolt_run` for every other tool command.
@@ -433,13 +419,39 @@ pub fn core_tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 .is_some_and(|n| CORE.contains(&n.replace('_', ".").as_str()))
         })
         .collect();
+    for tool in &mut listed {
+        crate::schema::compact_listing(&mut tool["inputSchema"]);
+        compact_annotations(tool);
+    }
     listed.push(json!({"name":"cutbolt_run",
-        "description":format!("Run other Cutbolt tool commands by name. Prefer direct tools when listed. Routed commands never delete files or cancel jobs; job.cancel and cache.prune are direct tools only. Use arguments exactly as for a direct call (cutbolt_schema {{\"name\": command}} returns their schema): {}. Long-running commands still go through job.start.", others.join(", ")),
+        "description":concat!(
+            "Run a command from the enum with its usual arguments. Prefer direct tools when listed. Routed commands never delete files or cancel jobs; use direct job.cancel/cache.prune. Long-running work uses job.start. cutbolt_schema returns complete arguments.\n",
+            "Editing: project, timeline, sessions and transcript assembly.\n",
+            "Media: source images, registry, proxy, conform and synchronization inspection.\n",
+            "Graphics: scenes, templates, captions, effects, tracking and stabilization.\n",
+            "Audio: levels, loudness, pause/filler edits, routing and recording inspection.\n",
+            "Delivery: render/export planning, interchange, portability and backups."),
         "inputSchema":{"type":"object","additionalProperties":false,"required":["command"],"properties":{
             "command":{"type":"string","enum":others,"description":"Command to run."},
             "arguments":{"type":"object","description":"The command's arguments, without command; default none."}}},
         "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}));
+    compact_annotations(listed.last_mut().expect("router"));
     listed
+}
+
+/// Protocol defaults need no repeated hints; full listings retain their existing annotations.
+fn compact_annotations(tool: &mut Value) {
+    if let Some(hints) = tool["annotations"].as_object_mut() {
+        for (name, default) in [
+            ("readOnlyHint", false),
+            ("destructiveHint", true),
+            ("idempotentHint", false),
+        ] {
+            if hints.get(name).and_then(Value::as_bool) == Some(default) {
+                hints.remove(name);
+            }
+        }
+    }
 }
 
 /// Whether a command is offered as an MCP tool.
@@ -613,12 +625,12 @@ impl Server {
             "Review your work: timeline.check lists likely mistakes without rendering; timeline.outline reads the whole cut as text, one line per clip, with what is said in it when given transcripts; preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
             "A whole narrated pixel-art explainer (script, one visual beat per scene, palette, music) is one local command outside the engine: python tools/production.py build <manifest> --root <folder> in the Cutbolt repository drives PixelForge, the Qwen narration worker and these tools with resumable stage receipts; see docs/PRODUCTION.md. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
-            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template, audio_routing, transcript and captions schemas; ",
+            "Times may be 2.5, \"5/2\" or {num, den} exact nonnegative seconds on frame boundaries; outputs use {num, den}. Audio-bearing cuts also need whole 48 kHz samples. Tool listings abbreviate the project, operation, scene, template, audio_routing, transcript and captions schemas; ",
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
         )
         .to_owned();
         if self.core {
-            text.push_str(" This compact catalog lists the everyday tools; cutbolt_run runs any other command named here, with the same arguments.");
+            text.push_str(" This compact catalog is the default: shared workflow and recovery tools plus cutbolt_run for the remaining listed commands. Full schemas remain available through cutbolt_schema; launch with --tools full for every direct tool.");
         }
         if let Some(workspace) = &self.workspace {
             text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file (select may be a dotted path such as result.operations), and save_as writes a large result to a new .json file instead of returning it. Proposals (audio.duck, audio.normalize, audio.tighten, transcript.fillers, transcript.assemble) take save_as; then pass session.apply operations as {{\"file\": that file, \"select\": \"operations\"}} instead of copying them.", workspace.root().display()));
@@ -903,10 +915,32 @@ mod tests {
         for command in CORE {
             assert!(commands.contains(&command) && exposed(command), "{command}");
         }
-        let compact = core_tools(None);
-        assert_eq!(compact.len(), CORE.len() + 1);
-        let bytes: usize = compact.iter().map(|t| t.to_string().len()).sum();
-        assert!(bytes <= 96 * 1024, "compact catalog uses {bytes} bytes");
+        let temp =
+            std::env::temp_dir().join(format!("cutbolt-core-catalog-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let workspace = Workspace::open(&temp).unwrap();
+        for context in [None, Some(&workspace)] {
+            let compact = core_tools(context);
+            assert_eq!(compact.len(), CORE.len() + 1);
+            for tool in &compact {
+                assert!(
+                    tool.to_string().len() <= 4096,
+                    "core tool {} exceeds 4 KiB",
+                    tool["name"]
+                );
+                assert_eq!(undescribed(&tool["inputSchema"]), 0, "{}", tool["name"]);
+            }
+            let bytes = response(json!(1), json!({"tools":compact}))
+                .to_string()
+                .len()
+                + 1;
+            assert!(bytes <= 40_000, "default catalog uses {bytes} bytes");
+            eprintln!(
+                "default catalog (workspace={}): {bytes} bytes",
+                context.is_some()
+            );
+        }
+        std::fs::remove_dir_all(&temp).unwrap();
     }
 
     /// Tool names replace dots with underscores, and calls map them back, so a command name with
