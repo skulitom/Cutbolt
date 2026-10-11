@@ -755,7 +755,7 @@ def run(root):
                   'output':str(output/'review-wsl'), 'rendition_height':0}, 'INVALID_TRANSCRIPTION')
             assert not (output/'review-wsl').exists()
         unheard = call({**reviewing, 'heard':[], 'runtime':wrong, 'language':'en', 'output':str(output/'review-unheard'), 'rendition_height':0})
-        failed = {'code':'MODEL_CHANGED', 'message':'Selected speech profile requires its pinned local model'}
+        failed = {'code':'MODEL_CHANGED', 'message':'Selected speech profile requires its pinned local model', 'retry':'changed'}
         assert unheard['speech']['recognition'] == {'ok':False, 'error':failed}, unheard['speech']
         assert unheard['speech']['expected_words'] == 3 and 'comparison' not in unheard['speech']
         assert (unheard['picture']['black'], unheard['sound'], unheard['timing']) == (reviewed['picture']['black'], reviewed['sound'], reviewed['timing'])

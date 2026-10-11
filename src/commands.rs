@@ -2144,7 +2144,28 @@ pub fn handle(request: Request) -> Result<Value> {
             let metadata = media::probe(&path)?;
             let relative = identity["path"].as_str().expect("identity path");
             let timeline = crate::readiness::timeline(&path, relative, &metadata);
-            Ok(json!({"path":path,"identity":identity,"timeline":timeline,"metadata":metadata}))
+            let mut result =
+                json!({"path":path,"identity":identity,"timeline":timeline,"metadata":metadata});
+            if metadata["streams"].as_array().is_some_and(|streams| {
+                streams.iter().any(|s| {
+                    s["codec_type"] == "video"
+                        && matches!(s["codec_name"].as_str(), Some("h264" | "hevc" | "prores"))
+                })
+            }) {
+                let source = crate::registry::Identity {
+                    bytes: identity["bytes"].as_u64().expect("identity bytes"),
+                    sha256: identity["sha256"].as_str().expect("identity hash").into(),
+                };
+                result["source_index"] = match crate::source_index::inspect(
+                    &path, source, &metadata,
+                ) {
+                    Ok(index) => index,
+                    Err(failure) => {
+                        json!({"eligible":false,"direct_decode_available":false,"error":failure})
+                    }
+                };
+            }
+            Ok(result)
         }
         Request::Plan {
             project,

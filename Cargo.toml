@@ -14,6 +14,7 @@ rusqlite = { version = "0.40.2", features = ["bundled", "blob"] }
 
 schemars = "1.2.2"
 png = "=0.18.1"
+flate2 = "=1.1.10"
 hound = "=3.5.1"
 fontdue = { version = "=0.9.4", default-features = false, features = ["std"] }
 harfrust = "=0.13.3"

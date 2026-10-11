@@ -113,7 +113,7 @@ fn memory() -> &'static Mutex<HashMap<String, Verified>> {
     MEMORY.get_or_init(Default::default)
 }
 
-fn directory() -> Option<&'static Path> {
+pub(crate) fn directory() -> Option<&'static Path> {
     static DIRECTORY: OnceLock<Option<PathBuf>> = OnceLock::new();
     DIRECTORY
         .get_or_init(|| {

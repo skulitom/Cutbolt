@@ -6,9 +6,36 @@ Later stages add direct-vs-conform and seek oracles to this same fixture.
 import argparse
 from fractions import Fraction as F
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 
-from footage_sources import ROOT, generate, identity, probe
+from engine import ENGINE
+from footage_sources import ROOT, FFMPEG, FFPROBE, generate, identity, probe
+
+
+def counted_tools(root):
+    source = root / 'counted-index-tool.rs'
+    source.write_text(r'''
+use std::{env, fs::OpenOptions, io::Write, process::{Command, exit}};
+fn main() {
+    let probe = env::current_exe().unwrap().file_stem().unwrap().to_string_lossy().contains("probe");
+    let args: Vec<String> = env::args().skip(1).collect();
+    let kind = if probe { if args.iter().any(|a| a == "-show_frames") { "frames" } else { "metadata" } } else { "audio" };
+    let mut log = OpenOptions::new().create(true).append(true).open(env::var("CUTBOLT_INDEX_LOG").unwrap()).unwrap();
+    writeln!(log,"{kind}").unwrap();
+    let program = env::var(if probe { "CUTBOLT_INDEX_PROBE" } else { "CUTBOLT_INDEX_DECODER" }).unwrap();
+    exit(Command::new(program).args(args).status().unwrap().code().unwrap_or(1));
+}
+''', encoding='utf-8')
+    decoder, prober = root / 'index-decoder.exe', root / 'index-probe.exe'
+    subprocess.run(['rustc', '--edition=2024', str(source), '-o', str(decoder)], check=True, capture_output=True)
+    shutil.copy2(decoder, prober)
+    log = root / 'index-launches.txt'
+    return {**os.environ, 'CUTBOLT_FFMPEG': str(decoder), 'CUTBOLT_FFPROBE': str(prober),
+            'CUTBOLT_INDEX_DECODER': shutil.which(FFMPEG), 'CUTBOLT_INDEX_PROBE': shutil.which(FFPROBE),
+            'CUTBOLT_INDEX_LOG': str(log)}, log
 
 
 def run(root, long=False):
@@ -21,6 +48,16 @@ def run(root, long=False):
 
 def verify(root, manifest, long=False):
     results = {}
+    env, launches = counted_tools(root)
+    def inspect(path):
+        process = subprocess.run([str(ENGINE), '--workspace', str(root)], input=json.dumps({
+            'command':'media.inspect', 'path':str(path)}), env=env, capture_output=True, text=True, encoding='utf-8', timeout=1800)
+        result = json.loads(process.stdout)
+        assert process.returncode == 0 and result['ok'], result
+        indexed = result['result']['source_index']
+        assert 'error' not in indexed, indexed
+        assert indexed['direct_decode_available'] is False and result['result']['timeline']['ready'] is False
+        return indexed
     for name, case in manifest["cases"].items():
         path = root / "sources" / case["path"]
         data = probe(path)
@@ -56,10 +93,30 @@ def verify(root, manifest, long=False):
         if name == "prores-hq":
             assert video["profile"] == "HQ", video
         assert identity(path) == {k: case[k] for k in ("bytes", "sha256")}
+        before = len(launches.read_text().splitlines()) if launches.exists() else 0
+        indexed = inspect(path)
+        first_calls = launches.read_text().splitlines()[before:]
+        assert first_calls == ['metadata', 'frames', 'audio'], (name, first_calls)
+        assert not indexed['cache_hit'] and indexed['cache_bytes'] > 0
+        repeated = inspect(path)
+        assert repeated['cache_hit'] and repeated['key'] == indexed['key']
+        assert launches.read_text().splitlines()[before + len(first_calls):] == ['metadata']
+        qualifies = name not in {'h264-vfr','h264-rotation','h264-sar','hevc-main10','prores-hq'}
+        assert indexed['eligible'] == qualifies and bool(indexed['reasons']) != qualifies, (name, indexed)
+        assert indexed['frames'] == len(frames) and indexed['first_timestamp'] == stamps[0]
+        assert F(indexed['time_base']['num'],indexed['time_base']['den']) == tb
+        assert indexed['keyframes'] == sum(f['key_frame'] for f in frames)
+        assert indexed['b_frames'] == sum(f['pict_type'] == 'B' for f in frames)
+        audio_frames = [f for f in data['frames'] if f['media_type'] == 'audio']
+        decoded = indexed['audio']
+        assert decoded['decoded_samples'] == sum(f['nb_samples'] for f in audio_frames), (name, decoded)
+        assert F(decoded['first_pts'],decoded['sample_rate']) == int(audio_frames[0]['best_effort_timestamp']) * F(audio['time_base'])
+        assert decoded['channels'] == case['channels'] and decoded['sample_rate'] == case['audio_rate']
+        assert identity(path) == {k: case[k] for k in ('bytes','sha256')}
         results[name] = {"frames": len(frames), "first_timestamp": stamps[0], "time_base": str(tb),
                          "intervals": intervals, "codec": video["codec_name"], "profile": video.get("profile"),
-                         "pix_fmt": video["pix_fmt"], "audio_rate": int(audio["sample_rate"])}
-    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures"], "stage": "preparation",
+                         "pix_fmt": video["pix_fmt"], "audio_rate": int(audio["sample_rate"]), "index":indexed}
+    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index"], "stage": "source_index",
               "direct_decode_verified": False, "sources_preserved": True, "cases": results,
               "tools": manifest["tools"], "long_source_generated": long}
     (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

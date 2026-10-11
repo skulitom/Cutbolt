@@ -67,6 +67,7 @@ pub mod schema;
 pub mod scopes;
 pub mod selection;
 pub mod sequences;
+mod source_index;
 pub mod spatial;
 mod spelling;
 pub mod stabilize;

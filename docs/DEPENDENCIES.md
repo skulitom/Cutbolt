@@ -118,6 +118,7 @@ Original [LUT conversion and numerical scopes](LUTS_SCOPES.md) use project-owned
 | schemars | 1.2.2 | MIT |
 | png | 0.18.1 | MIT OR Apache-2.0 |
 | hound | 3.5.1 | Apache-2.0 |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 |
 | fontdue (std only, default features disabled) | 0.9.4 | MIT OR Apache-2.0 OR Zlib |
 | harfrust | 0.13.3 | MIT |
 | unicode-bidi | 0.3.18 | MIT OR Apache-2.0 |
@@ -128,6 +129,8 @@ Original [LUT conversion and numerical scopes](LUTS_SCOPES.md) use project-owned
 | windows-core (Windows target only) | 0.62.2 | MIT OR Apache-2.0 |
 | windows-sys (Windows target only) | 0.61.2 | MIT OR Apache-2.0 |
 | libc (Unix targets only) | 0.2.189 | MIT OR Apache-2.0 |
+
+Source indexes use flate2 1.1.10 directly for bounded gzip storage. It was already selected transitively; no version, license or package count changed. Cargo keeps its code outside this repository.
 
 The 91-package lockfile includes the project and build/transitive/other-target dependencies. The tested Windows metadata includes 77 external packages. SQLite 3.53.2 is compiled through `libsqlite3-sys` 0.38.2 from Cargo's external package cache; neither the SQLite source nor compiled binary is vendored in this repository. The bundled build removes the need for a runtime SQLite installation and requires a C compiler when building. SQLite's embedded source declares public-domain status; the Rust wrapper has its own MIT license.
 

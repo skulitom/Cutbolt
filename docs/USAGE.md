@@ -16,6 +16,8 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
+Compressed H.264/HEVC/ProRes inspection now includes a cached presented-frame and decoded-audio index. See [the source-index contract](DIRECT_SOURCES.md) for qualification reasons and bounds. Direct playback remains in development; the index does not change timeline readiness.
+
 ## Project snapshots
 
 The [transcript editing contract](TRANSCRIPTS.md) adds `transcript.inspect`, `transcript.correct`, `transcript.plan` and the content-bound `transcript.cut` operation. The blocking `transcript.transcribe` command and both G04 checkpoints pass bounded local English/Greek acceptance; estimated intervals remain subject to explicit review.

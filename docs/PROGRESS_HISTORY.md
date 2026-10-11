@@ -1,5 +1,35 @@
 # Progress history
 
+## 11 October 2026: direct-footage source-index foundation
+
+`media.inspect` now builds a compressed presented-frame and decoded-PCM index for compressed
+footage. One incremental frame scan records timestamps, keyframes, picture types and changing
+format/color declarations. One audio decode feeds a byte counter and clock reader concurrently,
+without a PCM file. Actual decoded sample counts and first timestamps expose AAC padding and
+edit-list offsets. The summary reports eligibility/reasons, GOP statistics, audio format and
+cache information. It explicitly reports that direct decoding is not yet available; timeline
+readiness and renderer acceptance have not been broadened. See [DIRECT_SOURCES.md](DIRECT_SOURCES.md).
+
+Cache keys bind source content, both external tool executables, engine producer and schema.
+Compressed entries validate identity/key/schema/payload digest, bound expansion and publish without
+overwriting existing files. Source bytes are fully rehashed after building an index. Fresh-process
+fixture calls prove that reuse skips both frame scanning and audio decoding. The existing flate2
+1.1.10 dependency is now directly selected for gzip; versions/licenses and package count are unchanged.
+
+Windows/Linux pass 214/213 Rust tests and all six targeted fixtures: direct_sources, integration,
+conform, transcripts, queue_recovery and render_failures. All 14 short compressed fixtures compare
+against independently decoded frame/sample observations and preserve source identities. Windows
+lint and the 303-file material check pass. The retained 20-minute fixture is being checked separately;
+no long-source seek/preview speed or full stage-1 claim is made here.
+
+The preceding error-recovery commit's background suite passed 48 fixtures and found one transcript
+fixture expecting the old two-field error. Its exact expected recognition failure now includes
+`retry: changed`; the complete transcript fixture passes on both systems. This commit uses the usual
+shipping gate and deferred verification. Thorough progress evidence remains the prior milestone;
+no v1/v2 points or scope changed. Remaining direct-decode work includes playback, clock/audio policy,
+asset bindings, approved metadata-based hash reuse and the render/seek oracles. All later direct
+stages and agent-cost stages 4–5 remain open.
+
 ## 11 October 2026: agent-cost stage 3, structured error recovery
 
 Errors now add optional `retry`, `path` and `hint`, with repair values in `detail`. One sorted
