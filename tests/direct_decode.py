@@ -16,13 +16,22 @@ def helper(root):
 use cutbolt::{color::Transfer, direct::Video, media::{Control, Uncontrolled}, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{io::{self, Read}, path::Path, process::Command, sync::Mutex};
+use std::{io::{self, Read}, path::Path, process::Command, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
 #[derive(Default)]
-struct Commands(Mutex<Vec<Vec<String>>>);
+struct Commands(Mutex<Vec<Vec<String>>>, AtomicBool);
 impl Control for Commands {
     fn command(&self, program: &str, args: &[String]) -> Result<Command> {
         self.0.lock().unwrap().push(args.to_vec());
-        Uncontrolled.command(program,args)
+        let mut args=args.to_vec();
+        if self.1.load(Ordering::Relaxed) {
+            for arg in &mut args {
+                if arg.contains("atrim=end_pts=") { *arg=arg.replace("[pcm][clock]","[raw][clock];[raw]volume=0[pcm]"); }
+            }
+            if !args.iter().any(|a| a=="-filter_complex") && args.iter().any(|a| a=="pcm_s16le") {
+                let at=args.len()-1;args.splice(at..at,["-af".into(),"volume=0".into()]);
+            }
+        }
+        Uncontrolled.command(program,&args)
     }
 }
 fn main() {
@@ -30,13 +39,15 @@ fn main() {
     let requests: Vec<Value> = serde_json::from_str(&input).unwrap();
     let mut results = Vec::new();
     for request in requests {
-        let control = Commands::default();
+        let control = Commands(Mutex::new(Vec::new()),AtomicBool::new(false));
         let file = serde_json::from_value(request["file"].clone()).unwrap();
         let opened = Video::open(Path::new(request["root"].as_str().unwrap()),&file,&control);
         let video = match opened {
             Ok(video) => video,
             Err(error) => { results.push(json!({"error":error})); continue; }
         };
+        let commands_before_ranges=control.0.lock().unwrap().len();
+        control.1.store(request["corrupt_pcm"]==true,Ordering::Relaxed);
         let mutate = || {
             let path = Path::new(request["root"].as_str().unwrap()).join(&file.path);
             let mut bytes = std::fs::read(&path).unwrap();
@@ -50,6 +61,19 @@ fn main() {
             let count = range[1].as_u64().unwrap();
             let mut hash = Sha256::new();
             let mut next = first;
+            if request["audio"] == true {
+                let result = video.read_audio(first,count,&control,|pcm| {
+                    if request["sink_error"]==true { return Err(cutbolt::error("TOOL_ABORTED","fixture sink stopped")); }
+                    hash.update(pcm); next+=pcm.len() as u64/4;
+                    if request["mutation"]=="during" && next==first+count { mutate(); }
+                    Ok(())
+                });
+                match result {
+                    Ok(receipt) => ranges.push(json!({"receipt":receipt,"sha256":format!("{:x}",hash.finalize())})),
+                    Err(error) => ranges.push(json!({"error":error})),
+                }
+                continue;
+            }
             let result = video.read(first,count,Transfer::Bt709,&control,|frame,rgb| {
                 assert_eq!(frame,next); next += 1; hash.update(rgb);
                 if request["mutation"] == "during" && next == first + count { mutate(); }
@@ -60,7 +84,7 @@ fn main() {
                 Err(error) => ranges.push(json!({"error":error})),
             }
         }
-        results.push(json!({"frames":video.frames(),"ranges":ranges,"commands":control.0.into_inner().unwrap()}));
+        results.push(json!({"frames":video.frames(),"samples":video.audio_samples(),"ranges":ranges,"commands_before_ranges":commands_before_ranges,"commands":control.0.into_inner().unwrap()}));
     }
     println!("{}",json!(results));
 }

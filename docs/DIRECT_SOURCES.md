@@ -1,6 +1,6 @@
 # Compressed-source inspection
 
-The source index and video library implement part of [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md).
+The source index and audio/video library implement part of [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md).
 It does **not yet enable direct timeline playback**. Continue to use the existing preparation
 workflow; `timeline.ready` and `source_index.direct_decode_available` remain false for these files.
 
@@ -13,8 +13,8 @@ this summary, leaving the metadata inspection available.
 
 One incremental ffprobe pass reads frame timestamps, key flags, picture types and decoded format
 and color changes. One FFmpeg audio decode supplies a PCM byte counter and a small frame-clock
-stream concurrently. Neither PCM nor a whole decoded-video stream is written to disk. The audio
-summary reports actual decoded samples, native rate/channels, first PCM timestamp, continuity,
+stream concurrently. Video frames are not written to disk. With an explicitly configured inspection cache, AAC also
+retains bounded canonical PCM chunks as described below. The audio summary reports actual decoded samples, native rate/channels, first PCM timestamp, continuity,
 optional codec initial padding, and mono duplication/resampling needs. Packet counts cannot replace
 this measurement for AAC. `audio_policy` now reports the exact first-audio offset relative to video,
 leading/trailing padding or trimming, mono duplication and linear 48 kHz resampling choices.
@@ -90,8 +90,8 @@ limit hides extra frames. Its raw bytes pass through the exact Rust table, never
 The preliminary check can reuse an unchanged source's verified hash as described below; every read
 fully hashes the source before returning success. Callback output is provisional until `read`
 succeeds; a caller must delay publication accordingly. The API creates no intermediate media and
-does not publish files. Audio decoding, saved direct
-asset bindings and timeline/render/preview/export integration are also pending; the video library
+does not publish files. Saved direct
+asset bindings and timeline/render/preview/export integration are pending; the audio/video library
 does not change the CLI/MCP readiness flags.
 
 The 26 original short fixtures include all eight native rates, full-range YUV and both H.264 and
@@ -123,13 +123,58 @@ after a full hash.
 Both open-GOP fixtures now span six GOPs (360 frames), so the near-end windows exercise later
 random-access points beyond initial preroll. Existing frame-digest oracles remain unchanged.
 
-## Approved bounded audio cache
+## Exact audio ranges and approved bounded cache
 
-Direct audio experiments found a reproducible AAC seek counterexample with the original fixture
-and FFmpeg 7.0-full_build-www.gyan.dev: for samples 283,200 through 287,999 of `h264-25`, a late
-seek changed 1,949 channel samples compared with full decoding, by at most 13 PCM16 levels. Extra
-preroll did not make every later block equal. The proposed audio reader detects this with indexed
-PCM block hashes and rejects the range rather than returning different samples. It also handles
-Opus container-clock rounding by matching block content and sample positions.
+`direct::Video::read_audio(first, count, control, callback)` reads a range on the first-video-frame
+clock, producing stereo PCM16 at 48 kHz. Native PCM block timestamps, cumulative sample positions
+and SHA-256 values in index schema 2 anchor sought decodes to the complete source decode. It uses
+exact rational linear resampling, duplicates mono, trims audio before/after the video and pads
+missing samples with silence. A video without audio produces bounded silent blocks. The callback's
+bytes are provisional until the call succeeds and the original source has been fully rehashed.
 
-That audio work is not shipped. On 11 October 2026, the user approved a bounded, content-verified audio cache for codecs whose seeks cannot reproduce the full decode. This explicitly changes stage 1.1's prohibition on storing PCM on disk for that fallback. The cache must preserve the exact full-decode reference, verify cached content, enforce storage bounds and preserve original sources and direct video decoding. Implementation and direct timeline integration remain pending; this approval is not a direct-audio or stage-1 completion claim.
+PCM, MP3, FLAC and Opus use a two-second preroll before the required block. Both raw PCM bytes and
+framehash records are consumed concurrently through a bounded queue. The reader requires exact
+block contents and a unique indexed match within the existing 1 ms container-clock tolerance;
+that permits Opus timestamp rounding without shifting a sample. It rejects a skipped block,
+changed PCM, excess/missing data, decoder failure or source change. It never assumes that preroll
+alone proves equality.
+
+AAC has a reproducible exception with the original fixture and Windows FFmpeg 7.0: seeking
+samples 283,200 through 287,999 of `h264-25` changed 1,949 channel samples compared with full
+decoding, by at most 13 PCM16 levels. Extra preroll did not make every later block equal. On
+11 October 2026, the user approved a bounded, content-verified cache for this case, explicitly
+amending stage 1.1's prohibition on PCM on disk.
+
+The original full AAC indexing pass records hashes of fixed 1 MiB chunks of native interleaved
+PCM16, plus the final short chunk. With a configured inspection directory, their payloads live
+in its `audio/cutbolt-cache.sqlite` sub-cache. A workspace therefore uses
+`.cutbolt/cache/inspections/audio`. This is an owned cache using the existing SQLite integrity,
+transactional eviction and readback checks: at most 1 GiB of payload and 4,096 entries (database
+and journal overhead are additional), at most 1 MiB per chunk and temporary copy. Index metadata
+is bounded to 65,536 chunk descriptors. Sources and decoded video stay untouched.
+
+Chunk keys include the source-index key (source identity, decoder/probe executable identities,
+engine producer and index schema), native byte range and canonical chunk hash. Reads compare
+against the trusted source index as well as the cache's own integrity fields. Chunk data emitted
+by an unsuccessful indexing pass is never sufficient to establish a valid index or receipt;
+its content-dependent key cannot substitute different bytes for a subsequently verified chunk.
+Missing or corrupt entries are rebuilt from a complete AAC decode and must match every indexed
+chunk before successful completion. This fallback streams through a two-chunk queue; it does
+not buffer a whole recording. Once present, a requested range reads only the needed chunks and
+launches no audio decoder. Without an explicitly configured cache directory, AAC ranges use a
+complete decode with those same index checks and retain no PCM on disk.
+
+Receipts distinguish `silence`, `verified_seek`, `canonical_cache` and `canonical_decode`, report
+sought seconds where applicable, native decoded samples, matched seek blocks, cached chunks and
+rebuilt chunks. `cache.inspect`/`cache.prune` accept the explicit audio sub-cache root. A prune or
+source/tool/engine change cannot authorize stale PCM reuse. This library work does not yet make
+direct sources ready for saved timeline rendering; the stage-1 integration and long-source
+performance gates remain open.
+
+Windows and Linux pass all 189 audio windows across the 21 qualifying synthetic sources against
+complete explicit-conform PCM, including offset/short/long audio and 44.1 kHz mono. Tests also cover
+cache reuse across processes without an audio decoder, full repair after corruption, public prune
+and rebuild, the 1 MiB chunk/1 GiB payload bounds, source changes, decoder-byte corruption and
+preservation of a callback failure. A unit check rejects even self-consistent cache tampering
+against the trusted index and verifies LRU eviction. These checks accompany the existing video
+oracles and cache-preview regression fixture on both platforms.

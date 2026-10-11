@@ -17,6 +17,9 @@ use std::{
     time::Duration,
 };
 
+mod audio;
+pub use audio::AudioDecoded;
+
 /// A verified compressed source and its presentation index. The source must remain in place
 /// while reading. Preliminary identity checks can reuse an unchanged file's verified hash;
 /// every successful read fully hashes its source again before returning a receipt.

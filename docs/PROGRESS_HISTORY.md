@@ -1,5 +1,27 @@
 # Progress history
 
+## 11 October 2026: exact direct audio and bounded canonical AAC cache
+
+Added native PCM block hashes and cumulative sample anchors to source-index schema 2, and a
+streaming direct-audio reader that matches explicit conform's rational linear resampling,
+mono duplication, offset trimming and silence padding. PCM/MP3/FLAC/Opus seek with verified block
+anchors; AAC uses the user-approved bounded canonical cache because preroll alone does not
+reproduce every full-decoded sample. The original index pass records 1 MiB chunk hashes and,
+when configured, stores their native PCM under the existing owned SQLite cache with a 1 GiB
+payload/4,096-entry bound. Chunk keys bind the complete source/tool/engine index identity and
+canonical hash. Reuse checks the trusted index, corruption/eviction rebuilds exact content,
+public pruning works, and one rebuild repairs all corrupted chunks. Unconfigured reads decode
+without retaining PCM. All callback output stays provisional until source rehash and success.
+
+Windows/Linux pass 226/225 Rust tests, formatting/lint, direct_sources and cache_previews.
+All 189 audio windows across 21 eligible original sources match complete conform PCM; existing
+video RGB oracles also pass. Tests cover fresh-process AAC reuse with no decoder, corruption,
+eviction, LRU, bounded payloads, changed sources, altered decoder bytes, callback errors and
+silent video-only sources. The final targeted runs took 182 s on Windows and 90 s on Linux;
+these are correctness run timings, not preview latency measurements. Direct timeline integration
+and long-source performance remain pending. The preceding 8a26e5212b background run passed
+all 45 deferred fixtures. No points or new thorough evidence; PROGRESS.md retains older evidence.
+
 ## 11 October 2026: embedded recipes participate in cache identity
 
 Follow-up to 09cdb8d: the build's engine-source identity now includes the 18 new catalog JSON

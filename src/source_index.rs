@@ -17,7 +17,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA: u32 = 1;
+const SCHEMA: u32 = 2;
 const MAX_FRAMES: usize = 4_000_000;
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(1800);
@@ -25,6 +25,11 @@ const TIMEOUT: Duration = Duration::from_secs(1800);
 /// Native stream ticks, keyframe flag, picture type's ASCII byte, interlace flag.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Frame(pub i64, pub bool, pub u8, pub bool);
+
+/// Native PTS, cumulative first sample, sample count and PCM frame checksum. These anchors
+/// locate sought audio on the full decode's sample clock despite container timestamp rounding.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AudioFrame(pub i64, pub u64, pub u64, pub String);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Audio {
@@ -36,6 +41,8 @@ pub(crate) struct Audio {
     pub continuous: bool,
     pub codec_initial_padding: Option<u64>,
     pub stream: Value,
+    pub frames: Vec<AudioFrame>,
+    pub chunks: Vec<crate::audio_cache::Chunk>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,7 +108,7 @@ fn ratio(value: &Value) -> Result<Time> {
 }
 
 /// Bound each tool record independently, rather than buffering a source-sized JSON document.
-fn lines(reader: impl Read, mut consume: impl FnMut(&str) -> Result<()>) -> Result<()> {
+pub(crate) fn lines(reader: impl Read, mut consume: impl FnMut(&str) -> Result<()>) -> Result<()> {
     let mut reader = BufReader::new(reader);
     loop {
         let mut line = Vec::new();
@@ -216,11 +223,12 @@ struct Clock {
     samples: u64,
     continuous: bool,
     time_base: Option<Time>,
+    frames: Vec<AudioFrame>,
 }
 
-/// FFmpeg decodes once, then splits PCM to a byte counter and a small framecrc clock stream.
-/// The checksums themselves are unused; PTS/duration/size establish the decoded audio clock.
-fn audio(path: &Path, stream: &Value, control: &dyn Control) -> Result<Audio> {
+/// FFmpeg decodes once, then splits PCM to a byte counter and a small framehash clock stream.
+/// PCM checksums and cumulative positions also anchor later seeks to the full decoded clock.
+fn audio(path: &Path, stream: &Value, key: &str, control: &dyn Control) -> Result<Audio> {
     let number = |name| {
         stream[name]
             .as_u64()
@@ -262,20 +270,33 @@ fn audio(path: &Path, stream: &Value, control: &dyn Control) -> Result<Audio> {
             "-c:a",
             "pcm_s16le",
             "-f",
-            "framecrc",
+            "framehash",
+            "-hash",
+            "sha256",
             "pipe:2",
         ]
         .into_iter()
         .map(str::to_owned),
     )
     .collect();
-    let (bytes, clock) = media::feed_stdin_pipes(
+    let canonical = crate::audio_cache::required(stream);
+    let key = key.to_owned();
+    let ((bytes, chunks), clock) = media::feed_stdin_pipes(
         control.command(&program, &args)?,
         &program,
         TIMEOUT,
         media::Watch::default(),
         (
-            |mut stdout| Ok(std::io::copy(&mut stdout, &mut std::io::sink())?),
+            move |mut stdout| {
+                if canonical {
+                    crate::audio_cache::collect(stdout, &key)
+                } else {
+                    Ok((
+                        std::io::copy(&mut stdout, &mut std::io::sink())?,
+                        Vec::new(),
+                    ))
+                }
+            },
             move |stderr| {
                 let mut clock = Clock {
                     continuous: true,
@@ -302,6 +323,23 @@ fn audio(path: &Path, stream: &Value, control: &dyn Control) -> Result<Audio> {
                         if count == 0 || count.checked_mul(channels * 2) != Some(bytes) {
                             return Err(invalid("Decoded PCM size and duration disagree"));
                         }
+                        if bytes > 1_048_576 || clock.frames.len() == MAX_FRAMES {
+                            return Err(error(
+                                "LIMIT_EXCEEDED",
+                                "Audio index supports at most 4000000 PCM blocks of at most 1 MiB each",
+                            ));
+                        }
+                        let checksum = fields[5].to_owned();
+                        if checksum.len() != 64
+                            || !checksum
+                                .bytes()
+                                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+                        {
+                            return Err(invalid("Invalid decoded PCM checksum"));
+                        }
+                        clock
+                            .frames
+                            .push(AudioFrame(pts, clock.samples, count, checksum));
                         // Container audio timestamps (notably MKV's millisecond ticks) can
                         // quantize each block. Compare with the cumulative decoded sample clock,
                         // not the previous rounded block, so drift cannot accumulate unnoticed.
@@ -338,6 +376,8 @@ fn audio(path: &Path, stream: &Value, control: &dyn Control) -> Result<Audio> {
         continuous: clock.continuous,
         codec_initial_padding: stream["initial_padding"].as_u64(),
         stream: stream.clone(),
+        frames: clock.frames,
+        chunks,
     })
 }
 
@@ -357,7 +397,13 @@ fn periodic(frames: &[Frame], tb: Time, rate: Time) -> bool {
     })
 }
 
-fn build(path: &Path, source: Identity, metadata: &Value, control: &dyn Control) -> Result<Index> {
+fn build(
+    path: &Path,
+    source: Identity,
+    metadata: &Value,
+    key: &str,
+    control: &dyn Control,
+) -> Result<Index> {
     let streams = metadata["streams"]
         .as_array()
         .ok_or_else(|| invalid("No streams"))?;
@@ -462,7 +508,7 @@ fn build(path: &Path, source: Identity, metadata: &Value, control: &dyn Control)
         );
         reject([1, 2].contains(&channels), "audio requires mono or stereo");
         if [1, 2].contains(&channels) {
-            let audio = audio(path, stream, control)?;
+            let audio = audio(path, stream, key, control)?;
             reject(
                 audio.continuous,
                 "decoded audio has a timestamp discontinuity",
@@ -517,6 +563,14 @@ fn cache_read(path: &Path, key: &str, source: &Identity) -> Option<Index> {
         || &entry.index.source != source
         || entry.index.frames.is_empty()
         || entry.index.frames.len() > MAX_FRAMES
+        || entry.index.audio.as_ref().is_some_and(|a| {
+            crate::audio_cache::required(&a.stream)
+                && !a
+                    .samples
+                    .checked_mul(a.channels)
+                    .and_then(|n| n.checked_mul(2))
+                    .is_some_and(|bytes| crate::audio_cache::valid(&a.chunks, bytes))
+        })
         || digest(&serde_json::to_vec(&entry.index).ok()?) != entry.digest
     {
         return None;
@@ -595,7 +649,7 @@ pub(crate) fn load(
         Some(index) => index,
         None => {
             let _slot = inspection_cache::slot();
-            let index = build(path, source, metadata, control)?;
+            let index = build(path, source, metadata, &key, control)?;
             if let Some(path) = &cache {
                 let _ = cache_write(path, &key, &index);
             }
@@ -629,7 +683,11 @@ impl Loaded {
             .max();
         let audio_policy = index.audio.as_ref().map(|a| json!({"decoded_samples":a.samples,"sample_rate":a.rate,"channels":a.channels,
         "first_pts":a.first_pts,"time_base":{"num":1,"den":a.rate},"continuous":a.continuous,"timestamp_tolerance":{"num":1,"den":1000},"codec_initial_padding":a.codec_initial_padding,
-        "mono_to_stereo":a.channels == 1,"resample_to_48000":a.rate != 48000}));
+        "mono_to_stereo":a.channels == 1,"resample_to_48000":a.rate != 48000,
+        "canonical_audio":if crate::audio_cache::required(&a.stream) {
+            json!({"chunks":a.chunks.len(),"chunk_bytes":crate::audio_cache::CHUNK_BYTES,
+                "cache_root":crate::audio_cache::directory(),"maximum_payload_bytes":1073741824,"maximum_entries":4096})
+        } else { Value::Null }}));
         Ok(
             json!({"schema_version":SCHEMA,"key":self.key,"cache_hit":self.cache_hit,"cache_bytes":self.cache_bytes,
         "eligible":index.reasons.is_empty(),"reasons":index.reasons,"frames":index.frames.len(),"first_timestamp":index.frames[0].0,
