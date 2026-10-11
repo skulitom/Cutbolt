@@ -8,18 +8,20 @@ fn sources(path: &Path, output: &mut Vec<PathBuf>) {
         let path = item.expect("source entry").path();
         if path.is_dir() {
             sources(&path, output);
-        } else if path.extension().is_some_and(|x| x == "rs") {
+        } else if path.extension().is_some_and(|x| x == "rs" || x == "json") {
             output.push(path);
         }
     }
 }
 /// Files besides `src` whose bytes are part of the engine's identity.
-const ENGINE_FILES: [&str; 5] = [
+const ENGINE_FILES: [&str; 7] = [
     "Cargo.toml",
     "Cargo.lock",
     "build.rs",
     "tools/transcribe_worker.py",
     "tools/transcribe_supervisor.py",
+    "examples/lower-third-template.json",
+    "examples/title-card-template.json",
 ];
 /// The Git commit checked out at build time and whether the engine's files differ from it, or
 /// `None` when Git cannot tell. The build reruns when this worktree's HEAD moves; edits to the

@@ -1,5 +1,14 @@
 # Progress history
 
+## 11 October 2026: embedded recipes participate in cache identity
+
+Follow-up to 09cdb8d: the build's engine-source identity now includes the 18 new catalog JSON
+recipes and the two embedded example recipes. Template-only edits therefore invalidate derived
+cache keys and are reported as modified engine sources. The catalog test requires the exact
+bytes of every compiled recipe to occur in the producer manifest, guarding future additions.
+Windows/Linux pass that Rust check and cache_previews. No points or new thorough evidence;
+PROGRESS.md retains older evidence. The 09cdb8d deferred run remains in progress at this entry.
+
 ## 11 October 2026: original built-in templates and exact transparent enlargement
 
 Implemented agent-cost plan sections 4.1.1-4.1.3: 20 original embedded designs, the read-only

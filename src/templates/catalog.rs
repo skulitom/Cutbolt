@@ -507,6 +507,13 @@ mod tests {
         for (_, source) in CATALOG {
             let template = load(source).unwrap();
             assert!(ids.insert(template.id.clone()));
+            assert!(
+                crate::cache::ENGINE_SOURCES
+                    .iter()
+                    .any(|(name, bytes)| name.ends_with(".json") && *bytes == source.as_bytes()),
+                "Every compiled recipe must participate in the engine/cache producer identity: {}",
+                template.id
+            );
             for property in [
                 Property::SceneWidth,
                 Property::SceneHeight,
