@@ -4,6 +4,8 @@ Research date: 5 October 2026. This is a strategy recommendation for agents and 
 
 HyperFrames facts come from its public repository at commit [`9c7ff590`](https://github.com/heygen-com/hyperframes/tree/9c7ff590fe9e1f3fa7bf06cb3bf67ae78c2a993b) (5 October 2026), its documentation site, npm and public issue pages. Nothing was installed or run, and no HyperFrames code, skills, docs or assets entered this repository. HyperFrames is Apache-2.0; do not copy its text or code into Cutbolt. Write original material. Cutbolt measurements were taken on Linux x86_64 (4 cores, FFmpeg 6.1.1, debug build of commit `d3c9140`) unless stated.
 
+**11 October 2026 measurement note.** Catalog byte counts below are historical, from the 5 October research build before the catalog trim. At `c4064df`, compact JSON tool arrays contain 218,163 bytes in full mode and 66,577 bytes in core mode without a workspace. The official-SDK workflow baseline records 224,321 response bytes for the full workspace `tools/list` (including its JSON-RPC envelope). See [AGENT_COSTS.md](AGENT_COSTS.md) for reproducible current measurements. The Linux job/speech port has also landed; the dated platform findings below describe the research build.
+
 ## Decision summary
 
 1. **Do not fight HyperFrames on its home ground.** It generates new motion-graphics videos from HTML. It has 57k stars, about 813k npm downloads a week, 21 agent skills, 394 catalog items and a funded team shipping several releases a day. Cutbolt cannot win a race to be "HTML video".

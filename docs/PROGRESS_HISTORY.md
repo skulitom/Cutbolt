@@ -1,5 +1,38 @@
 # Progress history
 
+## 11 October 2026: agent-cost stage 1, consistent instructions and named errors
+
+Completed the quick fixes in [the agent-cost plan](plans/AGENT_COST_PLAN.md).
+MCP descriptions now direct scene/template compilation, proxy generation, image-sequence
+compilation, audio rendering and conforming through `job.start`. README, usage, native timing,
+scene, template and agent-interface documentation agree on the eight native clocks, workspace
+roots, resolved identities, concurrent calls and progress notifications. The strategy report
+retains its historical figures with a dated measurement/platform note.
+
+Template failures name the parameter, declared type and supplied or binding type. Unknown names
+include the available parameter names/types. Existing error codes and read-only behavior remain;
+the template fixture asserts the useful error context as well as all existing pixel checks.
+
+`cutbolt_run` advertises `destructiveHint: false` and tells callers to prefer direct tools.
+To make that annotation true, it rejects `job.cancel` and `cache.prune`; both are now direct tools
+in the compact catalog (33 direct tools plus the router). Routing other direct tools still works.
+The wire fixture checks the annotation, direct availability and rejection of both destructive
+routes. The default remains full until stage 2's measured compact-catalog change.
+
+Windows and Linux pass `integration` (including the wire and official SDK checks), `templates`,
+`agent_ergonomics` and `agent_costs`; Rust tests pass 206/205 respectively. Formatting, Windows
+clippy and the repository material check pass. The Windows quick ergonomics run recorded one
+wall-time budget overrun under concurrent verification load; correctness passed. No speed claim.
+The five workflow call counts remain 15 / 6 / 12 / 8 / 8, with zero failed calls, schema lookups
+or capabilities lookups. Windows received bytes are 412,483 / 249,524 / 265,581 / 243,717 /
+388,576, versus preparation's 412,758 / 249,511 / 265,568 / 243,704 / 388,563. Linux received
+bytes are 412,319 / 249,400 / 265,455 / 243,593 / 388,452. No budgets were loosened.
+
+Preparation commit `9554596` passed its ship gate and was pushed; its deferred checks and the
+preparation snapshot's full quick check continue independently. This entry awards no editing
+points and changes no scope. Generated progress and thorough evidence remain stale pending a
+milestone run; neither plan is complete.
+
 ## 11 October 2026: direct-footage and agent-cost preparation
 
 Started both [direct-footage](plans/DIRECT_FOOTAGE_PLAN.md) and

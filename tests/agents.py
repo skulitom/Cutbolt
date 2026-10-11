@@ -230,13 +230,20 @@ def run(executable, fixture):
         core_names = [tool["name"] for tool in core]
         others = next(t for t in core if t["name"] == "cutbolt_run")["inputSchema"]["properties"]["command"]["enum"]
         routed = {"cutbolt_" + c.replace(".", "_") for c in others}
-        check("mcp.compact_catalog", len(core_names) == len(set(core_names)) == 32 and not routed & set(core_names)
+        check("mcp.compact_catalog", len(core_names) == len(set(core_names)) == 34 and not routed & set(core_names)
               and (set(core_names) - {"cutbolt_run"}) | routed == set(names) and len(json.dumps(core)) * 3 < len(json.dumps(catalog)))
+        router = next(t for t in core if t["name"] == "cutbolt_run")
+        assert router["annotations"]["destructiveHint"] is False
+        assert {"cutbolt_job_cancel", "cutbolt_cache_prune"}.issubset(core_names)
+        for name in ("cutbolt_job_cancel", "cutbolt_cache_prune"):
+            assert next(t for t in core if t["name"] == name)["annotations"]["destructiveHint"] is True
+        direct_routed = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"capabilities"}})["result"]
+        assert direct_routed["structuredContent"]["result"] == normal.call("capabilities")
         made = normal.call("project.create", id="compact", width=16, height=16, frame_rate={"num":25, "den":1})
         routed_call = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"project.validate", "arguments":{"project":made}}})["result"]
         assert routed_call["structuredContent"]["result"] == normal.call("project.validate", project=made) and not routed_call["isError"]
         assert compact.call("files.list", input_root=str(root))["entries"] == normal.call("files.list", input_root=str(root))["entries"]
-        for command in ("export.run", "nope"):
+        for command in ("export.run", "nope", "job.cancel", "cache.prune"):
             assert compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":command, "arguments":{}}})["error"]["code"] == -32602
         by_env = Client(executable, env={**os.environ, "CUTBOLT_MCP_TOOLS":"core"});clients.append(by_env)
         by_env.initialize()

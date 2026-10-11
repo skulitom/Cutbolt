@@ -82,7 +82,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Compute exact per-channel/luma histograms, waveform/parade and a chroma vectorscope for one full-quality timeline frame. Explicit color interpretation and missing-tag policy required; proxy selection is ignored. No files or saved state change."
         }
         "export.inspect" => {
-            "Inspect an exact timeline range and full-quality sources for reference, lossless PNG movie/image-directory or H.264/AAC export. Lossless sequential output supports native clocks; H.264 and placed tracks retain 25 fps. PNG/H.264 video needs input_transfer unless the project declares its transfer with the project.transfer operation; sequence_first selects image numbering, h264 selects delivery controls and aac_bitrate selects audio rate. Returns timing, source identities and color/publication policy without writing. Run the export with job.start run export.run."
+            "Inspect an exact timeline range and full-quality sources for reference, lossless PNG movie/image-directory or H.264/AAC export. Lossless, H.264 and placed-track output use the project's native frame clock. PNG/H.264 video needs input_transfer unless the project declares its transfer with the project.transfer operation; sequence_first selects image numbering, h264 selects delivery controls and aac_bitrate selects audio rate. Returns timing, source identities and color/publication policy without writing. Run the export with job.start run export.run."
         }
         "effects.preset" => {
             "Return an independent editable scene effect chain from an original green/blue hard/soft chroma-key preset. Explicit strength and spill controls must be 0..1000. Copy effects into a layer, inspect the scene, then compile it. No files or saved state are changed."
@@ -118,19 +118,19 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Append caption layers to a supplied scene using explicit per-style fonts/boxes and exact frame-start sampling. Reports unsampled and out-of-window cues. Returns an editable scene and inspection; does not render or save it."
         }
         "graphics.instantiate" => {
-            "Expand an original scene template using explicit typed parameters. Validates bindings, complete scene semantics and external source identities; returns a fresh editable scene and inspection. No files or saved sessions are changed. Render the returned scene through the blocking CLI/library."
+            "Expand an original scene template using explicit typed parameters. Validates bindings, complete scene semantics and external source identities; returns a fresh editable scene and inspection. No files or saved sessions are changed. Compile the returned scene with job.start run scene.render, then follow its ticket with job.wait."
         }
         "proxy.status" => {
             "Check proxy availability and identities. Preview selection is saved with preview.proxy through session.apply; final exports always use full-quality media."
         }
         "proxy.relink" => {
-            "Find an unambiguous proxy by bound content identity and return a proposal for session.apply. Does not move files or save edits. Proxy generation is a blocking CLI/library command."
+            "Find an unambiguous proxy by bound content identity and return a proposal for session.apply. Does not move files or save edits. Generate proxies with job.start run proxy.generate."
         }
         "media.conform.inspect" => {
-            "Validate a supported source identity, codec/container and exact timestamp mapping into a 25 fps editing asset. Reports constant or variable-speed source clocks, frame selection/blend weights and explicit audio pitch policy; media.conform rendering uses the blocking CLI/library."
+            "Validate a supported source identity, codec/container and exact timestamp mapping into an editing asset at the declared native frame rate. Reports constant or variable-speed source clocks, frame selection/blend weights and explicit audio pitch policy. Convert with job.start run media.conform."
         }
         "audio.inspect" => {
-            "Validate and evaluate a bounded PCM mix: sample-aligned trims, gain/fade automation and multiple tracks, plus optional buses, explicit channel matrices, panning and named surround layouts. Reports output samples, PCM hash, layout, routing and clipping counts. Read-only; WAV rendering uses the blocking CLI/library command audio.render."
+            "Validate and evaluate a bounded PCM mix: sample-aligned trims, gain/fade automation and multiple tracks, plus optional buses, explicit channel matrices, panning and named surround layouts. Reports output samples, PCM hash, layout, routing and clipping counts. Read-only; render a WAV with job.start run audio.render."
         }
         "registry.search" => {
             "Search project assets by text, bin prefix and exact tags. Stable ID order and pagination; content duplicates are reported without merging assets."
@@ -145,13 +145,13 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Match explicit candidate paths to a bound asset identity. Reject ambiguous or mismatching content. Returns an updated snapshot and operations for session.apply; does not save or move media."
         }
         "image.sequence.inspect" => {
-            "Validate every numbered PNG identity and exact source window/repeat, alpha association, color interpretation and native output clock. Returns the explicit transparent or opaque compilation policy without writing. image.sequence.compile is blocking CLI/library-only."
+            "Validate every numbered PNG identity and exact source window/repeat, alpha association, color interpretation and native output clock. Returns the explicit transparent or opaque compilation policy without writing. Compile with job.start run image.sequence.compile."
         }
         "expression.inspect" => {
             "Evaluate a bounded typed property graph at explicit rational times. Reports exact values and rounded position/opacity bindings, with property links, cycle/type checks and deterministic seeded operations. Reads no media, executes no source code and writes no files."
         }
         "scene.inspect" => {
-            "Validate a bounded pixel scene, source identities, rational frame selection, text layout, sampled grading/selection/keying parameters and WAV conversion. Read-only; returns explicit color/timing/audio policies. scene.render is available through the blocking CLI/library, not this MCP connection."
+            "Validate a bounded pixel scene, source identities, rational frame selection, text layout, sampled grading/selection/keying parameters and WAV conversion. Read-only; returns explicit color/timing/audio policies. Compile with job.start run scene.render, then follow its ticket with job.wait."
         }
         "cache.inspect" => {
             "Inspect the owned local cache, entry identities, logical and physical sizes without generating media."
@@ -381,7 +381,7 @@ const SUMMARIZED: [&str; 7] = [
 
 /// The everyday tools a compact catalog (`mcp --tools core`) lists in full; `cutbolt_run` runs
 /// every other tool command by name.
-pub(crate) const CORE: [&str; 31] = [
+pub(crate) const CORE: [&str; 33] = [
     "capabilities",
     "schema",
     "files.list",
@@ -392,6 +392,8 @@ pub(crate) const CORE: [&str; 31] = [
     "session.preview",
     "session.undo",
     "session.history",
+    "job.cancel",
+    "cache.prune",
     "media.inspect",
     "media.sheet",
     "preview.frame",
@@ -432,11 +434,11 @@ pub fn core_tools(workspace: Option<&Workspace>) -> Vec<Value> {
         })
         .collect();
     listed.push(json!({"name":"cutbolt_run",
-        "description":format!("Run any other Cutbolt tool command by name, with its arguments exactly as for a direct call (cutbolt_schema {{\"name\": command}} returns their schema): {}. Long-running commands still go through job.start.", others.join(", ")),
+        "description":format!("Run other Cutbolt tool commands by name. Prefer direct tools when listed. Routed commands never delete files or cancel jobs; job.cancel and cache.prune are direct tools only. Use arguments exactly as for a direct call (cutbolt_schema {{\"name\": command}} returns their schema): {}. Long-running commands still go through job.start.", others.join(", ")),
         "inputSchema":{"type":"object","additionalProperties":false,"required":["command"],"properties":{
             "command":{"type":"string","enum":others,"description":"Command to run."},
             "arguments":{"type":"object","description":"The command's arguments, without command; default none."}}},
-        "annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}}));
+        "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}));
     listed
 }
 
@@ -724,12 +726,15 @@ impl Server {
                 // cutbolt_run names the command and nests its arguments.
                 let (command, arguments) = if name == "cutbolt_run" {
                     let command = params["arguments"]["command"].as_str().unwrap_or_default();
-                    if !crate::schema::commands().any(|c| c == command) || !exposed(command) {
+                    if !crate::schema::commands().any(|c| c == command)
+                        || !exposed(command)
+                        || matches!(command, "job.cancel" | "cache.prune")
+                    {
                         return Some(rpc_error(
                             id,
                             -32602,
                             &format!(
-                                "cutbolt_run cannot run {command:?}; its description lists the commands, and long-running ones go through job.start"
+                                "cutbolt_run cannot run {command:?}; use its listed commands or a direct tool; long-running commands go through job.start"
                             ),
                         ));
                     }

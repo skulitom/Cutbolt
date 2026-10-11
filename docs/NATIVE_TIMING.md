@@ -1,4 +1,4 @@
-# Exact native sequential frame clocks
+# Exact native frame clocks
 
 Full verification passes both exact-timing checkpoints. Native sequential `render.plan`, `render.run`, queued renders, frame/range previews, cached previews, scopes and contact sheets accept these project frame rates:
 
@@ -17,7 +17,7 @@ Set the snapshot's existing rational `frame_rate` field, for example `{"num":300
 
 For 30000/1001, five frames last exactly 1001/6000 seconds and contain exactly 8,008 stereo sample frames. The same exact arithmetic is used after splits, trims, moves, selected ranges and undo. A single video-frame preview can inspect any native frame; a rendered range containing audio must meet the shared cut rule above.
 
-Sequential timelines hold up to 1,000 items and 1–180,000 total output frames; more than 64 items render as exactly joined chunks ([long timelines](USAGE.md#long-timelines)). Every inspected source has the same 180,000-frame bound. Frame/contact-sheet previews retain their existing pixel limits. Proxies, placed tracks, nested sequences, scene compilation and H.264 delivery retain their documented 25 fps restrictions. [Lossless sequential exports](EXPORT_FORMATS.md) now use these native clocks. This extension does not silently change their clocks or claim fractional-rate support for those paths.
+Sequential timelines hold up to 1,000 items and 1–180,000 total output frames; more than 64 items render as exactly joined chunks ([long timelines](USAGE.md#long-timelines)). Every inspected source has the same 180,000-frame bound. Frame/contact-sheet previews retain their existing pixel limits. Proxies, placed tracks, nested sequences, scene compilation, captions and H.264 delivery also support these eight clocks, as do [lossless sequential exports](EXPORT_FORMATS.md). Their separate size, layer and duration bounds still apply; see [tracks](TRACKS.md), [scenes](SCENES.md) and [delivery](EXPORT.md).
 
 ## Container timestamps
 
@@ -31,7 +31,7 @@ Queued publication recovery derives both expected frame count and sample count f
 
 ## Variable-rate sources
 
-Direct native rendering rejects a source whose timestamps do not match the declared constant frame clock. Use the existing explicit `media.conform` path for variable-rate sources: it samples the observed source presentation timestamps into the documented 25 fps intermediate and preserves the declared audio policy. That intermediate can then be edited and rendered normally. This is explicit VFR input conversion; native projects in this slice remain constant-rate timelines.
+Direct native rendering rejects a source whose timestamps do not match the declared constant frame clock. Use the existing explicit `media.conform` path for variable-rate sources: it samples the observed source presentation timestamps into an intermediate at the explicitly declared supported native frame rate (25 fps by default) and preserves the declared audio policy. That intermediate can then be edited and rendered normally. This is explicit VFR input conversion; native projects in this slice remain constant-rate timelines.
 
 ## Independent acceptance
 

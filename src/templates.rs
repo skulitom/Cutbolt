@@ -1,6 +1,6 @@
 //! Portable original scene templates with explicit typed bindings and no code evaluation.
 use crate::{
-    Result,
+    At, Result,
     animation::Curve,
     error,
     graphics::Graphic,
@@ -452,7 +452,13 @@ pub fn instantiate(
                 "Parameters require unique names and at least one binding",
             ));
         }
-        parameter.definition.validate()?;
+        parameter.definition.validate().at(|| {
+            format!(
+                "parameter {:?} ({})",
+                parameter.name,
+                parameter.definition.kind()
+            )
+        })?;
         let value = if let Some(value) = values.get(&parameter.name) {
             value.clone()
         } else {
@@ -464,7 +470,14 @@ pub fn instantiate(
                 )
             })?
         };
-        parameter.definition.check(&value)?;
+        parameter.definition.check(&value).at(|| {
+            format!(
+                "parameter {:?}: declared {}, given {}",
+                parameter.name,
+                parameter.definition.kind(),
+                value.kind()
+            )
+        })?;
         for binding in &parameter.bindings {
             if !targets.insert((binding.layer.clone(), binding.property.conflict_key()))
                 || targets.len() > 256
@@ -474,15 +487,30 @@ pub fn instantiate(
                 ));
             }
             if binding.property.kind() != parameter.definition.kind() {
-                return Err(invalid("Binding and parameter types differ"));
+                return Err(invalid(&format!(
+                    "Parameter {:?}: declared {}, but binding {:?} requires {}",
+                    parameter.name,
+                    parameter.definition.kind(),
+                    binding.property,
+                    binding.property.kind()
+                )));
             }
         }
         resolved.insert(parameter.name.clone(), value);
     }
-    if values.keys().any(|key| !names.contains(key)) {
+    if let Some((name, value)) = values.iter().find(|(name, _)| !names.contains(name)) {
         return Err(error(
             "UNKNOWN_PARAMETER",
-            "A supplied parameter is not declared by this template",
+            format!(
+                "Parameter {name:?}: undeclared, given {}; available parameters: {}",
+                value.kind(),
+                template
+                    .parameters
+                    .iter()
+                    .map(|p| format!("{} ({})", p.name, p.definition.kind()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         ));
     }
     let mut result = template.scene.clone();
