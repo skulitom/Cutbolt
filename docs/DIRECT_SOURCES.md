@@ -123,7 +123,7 @@ after a full hash.
 Both open-GOP fixtures now span six GOPs (360 frames), so the near-end windows exercise later
 random-access points beyond initial preroll. Existing frame-digest oracles remain unchanged.
 
-## Pending audio storage decision
+## Approved bounded audio cache
 
 Direct audio experiments found a reproducible AAC seek counterexample with the original fixture
 and FFmpeg 7.0-full_build-www.gyan.dev: for samples 283,200 through 287,999 of `h264-25`, a late
@@ -132,9 +132,4 @@ preroll did not make every later block equal. The proposed audio reader detects 
 PCM block hashes and rejects the range rather than returning different samples. It also handles
 Opus container-clock rounding by matching block content and sample positions.
 
-That audio work is not shipped. A bounded, content-verified audio cache would preserve the exact
-full-decode reference and allow later ranges to read locally, but would change stage 1.1's rule
-against storing PCM on disk. The user has been asked to choose between allowing that cache and
-retaining disk-free audio with decoding from the source beginning. Direct video decoding and
-source preservation remain part of either choice. No direct-audio or stage-1 completion claim
-is made while the decision and implementation remain pending.
+That audio work is not shipped. On 11 October 2026, the user approved a bounded, content-verified audio cache for codecs whose seeks cannot reproduce the full decode. This explicitly changes stage 1.1's prohibition on storing PCM on disk for that fallback. The cache must preserve the exact full-decode reference, verify cached content, enforce storage bounds and preserve original sources and direct video decoding. Implementation and direct timeline integration remain pending; this approval is not a direct-audio or stage-1 completion claim.

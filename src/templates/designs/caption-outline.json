@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-caption-outline-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "caption-outline",
+    "width": 320,
+    "height": 180,
+    "output_scale": 2,
+    "duration": {
+      "num": 3,
+      "den": 1
+    },
+    "background": [
+      10,
+      17,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "transparent": true,
+    "audio": null,
+    "layers": [
+      {
+        "id": "label",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "A clear caption",
+          "fonts": [],
+          "size": 22,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            22,
+            120,
+            276,
+            45
+          ],
+          "line_height": 28,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject",
+          "outline": {
+            "color": [
+              3,
+              8,
+              14,
+              255
+            ],
+            "width": 2
+          }
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "label",
+      "definition": {
+        "type": "text",
+        "default": "A clear caption",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          241,
+          245,
+          251,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 3,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        }
+      ]
+    }
+  ]
+}

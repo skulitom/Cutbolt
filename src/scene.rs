@@ -2459,8 +2459,9 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         scene.height * scene.output_scale,
     );
     let (ffv1_level, ffv1_slices) = media::ffv1_encoding(out_w, out_h);
-    // Integer enlargement stays nearest-neighbour; native-size scenes skip the scaler entirely.
-    let filter = if scene.output_scale == 1 {
+    // Enlarge transparent pixels ourselves: swscale can change alpha by one even with nearest
+    // sampling. Opaque output retains its existing scaler; native-size scenes skip it entirely.
+    let filter = if scene.output_scale == 1 || scene.transparent {
         "setsar=1".to_string()
     } else {
         format!("scale={out_w}:{out_h}:flags=neighbor,setsar=1")
@@ -2475,7 +2476,11 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
         "-pixel_format".into(),
         if scene.transparent { "rgba" } else { "rgb24" }.into(),
         "-video_size".into(),
-        format!("{}x{}", scene.width, scene.height),
+        if scene.transparent {
+            format!("{out_w}x{out_h}")
+        } else {
+            format!("{}x{}", scene.width, scene.height)
+        },
         "-framerate".into(),
         format!("{}/{}", rate.num, rate.den),
         "-i".into(),
@@ -2548,7 +2553,19 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
             workers,
             window,
             &|n| compose(scene, shared, n),
-            &mut |rgb| Ok(stdin.write_all(rgb)?),
+            &mut |rgb| {
+                if scene.transparent {
+                    write_enlarged(
+                        rgb,
+                        scene.width as usize,
+                        4,
+                        scene.output_scale as usize,
+                        stdin,
+                    )
+                } else {
+                    Ok(stdin.write_all(rgb)?)
+                }
+            },
         )
     })?;
     let (out_w, out_h) = (
@@ -2625,17 +2642,7 @@ pub fn still(
     let scale = scene.output_scale as usize;
     let (width, height) = (scene.width as usize, scene.height as usize);
     let mut enlarged = Vec::with_capacity(pixels.len() * scale * scale);
-    for row in pixels.chunks(width * channels) {
-        let mut line = Vec::with_capacity(row.len() * scale);
-        for pixel in row.chunks(channels) {
-            for _ in 0..scale {
-                line.extend_from_slice(pixel);
-            }
-        }
-        for _ in 0..scale {
-            enlarged.extend_from_slice(&line);
-        }
-    }
+    write_enlarged(&pixels, width, channels, scale, &mut enlarged)?;
     let scratch = Scratch::new(output.parent().expect("validated parent"))?;
     let temp = scratch.0.join("frame.png");
     let (out_w, out_h) = ((width * scale) as u32, (height * scale) as u32);
@@ -2648,6 +2655,33 @@ pub fn still(
         json!({"output":output,"scene_id":scene.id,"frame":n,"time":Time::new(n * rate.den, rate.num)?,
         "frame_rate":rate,"width":out_w,"height":out_h,"transparent":scene.transparent}),
     )
+}
+
+/// Exact nearest-neighbor byte replication, with only one enlarged row in working memory.
+fn write_enlarged(
+    pixels: &[u8],
+    width: usize,
+    channels: usize,
+    scale: usize,
+    output: &mut dyn Write,
+) -> Result<()> {
+    if scale == 1 {
+        output.write_all(pixels)?;
+        return Ok(());
+    }
+    let mut line = Vec::with_capacity(width * channels * scale);
+    for row in pixels.chunks_exact(width * channels) {
+        line.clear();
+        for pixel in row.chunks(channels) {
+            for _ in 0..scale {
+                line.extend_from_slice(pixel);
+            }
+        }
+        for _ in 0..scale {
+            output.write_all(&line)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn write_png(path: &Path, width: u32, height: u32, bytes: &[u8]) -> Result<()> {

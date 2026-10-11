@@ -1,0 +1,291 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-title-center-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "title-center",
+    "width": 320,
+    "height": 180,
+    "output_scale": 2,
+    "duration": {
+      "num": 3,
+      "den": 1
+    },
+    "background": [
+      10,
+      17,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "transparent": false,
+    "audio": null,
+    "layers": [
+      {
+        "id": "rule",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "rectangle",
+          "rect": [
+            134,
+            38,
+            52,
+            4
+          ],
+          "fill": [
+            91,
+            225,
+            195,
+            255
+          ],
+          "stroke": null
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "label",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "Your story",
+          "fonts": [],
+          "size": 30,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            20,
+            50,
+            280,
+            52
+          ],
+          "line_height": 36,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "subtitle",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "An opening thought",
+          "fonts": [],
+          "size": 14,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            28,
+            107,
+            264,
+            30
+          ],
+          "line_height": 20,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "label",
+      "definition": {
+        "type": "text",
+        "default": "Your story",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "subtitle",
+      "definition": {
+        "type": "text",
+        "default": "An opening thought",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "subtitle"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "label"
+        },
+        {
+          "property": "fonts",
+          "layer": "subtitle"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          241,
+          245,
+          251,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "label"
+        },
+        {
+          "property": "text_color",
+          "layer": "subtitle"
+        }
+      ]
+    },
+    {
+      "name": "accent",
+      "definition": {
+        "type": "color",
+        "default": [
+          91,
+          225,
+          195,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "shape_fill",
+          "layer": "rule"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 3,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        }
+      ]
+    }
+  ]
+}

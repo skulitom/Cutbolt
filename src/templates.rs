@@ -1,4 +1,5 @@
 //! Portable original scene templates with explicit typed bindings and no code evaluation.
+mod catalog;
 use crate::{
     At, Result,
     animation::Curve,
@@ -7,6 +8,7 @@ use crate::{
     scene::{self, Identity, Scene},
     time::Time,
 };
+pub use catalog::{list, select};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -24,6 +26,11 @@ use std::{
     deny_unknown_fields
 )]
 pub enum ParameterValue {
+    /// Value for a `boolean` parameter.
+    Boolean(
+        /// Explicit true or false.
+        bool,
+    ),
     /// Value for a `text` parameter.
     Text(
         /// Nonempty string within the definition's `max_chars` and 4096 UTF-8 bytes.
@@ -64,6 +71,7 @@ pub enum ParameterValue {
 impl ParameterValue {
     fn kind(&self) -> &'static str {
         match self {
+            Self::Boolean(_) => "boolean",
             Self::Text(_) => "text",
             Self::Integer(_) => "integer",
             Self::Color(_) => "color",
@@ -79,6 +87,11 @@ impl ParameterValue {
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Definition {
+    /// Boolean parameter.
+    Boolean {
+        /// Default true or false; omit or null to require a value.
+        default: Option<bool>,
+    },
     /// Text parameter.
     Text {
         /// Default string, checked against `max_chars`; omit or null to require a value.
@@ -125,6 +138,7 @@ pub enum Definition {
 impl Definition {
     fn kind(&self) -> &'static str {
         match self {
+            Self::Boolean { .. } => "boolean",
             Self::Text { .. } => "text",
             Self::Integer { .. } => "integer",
             Self::Color { .. } => "color",
@@ -136,6 +150,7 @@ impl Definition {
     }
     fn default_value(&self) -> Option<ParameterValue> {
         match self {
+            Self::Boolean { default } => default.map(ParameterValue::Boolean),
             Self::Text { default, .. } => default.clone().map(ParameterValue::Text),
             Self::Integer { default, .. } => default.map(ParameterValue::Integer),
             Self::Color { default } => default.map(ParameterValue::Color),
@@ -202,12 +217,17 @@ impl Definition {
     }
 }
 
-/// Binding target (parameter type): scene-level `scene_background` (color, alpha 255), `scene_duration` (time); layer `layer_start`, `layer_duration` (time); text `text` (text), `text_color` (color), `fonts` (fonts), `font_size`, `line_height`, `letter_spacing` (integer); shape `shape_fill`, `stroke_color` (color), `stroke_width` (integer), strokes must already exist; `rect` (rect); static `position_x`, `position_y`, `opacity` (integer); animated `position_x_curve`, `position_y_curve`, `opacity_curve` (curve).
+/// Binding target: scene background (color), duration/frame rate (time), width/height/output scale (integer), transparency (boolean); layer timing, text/shape appearance and position/opacity curves. Layer targets require a layer ID; scene targets forbid one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Property {
     SceneBackground,
     SceneDuration,
+    SceneWidth,
+    SceneHeight,
+    SceneOutputScale,
+    SceneFrameRate,
+    SceneTransparent,
     LayerStart,
     LayerDuration,
     Text,
@@ -230,16 +250,31 @@ pub enum Property {
 impl Property {
     fn kind(self) -> &'static str {
         match self {
+            Self::SceneTransparent => "boolean",
             Self::Text => "text",
             Self::SceneBackground | Self::TextColor | Self::ShapeFill | Self::StrokeColor => {
                 "color"
             }
             Self::Fonts => "fonts",
-            Self::SceneDuration | Self::LayerStart | Self::LayerDuration => "time",
+            Self::SceneDuration | Self::SceneFrameRate | Self::LayerStart | Self::LayerDuration => {
+                "time"
+            }
             Self::PositionXCurve | Self::PositionYCurve | Self::OpacityCurve => "curve",
             Self::Rect => "rect",
             _ => "integer",
         }
+    }
+    fn scene(self) -> bool {
+        matches!(
+            self,
+            Self::SceneBackground
+                | Self::SceneDuration
+                | Self::SceneWidth
+                | Self::SceneHeight
+                | Self::SceneOutputScale
+                | Self::SceneFrameRate
+                | Self::SceneTransparent
+        )
     }
     fn conflict_key(self) -> Self {
         match self {
@@ -257,7 +292,7 @@ impl Property {
 pub struct Binding {
     /// Target property; static and curve bindings of the same property conflict.
     pub property: Property,
-    /// ID of a base scene layer for layer properties; omit for `scene_background` and `scene_duration`.
+    /// ID of a base scene layer for layer properties; omit for every scene-level property.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layer: Option<String>,
 }
@@ -306,13 +341,28 @@ fn bind(scene: &mut Scene, binding: &Binding, value: &ParameterValue) -> Result<
     if binding.property.kind() != value.kind() {
         return Err(invalid("Binding and parameter types differ"));
     }
-    if matches!(binding.property, P::SceneBackground | P::SceneDuration) {
+    if binding.property.scene() {
         if binding.layer.is_some() {
             return Err(invalid("Scene properties cannot name a layer"));
         }
-        match value {
-            V::Color(c) if c[3] == 255 => scene.background = [c[0], c[1], c[2]],
-            V::Time(t) => scene.duration = *t,
+        match (binding.property, value) {
+            (P::SceneBackground, V::Color(c)) if c[3] == 255 => {
+                scene.background = [c[0], c[1], c[2]]
+            }
+            (P::SceneDuration, V::Time(t)) => scene.duration = *t,
+            (P::SceneFrameRate, V::Time(t)) => {
+                scene.frame_rate = Some(crate::render::clock::rate(*t)?)
+            }
+            (P::SceneTransparent, V::Boolean(b)) => scene.transparent = *b,
+            (P::SceneWidth | P::SceneHeight | P::SceneOutputScale, V::Integer(n)) => {
+                let n =
+                    u32::try_from(*n).map_err(|_| invalid("Scene sizes must be nonnegative"))?;
+                match binding.property {
+                    P::SceneWidth => scene.width = n,
+                    P::SceneHeight => scene.height = n,
+                    _ => scene.output_scale = n,
+                }
+            }
             _ => return Err(invalid("Scene background must have alpha 255")),
         }
         return Ok(());
@@ -423,6 +473,21 @@ pub fn instantiate(
     values: &BTreeMap<String, ParameterValue>,
     input_root: &Path,
 ) -> Result<Value> {
+    instantiate_for_project(template, instance_id, values, input_root, None)
+}
+
+/// Project-aware expansion: canvas and frame-clock defaults come from the target snapshot.
+/// Inline templates retain their authored layer coordinates; built-ins fit their layout first.
+pub fn instantiate_for_project(
+    template: &Template,
+    instance_id: &str,
+    values: &BTreeMap<String, ParameterValue>,
+    input_root: &Path,
+    project: Option<&crate::model::Project>,
+) -> Result<Value> {
+    if let Some(project) = project {
+        project.validate()?;
+    }
     if template.schema_version != 1
         || !valid_id(&template.id)
         || !valid_id(instance_id)
@@ -445,6 +510,7 @@ pub fn instantiate(
     let mut targets = HashSet::new();
     let mut resolved = BTreeMap::new();
     let mut defaults = Vec::new();
+    let mut project_defaults = Vec::new();
     for parameter in &template.parameters {
         if !parameter_name(&parameter.name)
             || !names.insert(&parameter.name)
@@ -465,12 +531,21 @@ pub fn instantiate(
             value.clone()
         } else {
             defaults.push(parameter.name.clone());
-            parameter.definition.default_value().ok_or_else(|| {
-                error(
-                    "MISSING_PARAMETER",
-                    format!("Required parameter: {}", parameter.name),
-                )
-            })?
+            let inherited = project
+                .map(|project| project_value(parameter, project))
+                .transpose()?
+                .flatten();
+            if inherited.is_some() {
+                project_defaults.push(parameter.name.clone());
+            }
+            inherited
+                .or_else(|| parameter.definition.default_value())
+                .ok_or_else(|| {
+                    error(
+                        "MISSING_PARAMETER",
+                        format!("Required parameter: {}", parameter.name),
+                    )
+                })?
         };
         parameter.definition.check(&value).at(|| {
             format!(
@@ -516,6 +591,12 @@ pub fn instantiate(
         ));
     }
     let mut result = template.scene.clone();
+    if let Some(project) = project {
+        result.width = project.width;
+        result.height = project.height;
+        result.output_scale = 1;
+        result.frame_rate = Some(project.frame_rate);
+    }
     result.id = instance_id.into();
     for parameter in &template.parameters {
         for binding in &parameter.bindings {
@@ -524,11 +605,40 @@ pub fn instantiate(
     }
     let inspection = scene::inspect(&result, input_root)?;
     defaults.sort();
-    Ok(
-        json!({"template_id":template.id,"template_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(template)?)),"scene_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(&result)?)),"scene":result,"parameters":resolved,"defaulted_parameters":defaults,"inspection":inspection}),
-    )
+    let mut report = json!({"template_id":template.id,"template_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(template)?)),"scene_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(&result)?)),"scene":result,"parameters":resolved,"defaulted_parameters":defaults,"inspection":inspection});
+    if let Some(project) = project {
+        project_defaults.sort();
+        report["target_project"] = json!({"id":project.id,"revision":project.revision});
+        report["project_defaulted_parameters"] = json!(project_defaults);
+    }
+    Ok(report)
+}
+
+fn project_value(
+    parameter: &Parameter,
+    project: &crate::model::Project,
+) -> Result<Option<ParameterValue>> {
+    let mut selected: Option<ParameterValue> = None;
+    for binding in &parameter.bindings {
+        let value = match binding.property {
+            Property::SceneWidth => ParameterValue::Integer(project.width as i32),
+            Property::SceneHeight => ParameterValue::Integer(project.height as i32),
+            Property::SceneOutputScale => ParameterValue::Integer(1),
+            Property::SceneFrameRate => ParameterValue::Time(project.frame_rate),
+            _ => continue,
+        };
+        if let Some(previous) = &selected
+            && serde_json::to_value(previous)? != serde_json::to_value(&value)?
+        {
+            return Err(invalid(
+                "One parameter cannot inherit conflicting target-project defaults; provide an explicit value",
+            ));
+        }
+        selected = Some(value);
+    }
+    Ok(selected)
 }
 
 pub fn capabilities() -> Value {
-    json!({"schema_version":1,"command":"graphics.instantiate","value_types":["text","integer","color","fonts","curve","time","rect"],"maximum_parameters":64,"maximum_bindings":256,"evaluation":"explicit_typed_bindings_no_scripts","instance_validation":"complete_scene_and_source_identities","mutation":"returns_fresh_scene_no_files_written"})
+    json!({"schema_version":1,"command":"graphics.instantiate","catalog_command":"templates.list","value_types":["text","integer","boolean","color","fonts","curve","time","rect"],"maximum_parameters":64,"maximum_bindings":256,"evaluation":"explicit_typed_bindings_no_scripts","instance_validation":"complete_scene_and_source_identities","mutation":"returns_fresh_scene_no_files_written"})
 }

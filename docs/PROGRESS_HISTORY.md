@@ -1,5 +1,40 @@
 # Progress history
 
+## 11 October 2026: original built-in templates and exact transparent enlargement
+
+Implemented agent-cost plan sections 4.1.1-4.1.3: 20 original embedded designs, the read-only
+`templates.list` catalog, built-in-ID or inline instantiation, five typed output bindings
+(including boolean transparency), and optional target-project canvas/clock defaults. Built-ins
+fit authored rectangles/positions and uniform font/stroke metrics, with exact rational timing
+and frame-aligned activation boundaries. Explicit values override defaults. Inline templates
+retain authored coordinates and explicit keyframe timing; previous no-project calls stay equal.
+No fonts, third-party templates or generated media are bundled. Embedded JSON now participates
+in progress fingerprints and cached-verification invalidation.
+
+Default transparent exports exposed an existing scaler bug: alpha 238 became 239 during integer
+enlargement. Transparent scene movies now replicate pixels in Rust using one enlarged row of
+working memory, sharing that code with still previews. Opaque compilation keeps its existing
+path. The new fixture renders every design's real defaults (1,525 frames), compares selected
+RGB/RGBA movie frames with stills and every silent PCM sample, checks whole-pixel synthetic-glyph
+variants against independent geometric/integer RGB oracles, exercises all 256 alpha values at
+all eight output scales, and checks project overrides, inline bindings, 16 native-clock cases,
+rejections, source preservation and core/full MCP parity.
+
+Windows/Linux pass 224/223 Rust tests and the builtin_templates, templates, scenes, agent_costs
+and agent_ergonomics fixtures; font checks also pass on Windows. Formatting and lint pass on both.
+The previous a6d9acf background run passed all 45 deferred fixtures. The core catalog remains
+18 tools and grows by 17 bytes over font discovery to 21,248 bytes (21,090 with a workspace),
+within the unchanged 40,000-byte ceiling. Full catalogs have 86 tools. Scripted workflows still
+use 15/6/12/8/8 calls, with no failed calls or schema lookups. Received bytes on this run are
+209,520/46,599/62,656/40,792/185,653 on Windows and
+209,388/46,473/62,526/40,666/185,523 on Linux. Placement, shorthand and the fresh-agent title/token
+gates remain unfinished; no model-trial or whole-stage completion is claimed.
+
+The user approved a bounded, content-verified audio cache for codecs whose seeks cannot reproduce
+the full decode, explicitly amending direct-footage section 1.1's PCM-on-disk prohibition.
+Implementation is next; direct timeline integration remains pending. No editing points, scope
+adoption or new thorough evidence: PROGRESS.md retains older verified evidence.
+
 ## 11 October 2026: installed fonts without copying or manual hashing
 
 Implemented agent-cost plan section 4.2: `fonts.find` lists bounded OS-font-folder scans with

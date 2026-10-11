@@ -104,6 +104,7 @@ Add a one-time, cached index of a compressed source, beside `inspection_cache.rs
 
 - Video: per presented frame, in presentation order, record the best-effort timestamp, the keyframe flag and the picture type. Get it from one `ffprobe -show_frames -select_streams v:0` pass, reading entries incrementally. Record the decoder's native `pix_fmt`, color tags, `field_order`, SAR and any display matrix.
 - Audio: the decoded sample count and start padding, taken by decoding once to PCM (`-f s16le` to a counter, never to disk). Packets do not give AAC sample counts.
+  - **Approved amendment, 11 October 2026:** the user allows a bounded, content-verified audio cache when codec seeking cannot reproduce full-decoded samples. The fallback may store PCM, preserves source files and direct video, and must retain full content verification before publication. See [DIRECT_SOURCES.md](../DIRECT_SOURCES.md) for the measured AAC counterexample and implementation status.
 - Store the index compressed in the cache directory, keyed by content identity. A 20-minute 60 fps source is 72,000 entries. Never put the index in the project.
 - Return a summary from `media.inspect`: `direct: true|false` with reasons, frame count, rate, GOP length and `audio_policy` needs.
 

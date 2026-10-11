@@ -154,9 +154,29 @@ tokens**, and **no schema lookup** in a skill-driven run. There are no completed
 ## Stage 4 font discovery
 
 `fonts.find` adds one read-only tool to the full catalog (85 total); the default core catalog still
-has 18 tools and routes discovery through `cutbolt_run`. Its listing is now 21,231 bytes without
+has 18 tools and routes discovery through `cutbolt_run`. At that checkpoint its listing was 21,231 bytes without
 a workspace and 21,073 bytes with one: 30 bytes above stage 2, within the unchanged 40,000-byte
 ceiling. Fonts remain external, with exact content identities resolved before queueing. See
-[FONTS.md](FONTS.md) and the synthetic `fonts` fixture. Original built-in templates, placement
+[FONTS.md](FONTS.md) and the synthetic `fonts` fixture. Placement
 and scene shorthand remain separate unfinished stage-4 work; this does not establish the final
 model-driven title workflow or talking-head token target.
+
+## Stage 4 built-in template checkpoint
+
+`templates.list` adds a read-only catalog of 20 original graphics, and `graphics.instantiate`
+accepts either a built-in ID or an inline recipe. Output bindings and optional target-project
+fitting remove manual canvas, scale and frame-clock edits. Fonts remain external. See
+[TEMPLATES.md](TEMPLATES.md) for fitting and exact timing rules.
+
+The default catalog still has 18 tools; the full catalog has 86. Compact JSON-RPC listing bytes
+(including the final newline) are 21,248 without a workspace and 21,090 with one, an increase
+of 17 bytes over font discovery and within the unchanged 40,000-byte ceiling. Full listings
+are 225,000 / 231,141 bytes respectively. The replay retains the original title recipe so this
+checkpoint does not claim a two-call title workflow or fresh-agent token reduction. One-job
+placement and scene shorthand remain to be implemented and measured.
+
+The five existing scripted replays remain at 15/6/12/8/8 calls, 8,850/4,223/7,920/2,320/2,351
+sent bytes, no failed calls and zero schema lookups. Received bytes were
+209,520/46,599/62,656/40,792/185,653 on Windows and
+209,388/46,473/62,526/40,666/185,523 on Linux. These include the updated catalog and retain all
+previous budgets. Raw replay messages remain external; byte counts are not model token counts.

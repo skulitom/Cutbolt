@@ -661,14 +661,25 @@ pub enum Request {
     CaptionsScene(crate::captions::SceneRequest),
     #[serde(rename = "graphics.instantiate")]
     GraphicsInstantiate {
-        /// Template to expand: a scene with typed, bound parameters.
-        template: crate::templates::Template,
+        /// Inline template to expand; provide exactly one of template or template_id.
+        template: Option<crate::templates::Template>,
+        /// Original built-in ID from templates.list; alternative to an inline template.
+        template_id: Option<String>,
         /// ID for the returned scene instance.
         instance_id: String,
         /// Values keyed by parameter ID; a parameter without a value uses its declared default.
+        #[serde(default)]
         values: std::collections::BTreeMap<String, crate::templates::ParameterValue>,
+        /// Optional target snapshot: defaults the output canvas, scale 1 and native frame rate. Built-in layouts fit it; inline layer coordinates remain authored.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
+    },
+    #[serde(rename = "templates.list")]
+    TemplatesList {
+        /// Optional exact built-in ID; omit to list the whole catalog with typed defaults and output sizes.
+        template_id: Option<String>,
     },
     #[serde(rename = "fonts.find")]
     FontsFind(crate::fonts::Find),
@@ -1697,10 +1708,27 @@ pub fn handle(request: Request) -> Result<Value> {
         ),
         Request::GraphicsInstantiate {
             template,
+            template_id,
             instance_id,
             values,
+            project,
             input_root,
-        } => crate::templates::instantiate(&template, &instance_id, &values, &input_root),
+        } => {
+            let selected = crate::templates::select(
+                template_id.as_deref(),
+                template.as_ref(),
+                project.as_ref(),
+                &values,
+            )?;
+            crate::templates::instantiate_for_project(
+                &selected,
+                &instance_id,
+                &values,
+                &input_root,
+                project.as_ref(),
+            )
+        }
+        Request::TemplatesList { template_id } => crate::templates::list(template_id.as_deref()),
         Request::ExpressionInspect { request } => crate::expressions::inspect(&request),
         Request::SceneInspect { scene, input_root } => scene::inspect(&scene, &input_root),
         Request::SceneRender {

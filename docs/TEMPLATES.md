@@ -2,21 +2,60 @@
 
 `graphics.instantiate` expands a portable original template with typed parameters, validates the complete resulting scene and external source identities, and returns an editable scene recipe. It is available through the CLI, Rust library and MCP stdio. The operation writes no files or saved sessions. Use `scene.render` to compile the returned recipe to a new asset, then add it to an ordinary timeline or saved session.
 
-Original reusable examples are [lower-third-template.json](../examples/lower-third-template.json) and [title-card-template.json](../examples/title-card-template.json). Each exposes text, supplied fonts, text/panel colors, font size, duration and a shared fade curve. The lower-third also exposes a horizontal offset; the title card exposes a shared vertical entrance curve. Both use a 160 by 90 logical canvas, output scale 4, and a three-second default duration. Fonts are required external inputs. These recipes contain no typeface, media asset or third-party template.
+The binary includes 20 original designs, discoverable with `templates.list`. Original reusable examples are [lower-third-template.json](../examples/lower-third-template.json) and [title-card-template.json](../examples/title-card-template.json). Each exposes text, supplied fonts, text/panel colors, font size, duration and a shared fade curve. The lower-third also exposes a horizontal offset; the title card exposes a shared vertical entrance curve. Both use a 160 by 90 logical canvas, output scale 4, and a three-second default duration. Fonts are required external inputs. These recipes contain no typeface, media asset or third-party template.
 
 ## Request and result
 
 | Request field | Meaning |
 | --- | --- |
 | `command` | `"graphics.instantiate"` (omit when using the MCP tool) |
-| `template` | Complete template JSON object; file paths are not loaded implicitly |
+| `template_id` or `template` | Exactly one built-in ID or complete inline template object; paths are not loaded implicitly |
+| `project` | Optional target snapshot or saved-project reference; defaults canvas, scale 1 and native frame rate |
 | `instance_id` | Nonblank scene/compiled-asset ID, at most 128 bytes |
-| `values` | Map from declared parameter names to typed values; use `{}` when every parameter has a default |
+| `values` | Map from declared parameter names to typed values; omit or use `{}` when every parameter has a default |
 | `input_root` | Existing absolute directory for every external source used by the resolved scene |
 
 The result contains `scene`, `inspection`, resolved `parameters`, sorted `defaulted_parameters`, `template_id`, `template_sha256` and `scene_sha256`. The scene digest agrees with a subsequent `scene.render` receipt. Digests cover native serialized recipes, not rendered pixel bytes. Whitespace and JSON object-key order do not alter them. Ordered arrays remain significant; rearranging parameter declarations can change the template digest even when the expanded scene is unchanged. Source identities in `inspection` identify the actual external files.
 
 Each call clones the base scene and sets its ID to `instance_id`. Reusing a template, changing later values or failing validation cannot mutate an earlier returned scene. Instances have no hidden link to the template: changing a template later requires explicit re-instantiation and recompilation. Store both the editable template/values and concrete recipe when continued editing is required. The compiled timeline asset remains flattened.
+
+## Built-in catalog and output fitting
+
+Call `templates.list` with no arguments to list every ID, one-line purpose, typed parameter/default and output size; pass `template_id` to inspect one entry. The listing omits scene internals. All designs require external fonts, supplied by identity or an unambiguous installed name from [fonts.find](FONTS.md).
+
+| IDs (each prefixed `cutbolt-` and suffixed `-v1`) | Designs |
+| --- | --- |
+| `lower-third`, `lower-third-rule`, `lower-third-marker` | Three lower thirds |
+| `title-card`, `title-center`, `title-split` | Three title cards |
+| `end-card`, `section-divider` | Closing message and section heading |
+| `callout-arrow`, `callout-box`, `chapter-marker`, `progress-bar` | Annotations; progress uses an editable `fill_rect` |
+| `caption-outline`, `caption-box`, `caption-accent` | Three caption styles |
+| `quote-card`, `reminder`, `countdown`, `name-tag`, `list-reveal` | Quotation, original follow reminder, timed countdown, speaker tag and timed list |
+
+Each built-in exposes `width`, `height` and `output_scale` as integers, `frame_rate` as a time rational, and `transparent` as a boolean. Width/height are logical pixels; final size multiplies them by output scale. Without a project, defaults produce 640 by 360 pixels at 25 fps, for three seconds (four for the countdown). Transparent overlays keep alpha; title, quote, countdown, divider and end cards have opaque backgrounds. The two existing examples retain their original opaque output.
+
+With `project`, output defaults to its dimensions and native frame rate at scale 1. Transparency keeps the design's default because projects have no transparency setting. Explicit parameter values override these defaults. Built-ins fit their authored layout: rectangle edges/positions scale per axis; text, spacing and stroke sizes scale uniformly by the smaller canvas ratio within renderer limits. Aspect changes can alter whitespace and text wrapping; overflow remains an explicit error. Supplied pixel values are final logical coordinates and are not scaled again. Inline templates keep their authored layer coordinates even when project defaults change their output canvas.
+
+Built-ins proportionally retime layer activation ranges and default curves when duration changes. Activation edges round to the nearest frame (half up); every layer must retain at least one frame. Native fractional rates use 1001/1000-second design beats by default, preserving whole frames, audio samples and milliseconds. Explicit durations must meet the usual native-clock and sample alignment rules. Supplied curves remain explicit and must fit their layer clocks. Inline templates retain their original explicit timing behavior.
+
+A project-aware result additionally reports `target_project` (ID/revision) and sorted `project_defaulted_parameters`. The built-in template digest covers the fitted recipe, so output dimensions/rate/duration can change it; the scene digest covers the resolved scene as usual. Existing inline calls without a project retain their prior behavior.
+
+For example, after choosing an available font:
+
+```json
+{
+  "command": "graphics.instantiate",
+  "template_id": "cutbolt-title-center-v1",
+  "instance_id": "opening",
+  "input_root": "C:/DEV/CutboltData/inputs",
+  "values": {
+    "fonts": {"type": "fonts", "value": ["Your exact installed font name"]},
+    "label": {"type": "text", "value": "Opening title"}
+  }
+}
+```
+
+The font name and directory above are placeholders to replace with local inputs. This returns an expanded, inspectable scene. `graphics.place` and scene shorthand are not implemented in this checkpoint; compiling and adding a session asset still use the existing calls.
 
 ## Template schema
 
@@ -28,6 +67,7 @@ Each parameter has a unique `name`, a `definition`, and one or more `bindings`. 
 | --- | --- | --- |
 | `text` | `max_chars: 1..1024` | Nonempty string within this scalar limit and 4096 UTF-8 bytes |
 | `integer` | `min`, `max` | Signed 32-bit integer within the inclusive declared range; min must not exceed max |
+| `boolean` | None | Explicit `true` or `false` |
 | `color` | None | Four 8-bit straight RGBA channels |
 | `fonts` | None | 1-4 ordered [external font identities](GRAPHICS.md#text-and-external-fonts) |
 | `curve` | None | Ordinary scene curve with 1-128 keys and exact rational times |
@@ -41,7 +81,9 @@ Every binding has `property` and, for layer properties, `layer` naming a base sc
 | Property | Required parameter type | Target |
 | --- | --- | --- |
 | `scene_background` | `color` with alpha 255 | Scene RGB background |
-| `scene_duration` | `time` | Scene duration |
+| `scene_duration`, `scene_frame_rate` | `time` | Scene duration or one of eight native rates |
+| `scene_width`, `scene_height`, `scene_output_scale` | `integer` | Logical canvas dimensions or integer output scale |
+| `scene_transparent` | `boolean` | Straight-alpha output |
 | `layer_start`, `layer_duration` | `time` | Layer activation range |
 | `text` | `text` | Text graphic content |
 | `text_color` | `color` | Text RGBA color |
@@ -53,9 +95,9 @@ Every binding has `property` and, for layer properties, `layer` naming a base sc
 | `position_x`, `position_y`, `opacity` | `integer` | Static transform field |
 | `position_x_curve`, `position_y_curve`, `opacity_curve` | `curve` | Corresponding animation curve; creates the animation object if needed |
 
-One parameter may bind multiple compatible targets, such as a shared color or fade. A target can have only one binding across the template. Static and animated bindings for the same property conflict, and a static binding cannot be hidden by a base animation curve. Layer IDs, source types and binding types are checked explicitly. Templates do not execute scripts or expressions, resolve nested templates, interpolate strings, infer layout or automatically retime media/keyframes.
+One parameter may bind multiple compatible targets, such as a shared color or fade. A target can have only one binding across the template. Static and animated bindings for the same property conflict, and a static binding cannot be hidden by a base animation curve. Layer IDs, source types and binding types are checked explicitly. Templates do not execute scripts or expressions, resolve nested templates or interpolate strings. Only the built-in fitting path adjusts authored layout and default timing as described above.
 
-Changing duration is explicit. A parameter may bind both scene and layer durations, as in the examples, but existing fade/movement keys must still fit the new layer clocks. Supply corresponding new curves when shortening an instance. Retiming a curve uses the existing scene curve contract and does not change activation ranges.
+For inline templates, changing duration is explicit. A parameter may bind both scene and layer durations, as in the examples, but existing fade/movement keys must still fit the new layer clocks. Supply corresponding new curves when shortening an instance. Retiming a curve uses the existing scene curve contract and does not change activation ranges.
 
 ## Local example
 
@@ -99,3 +141,5 @@ Send that scene object to `scene.render` with the same input root and an unused 
 Missing/unknown values fail with `MISSING_PARAMETER`/`UNKNOWN_PARAMETER`. Wrong value types and declared-bound violations fail with `INVALID_PARAMETER`. Unknown values name the undeclared parameter and its given type; value/binding type errors name the parameter and both types. Invalid definitions, duplicate or incompatible bindings and missing target fields fail with `INVALID_TEMPLATE`. Malformed JSON/unknown fields fail with `INVALID_JSON`. Resolved scenes preserve the existing detailed font, identity, timing, animation and layout errors. No partial scene or output is published on failure.
 
 `python -X utf8 tests/templates.py --output C:\DEV\CutboltData\new-template-test` retains the original-font fixtures and instantiated recipes externally. It independently assembles expected scenes for two preset variants each and a custom multiline template, checks every RGB frame and silent PCM sample across 70 frames, and verifies compiled saved-session cuts, deterministic replay through MCP, parameter order, schema validation and isolation. Forty invalid cases cover types, constraints, missing media, incompatible targets, clock/layout errors and read-only failure behavior. Template example files participate in the verification fingerprint. This earns G02 extended; no expression or broader text-layout checkpoint is claimed.
+
+`tests/builtin_templates.py` renders all 20 designs at their actual defaults, compares selected RGB/RGBA movie frames with stills and all silent PCM samples, and independently checks whole-pixel synthetic-glyph variants using analytic shape/glyph coverage and integer RGB compositing. It tests project fitting, output overrides, inline binding constraints, all eight native rates for countdown/list timing, and core/full MCP parity. Its alpha regression compares every alpha byte at every integer output scale; transparent export enlarges bytes in Rust to preserve exact preview/movie agreement. Authored catalog JSON participates in progress and cached-verification fingerprints.

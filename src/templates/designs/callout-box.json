@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-callout-box-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "callout-box",
+    "width": 320,
+    "height": 180,
+    "output_scale": 2,
+    "duration": {
+      "num": 3,
+      "den": 1
+    },
+    "background": [
+      10,
+      17,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "transparent": true,
+    "audio": null,
+    "layers": [
+      {
+        "id": "box",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "rectangle",
+          "rect": [
+            64,
+            20,
+            192,
+            100
+          ],
+          "fill": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "stroke": {
+            "width": 2,
+            "color": [
+              91,
+              225,
+              195,
+              255
+            ]
+          }
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "caption-plate",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "rectangle",
+          "rect": [
+            63,
+            128,
+            194,
+            38
+          ],
+          "fill": [
+            19,
+            31,
+            47,
+            238
+          ],
+          "stroke": null
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "label",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "A key detail",
+          "fonts": [],
+          "size": 18,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            73,
+            131,
+            174,
+            32
+          ],
+          "line_height": 24,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "label",
+      "definition": {
+        "type": "text",
+        "default": "A key detail",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          241,
+          245,
+          251,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "accent",
+      "definition": {
+        "type": "color",
+        "default": [
+          91,
+          225,
+          195,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "stroke_color",
+          "layer": "box"
+        }
+      ]
+    },
+    {
+      "name": "panel",
+      "definition": {
+        "type": "color",
+        "default": [
+          19,
+          31,
+          47,
+          238
+        ]
+      },
+      "bindings": [
+        {
+          "property": "shape_fill",
+          "layer": "caption-plate"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 3,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        }
+      ]
+    }
+  ]
+}

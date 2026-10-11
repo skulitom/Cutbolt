@@ -432,7 +432,7 @@ pub(crate) fn prepare(request: &mut Value) -> Result<Vec<Value>> {
                     }
                 }
             }
-            if let Some(values) = request["values"].as_object_mut() {
+            if let Some(values) = request.get_mut("values").and_then(Value::as_object_mut) {
                 for (key, value) in values {
                     if value["type"] == "fonts"
                         && let Some(fonts) = value.get_mut("value")

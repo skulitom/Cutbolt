@@ -273,7 +273,11 @@ def fingerprint(stage, mode_args):
     if document is None or stage not in document["covered_files"]:
         return None
     digest = hashlib.sha256(json.dumps([stage, mode_args, tool_versions()]).encode())
-    for path in sorted(python_closure(stage) | set(document["covered_files"][stage]) | {"Cargo.toml", "Cargo.lock", "build.rs"}):
+    # Authored JSON is compiled into the binary with include_str!, so a recipe edit must invalidate
+    # a cached pass even when the including Rust file and mapped coverage have not changed.
+    embedded = {p.relative_to(ROOT).as_posix() for folder in (ROOT / "examples", ROOT / "src/templates/designs")
+                for p in folder.glob("*.json")}
+    for path in sorted(python_closure(stage) | set(document["covered_files"][stage]) | embedded | {"Cargo.toml", "Cargo.lock", "build.rs"}):
         file = ROOT / path
         digest.update(path.encode() + b"\0" + (file.read_bytes() if file.is_file() else b"<missing>") + b"\0")
     return digest.hexdigest()

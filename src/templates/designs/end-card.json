@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-end-card-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "end-card",
+    "width": 320,
+    "height": 180,
+    "output_scale": 2,
+    "duration": {
+      "num": 3,
+      "den": 1
+    },
+    "background": [
+      10,
+      17,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "transparent": false,
+    "audio": null,
+    "layers": [
+      {
+        "id": "label",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "Thanks for watching",
+          "fonts": [],
+          "size": 24,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            20,
+            27,
+            280,
+            58
+          ],
+          "line_height": 30,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "rule",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "rectangle",
+          "rect": [
+            100,
+            96,
+            120,
+            3
+          ],
+          "fill": [
+            91,
+            225,
+            195,
+            255
+          ],
+          "stroke": null
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "left_label",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "Keep exploring",
+          "fonts": [],
+          "size": 14,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            20,
+            118,
+            133,
+            38
+          ],
+          "line_height": 20,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "right_label",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "See you soon",
+          "fonts": [],
+          "size": 14,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            167,
+            118,
+            133,
+            38
+          ],
+          "line_height": 20,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "label",
+      "definition": {
+        "type": "text",
+        "default": "Thanks for watching",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "label"
+        }
+      ]
+    },
+    {
+      "name": "left_label",
+      "definition": {
+        "type": "text",
+        "default": "Keep exploring",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "left_label"
+        }
+      ]
+    },
+    {
+      "name": "right_label",
+      "definition": {
+        "type": "text",
+        "default": "See you soon",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "right_label"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "label"
+        },
+        {
+          "property": "fonts",
+          "layer": "left_label"
+        },
+        {
+          "property": "fonts",
+          "layer": "right_label"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          241,
+          245,
+          251,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "label"
+        },
+        {
+          "property": "text_color",
+          "layer": "left_label"
+        },
+        {
+          "property": "text_color",
+          "layer": "right_label"
+        }
+      ]
+    },
+    {
+      "name": "accent",
+      "definition": {
+        "type": "color",
+        "default": [
+          91,
+          225,
+          195,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "shape_fill",
+          "layer": "rule"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 3,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        }
+      ]
+    }
+  ]
+}

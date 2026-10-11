@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def source_hashes():
     files = [ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "build.rs", ROOT / "docs/MCP_EVALUATION.md"]
     files.extend(sorted((ROOT / "examples").glob("*-template.json")))
+    files.extend(sorted((ROOT / "src/templates/designs").glob("*.json")))
     files.extend(sorted((ROOT / "examples").glob("*.rs")))
     for directory, pattern in [("src", "*.rs"), ("tools", "*.py"), ("tests", "*.py"), ("tests", "*.rs")]:
         files.extend(sorted((ROOT / directory).rglob(pattern)))
