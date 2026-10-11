@@ -33,6 +33,7 @@ pub mod fillers;
 pub mod fonts;
 pub mod geometry;
 pub mod graphics;
+pub mod graphics_place;
 pub mod hdr;
 pub mod hdr_color;
 mod hdr_metadata;

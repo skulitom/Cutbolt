@@ -18,6 +18,7 @@ const APPLICATION_ID: i64 = 0x45565431;
 const STORE_VERSION: i64 = 2;
 mod backup;
 mod integrity;
+pub(crate) mod prepared;
 pub use backup::{Backup, Recover, backup, recover};
 pub use integrity::{check, migrate};
 

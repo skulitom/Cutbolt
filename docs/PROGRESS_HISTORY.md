@@ -1,5 +1,46 @@
 # Progress history
 
+## 12 October 2026: one-job graphic placement and verification follow-up
+
+`graphics.place` expands an original built-in or inline template against a saved project,
+compiles a durable asset, and attaches its video clip in one revision-checked edit. MCP uses
+`job.start` and `job.wait`; the catalogs remain 18 core / 86 full tools. Rendering runs outside
+the store write transaction, with revision and request replay checked again before commit.
+Ordinary failed preparation removes only its owned asset; undo retains committed assets for
+history restore. An ambiguous commit or crash can retain an unreferenced generated folder.
+Job errors provide the inner edit's session-receipt lookup without losing existing error detail.
+This is compiled graphic placement, not the direct-footage plan's generated scene clips.
+
+Six original fixture groups pass on Windows and Linux: queued placement versus explicit
+instantiate/render/apply, inline opaque graphics on an empty fractional-rate timeline, retry
+and undo/history, rejected edits and root escapes, concurrent replay/revision conflicts and
+encoder failure, and queued cancellation. They compare 70 decoded frames and 112016 stereo
+sample frames and preserve all original inputs. The fixture's queued title costs two calls,
+833 sent wire bytes on Windows / 830 on Linux, with no schema lookup. Format/lint and Rust
+tests pass on both platforms (229 Windows / 228 Linux). Windows queue-recovery, render-failure
+and built-in-template regressions also pass; final placement and agent-cost replays pass again
+after the platform-specific enum-layout lint fix.
+
+The scripted tutorial now uses the built-in title's project fitting instead of manually
+rewriting an inline template: 12 to 10 calls, 7920 to 3619 sent bytes. Its title step alone is
+two calls / 775 sent bytes, and the tutorial ceiling tightens to 10 calls / 4000 sent bytes.
+Final Windows received bytes are 53287; Linux 53186. The other four workflows remain at
+15/6/8/8 calls. These are regression wire measurements, not tokens or independent model trials.
+Scene shorthand, tested skills/plugin distribution and the approved fresh-agent trial remain
+required; no stage-4 or full-plan completion is claimed.
+
+The inclusive c108fd9 full quick run completed: 68 fixtures passed, none failed, skipped or
+unstarted (2066 seconds). It includes direct-source, recording, optional-runtime and hardware
+decode checks, but predates doctor and graphic placement. Shipping follow-ups have now been
+checked: b910d49 passed 14 and c108fd9 passed 26 before their remaining checks were superseded;
+633fde0's deferred run passed all 53. `verify --status` has no unresolved failures. This closes
+the earlier entries' pending result checks, including the superseded 506114f recording failure.
+An inclusive milestone thorough run is in progress on the fixed 633fde0 checkout, with all five
+external prerequisites and CUDA configured. Its result must be checked before refreshing
+progress evidence or declaring direct stage 1 complete. The 4 October full evidence remains
+unchanged and stale for these additions. No editing points, comparative lead, release tag,
+roadmap adoption or v2 scope change is claimed.
+
 ## 11 October 2026: installation diagnostics and completed long-source proof
 
 Added the local `cutbolt doctor` CLI command. It reports the selected external FFmpeg/ffprobe

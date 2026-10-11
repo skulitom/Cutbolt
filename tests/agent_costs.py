@@ -33,7 +33,7 @@ FULL_BUDGETS = {  # calls, request bytes, received bytes (including initialize/l
 COMPACT_BUDGETS = {
     'talking-head': (15, 9_500, 235_000),
     'interview': (6, 4_500, 55_000),
-    'tutorial': (12, 8_500, 75_000),
+    'tutorial': (10, 4_000, 60_000),
     'revision': (8, 2_500, 48_000),
     'handoff': (8, 2_600, 210_000),
 }
@@ -273,23 +273,13 @@ async def workflow(name, workspace, assets, font, executable):
                         right_clip_ids=[{'id': cid, 'new_id': cid + '-right'} for cid in ids],
                         right_link_ids=[{'id': l['id'], 'new_id': l['id'] + '-right'} for l in saved['tracks']['links']],
                         end_policy='resize', transitions='reject_affected')])
-                template = json.loads((ROOT / 'examples/title-card-template.json').read_text())
                 start = len(replay.commands)
-                expanded = await replay.call('graphics.instantiate', template=template, instance_id='title',
-                    values={'fonts': {'type': 'fonts', 'value': [font]}, 'label': {'type': 'text', 'value': 'A'}})
-                scene = expanded['scene']
-                scene['output_scale'] = 1
-                scene['duration'] = 1
-                scene['transparent'] = True
-                for layer in scene['layers']:
-                    layer['start'] = 0
-                    layer['duration'] = 1
-                    layer.pop('animation', None)
-                title = await replay.job('scene.render', scene=scene, output='title.mkv')
-                await replay.apply([{'op': 'media.add', 'asset': title['asset']},
-                    track_edit('add', track=track('titles', 'video', composite='alpha_over')),
-                    track_edit('place', track_id='titles', clip={'id': 'title', 'asset_id': 'title',
-                        'start': 0, 'source_in': 0, 'duration': 1}, collision='reject')])
+                title = await replay.job('graphics.place', project_id=name, expected_revision=replay.revision,
+                    request_id=f'title-{replay.revision}', instance_id='title', track_id='titles',
+                    template_id='cutbolt-title-card-v1', values={'fonts': {'type': 'fonts', 'value': [font]},
+                        'label': {'type': 'text', 'value': 'A'}, 'duration': {'type': 'time', 'value': 1},
+                        'transparent': {'type': 'boolean', 'value': True}})
+                replay.revision = title['revision']
                 title_commands = list(range(start, len(replay.commands)))
                 normalized = await replay.call('audio.normalize', project=replay.project, target_lkfs=-18)
                 assert normalized['operations'], normalized
@@ -351,6 +341,7 @@ def measure(workspace, commands, title_commands):
               'received_bytes': sum(m['bytes'] for m in messages if m['direction'] == 'received')}
     if title_commands:
         result['title'] = {'calls': len(title_commands), 'sent_bytes': sum(calls[i]['sent_bytes'] for i in title_commands)}
+        assert result['title']['calls'] <= 2 and result['title']['sent_bytes'] <= 1500, result['title']
     return result
 
 

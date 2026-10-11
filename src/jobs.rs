@@ -134,7 +134,8 @@ struct SavedCommand {
 }
 
 /// Commands that job.start can queue: each writes new files and can take minutes.
-pub const QUEUED_COMMANDS: [&str; 15] = [
+pub const QUEUED_COMMANDS: [&str; 16] = [
+    "graphics.place",
     "export.run",
     "media.transcribe",
     "captions.render",
@@ -694,7 +695,31 @@ fn run_command(connection: &Connection, id: &str, encoded: &str) -> Result<()> {
         (&saved.ffmpeg_sha256, &saved.ffprobe_sha256),
     )?;
     connection.execute("UPDATE jobs SET phase='running' WHERE id=?1", [id])?;
-    let result = supervise(connection, id, &saved)?;
+    let result = supervise(connection, id, &saved).map_err(|mut failure| {
+        if saved.command["command"] == "graphics.place" {
+            let reason = match failure.code {
+                "JOB_CANCELLED" => Some("Graphic job was cancelled"),
+                "JOB_STALLED" => Some("Graphic job stopped without progress"),
+                "JOB_TIMEOUT" => Some("Graphic job exceeded its time limit"),
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                failure.message = format!("{reason}; check the session receipt to determine whether its edit committed");
+            }
+            let hint = format!("{} Check session.receipt for this edit request before retrying an interrupted graphic job; a committed receipt is authoritative even if the job lost its response.", failure.hint.as_deref().unwrap_or_default());
+            failure = failure.with_hint(hint);
+            let mut detail = match failure.detail.take() {
+                Some(Value::Object(object)) => Value::Object(object),
+                Some(other) => json!({"cause":other}),
+                None => json!({}),
+            };
+            detail["session_receipt"] = json!({"command":"session.receipt",
+                "store_root":saved.command["store_root"],"project_id":saved.command["project_id"],
+                "request_id":saved.command["request_id"]});
+            failure.detail = Some(detail);
+        }
+        failure
+    })?;
     let tx = connection.unchecked_transaction()?;
     tx.execute(
         "UPDATE jobs SET status='completed',phase='completed',frames=total_frames,result=?1 WHERE id=?2",

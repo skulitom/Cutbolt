@@ -62,7 +62,7 @@ all five recipes. Small byte differences include paths, build strings, worker id
 All five have zero failed calls, schema requests and capabilities requests. The full workspace
 listing response costs **224,321 bytes** per workflow. Windows initialization is about **4.5 KB**.
 The title portion of the tutorial takes **4 calls / 5,043 sent bytes**. These are initial values;
-the compact-catalog measurements below supersede the listing cost; the two-call/1.5-KB title target remains unimplemented.
+the later catalog and placement measurements below supersede these costs.
 
 ## Compact default, stage 2
 
@@ -187,3 +187,32 @@ Measured current listings are 21,262 / 21,104 bytes for core (without/with a wor
 bytes. The five scripted workflows remain at 15/6/12/8/8 calls with zero failures or schema
 lookups; received bytes on this checkpoint are 209,534/46,613/62,670/40,806/185,667 on Windows
 and 209,408/46,489/62,544/40,682/185,541 on Linux. These remain scripted byte measurements.
+
+## Stage 4 queued graphic placement, 12 October 2026
+
+`graphics.place` takes the built-in template, typed values and saved revision in one queued
+request, then returns the revision containing the compiled asset and placed clip. The tutorial
+replay now uses a built-in title fitted to its project instead of sending and manually rewriting
+an inline scene. The user task remains a one-second title over the edited tutorial.
+
+| Tutorial replay | Calls | Sent bytes | Received bytes, Windows / Linux |
+| --- | ---: | ---: | ---: |
+| Direct-source checkpoint, explicit title workflow | 12 | 7,920 | 62,670 / 62,544 |
+| Queued built-in placement | 10 | 3,619 | 53,287 / 53,177 |
+
+The measured title portion now takes **2 calls / 775 sent bytes** through the SDK, with no schema
+lookup. Its independent placement fixture uses 833 bytes on Windows and 830 on Linux (different
+IDs/paths and JSON-RPC serialization), also for two calls. The default tutorial ceiling tightens
+to 10 calls, 4,000 sent bytes and 60,000 received bytes; full-catalog historical ceilings stay.
+The other four workflows retain their call counts, with no failed calls or schema lookups.
+Core listing size in the SDK run is 21,198 bytes with a workspace, within the 40,000-byte bound;
+the catalogs still have 18 core / 86 full tools.
+
+Placement is verified against the explicit instantiate/render/apply workflow over every picture
+and stereo sample of an original two-second source. Other checks cover undo/restore, repeat and
+concurrent requests, intervening edits, locks, overlaps, bounds, rendering failure, cancellation,
+preserved source identities and unchanged history integrity. See [TEMPLATES.md](TEMPLATES.md)
+for durable generated-asset ownership and interrupted-job recovery.
+
+Scene shorthand and fresh-agent/model token measurements remain open. These replay bytes do
+not establish the approved talking-head received-token target or a comparative engine lead.

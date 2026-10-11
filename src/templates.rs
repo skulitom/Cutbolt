@@ -640,5 +640,5 @@ fn project_value(
 }
 
 pub fn capabilities() -> Value {
-    json!({"schema_version":1,"command":"graphics.instantiate","catalog_command":"templates.list","value_types":["text","integer","boolean","color","fonts","curve","time","rect"],"maximum_parameters":64,"maximum_bindings":256,"evaluation":"explicit_typed_bindings_no_scripts","instance_validation":"complete_scene_and_source_identities","mutation":"returns_fresh_scene_no_files_written"})
+    json!({"schema_version":1,"command":"graphics.instantiate","catalog_command":"templates.list","placement":{"command":"graphics.place","execution":"job.start","result":"compiled_asset_and_atomic_session_revision"},"value_types":["text","integer","boolean","color","fonts","curve","time","rect"],"maximum_parameters":64,"maximum_bindings":256,"evaluation":"explicit_typed_bindings_no_scripts","instance_validation":"complete_scene_and_source_identities","mutation":"returns_fresh_scene_no_files_written"})
 }

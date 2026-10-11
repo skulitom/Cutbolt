@@ -414,7 +414,7 @@ pub(crate) fn prepare(request: &mut Value) -> Result<Vec<Value>> {
                 }
             }
         }
-        "graphics.instantiate" => {
+        "graphics.instantiate" | "graphics.place" => {
             if let Some(template) = request.get_mut("template") {
                 if let Some(scene) = template.get_mut("scene") {
                     resolver.scene(scene, "template.scene")?;

@@ -676,6 +676,9 @@ pub enum Request {
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
+    /// Instantiate and compile a graphic, then place its asset and clip in one revision-checked saved edit. Queue through job.start in MCP.
+    #[serde(rename = "graphics.place")]
+    GraphicsPlace(crate::graphics_place::Place),
     #[serde(rename = "templates.list")]
     TemplatesList {
         /// Optional exact built-in ID; omit to list the whole catalog with typed defaults and output sizes.
@@ -1056,7 +1059,7 @@ pub enum Request {
         job_root: PathBuf,
         /// Caller-chosen ID unique within job_root, 1-128 bytes. An identical resubmission returns the original ticket.
         request_id: String,
-        /// Command to run in the background: export.run, export.review, captions.render, media.prepare, media.transcribe, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
+        /// Command to run in the background: graphics.place, export.run, export.review, captions.render, media.prepare, media.transcribe, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
         run: String,
         /// That command's arguments exactly as for a direct call, without `command`; cutbolt_schema with its name gives the schema.
         arguments: serde_json::Map<String, Value>,
@@ -1336,6 +1339,7 @@ fn parse(request: Value) -> Result<Request> {
 
 pub fn handle(request: Request) -> Result<Value> {
     match request {
+        Request::GraphicsPlace(request) => crate::graphics_place::run(&request),
         Request::FontsFind(request) => crate::fonts::find(&request),
         Request::NativeImport(request) => crate::native_project::import(&request),
         Request::ProjectPortable {

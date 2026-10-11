@@ -55,7 +55,65 @@ For example, after choosing an available font:
 }
 ```
 
-The font name and directory above are placeholders to replace with local inputs. This returns an expanded, inspectable scene. `graphics.place` and scene shorthand are not implemented in this checkpoint; compiling and adding a session asset still use the existing calls.
+The font name and directory above are placeholders to replace with local inputs. This returns an expanded, inspectable scene. Scene shorthand remains planned.
+
+## Place a graphic in one job
+
+`graphics.place` expands a built-in or inline template against a saved project, compiles it and
+adds its asset and video clip in one saved edit. Through MCP, queue it with `job.start` and read
+its result with `job.wait`. For an existing project and font file in a bound workspace:
+
+```json
+{
+  "command": "job.start",
+  "request_id": "title-job",
+  "run": "graphics.place",
+  "arguments": {
+    "project_id": "edit",
+    "expected_revision": 3,
+    "request_id": "title-edit",
+    "instance_id": "intro-title",
+    "template_id": "cutbolt-lower-third-v1",
+    "values": {
+      "fonts": {"type": "fonts", "value": [{"path": "font.ttf"}]},
+      "label": {"type": "text", "value": "Hello"},
+      "duration": {"type": "time", "value": 1},
+      "transparent": {"type": "boolean", "value": true}
+    }
+  }
+}
+```
+
+Replace the project, revision and font with actual local values. Pass the returned `job_id` to
+`job.wait` with `timeout_seconds: 120`. The result includes the new `revision`, a bound `asset`,
+its scene digest and the ordinary session receipt. The original synthetic title fixture uses
+two MCP calls, 833 sent bytes on Windows / 830 on Linux including JSON-RPC envelopes, and no schema lookup.
+This is a scripted workflow measurement, not a fresh-model trial.
+
+`start` defaults to zero. `track_id` defaults to `graphics`; an absent track is added above the
+existing tracks as enabled video `alpha_over`. An existing destination must have that type,
+be enabled and unlocked, and have no overlapping clip. `instance_id` names both the new asset
+and clip. A sequential timeline is promoted with linked video/audio unchanged; an empty project
+gets a timeline ending at the graphic's end. A nonempty timeline is never extended implicitly.
+The template keeps its transparency choice, and scene soundtracks are rejected because this
+command places video only. Dimensions and native frame rate must match the project.
+
+Outside a workspace, provide `store_root`, `input_root` and `output_root`. The latter must be an
+existing directory inside `input_root`, so the saved project can read its generated asset.
+The command creates a unique `.cutbolt-graphic-*` folder containing `graphic.mkv`. This is a
+durable project asset, not an evictable preview cache. Undo retains it for saved-history restore.
+
+Rendering holds no database write lock. The final short transaction rechecks the head revision
+and saves the asset, track and clip together. Normal rendering, collision, revision-conflict
+and cancellation failures remove the command's uncommitted asset. Identical edit retries return
+the committed receipt even after later edits or undo; changed arguments with that request ID
+fail. Concurrent identical requests commit once and discard the losing prepared asset.
+
+After a process crash or ambiguous commit I/O error, an unreferenced generated folder may
+remain. The command retains a possibly committed asset rather than risk breaking history.
+Use `session.receipt` with the **inner edit request ID** to learn whether the edit committed;
+job errors include that lookup. A new job may retry the same inner request safely. This does
+not add automatic job retry or a new store/snapshot schema.
 
 ## Template schema
 

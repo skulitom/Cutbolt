@@ -123,6 +123,9 @@ pub(crate) fn description(command: &str) -> &'static str {
         "graphics.instantiate" => {
             "Expand a built-in template_id from templates.list or an inline template using typed values. Optional project defaults its canvas, scale 1 and frame rate; built-in layouts fit the canvas. Validates bindings and font identities; returns an editable scene and inspection. No files or sessions change. Compile with job.start run scene.render, then job.wait."
         }
+        "graphics.place" => {
+            "Instantiate and compile a built-in or inline graphic against a saved project, then attach its asset and clip on a video alpha_over track in one revision-checked edit. Queue with job.start; job.wait returns its session revision. Repeated edit request IDs replay safely."
+        }
         "templates.list" => {
             "List original built-in graphics by ID and purpose, with typed parameters, defaults and output sizes. Optional template_id selects one. Use an ID with graphics.instantiate; supply external font identities or unambiguous installed names. No files or sessions change."
         }
@@ -238,7 +241,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Independent jobs run at once, so queue several, then wait for them all with one job.wait job_ids; job.cancel stops one."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), graphics.place (instantiate, compile and attach a graphic in one saved edit), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Independent jobs run at once, so queue several, then wait for them all with one job.wait job_ids; job.cancel stops one."
         }
         "job.wait" => {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false. With job_ids, wait for several jobs in one call, until all (default) or any have finished: the result counts jobs by status and lists each job's receipt, error or progress. Receipts are summaries unless detail is full."
@@ -327,7 +330,8 @@ pub(crate) fn description(command: &str) -> &'static str {
 pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
 /// Long renders belong in persisted jobs so the MCP connection stays usable.
-const BLOCKING: [&str; 17] = [
+const BLOCKING: [&str; 18] = [
+    "graphics.place",
     "media.prepare",
     "media.transcribe",
     "captions.render",
