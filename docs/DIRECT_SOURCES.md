@@ -115,14 +115,34 @@ serial and full 128-bit file ID on Windows, or device and inode on Linux. Missin
 ID support disables reuse. A full hash is remembered only if both its open handle and current
 path retain the original fingerprint after hashing.
 
-The direct video library uses reuse only for its preliminary read check. Its final verification,
-all existing publication checks and public file-hash functions still read every byte. Other
-render gates retain full preliminary hashing until their publication paths are integrated and
-audited. The cache is in memory; a new process starts empty. No source bytes or identities enter a
-new persistent file. Same-size in-place edits with deliberately restored modification times can
+The direct video library uses reuse only for its preliminary read check. Single-frame previews
+of sequential or single opaque direct clips also reuse preliminary identity checks, then fully
+hash the original after writing the provisional PNG and immediately before publication. This
+consolidates four full source hashes into one on a warm preview. Library receipts, scope/sheet
+reads, render planning, other render gates and public file-hash functions keep their full checks.
+The cache is in memory; a new process starts empty. No source bytes or identities enter a new
+persistent file. Same-size in-place edits with deliberately restored modification times can
 pass the preliminary check; the mandatory full hash detects them before a successful receipt.
 The unit test covers this approved tradeoff, modified metadata, replacement file IDs and refresh
-after a full hash.
+after a full hash. A persistent-process preview fixture warms the cache, mutates a synthetic
+source copy while preserving size/mtime/file ID, and requires MEDIA_CHANGED with no published or
+surviving provisional image. Short/excess frames and a failed decoder likewise cannot publish.
+
+The original 20-minute 1080p30 fixture's final frame (35999) passes a ten-second ceiling declared
+before measurement. Five warm release previews per build were interleaved, swapping order each
+round, with a three-second system CPU sample before each request and no compilation during it:
+
+| Build | Median seconds | Range seconds | Sampled CPU busy fraction |
+| --- | ---: | ---: | ---: |
+| Before, 506114f | 12.298 | 10.311-13.017 | 36.1-63.9% |
+| With preview hash consolidation | 5.073 | 4.717-7.693 | 25.9-80.5% |
+
+All ten previews have identical decoded RGB; their decoder receipts seek near the end of the
+source. These are warm-cache measurements, not cold indexing latency. The current compressed
+index, including audio anchors, is 2,134,638 bytes for the 2,768,314,141-byte source. The original
+index-foundation measurement above used the earlier, smaller index schema. The reproducible
+driver is `tests/direct_long.py`; generated sources, frozen binaries, counted-tool helpers and
+raw reports stay external. The independent late-export comparison remains pending.
 
 Both open-GOP fixtures now span six GOPs (360 frames), so the near-end windows exercise later
 random-access points beyond initial preroll. Existing frame-digest oracles remain unchanged.

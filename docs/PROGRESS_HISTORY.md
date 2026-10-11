@@ -1,5 +1,40 @@
 # Progress history
 
+## 11 October 2026: one final source hash for direct frame publication
+
+The approved identity cache now serves the preliminary checks of a single-frame direct
+preview on sequential timelines and the single opaque placed-clip path. The prepared decoder
+still requires exactly one complete frame and a successful exit. The original is fully hashed
+after the provisional PNG is written and immediately before publication; this consolidates
+four full source passes into one for a warm preview. Public library receipts, scope/sheet
+reads, render plans and other render gates retain their full checks.
+
+The persistent-process fault fixture warms the cache, then tests short/excess decoder output,
+a late decoder failure and a changed synthetic source copy whose size, mtime and file ID are
+preserved. Each fails with its original error and no published/provisional image. The original
+fixture is unchanged. All eight render/preview failure cases pass separately on Windows and
+inside direct_sources on both platforms. Windows Rust tests pass 228; Linux passes 227;
+formatting and warning-free Windows lint pass. direct_sources, native_timing and cache_previews
+pass together on Windows (1220 seconds, direct_sources 1217) and Linux (471 seconds).
+
+The prior full A/V checkpoint's nine-fixture runs completed successfully on Windows (1458
+seconds) and Linux (615 seconds). The later readiness direct_sources checks also passed on
+Windows (1227 seconds) and Linux (600 seconds). Those five-fixture readiness reports retain
+the old conform expected-conversion failure; the corrected conform/integration/agent_costs
+checks recorded in the preceding entry supersede it. The 506114f background run passed 48
+fixtures but both recording attempts reported real timestamp discontinuities; a separate
+rerun remains required, with the existing one-millisecond threshold unchanged.
+
+The retained 20-minute release benchmark passes its declared ten-second warm-preview ceiling
+for all five interleaved requests. Before: median 12.298 seconds, range 10.311-13.017, sampled
+CPU busy fraction 36.1-63.9%. After: median 5.073 seconds, range 4.717-7.693, load 25.9-80.5%.
+Every request reads frame 35999 through a sought native-YUV decoder and produces identical RGB;
+no compilation occurs during a measured request. The benchmark excludes a known noncompiler
+name collision (Gigabyte Control Center's GCC.exe); its initial warmup-only run was retained.
+The explicit-conform comparison for the queued final ten-second export is still running.
+No complete long-source acceptance, stage-1 completion, v2 adoption or points are claimed here.
+Thorough evidence and PROGRESS.md remain unchanged and stale for the new capabilities.
+
 ## 11 October 2026: shared indexed-source gate and truthful readiness
 
 The renderer's source gate now has explicit Reference and Indexed profiles. Native callers

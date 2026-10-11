@@ -183,8 +183,13 @@ impl<'a> Graph<'a> {
                 .expect("validated asset");
             let path = media::project_file(Path::new(&asset.path), self.root)?;
             let source = if asset.decode.is_some() {
-                let (source, video) =
-                    render::inspect_indexed(self.project, asset, self.root, self.control)?;
+                let (source, video) = render::inspect_indexed(
+                    self.project,
+                    asset,
+                    self.root,
+                    self.control,
+                    render::IdentityCheck::Full,
+                )?;
                 self.indexed.insert(asset.id.clone(), video);
                 if overlay {
                     self.overlay_assets.insert(asset.id.clone());

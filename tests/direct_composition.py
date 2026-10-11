@@ -8,6 +8,7 @@ import subprocess
 
 from PIL import Image
 
+from agents import Client
 from footage_sources import identity
 from engine import ENGINE
 from source_clocks import call, decoded, time
@@ -100,7 +101,9 @@ fn main() {
     io::stdout().write_all(&bytes).unwrap();
     if mode=="changed" {
         let path=env::var("DIRECT_SOURCE").unwrap();
-        let mut bytes=fs::read(&path).unwrap(); let last=bytes.len()-1;bytes[last]^=1;fs::write(path,bytes).unwrap();
+        let modified=fs::metadata(&path).unwrap().modified().unwrap();
+        let mut bytes=fs::read(&path).unwrap(); let last=bytes.len()-1;bytes[last]^=1;fs::write(&path,bytes).unwrap();
+        fs::File::options().write(true).open(&path).unwrap().set_times(fs::FileTimes::new().set_modified(modified)).unwrap();
     }
     if mode=="failed" { exit(23); }
 }
@@ -128,5 +131,29 @@ fn main() {
         assert not result['ok'] and result['error']['code']==expected, result
         assert not target.exists() and not list(root.glob('*.partial.mkv')), label
         observed[label]=expected
+    # The preview's preliminary hash may be reused inside a persistent process. Even a source
+    # mutation with restored mtime, unchanged size and the same file ID must fail publication.
+    shutil.copy2(original,source)
+    mode.write_text('')
+    client=Client(ENGINE,env=env)
+    client.initialize()
+    preview_errors={}
+    try:
+        warm=root/'warm.png'
+        client.call('preview.frame',project=project,input_root=str(root),output_root=str(root),output=str(warm),time=time(0))
+        fingerprint=lambda: (source.stat().st_size,source.stat().st_mtime_ns,source.stat().st_dev,source.stat().st_ino)
+        before=fingerprint()
+        for label,expected in [('short','RENDER_VALIDATION_FAILED'),('extra','RENDER_VALIDATION_FAILED'),
+                               ('failed','TOOL_FAILED'),('changed','MEDIA_CHANGED')]:
+            mode.write_text(label)
+            target=root/('preview-'+label+'.png')
+            client.call('preview.frame',expected_error=expected,project=project,input_root=str(root),
+                        output_root=str(root),output=str(target),time=time(0))
+            assert not target.exists() and set(root.rglob('*.png'))=={warm}, label
+            preview_errors[label]=expected
+        assert fingerprint()==before and identity(source)!=original_identity
+    finally:
+        client.close()
     assert identity(original)==original_identity
-    return dict(errors=observed,no_failed_output_published=True,original_preserved=True)
+    return dict(errors=observed,preview_errors=preview_errors,metadata_spoof_rejected=True,
+                no_failed_output_published=True,original_preserved=True)

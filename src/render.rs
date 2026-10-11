@@ -512,6 +512,12 @@ fn parameters(width: u32, height: u32, rate: Time, alpha: bool, timing: Timing) 
 }
 /// A source with its video pixel format, or why its inspection failed.
 pub(crate) type Inspected = Result<(Source, String)>;
+#[derive(Clone, Copy)]
+pub(crate) enum IdentityCheck {
+    Full,
+    /// Preliminary reuse only. The caller must fully hash before publishing its output/receipt.
+    DeferredToPublication,
+}
 /// Acceptance and decoding are paired: indexed YUV must never enter a native RGB graph.
 enum SourceProfile<'a> {
     Reference {
@@ -522,6 +528,7 @@ enum SourceProfile<'a> {
         project: &'a Project,
         asset: &'a crate::model::Asset,
         root: &'a Path,
+        identity: IdentityCheck,
     },
 }
 enum AcceptedSource {
@@ -549,8 +556,15 @@ fn inspect_source_with(
             project,
             asset,
             root,
+            identity,
         } => {
-            let (video, source) = crate::direct::bound_video(project, asset, root, control)?;
+            let (video, source) = crate::direct::bound_video(
+                project,
+                asset,
+                root,
+                control,
+                matches!(identity, IdentityCheck::DeferredToPublication),
+            )?;
             Ok(AcceptedSource::Indexed(source, std::sync::Arc::new(video)))
         }
     }
@@ -560,12 +574,14 @@ pub(crate) fn inspect_indexed(
     asset: &crate::model::Asset,
     root: &Path,
     control: &dyn media::Control,
+    identity: IdentityCheck,
 ) -> Result<(Source, std::sync::Arc<crate::direct::Video>)> {
     match inspect_source_with(
         SourceProfile::Indexed {
             project,
             asset,
             root,
+            identity,
         },
         control,
     )? {

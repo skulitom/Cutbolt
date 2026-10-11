@@ -58,11 +58,12 @@ fn stale(asset: &Asset, expected: &str, current: &str) -> crate::Error {
         .with_detail(json!({"asset_id":asset.id,"saved_index":expected,"current_index":current}))
 }
 
-/// The source has already passed a full hash comparison before an index can be trusted.
+/// A reused preliminary identity is provisional until the caller's full publication check.
 fn loaded(
     asset: &Asset,
     root: &Path,
     control: &dyn Control,
+    reuse_identity: bool,
 ) -> Result<(std::path::PathBuf, source_index::Loaded)> {
     let path = media::project_file(Path::new(&asset.path), root)?;
     let identity = asset.identity.as_ref().ok_or_else(|| {
@@ -82,7 +83,11 @@ fn loaded(
             crate::registry::RELINK_ASSET,
         ));
     }
-    let hash = media::file_hash_controlled(&path, control)?;
+    let hash = if reuse_identity {
+        media::file_hash_reused_controlled(&path, control)?
+    } else {
+        media::file_hash_controlled(&path, control)?
+    };
     if hash != identity.sha256 {
         return Err(crate::registry::changed_digest(
             &asset.path,
@@ -110,7 +115,7 @@ pub(crate) fn bind(
             sha256: media::file_hash(&path)?,
         });
     }
-    let (path, index) = loaded(&asset, &root, &media::Uncontrolled)?;
+    let (path, index) = loaded(&asset, &root, &media::Uncontrolled, false)?;
     if !refresh
         && let Some(Decode::Direct { index: saved }) = &asset.decode
         && saved != &index.key
@@ -132,6 +137,7 @@ pub(crate) fn bound_video(
     asset: &Asset,
     root: &Path,
     control: &dyn Control,
+    reuse_identity: bool,
 ) -> Result<(Video, Source)> {
     let Some(Decode::Direct { index: saved }) = &asset.decode else {
         return Err(error(
@@ -139,7 +145,7 @@ pub(crate) fn bound_video(
             "An indexed direct binding is required",
         ));
     };
-    let (path, loaded) = loaded(asset, root, control)?;
+    let (path, loaded) = loaded(asset, root, control, reuse_identity)?;
     if saved != &loaded.key {
         return Err(stale(asset, saved, &loaded.key));
     }
