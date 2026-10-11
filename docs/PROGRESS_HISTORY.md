@@ -1,5 +1,40 @@
 # Progress history
 
+## 11 October 2026: explicit compressed-source clock and audio reference
+
+Explicit SDR conform now accepts H.264/HEVC Main 8-bit YUV420 in MP4/MOV/MKV and AAC, PCM,
+MP3, FLAC or Opus mono/stereo audio at positive native rates. The original float64 pixel converter
+remains the numerical path. Optional `source.clock: first_video_frame` anchors picture to its first
+presented frame and preserves the decoded audio offset. Native PCM timestamps use nearest-sample
+rescaling with signed ties away from zero; exact rational positions then use the existing linear
+resampler. Early/long audio is trimmed, late/short audio is padded with silence, and mono duplicates.
+Omitting the option preserves the old zero-origin/alignment/extent checks. Project times remain
+nonnegative; the signed internal source-clock helper retains the same safe-integer rational bounds.
+
+Index summaries now report explicit start/tail/channel/resampling policies. Audio continuity is
+checked against cumulative sample count with the existing 1 ms container tolerance, rather than
+requiring exact adjacent timestamps; this admits ordinary MKV rounding without accumulating drift.
+The reference and index agree on the fractional native clock, including negative 44.1 kHz MP3
+priming. This extends the oracle needed by direct decoding; direct playback, asset bindings and
+approved metadata hash reuse remain unimplemented. Transcript propagation explicitly rejects the
+new clock option before publication; callers can transcribe the normalized output. Existing
+transcript behavior is unchanged. See [CONFORM.md](CONFORM.md) and [DIRECT_SOURCES.md](DIRECT_SOURCES.md).
+
+The original direct_sources generator now has 20 short cases. All 15 qualifying cases complete
+explicit conversion, comparing every RGB byte to independent full-frame float64 YUV arithmetic
+and every PCM sample to independent integer/Fraction resampling. They include HEVC/open GOP,
+AAC edit lists, PCM24 MOV, FLAC at 96 kHz, MP3 at 44.1 kHz, Opus MKV and late/short audio. The other
+five retain named direct-qualification rejections. Counted tool reuse, input hashes and index
+policies pass, and omission of clock normalization still rejects the edit-list source.
+
+Windows/Linux pass 218/217 Rust tests, lint, and direct_sources, conform, remapping, integration
+and agent_costs. The five workflow call counts remain 15/6/12/8/8, with zero failed calls or schema
+lookups and unchanged budget ceilings. Windows receives 209,775/46,554/62,609/40,745/185,606 bytes;
+Linux receives 209,341/46,426/62,483/40,621/185,480. These are scripted wire measurements, not model
+tokens. The material check passes 306 candidate files. The previous lookup commit's 42 deferred
+fixtures all passed. This commit uses the ordinary gate/background loop; thorough milestone
+proof and points remain unchanged. All remaining requirements of both plans remain in the goal.
+
 ## 11 October 2026: exact YUV lookup and long-source index validation
 
 The library now provides `color::Yuv420Converter`, a native 8-bit 4:2:0-to-RGB lookup for the

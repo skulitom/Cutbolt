@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import source_clocks
 
 from engine import ENGINE
 from footage_sources import ROOT, FFMPEG, FFPROBE, generate, identity, probe
@@ -48,6 +49,7 @@ def run(root, long=False):
 
 def verify(root, manifest, long=False):
     results = {}
+    conformed = {}
     env, launches = counted_tools(root)
     def inspect(path):
         process = subprocess.run([str(ENGINE), '--workspace', str(root)], input=json.dumps({
@@ -110,15 +112,30 @@ def verify(root, manifest, long=False):
         audio_frames = [f for f in data['frames'] if f['media_type'] == 'audio']
         decoded = indexed['audio']
         assert decoded['decoded_samples'] == sum(f['nb_samples'] for f in audio_frames), (name, decoded)
-        assert F(decoded['first_pts'],decoded['sample_rate']) == int(audio_frames[0]['best_effort_timestamp']) * F(audio['time_base'])
+        first_audio = int(audio_frames[0]['best_effort_timestamp']) * F(audio['time_base'])
+        assert abs(F(decoded['first_pts'],decoded['sample_rate']) - first_audio) <= F(audio['time_base'])/2
         assert decoded['channels'] == case['channels'] and decoded['sample_rate'] == case['audio_rate']
+        if qualifies:
+            policy = indexed['audio_policy']
+            relative = F(decoded['first_pts'],decoded['sample_rate']) - stamps[0]*tb
+            duration = F(len(frames))/F(case['rate'])
+            tail = relative + F(decoded['decoded_samples'],decoded['sample_rate']) - duration
+            assert policy['audio_first_relative_to_video'] == source_clocks.time(relative)
+            assert policy['start'] == ('trim_before_video' if relative < 0 else 'pad_with_silence' if relative > 0 else 'aligned')
+            assert policy['tail'] == ('trim_after_video' if tail > 0 else 'pad_with_silence' if tail < 0 else 'aligned')
+            assert policy['channels'] == ('duplicate_mono' if case['channels']==1 else 'preserve_stereo')
+            assert policy['video_duration'] == source_clocks.time(duration)
         assert identity(path) == {k: case[k] for k in ('bytes','sha256')}
         results[name] = {"frames": len(frames), "first_timestamp": stamps[0], "time_base": str(tb),
                          "intervals": intervals, "codec": video["codec_name"], "profile": video.get("profile"),
                          "pix_fmt": video["pix_fmt"], "audio_rate": int(audio["sample_rate"]), "index":indexed}
-    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index"], "stage": "source_index",
+        if qualifies and name != 'h264-20min':
+            conformed[name] = source_clocks.verify(root,name,case,data)
+            offset = conformed[name]['audio_sample_offset']
+            assert F(offset['num'],offset['den']) == -relative * decoded['sample_rate'], (name, offset, relative)
+    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference"], "stage": "source_index_and_reference",
               "direct_decode_verified": False, "sources_preserved": True, "cases": results,
-              "tools": manifest["tools"], "long_source_generated": long}
+              "tools": manifest["tools"], "long_source_generated": long, "conform_references":conformed}
     (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
 

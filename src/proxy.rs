@@ -133,6 +133,7 @@ pub fn generate(request: &Generate) -> Result<Value> {
             },
             color: Some(conform::Color::EncodedRgb),
             sdr: None,
+            clock: None,
         },
         source_in: Time::ZERO,
         duration: asset.duration,

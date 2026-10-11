@@ -531,6 +531,12 @@ pub fn can_follow(
     if transcripts.is_empty() {
         return Ok(());
     }
+    if recipe.source.clock.is_some() {
+        return Err(error(
+            "INVALID_ARGUMENT",
+            "transcripts cannot yet follow source.clock normalization; transcribe the normalized output",
+        ));
+    }
     if recipe.rate != (Time { num: 1, den: 1 })
         || recipe.reverse
         || recipe.freeze

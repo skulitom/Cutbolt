@@ -16,7 +16,10 @@ and color changes. One FFmpeg audio decode supplies a PCM byte counter and a sma
 stream concurrently. Neither PCM nor a whole decoded-video stream is written to disk. The audio
 summary reports actual decoded samples, native rate/channels, first PCM timestamp, continuity,
 optional codec initial padding, and mono duplication/resampling needs. Packet counts cannot replace
-this measurement for AAC. Padding/trimming relative to video and playback remain subsequent work.
+this measurement for AAC. `audio_policy` now reports the exact first-audio offset relative to video,
+leading/trailing padding or trimming, mono duplication and linear 48 kHz resampling choices.
+These policies are verified by [explicit conform clock normalization](CONFORM.md#explicit-source-clock);
+direct playback remains subsequent work.
 
 Qualification currently requires one video stream, at most one mono/stereo audio stream and no
 other stream types; MP4/MOV/MKV; H.264 or HEVC Main, even-sized 8-bit 4:2:0 progressive pictures;
@@ -24,7 +27,8 @@ square pixels without a display matrix; and one of the eight native CFR clocks r
 first presented frame, rounded at container precision. It requires stable, explicit BT.709 matrix
 and primaries, full/limited range, BT.709 or sRGB transfer, and left chroma placement. Missing SAR
 uses the existing converter's square-pixel assumption and sets `square_pixels_assumed`. AAC, MP3,
-FLAC, Opus and PCM are candidates; decoded audio must be continuous. Unsupported cases report
+FLAC, Opus and PCM are candidates; decoded audio must follow its cumulative sample clock within
+1 ms, allowing container timestamp quantization without permitting accumulated drift. Unsupported cases report
 reasons, never a successful render claim.
 
 Indexes are gzip-compressed JSON in the inspection-cache directory: by default a workspace's
@@ -44,7 +48,7 @@ reject wrong identity/key/schema, payload-digest changes and corrupt compressed 
 
 The retained original 20-minute 1080p30 fixture also passes these checks: 36,000 presented frames,
 600 keyframes, 26,400 B-frames and 57,600,000 decoded stereo samples. Its compressed index occupies
-176,032 bytes for a 2,768,314,141-byte MP4. A fresh-process second inspection launches only metadata
+176,032 bytes in the original index-foundation build for a 2,768,314,141-byte MP4. A fresh-process second inspection launches only metadata
 probing. These are storage/correctness observations, not a preview or seek-performance result.
 
 ## Exact color conversion foundation

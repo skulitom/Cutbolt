@@ -2,6 +2,9 @@ use crate::{Result, error};
 use serde::{Deserialize, Deserializer, Serialize, de};
 use std::{borrow::Cow, cmp::Ordering, fmt};
 
+mod signed;
+pub(crate) use signed::Stamp;
+
 const MAX: u128 = 9_007_199_254_740_991;
 
 /// Every form a time may be written in; rejections quote it.

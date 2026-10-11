@@ -83,7 +83,7 @@ impl Transfer {
         }
     }
 }
-/// Sample matrix: `rgb` for FFV1/bgr0 RGB, `bt709` for BT.709 YUV (FFV1 yuv444p MKV or H.264 yuv420p MP4/MOV).
+/// Sample matrix: `rgb` for FFV1/bgr0 RGB, `bt709` for BT.709 YUV (FFV1 yuv444p MKV or H.264/HEVC Main yuv420p MP4/MOV/MKV).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Matrix {
@@ -144,13 +144,15 @@ impl Input {
                 Layout::Yuv444
             }
             (Matrix::Bt709, Some("yuv420p" | "yuvj420p"))
-                if mp4 && stream["codec_name"] == "h264" =>
+                if (mp4 || mkv)
+                    && (stream["codec_name"] == "h264"
+                        || stream["codec_name"] == "hevc" && stream["profile"] == "Main") =>
             {
                 Layout::Yuv420
             }
             _ => {
                 return Err(invalid(
-                    "SDR normalization requires declared FFV1/bgr0 or YUV444 MKV, or H.264/YUV420 MP4/MOV",
+                    "SDR normalization requires declared FFV1/bgr0 or YUV444 MKV, or H.264/HEVC Main YUV420 MP4/MOV/MKV",
                 ));
             }
         };
@@ -271,7 +273,7 @@ impl Input {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"profile":"sdr-normalization-v1","input_matrix":["rgb","bt709"],"input_range":["full","limited"],"transfer":["srgb","bt709"],"primaries":"bt709","missing_tags":["reject","use_declared"],"conflicting_tags":"reject","output":"tagged_full_range_rgb_ffv1","precision":"8bit_samples_f64_conversion","hdr":false,"icc":false})
+    json!({"profile":"sdr-normalization-v1","inputs":["ffv1_bgr0_yuv444_mkv","h264_yuv420_mp4_mov_mkv","hevc_main_yuv420_mp4_mov_mkv"],"input_matrix":["rgb","bt709"],"input_range":["full","limited"],"transfer":["srgb","bt709"],"primaries":"bt709","missing_tags":["reject","use_declared"],"conflicting_tags":"reject","output":"tagged_full_range_rgb_ffv1","precision":"8bit_samples_f64_conversion","hdr":false,"icc":false})
 }
 #[cfg(test)]
 mod tests {

@@ -57,8 +57,9 @@ def probe(path):
 
 
 def encode(root, name, *, codec="h264", rate=Fraction(30), count=150, size=(160, 90),
-           audio_rate=48000, channels=2, gop=60, open_gop=False, pix_fmt="yuv420p", extra=(), phase=0):
-    suffix = ".mov" if codec == "prores" else ".mkv" if codec == "ffv1" else ".mp4"
+           audio_rate=48000, channels=2, gop=60, open_gop=False, pix_fmt="yuv420p", extra=(), phase=0,
+           container=None, audio_codec=None, audio_offset=None):
+    suffix = '.' + container if container else ".mov" if codec == "prores" else ".mkv" if codec == "ffv1" else ".mp4"
     path = root / (name + suffix)
     audio = root / (name + ".wav")
     sound(audio, audio_rate, channels, Fraction(count, 1) / rate)
@@ -69,13 +70,15 @@ def encode(root, name, *, codec="h264", rate=Fraction(30), count=150, size=(160,
               f"pools=2:frame-threads=2:keyint={gop}:min-keyint={gop}:scenecut=0:bframes=3:b-adapt=0:open-gop={int(open_gop)}"]
              if codec == "hevc" else ["-c:v", "prores_ks", "-profile:v", "3"]
              if codec == "prores" else ["-c:v", "ffv1", "-level", "3"])
+    audio_codec = audio_codec or ("pcm_s16le" if codec in {"prores", "ffv1"} else "aac")
     command = [FFMPEG, "-v", "error", "-nostdin", "-n", "-f", "rawvideo", "-pixel_format", "rgb24",
                "-video_size", f"{size[0]}x{size[1]}", "-framerate", str(rate), "-i", "pipe:0",
+               *([] if audio_offset is None else ['-itsoffset', str(audio_offset)]),
                "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0", "-threads", "2", *video,
                "-pix_fmt", pix_fmt, "-color_primaries", "bt709", "-color_trc", "bt709",
                "-colorspace", "rgb" if codec == "ffv1" else "bt709", "-color_range", "pc" if codec == "ffv1" else "tv",
-               "-c:a", "pcm_s16le" if codec in {"prores", "ffv1"} else "aac",
-               *([] if codec in {"prores", "ffv1"} else ["-b:a", "128k"]), *extra, str(path)]
+               "-c:a", audio_codec,
+               *(["-b:a", "128k"] if audio_codec in {'aac','libopus','libmp3lame'} else []), *extra, str(path)]
     with (root / (name + ".encoder.log")).open("xb") as log:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
         try:
@@ -117,6 +120,12 @@ def generate(root, long=False):
         "h264-long-gop": {"gop": 250, "count": 300},
         "hevc-main": {"codec": "hevc"},
         "hevc-open-gop": {"codec": "hevc", "open_gop": True},
+        "h264-mkv-flac": {"container":"mkv", "audio_codec":"flac", "audio_rate":96000},
+        "hevc-mkv-opus": {"codec":"hevc", "container":"mkv", "audio_codec":"libopus"},
+        "h264-mov-pcm": {"container":"mov", "audio_codec":"pcm_s24le", "audio_rate":32000},
+        "h264-mkv-mp3": {"container":"mkv", "audio_codec":"libmp3lame", "audio_rate":44100, "channels":1},
+        "h264-audio-late": {"audio_offset":"0.125"},
+        "h264-audio-short": {"extra":["-af","atrim=end_sample=96000"]},
         "hevc-main10": {"codec": "hevc", "pix_fmt": "yuv420p10le"},
         "prores-hq": {"codec": "prores", "pix_fmt": "yuv422p10le"},
     }.items():

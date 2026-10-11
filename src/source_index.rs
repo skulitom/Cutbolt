@@ -4,7 +4,7 @@ use crate::{
     Result, error, inspection_cache,
     media::{self, Control},
     registry::Identity,
-    time::Time,
+    time::{Stamp, Time},
 };
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,36 @@ pub(crate) struct Index {
     pub frames: Vec<Frame>,
     pub audio: Option<Audio>,
     pub reasons: Vec<String>,
+}
+
+impl Index {
+    fn audio_policy(&self) -> Result<Value> {
+        let Some(rate) = self.rate else {
+            return Ok(
+                json!({"clock":"first_video_frame","video_duration":null,"tail":"requires_video_mapping"}),
+            );
+        };
+        let duration =
+            Time::new(self.frames.len() as u64, 1)?.times(Time::new(rate.den, rate.num)?)?;
+        let Some(audio) = &self.audio else {
+            return Ok(
+                json!({"clock":"first_video_frame","video_duration":duration,"audio":"silence"}),
+            );
+        };
+        let first = Stamp::ticks(audio.first_pts, Time::new(1, audio.rate)?)?
+            .minus(Stamp::ticks(self.frames[0].0, self.time_base)?)?;
+        let tail = first
+            .plus(Stamp::time(Time::new(audio.samples, audio.rate)?)?)?
+            .compare(Stamp::time(duration)?)?;
+        use std::cmp::Ordering;
+        Ok(
+            json!({"clock":"first_video_frame","video_duration":duration,"audio_first_relative_to_video":first,
+            "start":match first.compare(Stamp::ZERO)? { Ordering::Less=>"trim_before_video",Ordering::Equal=>"aligned",Ordering::Greater=>"pad_with_silence" },
+            "tail":match tail { Ordering::Less=>"pad_with_silence",Ordering::Equal=>"aligned",Ordering::Greater=>"trim_after_video" },
+            "channels":if audio.channels==1 { "duplicate_mono" } else { "preserve_stereo" },
+            "sample_rate":if audio.rate==48000 { "preserve_48000" } else { "linear_resample_to_48000" }}),
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -183,7 +213,6 @@ fn video_frames(path: &Path, video: &Value, control: &dyn Control) -> Result<(Ve
 #[derive(Default)]
 struct Clock {
     first: Option<i64>,
-    end: i64,
     samples: u64,
     continuous: bool,
     time_base: Option<Time>,
@@ -273,14 +302,14 @@ fn audio(path: &Path, stream: &Value, control: &dyn Control) -> Result<Audio> {
                         if count == 0 || count.checked_mul(channels * 2) != Some(bytes) {
                             return Err(invalid("Decoded PCM size and duration disagree"));
                         }
-                        clock.continuous &= clock.first.is_none() || clock.end == pts;
+                        // Container audio timestamps (notably MKV's millisecond ticks) can
+                        // quantize each block. Compare with the cumulative decoded sample clock,
+                        // not the previous rounded block, so drift cannot accumulate unnoticed.
+                        clock.continuous &= clock.first.is_none_or(|first| {
+                            (pts as i128 - first as i128 - clock.samples as i128).abs() * 1000
+                                <= rate as i128
+                        });
                         clock.first.get_or_insert(pts);
-                        clock.end = pts
-                            .checked_add(
-                                i64::try_from(count)
-                                    .map_err(|_| invalid("PCM duration overflow"))?,
-                            )
-                            .ok_or_else(|| invalid("PCM timestamp overflow"))?;
                         clock.samples = clock
                             .samples
                             .checked_add(count)
@@ -572,13 +601,13 @@ pub(crate) fn inspect(path: &Path, source: Identity, metadata: &Value) -> Result
         .map(|p| p[1] - p[0])
         .max();
     let audio_policy = index.audio.as_ref().map(|a| json!({"decoded_samples":a.samples,"sample_rate":a.rate,"channels":a.channels,
-        "first_pts":a.first_pts,"time_base":{"num":1,"den":a.rate},"continuous":a.continuous,"codec_initial_padding":a.codec_initial_padding,
+        "first_pts":a.first_pts,"time_base":{"num":1,"den":a.rate},"continuous":a.continuous,"timestamp_tolerance":{"num":1,"den":1000},"codec_initial_padding":a.codec_initial_padding,
         "mono_to_stereo":a.channels == 1,"resample_to_48000":a.rate != 48000}));
     Ok(
         json!({"schema_version":SCHEMA,"key":key,"cache_hit":hit,"cache_bytes":cache.and_then(|p| fs::metadata(p).ok()).map(|m| m.len()),
         "eligible":index.reasons.is_empty(),"reasons":index.reasons,"frames":index.frames.len(),"first_timestamp":index.frames[0].0,
         "time_base":index.time_base,"frame_rate":index.rate,"keyframes":keys.len(),"maximum_gop_frames":longest_gop,
-        "b_frames":index.frames.iter().filter(|f| f.2 == b'B').count(),"audio":audio_policy,
+        "b_frames":index.frames.iter().filter(|f| f.2 == b'B').count(),"audio":audio_policy,"audio_policy":index.audio_policy()?,
         "square_pixels_assumed":!matches!(index.video["sample_aspect_ratio"].as_str(),Some("1:1")),
         "direct_decode_available":false}),
     )

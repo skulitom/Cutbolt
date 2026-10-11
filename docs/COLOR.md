@@ -36,9 +36,10 @@ An optional [LUT transform](LUTS_SCOPES.md) can follow this normalization before
 | --- | --- | --- | --- |
 | FFV1/bgr0 MKV | `rgb` | `full` or `limited` | `srgb` or `bt709` |
 | FFV1/yuv444p MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
-| H.264/yuv420p or yuvj420p MP4/MOV | `bt709` | `full` or `limited`; yuvj420p requires full | `srgb` or `bt709` |
+| H.264/yuv420p or yuvj420p MP4/MOV/MKV | `bt709` | `full` or `limited`; yuvj420p requires full | `srgb` or `bt709` |
+| HEVC Main/yuv420p MP4/MOV/MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
 
-All normalized inputs use BT.709 primaries and D65. The working transfer is `srgb` or `bt709`; output matrix is RGB, range full, primaries BT.709, with matching transfer tags. This is an 8-bit path. Existing conform restrictions on progressive square pixels, timing, audio, source identity, local roots, duration and no-overwrite publication still apply. Native decoded samples are capped at 4 GiB (four bytes per bgr0 pixel, three per YUV444 pixel, or 1.5 per YUV420 pixel); output RGB retains its separate 4 GiB bound.
+All normalized inputs use BT.709 primaries and D65. The working transfer is `srgb` or `bt709`; output matrix is RGB, range full, primaries BT.709, with matching transfer tags. This is an 8-bit path. Existing conform restrictions on progressive square pixels, source identity, local roots, duration and no-overwrite publication still apply. Explicit SDR video accepts AAC/PCM/MP3/FLAC/Opus mono/stereo audio at any positive decoded rate. Its default timing remains zero-origin; optional [source clock normalization](CONFORM.md#explicit-source-clock) aligns offset video/audio, pads short audio and trims long audio. Reverse/non-monotonic native decode windows are capped at 4 GiB (four bytes per bgr0 pixel, three per YUV444 pixel, or 1.5 per YUV420 pixel); forward CPU decoding streams frames.
 
 ## Metadata policy
 

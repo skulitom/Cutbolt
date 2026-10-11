@@ -507,6 +507,7 @@ fn recipe(
             },
             color: Some(conform::Color::EncodedRgb),
             sdr: None,
+            clock: None,
         },
         source_in: start,
         duration: request.duration,

@@ -2,7 +2,7 @@
 
 `media.conform.inspect` validates a source and reports the exact source frames selected by a recipe. `media.conform` writes a new lossless editing asset using that recipe. Both use explicit local roots and require the original source's SHA-256 and byte count. Sources are never rewritten. The output can enter ordinary saved sessions through `media.add` and can then be trimmed, assembled, previewed or queued for reference export.
 
-Rendering is a blocking CLI/library operation. MCP exposes inspection as `cutbolt_media_conform_inspect`; the existing background queue accepts the completed asset in a reference project. Keep the source, recipe and receipt outside the repository to revise or reproduce the conversion. Session undo changes timeline edits; it does not regenerate an earlier conversion recipe.
+Rendering is a blocking CLI/library operation. MCP exposes inspection as `cutbolt_media_conform_inspect`; queue conversion with `job.start`, `run: "media.conform"`, or use `media.prepare`. The completed asset enters the existing session contract. Keep the source, recipe and receipt outside the repository to revise or reproduce the conversion. Session undo changes timeline edits; it does not regenerate an earlier conversion recipe.
 
 The optional [hardware-decode recipe](ACCELERATION.md) selects a local CUDA device for the bounded progressive H.264 source subset, with an explicit unavailable-device policy. Omission uses the CPU. Only source-video decoding moves to the GPU; inspection, color conversion, audio, timeline mapping and output verification retain their existing behavior. Receipts identify the selected backend and measured stages. Hardware acceptance is pending full-suite promotion.
 
@@ -22,7 +22,36 @@ The source file must be at most 16 GiB, referenced by a relative path inside an 
 
 ## Explicit SDR normalization
 
-Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV and declared full/limited H.264 YUV420 input handling, with strict conflict checks and an explicit policy for absent tags. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
+Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV and declared full/limited H.264 or HEVC Main YUV420 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
+
+### Explicit source clock
+
+With SDR video, optional `source.clock: "first_video_frame"` makes the first presented video frame
+time zero. Original signed source timestamps are retained in the receipt; project and recipe times
+remain nonnegative exact rationals. Omit this field to retain the existing zero-origin and audio
+extent checks. It does not change the timeline renderer's strict FFV1 profile.
+
+The decoded audio's first container timestamp is rescaled to the nearest native PCM sample, with
+signed half ties away from zero, as in the native decoder clock. Audio keeps its resulting offset
+relative to the first video frame. Early audio is trimmed; late audio starts after silence. Each
+output sample evaluates its exact source position, uses the existing linear interpolation and
+mono duplication, and writes silence outside the decoded sample interval. A fractional position
+within the last sample's interval holds that final value. Output audio ends at the recipe duration,
+padding a short source or trimming an overlong one. This mode permits fractional source-sample
+positions; legacy recipes retain their alignment requirement. Relative audio timestamps must stay
+within 1 ms of the cumulative decoded sample clock, including millisecond container quantization.
+
+The receipt's `clock` reports the original video origin, native-quantized audio origin, exact audio
+sample offset at video time zero, resampling/mono choices and the outside-audio policy. The original
+float64 color converter remains the reference. Existing transcript propagation currently rejects
+this new clock mode before rendering; transcribe its output when a transcript is needed.
+
+The `direct_sources` fixture checks 15 short qualifying files against independent full-frame
+float64 YUV arithmetic and integer/Fraction PCM resampling. It includes an edit list, negative MP3
+audio priming with 44.1 kHz rounding, late/short audio, HEVC Main/open GOP, MP4/MOV/MKV and AAC,
+PCM24, MP3, FLAC and Opus. It compares every RGB byte and PCM sample and checks the source index's
+clock policy agrees. Nonqualifying rotation/SAR/VFR/10-bit/ProRes files remain explicit rejections
+from direct qualification; their broader normalization is later work.
 
 ## Recipe and timing
 
