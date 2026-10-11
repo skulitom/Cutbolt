@@ -1,5 +1,29 @@
 # Progress history
 
+## 11 October 2026: exact YUV lookup and long-source index validation
+
+The library now provides `color::Yuv420Converter`, a native 8-bit 4:2:0-to-RGB lookup for the
+planned direct decoder. Each table holds all 2^24 RGB triples in exactly 48 MiB and is initialized
+once per range/transfer mapping. Equal input/output transfer declarations share a table, bounding
+retained storage to six tables/288 MiB; construction can temporarily use another 48 MiB buffer.
+The original f64 converter and explicit conform path remain unchanged as the reference. The new
+component validates matrix, even positive dimensions and exact source/output buffer lengths.
+
+The normal Rust suite exhaustively checks all 16,777,216 triples for all eight declared
+range/input-transfer/output-transfer combinations, with exact equality on Windows and Linux.
+A separate nonuniform planar frame compares chroma addressing with the f64 YUV420 path and checks
+invalid dimensions and buffer lengths. Windows passes all 216 Rust tests, formatting and lint;
+Linux's exhaustive and layout tests pass as well. The material check passes 304 candidate files.
+No speed comparison is inferred from these correctness tests.
+
+The source-index foundation's retained 20-minute 1080p30 MP4 passes the independent frame/PCM and
+counted-launch fixture: 36,000 frames, 600 keys, 26,400 B-frames and 57,600,000 audio samples. The
+2,768,314,141-byte source has a 176,032-byte compressed index; a fresh-process repeat launches only
+metadata probing, and source hashes remain unchanged. The earlier history entry's pending long
+check is therefore resolved. This is an index storage/correctness result, not a late-preview or
+10-second seek/export benchmark. Direct timeline decoding and all subsequent plan stages remain
+open. No v1/v2 points, scope or thorough evidence changed; ordinary shipping verification continues.
+
 ## 11 October 2026: direct-footage source-index foundation
 
 `media.inspect` now builds a compressed presented-frame and decoded-PCM index for compressed

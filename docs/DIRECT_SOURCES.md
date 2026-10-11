@@ -41,3 +41,28 @@ concurrent work. The original synthetic `direct_sources` fixture compares indepe
 frame/PCM observations, preserves input hashes and counts tool launches: the first inspection uses
 metadata, frame and audio passes; a fresh-process cache hit uses only metadata. Cache unit tests
 reject wrong identity/key/schema, payload-digest changes and corrupt compressed data.
+
+The retained original 20-minute 1080p30 fixture also passes these checks: 36,000 presented frames,
+600 keyframes, 26,400 B-frames and 57,600,000 decoded stereo samples. Its compressed index occupies
+176,032 bytes for a 2,768,314,141-byte MP4. A fresh-process second inspection launches only metadata
+probing. These are storage/correctness observations, not a preview or seek-performance result.
+
+## Exact color conversion foundation
+
+The library's `color::Yuv420Converter` provides the planned direct decoder's exact lookup path.
+It converts native planar 8-bit 4:2:0 to packed RGB with the same nearest-2x2 chroma interpretation,
+BT.709 matrix, full/limited range, clipping and rounding as `color::Input::convert`. The f64
+converter remains unchanged and is still used by explicit conform. This component is not yet wired
+into timeline playback.
+
+Each table maps all 2^24 Y/U/V triples to RGB and uses exactly 48 MiB. Tables are built lazily and
+shared in memory. Equal source/output transfers have identical arithmetic and share storage;
+the two ranges and three distinct transfer mappings bound retained table storage to 288 MiB.
+Construction can temporarily hold another table-sized buffer while transferring ownership.
+Media tag validation remains the caller's responsibility. The converter rejects an RGB matrix,
+nonpositive/odd dimensions and buffers whose lengths do not match one complete frame.
+
+The ordinary Rust unit suite exhaustively compares every table entry with the unchanged f64
+converter for all eight range/input-transfer/output-transfer declarations on Windows and Linux.
+A separate planar 4:2:0 frame test checks layout/chroma addressing, bounds and invalid buffers.
+This proves numerical equality; renderer wiring and measured preview performance remain open.

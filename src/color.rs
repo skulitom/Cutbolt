@@ -3,6 +3,9 @@ use crate::{Result, error};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod lookup;
+pub use lookup::Yuv420Converter;
+
 /// SDR transfer function of encoded RGB or YUV values: `srgb` (sRGB piecewise curve) or `bt709` (BT.709 OETF).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
