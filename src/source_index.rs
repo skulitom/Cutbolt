@@ -627,6 +627,7 @@ pub(crate) fn inspect(path: &Path, source: Identity, metadata: &Value) -> Result
     load(path, source, metadata, &media::Uncontrolled)?.summary()
 }
 
+#[derive(Debug)]
 pub(crate) struct Loaded {
     pub key: String,
     pub index: Index,

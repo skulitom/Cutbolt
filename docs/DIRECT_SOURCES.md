@@ -2,9 +2,9 @@
 
 The source index, saved direct bindings and exact frame previews implement part of
 [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md). Original compressed clips can now supply
-single-frame previews on sequential or ordinary opaque tracks. Range rendering, transitions,
-overlays and exports still need the preparation workflow; `timeline.ready` and
-`source_index.direct_decode_available` remain false until the full render path is integrated.
+single-frame previews, placed-track base pictures, top-level transitions and cropped/faded
+overlays. Full direct audio/video rendering still needs integration; `timeline.ready` and
+`source_index.direct_decode_available` remain false until that complete path is verified.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame
@@ -222,3 +222,32 @@ undo, replay after source mutation, failed-refresh rollback, source identity pre
 size/rate/duration mismatches and absence of publication for rejected sources. The unmodified
 native_timing, sessions, proxies and agent_costs fixtures pass on both platforms. No complete
 stage-1 exit or long-source latency result is claimed yet.
+
+## Direct pictures in the track compositor
+
+Placed tracks can use bound compressed originals as their opaque base, transition endpoints
+and opaque `alpha_over` sources. The same indexed reader supplies native YUV and converts it
+in Rust before any composition. Native assets keep the existing base graph. A direct base
+replaces only its visible interval, then the existing integer transition and overlay equations
+apply. Cropping copies the converted RGB values exactly; divisor shrink, opacity and placement
+use the existing compositor. There is no prepared video file or FFmpeg YUV-to-RGB conversion.
+
+Commands are prepared through the caller's process-control policy on its own thread, then
+decoders start as their frame runs become due. Direct readers use the same bounded two-frame
+queue and abort/timeout supervision as native readers. They require exactly the indexed window
+and a clean decoder exit. Preview/render publication still fully verifies every original source.
+The public library reader shares this implementation and retains its final full-hash receipt check.
+
+This is a picture-path checkpoint. A placed timeline with silent or separately prepared audio
+can render its direct pictures; direct audio-track inputs and nested direct pictures still fail
+explicitly. Sequential range rendering, the complete direct audio/video export workflow and
+the long-source performance gate remain pending. Use preparation for those workflows.
+
+The composition fixture compares 28 twenty-frame renders (560 frames) and 140 PNG previews
+against complete explicit-conform sources across the 21 eligible files on Windows and Linux.
+It covers all eight native clocks, all four transition types, direct/native mixtures, GOP-crossing
+reads, crop/divisor shrink, partial opacity, clipped placement and an opaque covering track.
+Its audio is silence: these comparisons do not claim direct audio integration. Separate injected
+short/excess raw output, late decoder failure and a changed source copy all fail without a
+published file or surviving partial output; the original fixture remains unchanged. Decoder
+failures retain their original code even when stopping the encoder during cleanup.

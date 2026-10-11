@@ -18,6 +18,9 @@ use std::{
 };
 
 mod audio;
+mod picture;
+pub(crate) use picture::{Picture, PlanarFrames, PreparedPicture};
+use picture::{Prepared, PreparedStream};
 mod project;
 pub use audio::AudioDecoded;
 pub(crate) use project::{bind, bound_video, index_status};
@@ -25,6 +28,7 @@ pub(crate) use project::{bind, bound_video, index_status};
 /// A verified compressed source and its presentation index. The source must remain in place
 /// while reading. Preliminary identity checks can reuse an unchanged file's verified hash;
 /// every successful read fully hashes its source again before returning a receipt.
+#[derive(Debug)]
 pub struct Video {
     path: PathBuf,
     loaded: source_index::Loaded,
@@ -151,6 +155,31 @@ impl Video {
         control: &dyn Control,
         mut consume: impl FnMut(u64, &[u8]) -> Result<()>,
     ) -> Result<Decoded> {
+        let prepared = self.prepare(first, count, output, control)?;
+        let receipt = prepared.receipt;
+        let mut reader = prepared
+            .stream
+            .start(media::Watch::default(), Duration::from_secs(1800))?;
+        let mut rgb = vec![0; self.width as usize * self.height as usize * 3];
+        for frame in first..first + count {
+            control.check()?;
+            reader.read_exact(&mut rgb)?;
+            consume(frame, &rgb)?;
+        }
+        reader.finish()?;
+        self.verify(control, true)?;
+        Ok(receipt)
+    }
+
+    /// Prepare a streaming reader on the controlling thread, preserving custom command policy.
+    /// Compositors start it only when due and perform full source verification before publication.
+    pub(crate) fn prepare(
+        &self,
+        first: u64,
+        count: u64,
+        output: Transfer,
+        control: &dyn Control,
+    ) -> Result<Prepared> {
         let end = first
             .checked_add(count)
             .filter(|&n| count > 0 && n <= self.frames())
@@ -230,33 +259,27 @@ impl Video {
         // both missing and excess frames instead of hiding an unexpected trailing frame.
         let converter = Yuv420Converter::new(self.input, output)?;
         let program = control.tool("ffmpeg");
-        let mut decoder = media::StreamReader::spawn_with(
-            control.command(&program, &args)?,
-            &program,
-            Duration::from_secs(1800),
-            media::Watch::default(),
-        )?;
-        let pixels = self.width as usize * self.height as usize;
-        let mut native = vec![0; pixels * 3 / 2];
-        let mut rgb = vec![0; pixels * 3];
-        for frame in first..end {
-            control.check()?;
-            decoder.read_exact(&mut native)?;
-            converter.convert(self.width, self.height, &native, &mut rgb)?;
-            consume(frame, &rgb)?;
-        }
-        decoder.finish()?;
-        self.verify(control, true)?;
-        Ok(Decoded {
-            index: self.loaded.key.clone(),
-            first,
-            frames: count,
-            seek_frame: seek as u64,
-            seek_seconds,
+        let stream = PreparedStream {
+            command: control.command(&program, &args)?,
+            program,
+            converter,
             width: self.width,
             height: self.height,
-            frame_rate: self.rate,
-            transfer: output,
+            count,
+        };
+        Ok(Prepared {
+            stream,
+            receipt: Decoded {
+                index: self.loaded.key.clone(),
+                first,
+                frames: count,
+                seek_frame: seek as u64,
+                seek_seconds,
+                width: self.width,
+                height: self.height,
+                frame_rate: self.rate,
+                transfer: output,
+            },
         })
     }
 }

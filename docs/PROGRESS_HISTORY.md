@@ -1,5 +1,43 @@
 # Progress history
 
+## 11 October 2026: indexed original pictures in the track compositor
+
+Bound originals now supply placed-track base pictures, incoming/outgoing transition sides and
+opaque alpha-over pictures through the existing engine compositor. The native-YUV reader has a
+prepared streaming form: the caller prepares commands under its process-control policy, workers
+start as their windows become due, and a bounded two-frame queue carries Rust-converted RGB.
+Cropping copies RGB exactly; the existing integer transition, shrink, opacity and placement
+operations follow. Native inputs retain their base graph. Direct base intervals replace black
+placeholders rather than going through FFmpeg's YUV-to-RGB conversion. No video intermediate is
+created. All original identities are fully checked before preview/render publication.
+
+The shared library reader retains its exact frame-count/clean-exit checks and final full hash.
+New real-decoder fault injection found that compositor cleanup could replace the initiating
+failure with TOOL_ABORTED. Preserve that decoder/control failure while stopping workers. Short
+and excess output now retain RENDER_VALIDATION_FAILED, a late failed decoder retains TOOL_FAILED,
+and source mutation retains MEDIA_CHANGED. Each test verifies no published or partial output
+and preserves the original (only an explicit synthetic source copy is mutated).
+
+Windows and Linux compare 28 twenty-frame direct/native compositions (560 decoded RGB frames)
+and 140 composed PNG previews against complete explicit-conform references for all 21 eligible
+files: all eight native clocks, all four transition kinds, GOP boundaries, crop/divisor shrink,
+partial opacity, negative placement and opaque covering. Audio in these compositions is silence;
+this is not evidence for direct audio tracks. The existing 168 direct frame previews and library
+video/audio comparisons remain in the fixture. Final Rust checks pass 228 tests on Windows and
+227 on Linux, with formatting and warning-free lint. Linux passed all eight selected fixtures
+(direct_sources, native_timing, tracks, overlays, transitions, delivery, cache_previews, integration)
+in 252 seconds, then the final direct_sources/integration/render_failures checks in 274 seconds.
+Windows passed the picture/timing/render fixtures; one integration batch-wait assertion failed
+in the concurrent run, then separate integration/render_failures passed in 79 seconds and another
+integration run in 30 seconds. Batch-wait assertions now retain the returned job details to make
+any recurrence diagnosable. The four new decoder-failure cases also pass separately on Windows;
+the final expanded Windows direct_sources run is still in progress at this commit.
+
+Direct audio-track feeding, nested direct pictures, sequential range rendering, full original
+A/V exports and the long-source performance gate remain pending. Static readiness stays false.
+No stage-1 completion, v2 adoption, editing points or thorough evidence is claimed; the existing
+PROGRESS.md and capabilities evidence are retained unchanged.
+
 ## 11 October 2026: bound compressed originals and exact timeline frame previews
 
 Added optional Asset.decode direct-index bindings and explicit source inspection through

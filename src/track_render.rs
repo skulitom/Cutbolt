@@ -32,6 +32,8 @@ struct Graph<'a> {
     control: &'a dyn media::Control,
     /// Inspected sources by asset ID.
     sources: BTreeMap<String, Source>,
+    indexed: BTreeMap<String, std::sync::Arc<crate::direct::Video>>,
+    direct_runs: Vec<track_composite::DirectRun>,
     /// This graph's FFmpeg input index of each asset it reads.
     indices: BTreeMap<String, usize>,
     /// Where each media input's options start in `args`, by input index.
@@ -81,6 +83,8 @@ impl<'a> Graph<'a> {
             root,
             control,
             sources: BTreeMap::new(),
+            indexed: BTreeMap::new(),
+            direct_runs: Vec::new(),
             indices: BTreeMap::new(),
             starts: BTreeMap::new(),
             sounds: BTreeSet::new(),
@@ -126,6 +130,20 @@ impl<'a> Graph<'a> {
     ) -> Result<(usize, u64, u64)> {
         let source = self.inspect(clip, kind, overlay)?;
         let (first, end) = self.span(clip, at, duration, kind, &source)?;
+        if self.indexed.contains_key(&clip.asset_id) {
+            return Err(error(
+                "UNSUPPORTED_TIMELINE",
+                format!(
+                    "Clip {:?}: direct {} must use the engine stream compositor; this arrangement is not supported yet",
+                    clip.id,
+                    if kind == Kind::Audio {
+                        "audio"
+                    } else {
+                        "pictures"
+                    }
+                ),
+            ));
+        }
         if !self.indices.contains_key(&clip.asset_id) {
             self.starts.insert(self.inputs, self.args.len());
             self.args.extend([
@@ -162,7 +180,16 @@ impl<'a> Graph<'a> {
                 .find(|a| a.id == clip.asset_id)
                 .expect("validated asset");
             let path = media::project_file(Path::new(&asset.path), self.root)?;
-            let source = if let Some(check) = self.inspection(&path, kind, overlay) {
+            let source = if asset.decode.is_some() {
+                let (video, source) =
+                    crate::direct::bound_video(self.project, asset, self.root, self.control)?;
+                self.indexed
+                    .insert(asset.id.clone(), std::sync::Arc::new(video));
+                if overlay {
+                    self.overlay_assets.insert(asset.id.clone());
+                }
+                source
+            } else if let Some(check) = self.inspection(&path, kind, overlay) {
                 let (source, pix_fmt) = match self.take_prefetched(&path, check) {
                     Some(result) => result?,
                     None => render::inspect_checked(&path, check, self.control)?,
@@ -248,6 +275,9 @@ impl<'a> Graph<'a> {
             let Some(asset) = self.project.assets.iter().find(|a| &a.id == id) else {
                 continue;
             };
+            if asset.decode.is_some() {
+                continue;
+            }
             let Ok(path) = media::project_file(Path::new(&asset.path), self.root) else {
                 continue;
             };
@@ -353,6 +383,57 @@ impl<'a> Graph<'a> {
             ));
         }
         Ok((first, first + count))
+    }
+    fn direct_picture(
+        &self,
+        clip: &TrackClip,
+        at: Time,
+        duration: Time,
+        crop: [u32; 4],
+    ) -> Result<Option<crate::direct::Picture>> {
+        let Some(video) = self.indexed.get(&clip.asset_id) else {
+            return Ok(None);
+        };
+        let (first, end) = self.span(
+            clip,
+            at,
+            duration,
+            Kind::Video,
+            &self.sources[&clip.asset_id],
+        )?;
+        Ok(Some(crate::direct::Picture::new(
+            video.clone(),
+            first,
+            end - first,
+            crop,
+            self.project
+                .transfer
+                .unwrap_or(crate::color::Transfer::Bt709),
+        )))
+    }
+    /// Direct pictures replace a black base placeholder after native decoding/conversion in Rust.
+    fn base_source(
+        &mut self,
+        clip: &TrackClip,
+        at: Time,
+        duration: Time,
+        label: &str,
+        first: u64,
+    ) -> Result<()> {
+        let crop = [0, 0, self.project.width, self.project.height];
+        if let Some(picture) = self.direct_picture(clip, at, duration, crop)? {
+            let count = picture.count;
+            self.direct_runs.push(track_composite::DirectRun {
+                first,
+                end: first + count,
+                picture,
+            });
+            let rate = self.project.frame_rate;
+            self.filters.push(format!("color=c=black:s={}x{}:r={}/{},format=pix_fmts=gbrp,trim=end_frame={count},settb=expr={},setpts=N[{label}]", self.project.width, self.project.height, rate.num, rate.den, timebase(rate)));
+            Ok(())
+        } else {
+            self.video_source(clip, at, duration, label)
+        }
     }
     fn video_source(
         &mut self,
@@ -775,6 +856,14 @@ impl<'a> Graph<'a> {
                 duration,
                 kind,
             )?;
+        } else if self
+            .project
+            .assets
+            .iter()
+            .any(|a| a.id == clip.asset_id && a.decode.is_some())
+        {
+            let source = self.inspect(clip, kind, false)?;
+            self.span(clip, at, duration, kind, &source)?;
         } else {
             self.input(clip, at, duration, kind)?;
         }
@@ -918,7 +1007,13 @@ impl<'a> Graph<'a> {
                 if let Some((track, clip)) = visible {
                     if let Some(fx) = track.transition_at(at)? {
                         if deferred {
-                            self.video_source(track.endpoints(fx)?.0, at, length, &base)?;
+                            self.base_source(
+                                track.endpoints(fx)?.0,
+                                at,
+                                length,
+                                &base,
+                                part[0] - first,
+                            )?;
                             let index = (track.transitions.iter())
                                 .position(|t| std::ptr::eq(t, fx))
                                 .expect("track transition");
@@ -931,6 +1026,8 @@ impl<'a> Graph<'a> {
                         } else {
                             self.effect(track, fx, at, length, &base)?;
                         }
+                    } else if deferred {
+                        self.base_source(clip, at, length, &base, part[0] - first)?;
                     } else {
                         self.video_source(clip, at, length, &base)?;
                     }
@@ -1101,6 +1198,7 @@ impl<'a> Graph<'a> {
             let mut premix = Graph::new(self.project, self.root, self.control);
             premix.audio_only = true;
             premix.sources = self.sources.clone();
+            premix.indexed = self.indexed.clone();
             premix.overlay_assets = self.overlay_assets.clone();
             premix.alpha_assets = self.alpha_assets.clone();
             premix.inspected = self.inspected;
@@ -1171,6 +1269,7 @@ impl<'a> Graph<'a> {
     fn branch(&self) -> Graph<'a> {
         let mut next = Graph::new(self.project, self.root, self.control);
         next.sources = self.sources.clone();
+        next.indexed = self.indexed.clone();
         next.overlay_assets = self.overlay_assets.clone();
         next.alpha_assets = self.alpha_assets.clone();
         next.audio_only = self.audio_only;
@@ -1290,6 +1389,10 @@ impl<'a> Graph<'a> {
                     ]
                     .map(str::to_owned),
                 );
+                let direct = self.direct_picture(clip, at, length, [cx, cy, cw, ch])?;
+                if direct.is_some() {
+                    arguments.clear();
+                }
                 layers.push(track_composite::Layer {
                     track: index,
                     track_id: track.id.clone(),
@@ -1303,6 +1406,7 @@ impl<'a> Graph<'a> {
                     opacity,
                     position,
                     arguments,
+                    direct,
                 });
             }
         }
@@ -1331,29 +1435,39 @@ impl<'a> Graph<'a> {
             let (begin, finish) = track.interval(effect)?;
             let at = Time::new((window + first) * rate.den, rate.num)?;
             let length = Time::new((end - first) * rate.den, rate.num)?;
-            let mut incoming = self.branch();
-            incoming.video_source(track.endpoints(effect)?.1, at, length, "incoming")?;
-            for (id, source) in &incoming.sources {
-                self.sources
-                    .entry(id.clone())
-                    .or_insert_with(|| source.clone());
-            }
-            (self.serial, self.inspected) = (incoming.serial, incoming.inspected);
-            let arguments = incoming.arguments_with(
-                &[
-                    "-map",
-                    "[incoming]",
-                    "-an",
-                    "-fps_mode",
-                    "passthrough",
-                    "-f",
-                    "rawvideo",
-                    "-pix_fmt",
-                    "gbrp",
-                    "pipe:1",
-                ]
-                .map(str::to_owned),
+            let direct = self.direct_picture(
+                track.endpoints(effect)?.1,
+                at,
+                length,
+                [0, 0, self.project.width, self.project.height],
             )?;
+            let arguments = if direct.is_some() {
+                Vec::new()
+            } else {
+                let mut incoming = self.branch();
+                incoming.video_source(track.endpoints(effect)?.1, at, length, "incoming")?;
+                for (id, source) in &incoming.sources {
+                    self.sources
+                        .entry(id.clone())
+                        .or_insert_with(|| source.clone());
+                }
+                (self.serial, self.inspected) = (incoming.serial, incoming.inspected);
+                incoming.arguments_with(
+                    &[
+                        "-map",
+                        "[incoming]",
+                        "-an",
+                        "-fps_mode",
+                        "passthrough",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        "gbrp",
+                        "pipe:1",
+                    ]
+                    .map(str::to_owned),
+                )?
+            };
             mixes.push(track_composite::Mix {
                 track_id: track.id.clone(),
                 transition_id: effect.id.clone(),
@@ -1363,6 +1477,7 @@ impl<'a> Graph<'a> {
                 count: finish.minus(begin)?.units(rate)?,
                 offset: at.minus(begin)?.units(rate)?,
                 arguments,
+                direct,
             });
         }
         Ok(mixes)
@@ -1489,6 +1604,7 @@ impl Compiled<'_> {
         };
         let project = picture.project;
         let runs = picture.runs.clone();
+        let direct = picture.direct_runs.clone();
         let base = picture.arguments_with(
             &[
                 "-map",
@@ -1519,6 +1635,7 @@ impl Compiled<'_> {
             height: project.height,
             frames,
             base,
+            direct,
             runs,
             transitions,
             layers,
@@ -1570,13 +1687,13 @@ fn compile<'a>(
             })
             .collect::<Result<Vec<_>>>()?
             .contains(&true);
-        if overlays || transitions {
+        if overlays || transitions || !graph.indexed.is_empty() {
             // Top-level transitions and overlays are composited by the engine; nested ones stay
             // in the graph.
             graph.compose_with(a, start, duration, Kind::Video, "vout", true)?;
             let layers = graph.layers(a, start, duration)?;
             let mixes = graph.mixes(a, start)?;
-            if !mixes.is_empty() || !layers.is_empty() {
+            if !mixes.is_empty() || !layers.is_empty() || !graph.direct_runs.is_empty() {
                 let mut encoder = graph.successor();
                 if audio {
                     encoder.audio(a, start, duration)?;

@@ -212,8 +212,8 @@ def run(executable, fixture):
     handles = []
     jobs = []
 
-    def check(name, condition):
-        assert condition, name
+    def check(name, condition, detail=None):
+        assert condition, name if detail is None else (name, detail)
         passed.append(name)
 
     # These checks cover one worker's serial queue (a second job waits while the first runs), so
@@ -524,7 +524,7 @@ def run(executable, fixture):
         check("jobs.batch_wait", batch["finished"] and batch["until"] == "all" and batch["counts"] == {"completed": 3}
               and [e["job_id"] for e in entries] == tickets and "jobs[].result.timing" in batch["detail"]
               and all(e["command"] == "scene.render" and e["status"] == "completed" and e["result"]["layers"] == brief["layers"]
-                      and e["result"]["asset"]["path"].endswith(f"tiny-{n}.mkv") for n, e in enumerate(entries)))
+                      and e["result"]["asset"]["path"].endswith(f"tiny-{n}.mkv") for n, e in enumerate(entries)), batch)
         whole = normal.call("job.wait", job_root=str(job_root), job_ids=tickets, detail="full")
         assert all(e["result"]["timing"] == full["timing"] for e in whole["jobs"]), whole
         later, _ = start(normal, "after-batch", root / "after-batch.mkv")

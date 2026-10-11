@@ -3,6 +3,7 @@ from copy import deepcopy
 from fractions import Fraction as F
 import os
 import shutil
+import direct_composition
 
 from PIL import Image
 
@@ -65,8 +66,10 @@ def verify(root, manifest, indexed):
                         assert image.convert('RGB').tobytes() == reference[frame*size:(frame+1)*size], (name,layout,frame)
             assert identity(path) == asset['identity']
             cases[name] = {'sequential_frames':selected, 'track_frames':selected, 'source_preserved':True}
+            cases[name]['composition'] = direct_composition.verify(root, dict(case,name=name), asset, client)
             if name == 'h264-25':
                 cases['binding_lifecycle'] = lifecycle(client, root, project, cache, output)
+                cases['composition_failures'] = direct_composition.failures(root/'composition-failures', path, case)
         return cases
     finally:
         client.close()
