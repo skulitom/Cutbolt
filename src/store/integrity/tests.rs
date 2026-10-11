@@ -34,6 +34,7 @@ fn sample() -> Project {
         metadata: Default::default(),
         identity: None,
         proxy: None,
+        decode: None,
     });
     project.clips.push(Clip {
         id: "c".into(),

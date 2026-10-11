@@ -480,6 +480,7 @@ mod tests {
             metadata: Default::default(),
             identity: Some(document.source.identity.clone()),
             proxy: None,
+            decode: None,
         });
         let clips: Vec<_> = ["v", "a"]
             .iter()

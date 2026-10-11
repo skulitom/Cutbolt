@@ -13,6 +13,7 @@ import subprocess
 import source_clocks
 import direct_decode
 import direct_audio
+import direct_bindings
 
 from engine import ENGINE
 from footage_sources import ROOT, FFMPEG, FFPROBE, generate, identity, probe
@@ -137,10 +138,11 @@ def verify(root, manifest, long=False):
             assert F(offset['num'],offset['den']) == -relative * decoded['sample_rate'], (name, offset, relative)
     decoded_ranges = direct_decode.verify(root, manifest, results)
     decoded_audio = direct_audio.verify(root, manifest, results)
-    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference", "direct_sources.library_native_yuv_exact_sought_frames", "direct_sources.library_sample_exact_audio_ranges"], "stage": "indexed_av_library",
+    bindings = direct_bindings.verify(root, manifest, results)
+    report = {"passed": ["direct_sources.original_codec_and_clock_fixtures", "direct_sources.cached_presented_frame_and_pcm_index", "direct_sources.explicit_sdr_clock_rgb_pcm_reference", "direct_sources.library_native_yuv_exact_sought_frames", "direct_sources.library_sample_exact_audio_ranges", "direct_sources.saved_bindings_exact_frame_previews"], "stage": "indexed_av_library",
               "direct_decode_verified": False, "sources_preserved": True, "cases": results,
               "tools": manifest["tools"], "long_source_generated": long, "conform_references":conformed,
-              "library_video_ranges":decoded_ranges,"library_audio_ranges":decoded_audio}
+              "library_video_ranges":decoded_ranges,"library_audio_ranges":decoded_audio,"saved_frame_previews":bindings}
     (root / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
 

@@ -135,6 +135,11 @@ pub const REGISTRY: &[(&str, Retry, &str)] = &[
         "The selected local compute or capture device is unavailable.",
     ),
     (
+        "DIRECT_INDEX_STALE",
+        Retry::Changed,
+        "A saved direct-source index belongs to different source, decoder or engine identities; verify and refresh it with media.index.",
+    ),
+    (
         "DISK_FULL",
         Retry::Changed,
         "Storage is full; free space before retrying.",

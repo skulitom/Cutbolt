@@ -18,7 +18,9 @@ use std::{
 };
 
 mod audio;
+mod project;
 pub use audio::AudioDecoded;
+pub(crate) use project::{bind, bound_video, index_status};
 
 /// A verified compressed source and its presentation index. The source must remain in place
 /// while reading. Preliminary identity checks can reuse an unchanged file's verified hash;
@@ -63,6 +65,10 @@ impl Video {
             &metadata,
             control,
         )?;
+        Self::from_index(path, loaded)
+    }
+
+    fn from_index(path: PathBuf, loaded: source_index::Loaded) -> Result<Self> {
         if !loaded.index.reasons.is_empty() {
             return Err(error(
                 "UNSUPPORTED_MEDIA",

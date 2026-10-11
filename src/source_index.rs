@@ -454,6 +454,18 @@ fn build(
                 .is_some_and(|n| n > 0 && n.is_multiple_of(2)),
         "requires positive even dimensions",
     );
+    let (width, height) = (
+        video["width"].as_u64().unwrap_or(0),
+        video["height"].as_u64().unwrap_or(0),
+    );
+    reject(
+        width <= 4096
+            && height <= 4096
+            && width
+                .checked_mul(height)
+                .is_some_and(|pixels| pixels <= 8_000_000),
+        "direct dimensions must be at most 4096 per axis and 8000000 pixels",
+    );
     reject(
         !changed,
         "decoded frame format or color tags change within the source",
@@ -622,6 +634,27 @@ pub(crate) struct Loaded {
     cache_bytes: Option<u64>,
 }
 
+pub(crate) fn key(source: &Identity, control: &dyn Control) -> Result<String> {
+    let mut tools = Vec::new();
+    for name in ["ffprobe", "ffmpeg"] {
+        let path = crate::cache::resolve_tool(&control.tool(name))?;
+        tools.push(json!({"sha256":media::file_hash_controlled(&path, control)?,"bytes":fs::metadata(path)?.len()}));
+    }
+    Ok(digest(&serde_json::to_vec(&json!([
+        SCHEMA,
+        source,
+        tools,
+        crate::cache::producer()
+    ]))?))
+}
+
+/// Check cache presence/integrity without silently rebuilding it during a timeline check.
+pub(crate) fn cached(key: &str, source: &Identity) -> bool {
+    inspection_cache::directory()
+        .and_then(|d| cache_read(&d.join(format!("{key}.index.json.gz")), key, source))
+        .is_some()
+}
+
 pub(crate) fn load(
     path: &Path,
     source: Identity,
@@ -630,17 +663,7 @@ pub(crate) fn load(
 ) -> Result<Loaded> {
     control.check()?;
     source.validate()?;
-    let mut tools = Vec::new();
-    for name in ["ffprobe", "ffmpeg"] {
-        let path = crate::cache::resolve_tool(&control.tool(name))?;
-        tools.push(json!({"sha256":media::file_hash_controlled(&path, control)?,"bytes":fs::metadata(path)?.len()}));
-    }
-    let key = digest(&serde_json::to_vec(&json!([
-        SCHEMA,
-        source,
-        tools,
-        crate::cache::producer()
-    ]))?);
+    let key = key(&source, control)?;
     let _turn = inspection_cache::turn(&key);
     let cache = inspection_cache::directory().map(|d| d.join(format!("{key}.index.json.gz")));
     let cached = cache.as_ref().and_then(|p| cache_read(p, &key, &source));

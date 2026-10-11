@@ -2190,13 +2190,29 @@ pub fn handle(request: Request) -> Result<Value> {
                     sha256: identity["sha256"].as_str().expect("identity hash").into(),
                 };
                 result["source_index"] = match crate::source_index::inspect(
-                    &path, source, &metadata,
+                    &path,
+                    source.clone(),
+                    &metadata,
                 ) {
                     Ok(index) => index,
                     Err(failure) => {
                         json!({"eligible":false,"direct_decode_available":false,"error":failure})
                     }
                 };
+                if result["source_index"]["eligible"] == true {
+                    crate::registry::check_file(
+                        &path,
+                        relative,
+                        &source,
+                        crate::registry::RELINK_ASSET,
+                    )?;
+                    let index = &result["source_index"];
+                    let duration = index["audio_policy"]["video_duration"].clone();
+                    let asset = json!({"id":crate::readiness::asset_id(relative),"path":relative,"duration":duration,
+                        "identity":source,"decode":{"mode":"direct","index":index["key"]}});
+                    result["source_index"]["asset"] = asset;
+                    result["source_index"]["frame_preview_available"] = json!(true);
+                }
             }
             Ok(result)
         }
@@ -2230,7 +2246,7 @@ fn all_capabilities() -> Value {
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
     "commands":crate::schema::commands().collect::<Vec<_>>(),
-    "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
+    "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","media.index","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
     "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"],"results":"summary_unless_detail_full"},"jobs":{"platforms":["windows","linux"],"available":cfg!(any(windows, target_os = "linux")),"maximum_active_per_root":32,"maximum_jobs_per_wait":jobs::MAX_WAIT_JOBS,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
     "transcripts":crate::transcript::capabilities(),

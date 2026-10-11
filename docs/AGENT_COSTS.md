@@ -180,3 +180,10 @@ sent bytes, no failed calls and zero schema lookups. Received bytes were
 209,520/46,599/62,656/40,792/185,653 on Windows and
 209,388/46,473/62,526/40,666/185,523 on Linux. These include the updated catalog and retain all
 previous budgets. Raw replay messages remain external; byte counts are not model token counts.
+
+The subsequent direct-source binding checkpoint adds `media.index` to the operation catalog.
+Measured current listings are 21,262 / 21,104 bytes for core (without/with a workspace), and
+226,394 / 232,535 for full, with 18/86 tools and unchanged ceilings. The core increase is 14
+bytes. The five scripted workflows remain at 15/6/12/8/8 calls with zero failures or schema
+lookups; received bytes on this checkpoint are 209,534/46,613/62,670/40,806/185,667 on Windows
+and 209,408/46,489/62,544/40,682/185,541 on Linux. These remain scripted byte measurements.

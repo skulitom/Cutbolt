@@ -890,6 +890,7 @@ mod tests {
             metadata: Default::default(),
             identity: None,
             proxy: None,
+            decode: None,
             id: "a".into(),
             path: "external.mkv".into(),
             duration: t(20),

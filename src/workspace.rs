@@ -107,6 +107,21 @@ impl Workspace {
                 && let Some(Value::Array(operations)) = object.get_mut("operations")
             {
                 for (n, operation) in operations.iter_mut().enumerate() {
+                    if matches!(operation["op"].as_str(), Some("media.add" | "media.index")) {
+                        // Explicit add roots opt into source I/O. Never opt legacy adds in implicitly.
+                        let given = operation["input_root"].as_str();
+                        if given.is_some()
+                            || (operation["op"] == "media.index"
+                                && operation.get("input_root").is_none())
+                        {
+                            let resolved = self
+                                .resolve(given.unwrap_or(""))
+                                .at(|| at(&format!("operations.{n}.input_root")))?;
+                            self.contain(&resolved)
+                                .at(|| at(&format!("operations.{n}.input_root")))?;
+                            operation["input_root"] = json!(resolved);
+                        }
+                    }
                     if let Some("media.relink" | "media.proxy.relink") = operation["op"].as_str()
                         && let Some(path) = operation["path"].as_str()
                     {
@@ -293,6 +308,35 @@ mod tests {
     fn project(id: &str) -> Value {
         json!({"schema_version":1,"id":id,"revision":0,"width":32,"height":24,
             "frame_rate":{"num":25,"den":1},"assets":[],"clips":[]})
+    }
+
+    #[test]
+    fn media_operation_roots_are_explicit_contained_and_do_not_hide_bad_values() {
+        let temp = Temp::new();
+        let workspace = Workspace::open(&temp.0).unwrap();
+        for command in ["timeline.apply", "session.apply", "session.preview"] {
+            let mut request = json!({"command":command,"operations":[
+                {"op":"media.add","asset":{}},
+                {"op":"media.add","asset":{},"input_root":"media"},
+                {"op":"media.index","asset_id":"a"},
+                {"op":"media.index","asset_id":"a","input_root":7}]});
+            workspace.prepare(&mut request).unwrap();
+            assert!(request["operations"][0].get("input_root").is_none());
+            assert_eq!(
+                request["operations"][1]["input_root"],
+                json!(workspace.root().join("media"))
+            );
+            assert_eq!(
+                request["operations"][2]["input_root"],
+                json!(workspace.root())
+            );
+            assert_eq!(request["operations"][3]["input_root"], 7);
+            request["operations"][0]["input_root"] = json!("../outside");
+            assert_eq!(
+                workspace.prepare(&mut request).unwrap_err().code,
+                "PATH_OUTSIDE_WORKSPACE"
+            );
+        }
     }
 
     #[test]

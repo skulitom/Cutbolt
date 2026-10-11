@@ -28,7 +28,8 @@ The [transcript editing contract](TRANSCRIPTS.md) adds `transcript.inspect`, `tr
 
 | Operation | Additional fields | Meaning |
 | --- | --- | --- |
-| `media.add` | `asset`: `id`, `path`, `duration` | Declare an external source; rendering verifies its actual contents |
+| `media.add` | `asset`: `id`, `path`, `duration`; optional `input_root` | Declare an external source; an explicit root binds an eligible compressed original for [direct frame previews](DIRECT_SOURCES.md) |
+| `media.index` | `asset_id`, `input_root` | Verify the unchanged bound original and refresh its direct index; diffable and undoable |
 | `clip.append` | `clip`: `id`, `asset_id`, `source_in`, `duration` | Append a source interval |
 | `clip.trim` | `clip_id`, `source_in`, `duration` | Replace a clip's selected source interval |
 | `clip.split` | `clip_id`, `new_clip_id`, `offset` | Split at an offset measured from the start of this clip |

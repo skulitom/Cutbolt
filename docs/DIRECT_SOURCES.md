@@ -1,25 +1,29 @@
 # Compressed-source inspection
 
-The source index and audio/video library implement part of [direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md).
-It does **not yet enable direct timeline playback**. Continue to use the existing preparation
-workflow; `timeline.ready` and `source_index.direct_decode_available` remain false for these files.
+The source index, saved direct bindings and exact frame previews implement part of
+[direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md). Original compressed clips can now supply
+single-frame previews on sequential or ordinary opaque tracks. Range rendering, transitions,
+overlays and exports still need the preparation workflow; `timeline.ready` and
+`source_index.direct_decode_available` remain false until the full render path is integrated.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame
 count, first timestamp and stream time base, native frame rate when detected, keyframe count,
 maximum GOP length, B-frame count, qualification reasons and cache key/hit/bytes. `eligible` reports
-qualification for the indexed decoder, not current timeline support. An indexing error is nested in
-this summary, leaving the metadata inspection available.
+qualification for the indexed decoder. Eligible files also return a bound `source_index.asset`
+and `frame_preview_available: true`; these fields do not claim range/export support. An indexing
+error is nested in this summary, leaving the metadata inspection available.
 
 One incremental ffprobe pass reads frame timestamps, key flags, picture types and decoded format
 and color changes. One FFmpeg audio decode supplies a PCM byte counter and a small frame-clock
 stream concurrently. Video frames are not written to disk. With an explicitly configured inspection cache, AAC also
-retains bounded canonical PCM chunks as described below. The audio summary reports actual decoded samples, native rate/channels, first PCM timestamp, continuity,
+retains bounded canonical PCM chunks as described below. The audio summary reports actual decoded
+samples, native rate/channels, first PCM timestamp, continuity,
 optional codec initial padding, and mono duplication/resampling needs. Packet counts cannot replace
 this measurement for AAC. `audio_policy` now reports the exact first-audio offset relative to video,
 leading/trailing padding or trimming, mono duplication and linear 48 kHz resampling choices.
 These policies are verified by [explicit conform clock normalization](CONFORM.md#explicit-source-clock);
-direct playback remains subsequent work.
+range rendering remains subsequent work.
 
 Qualification currently requires one video stream, at most one mono/stereo audio stream and no
 other stream types; MP4/MOV/MKV; H.264 or HEVC Main, even-sized 8-bit 4:2:0 progressive pictures;
@@ -56,8 +60,8 @@ probing. These are storage/correctness observations, not a preview or seek-perfo
 The library's `color::Yuv420Converter` provides the indexed decoder's exact lookup path.
 It converts native planar 8-bit 4:2:0 to packed RGB with the same nearest-2x2 chroma interpretation,
 BT.709 matrix, full/limited range, clipping and rounding as `color::Input::convert`. The f64
-converter remains unchanged and is still used by explicit conform. This component is not yet wired
-into timeline playback.
+converter remains unchanged and is still used by explicit conform. Single-frame direct timeline
+previews now use the same table as the library reader.
 
 Each table maps all 2^24 Y/U/V triples to RGB and uses exactly 48 MiB. Tables are built lazily and
 shared in memory. Equal source/output transfers have identical arithmetic and share storage;
@@ -69,7 +73,7 @@ nonpositive/odd dimensions and buffers whose lengths do not match one complete f
 The ordinary Rust unit suite exhaustively compares every table entry with the unchanged f64
 converter for all eight range/input-transfer/output-transfer declarations on Windows and Linux.
 A separate planar 4:2:0 frame test checks layout/chroma addressing, bounds and invalid buffers.
-This proves numerical equality; renderer wiring and measured preview performance remain open.
+This proves numerical equality; range-renderer wiring and measured long-source performance remain open.
 
 ## Indexed video library
 
@@ -90,9 +94,8 @@ limit hides extra frames. Its raw bytes pass through the exact Rust table, never
 The preliminary check can reuse an unchanged source's verified hash as described below; every read
 fully hashes the source before returning success. Callback output is provisional until `read`
 succeeds; a caller must delay publication accordingly. The API creates no intermediate media and
-does not publish files. Saved direct
-asset bindings and timeline/render/preview/export integration are pending; the audio/video library
-does not change the CLI/MCP readiness flags.
+does not publish files. Saved bindings and single-frame previews use this library. Full timeline
+render/export integration remains pending; the general CLI/MCP readiness flags remain false.
 
 The 26 original short fixtures include all eight native rates, full-range YUV and both H.264 and
 HEVC open GOPs. For each of the 21 qualifying sources, the fixture compares nine decoded windows
@@ -100,7 +103,7 @@ with full explicit conform RGB, including first/key/B/last frames, a cut across 
 source. It inspects actual decoder arguments, exercises invalid ranges, and checks that sources
 changed before or during reading cannot return success. The explicit conform reference also
 checks every RGB byte and PCM sample against independent arithmetic. These are correctness checks;
-long-source seek latency and direct timeline acceptance remain unverified.
+long-source seek latency and complete direct timeline acceptance remain unverified.
 
 ## Approved identity reuse
 
@@ -178,3 +181,44 @@ and rebuild, the 1 MiB chunk/1 GiB payload bounds, source changes, decoder-byte 
 preservation of a callback failure. A unit check rejects even self-consistent cache tampering
 against the trusted index and verifies LRU eviction. These checks accompany the existing video
 oracles and cache-preview regression fixture on both platforms.
+
+## Saved bindings and frame previews
+
+Pass `media.inspect`'s `source_index.asset` to `media.add`, or give that operation an explicit
+`input_root` to inspect and bind an original compressed source while adding it. Without the root,
+legacy metadata-only adds retain their existing behavior. With the root, qualification, actual
+size/rate, complete duration and any supplied identity/index must agree before the edit commits.
+The snapshot stores the original identity and `decode: {"mode":"direct","index":"<key>"}`;
+it contains no index frames or prepared-media copy. The additive optional field retains project
+schema 1; older engines reject it through their existing unknown-field rule.
+
+A minimal operation inside `timeline.apply` or `session.apply` is:
+
+```json
+{"op":"media.add","input_root":"C:/Media","asset":{"id":"shot","path":"shot.mp4","duration":{"num":12,"den":1}}}
+```
+
+The duration must be the complete indexed video length. Place its clips with the usual operations.
+`preview.frame` reads original frames on sequential timelines and the single opaque-clip path of
+placed tracks, with the exact native clock, seek preroll and Rust color conversion. It uses the
+project's declared transfer, defaulting to BT.709 as the existing preparation recipe does. Its
+receipt includes the source frame, bound source identity and direct decoder receipt. No video
+intermediate is created, and publication still requires a full original-file hash.
+
+With an input root, `timeline.check` reports missing/corrupt or stale direct indexes without
+rebuilding them. A missing cache entry is rebuilt on the next preview. A binding for a different
+engine/decoder identity fails with `DIRECT_INDEX_STALE`, with a repair hint. Apply
+`{"op":"media.index","asset_id":"shot","input_root":"C:/Media"}` to verify the unchanged
+original and refresh its index. It cannot replace the bound original identity. Workspace calls
+resolve explicit operation roots inside the workspace; `media.index` defaults its omitted root
+there. Refreshes participate in asset diffs and undo. Saved-request replay precedes all source I/O,
+so retrying a committed add or refresh returns the original receipt even if the source later changes.
+
+The Windows/Linux fixture compares 168 actual sequential/opaque-track PNG previews across all
+21 eligible original sources with the complete explicit-conform RGB reference: first, key,
+B and last frames at all eight native clocks. An additional declared-sRGB preview matches the
+unchanged f64 conform path. It checks missing/stale index diagnosis and repair, asset diffs,
+undo, replay after source mutation, failed-refresh rollback, source identity preservation,
+size/rate/duration mismatches and absence of publication for rejected sources. The unmodified
+native_timing, sessions, proxies and agent_costs fixtures pass on both platforms. No complete
+stage-1 exit or long-source latency result is claimed yet.

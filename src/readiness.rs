@@ -451,7 +451,7 @@ pub(crate) fn prepared_name(id: &str, path: &Path) -> String {
     format!("{id}-prepared.{extension}")
 }
 
-fn asset_id(relative: &str) -> String {
+pub(crate) fn asset_id(relative: &str) -> String {
     let name = relative.rsplit('/').next().unwrap_or(relative);
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     let mut id = if stem.trim().is_empty() {

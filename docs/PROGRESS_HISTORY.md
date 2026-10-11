@@ -1,5 +1,38 @@
 # Progress history
 
+## 11 October 2026: bound compressed originals and exact timeline frame previews
+
+Added optional Asset.decode direct-index bindings and explicit source inspection through
+media.add input_root. media.inspect supplies an already-bound original asset for eligible files;
+legacy metadata-only adds retain their behavior. The additive optional property keeps project
+schema 1 (older engines reject its unknown field). Source/index identities, actual dimensions,
+rate and complete duration are checked before direct frame use. Sequential and ordinary opaque
+track previews use the verified native-YUV reader, project transfer (default BT.709), exact
+source clocks and full source verification before publication. No video intermediate is created.
+
+Timeline checks now report missing/corrupt or stale indexes without rebuilding them. Missing
+entries rebuild at preview time; media.index refreshes an index only for the unchanged bound
+original. Refresh changes participate in diffs/undo. Transactional replay precedes source I/O,
+including media.add, so a retry after source mutation keeps the first committed identity and
+receipt. Explicit operation roots resolve inside a workspace; schemas distinguish an explicit
+add root from the defaulted refresh root and malformed supplied roots are not overwritten.
+
+Windows/Linux pass 228/227 Rust tests, lint/format, direct_sources, native_timing, sessions,
+proxies and agent_costs. The direct fixture compares 168 published timeline frames from 21
+original qualifying sources with explicit conform, plus a declared-sRGB preview against the
+unchanged f64 path, and checks identity, cache diagnosis, repair, diffs, undo, replay and rejection
+before publication. The final schema-root refinement also passes its focused test on both.
+The five-fixture runs took 237 s Windows / 112 s Linux; no preview latency claim follows from that.
+The earlier c096075 background run passed 45 of 46 deferred fixtures; queue_recovery hit a
+10-second tool timeout. Its standalone rerun passed in 32 s; no timeout bound was changed.
+
+Core/full catalogs retain 18/86 tools. Core listings are 21,262 / 21,104 bytes without/with a
+workspace (+14 bytes); full listings are 226,394 / 232,535. Scripted calls remain 15/6/12/8/8
+with no failed calls or schema lookups; byte counts are recorded in AGENT_COSTS.md. Range/export
+integration, composed/nested direct previews and long-source measurements still remain open;
+readiness flags do not claim full direct rendering. No points or new thorough evidence;
+PROGRESS.md retains older evidence.
+
 ## 11 October 2026: exact direct audio and bounded canonical AAC cache
 
 Added native PCM block hashes and cumulative sample anchors to source-index schema 2, and a

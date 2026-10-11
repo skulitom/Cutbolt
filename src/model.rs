@@ -18,12 +18,25 @@ pub struct Asset {
     /// Searchable title, bin, tags and custom fields; omitted when empty.
     #[serde(default, skip_serializing_if = "crate::registry::Metadata::is_empty")]
     pub metadata: crate::registry::Metadata,
-    /// Bound content identity set by media.bind; required for relinking and proxies. Omitted when unbound.
+    /// Original content identity set by media.bind or indexed media.add; required for relinking and proxies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<crate::registry::Identity>,
+    /// Indexed original compressed source. Omitted for legacy/native assets; requires identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decode: Option<Decode>,
     /// Preview proxy attached with media.proxy.attach; omitted when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<crate::proxy::Binding>,
+}
+/// How an identity-bound original is decoded; the index is derived data kept outside the project.
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Decode {
+    /// Exact indexed native-YUV decoding. The key binds source, tools, engine and index schema.
+    Direct {
+        /// Lowercase SHA-256 index key returned by media.inspect or filled by media.add with input_root.
+        index: String,
+    },
 }
 impl Asset {
     /// An audio-only asset: a 48 kHz stereo PCM16 WAV, which audio tracks play directly and no
@@ -217,6 +230,19 @@ pub enum Operation {
     AddMedia {
         /// Asset to add, with an ID not already used by another asset.
         asset: Asset,
+        /// Optional explicit input root: inspect and bind an original compressed source before adding it.
+        /// Omit to add an already-bound asset or retain the legacy metadata-only behavior.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_root: Option<std::path::PathBuf>,
+    },
+    /// Rebuild/refresh a direct asset's derived index after a cache, engine or decoder change.
+    /// Its bound source identity must still match; changed source bytes require a new asset.
+    #[serde(rename = "media.index")]
+    IndexMedia {
+        /// Existing asset ID with a bound original identity.
+        asset_id: String,
+        /// Existing absolute directory containing the original; defaults inside a workspace.
+        input_root: std::path::PathBuf,
     },
     /// Replace one asset's complete metadata.
     #[serde(rename = "media.metadata")]
@@ -422,6 +448,16 @@ impl Project {
             if let Some(identity) = &asset.identity {
                 identity.validate()?;
             }
+            if let Some(Decode::Direct { index }) = &asset.decode
+                && (asset.identity.is_none()
+                    || !crate::cache_store::key_ok(index)
+                    || asset.audio_only())
+            {
+                return Err(error(
+                    "INVALID_MEDIA",
+                    "Direct decode requires a video asset, bound identity and a lowercase 64-character index key",
+                ));
+            }
             if let Some(proxy) = &asset.proxy {
                 proxy.validate(self, asset)?;
             }
@@ -488,7 +524,8 @@ impl Project {
         self.duration()?;
         Ok(())
     }
-    /// Pure snapshot transform: caller's project remains unchanged on success or failure.
+    /// Atomic snapshot transform: caller's project remains unchanged on success or failure.
+    /// Explicit media input roots may read originals and populate derived source caches.
     pub fn apply(&self, expected_revision: u64, operations: Vec<Operation>) -> Result<Self> {
         self.validate()?;
         if expected_revision != self.revision {
@@ -583,7 +620,29 @@ impl Project {
                 }
                 Operation::PreviewProxy { scale } => next.preview_scale = scale,
                 Operation::ProjectTransfer { transfer } => next.transfer = transfer,
-                Operation::AddMedia { asset } => next.assets.push(asset),
+                Operation::AddMedia {
+                    mut asset,
+                    input_root,
+                } => {
+                    if let Some(root) = input_root {
+                        asset = crate::direct::bind(&next, asset, &root, false)?;
+                    }
+                    next.assets.push(asset);
+                }
+                Operation::IndexMedia {
+                    asset_id,
+                    input_root,
+                } => {
+                    let asset = next.asset_mut(&asset_id)?.clone();
+                    if asset.identity.is_none() {
+                        return Err(error(
+                            "INVALID_IDENTITY",
+                            "media.index requires an existing bound source identity",
+                        ));
+                    }
+                    let indexed = crate::direct::bind(&next, asset, &input_root, true)?;
+                    *next.asset_mut(&asset_id)? = indexed;
+                }
                 Operation::Insert { at, clip, right_id } => {
                     let mut left = next.slice(Time::ZERO, at)?;
                     let mut right = next.slice(at, next.duration()?)?;
@@ -863,12 +922,40 @@ mod tests {
     fn t(n: u64) -> Time {
         Time::new(n, 1).unwrap()
     }
+    #[test]
+    fn direct_bindings_are_optional_but_require_valid_video_identity_and_index() {
+        let mut project = sample();
+        assert!(
+            serde_json::to_value(&project).unwrap()["assets"][0]
+                .get("decode")
+                .is_none()
+        );
+        project.assets[0].decode = Some(Decode::Direct {
+            index: "a".repeat(64),
+        });
+        assert_eq!(project.validate().unwrap_err().code, "INVALID_MEDIA");
+        project.assets[0].identity = Some(crate::registry::Identity {
+            bytes: 1,
+            sha256: "b".repeat(64),
+        });
+        project.validate().unwrap();
+        project.assets[0].decode = Some(Decode::Direct {
+            index: "A".repeat(64),
+        });
+        assert_eq!(project.validate().unwrap_err().code, "INVALID_MEDIA");
+        project.assets[0].decode = Some(Decode::Direct {
+            index: "a".repeat(64),
+        });
+        project.assets[0].path = "voice.wav".into();
+        assert_eq!(project.validate().unwrap_err().code, "INVALID_MEDIA");
+    }
     fn sample() -> Project {
         let mut p = Project::new("test".into(), 320, 180, t(25)).unwrap();
         p.assets.push(Asset {
             metadata: Default::default(),
             identity: None,
             proxy: None,
+            decode: None,
             id: "a".into(),
             path: "external.mkv".into(),
             duration: t(12),

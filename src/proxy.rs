@@ -206,6 +206,7 @@ pub fn status(project: &Project, root: &Path) -> Result<Value> {
             let mut a = a.clone();
             a.path = proxy.path.clone();
             a.identity = Some(proxy.identity.clone());
+            a.decode = None;
             a.proxy = None;
             mapped.assets.push(a);
         } else {
@@ -290,6 +291,7 @@ pub(crate) fn preview_project(project: &Project, root: &Path) -> Result<Project>
             }
             a.path = path.to_string_lossy().into_owned();
             a.identity = Some(proxy.identity.clone());
+            a.decode = None;
         }
         a.proxy = None;
     }
