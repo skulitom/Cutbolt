@@ -86,7 +86,7 @@ export async function verifyMcpb(bundle, { base = root, allowSkip = false } = {}
     const listed = await client.listTools();
     assert.equal(listed.length, manifest.tools.length);
     assert.deepEqual(new Set(listed.map(tool => tool.name)), new Set(manifest.tools.map(tool => tool.name)), 'Core catalog differs from manifest tools');
-    const called = await client.request('tools/call', { name: 'cutbolt_capabilities', arguments: {} });
+    const called = await client.request('tools/call', { name: 'cutbolt_run', arguments: { command: 'capabilities', arguments: {} } });
     assert.equal(called.isError, false, `Capabilities failed: ${JSON.stringify(called)}`);
     const content = called.structuredContent ?? JSON.parse(called.content.find(item => item.type === 'text').text);
     assert.equal(content.ok, true);
