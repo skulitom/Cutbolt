@@ -169,7 +169,7 @@ fn frames(path: &Path, selector: &str, timeout: Duration) -> Result<Vec<Value>> 
         "-select_streams",
         selector,
         "-show_entries",
-        "frame=best_effort_timestamp,duration,pkt_duration,nb_samples,width,height,interlaced_frame,color_space,color_range,color_primaries,color_transfer,chroma_location",
+        "frame=best_effort_timestamp,duration,pkt_duration,nb_samples,width,height,pix_fmt,interlaced_frame,color_space,color_range,color_primaries,color_transfer,chroma_location",
         "-of",
         "compact=p=0:nk=0",
     ];
@@ -387,6 +387,15 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
                     }
                 }
                 sdr.inspect(&profile, mkv, mp4)?;
+            }
+            if source.sdr.is_some() && f["pix_fmt"] != v["pix_fmt"] {
+                return Err(error(
+                    "UNSUPPORTED_MEDIA",
+                    format!(
+                        "SDR normalization requires one decoded pixel format: frame {i} has {}, stream declares {}",
+                        f["pix_fmt"], v["pix_fmt"]
+                    ),
+                ));
             }
             let t = if source.clock.is_some() {
                 let timestamp = Stamp::ticks(signed_number(&f["best_effort_timestamp"])?, tb)?;

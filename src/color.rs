@@ -83,7 +83,7 @@ impl Transfer {
         }
     }
 }
-/// Sample matrix: `rgb` for FFV1/bgr0 RGB, `bt709` for BT.709 YUV (FFV1 yuv444p MKV or H.264/HEVC Main yuv420p MP4/MOV/MKV).
+/// Sample matrix: `rgb` for FFV1/bgr0 RGB, `bt709` for the declared YUV source formats in color.capabilities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Matrix {
@@ -110,7 +110,7 @@ pub enum MissingTags {
 pub struct Input {
     /// Sample matrix; must match the stored pixel format.
     pub matrix: Matrix,
-    /// Code range of the stored samples; yuvj420p requires `full`.
+    /// Code range of the stored samples; YUVJ formats require `full`.
     pub range: Range,
     /// Transfer function of the source values.
     pub transfer: Transfer,
@@ -122,6 +122,11 @@ pub(crate) enum Layout {
     Bgr0,
     Yuv444,
     Yuv420,
+    /// Other accepted planar 4:2:0/4:2:2 formats. Wider samples are little-endian words.
+    SubsampledYuv {
+        bits: u8,
+        vertical: usize,
+    },
 }
 impl Layout {
     pub(crate) fn bytes(self, width: u32, height: u32) -> usize {
@@ -130,6 +135,9 @@ impl Layout {
             Self::Bgr0 => n * 4,
             Self::Yuv444 => n * 3,
             Self::Yuv420 => n * 3 / 2,
+            Self::SubsampledYuv { bits, vertical } => {
+                (n + n / vertical) * if bits == 8 { 1 } else { 2 }
+            }
         }
     }
 }
@@ -150,20 +158,61 @@ impl Input {
             {
                 Layout::Yuv420
             }
+            (Matrix::Bt709, Some("yuv420p10le"))
+                if (mp4 || mkv)
+                    && (stream["codec_name"] == "h264"
+                        || stream["codec_name"] == "hevc" && stream["profile"] == "Main 10") =>
+            {
+                Layout::SubsampledYuv {
+                    bits: 10,
+                    vertical: 2,
+                }
+            }
+            (Matrix::Bt709, Some("yuv422p" | "yuvj422p"))
+                if (mp4 || mkv) && stream["codec_name"] == "h264" =>
+            {
+                Layout::SubsampledYuv {
+                    bits: 8,
+                    vertical: 1,
+                }
+            }
+            (Matrix::Bt709, Some("yuv422p10le"))
+                if (mp4 || mkv)
+                    && matches!(stream["codec_name"].as_str(), Some("h264" | "prores")) =>
+            {
+                Layout::SubsampledYuv {
+                    bits: 10,
+                    vertical: 1,
+                }
+            }
             _ => {
                 return Err(invalid(
-                    "SDR normalization requires declared FFV1/bgr0 or YUV444 MKV, or H.264/HEVC Main YUV420 MP4/MOV/MKV",
+                    "SDR normalization requires declared FFV1/bgr0 or YUV444 MKV; H.264/HEVC 8/10-bit YUV420; or H.264 8/10-bit/ProRes 10-bit YUV422 in MP4/MOV/MKV",
                 ));
             }
         };
-        if matches!(layout, Layout::Yuv420)
+        let vertical = match layout {
+            Layout::Yuv420 => Some(2),
+            Layout::SubsampledYuv { vertical, .. } => Some(vertical as u64),
+            _ => None,
+        };
+        if let Some(vertical) = vertical
             && (!stream["width"].as_u64().unwrap_or(0).is_multiple_of(2)
-                || !stream["height"].as_u64().unwrap_or(0).is_multiple_of(2))
+                || !stream["height"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .is_multiple_of(vertical))
         {
-            return Err(invalid("SDR YUV420 normalization requires even dimensions"));
+            return Err(invalid(if vertical == 2 {
+                "SDR YUV420 normalization requires even dimensions"
+            } else {
+                "SDR YUV422 normalization requires an even width"
+            }));
         }
         // This deprecated pixel-format name itself declares full range even if metadata is absent.
-        if stream["pix_fmt"] == "yuvj420p" && self.range != Range::Full {
+        if matches!(stream["pix_fmt"].as_str(), Some("yuvj420p" | "yuvj422p"))
+            && self.range != Range::Full
+        {
             return Err(invalid(
                 "YUVJ pixel format conflicts with a limited-range declaration",
             ));
@@ -206,12 +255,12 @@ impl Input {
         )?;
         check("color_primaries", "bt709")?;
         check("color_transfer", self.transfer.tag())?;
-        if matches!(layout, Layout::Yuv420) {
+        if vertical.is_some() {
             check("chroma_location", "left")?;
         }
         Ok((
             layout,
-            json!({"input":self,"assumed_tags":assumed,"primaries":"bt709","white_point":"D65","chroma_reconstruction":if matches!(layout,Layout::Yuv420){"nearest_2x2_block"}else{"none"},"clipping":"encoded_rgb_to_0_1_before_transfer","precision":"f64_then_nearest_8bit","output_matrix":"gbr","output_range":"full"}),
+            json!({"input":self,"assumed_tags":assumed,"primaries":"bt709","white_point":"D65","chroma_reconstruction":match vertical {Some(2)=>"nearest_2x2_block",Some(1)=>"nearest_2x1_block",_=>"none"},"clipping":"encoded_rgb_to_0_1_before_transfer","precision":"f64_then_nearest_8bit","output_matrix":"gbr","output_range":"full"}),
         ))
     }
     fn byte(self, value: f64, output: Transfer) -> u8 {
@@ -243,6 +292,31 @@ impl Input {
                     };
                     [2, 1, 0].map(|c| (source[i * 4 + c] as f64 - offset) / divisor)
                 }
+                Layout::SubsampledYuv { bits, vertical } => {
+                    let plane = n / 2 / vertical;
+                    let chroma = i / width as usize / vertical * (width as usize / 2)
+                        + i % width as usize / 2;
+                    let sample = |index: usize| -> f64 {
+                        if bits == 8 {
+                            source[index] as f64
+                        } else {
+                            u16::from_le_bytes([source[2 * index], source[2 * index + 1]]) as f64
+                        }
+                    };
+                    let scale = (1u32 << (bits - 8)) as f64;
+                    let full = ((1u32 << bits) - 1) as f64;
+                    let (offset, yscale, cscale) = if self.range == Range::Limited {
+                        (16.0 * scale, 219.0 * scale, 224.0 * scale)
+                    } else {
+                        (0.0, full, full)
+                    };
+                    let y = (sample(i) - offset) / yscale;
+                    let cb = (sample(n + chroma) - 128.0 * scale) / cscale;
+                    let cr = (sample(n + plane + chroma) - 128.0 * scale) / cscale;
+                    let r = y + 1.5748 * cr;
+                    let b = y + 1.8556 * cb;
+                    [r, (y - 0.2126 * r - 0.0722 * b) / 0.7152, b]
+                }
                 Layout::Yuv444 | Layout::Yuv420 => {
                     let (chroma, plane) = if matches!(layout, Layout::Yuv444) {
                         (i, n)
@@ -273,11 +347,70 @@ impl Input {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"profile":"sdr-normalization-v1","inputs":["ffv1_bgr0_yuv444_mkv","h264_yuv420_mp4_mov_mkv","hevc_main_yuv420_mp4_mov_mkv"],"input_matrix":["rgb","bt709"],"input_range":["full","limited"],"transfer":["srgb","bt709"],"primaries":"bt709","missing_tags":["reject","use_declared"],"conflicting_tags":"reject","output":"tagged_full_range_rgb_ffv1","precision":"8bit_samples_f64_conversion","hdr":false,"icc":false})
+    json!({"profile":"sdr-normalization-v1","inputs":["ffv1_bgr0_yuv444_mkv","h264_yuv420_mp4_mov_mkv","hevc_main_yuv420_mp4_mov_mkv","h264_hevc_10bit_yuv420_mp4_mov_mkv","h264_8_10bit_yuv422_mp4_mov_mkv","prores_10bit_yuv422_mp4_mov_mkv"],"input_matrix":["rgb","bt709"],"input_range":["full","limited"],"transfer":["srgb","bt709"],"primaries":"bt709","missing_tags":["reject","use_declared"],"conflicting_tags":"reject","output":"tagged_full_range_rgb_ffv1","precision":"8_or_10bit_samples_f64_conversion_to_8bit","hdr":false,"icc":false})
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn wider_samples_preserve_limited_codes_and_chroma_rows() {
+        let input = Input {
+            matrix: Matrix::Bt709,
+            range: Range::Limited,
+            transfer: Transfer::Bt709,
+            missing_tags: MissingTags::Reject,
+        };
+        let original = [16u8, 235, 81, 100, 16, 235, 81, 100, 90, 128, 240, 128];
+        let mut expected = [0; 24];
+        input.convert(
+            Layout::Yuv420,
+            4,
+            2,
+            &original,
+            Transfer::Srgb,
+            &mut expected,
+        );
+        for (bits, vertical) in [(10, 2), (8, 1), (10, 1)] {
+            let codes = if vertical == 2 {
+                original.to_vec()
+            } else {
+                [
+                    original[..8].to_vec(),
+                    vec![90, 128, 90, 128, 240, 128, 240, 128],
+                ]
+                .concat()
+            };
+            let bytes = if bits == 8 {
+                codes
+            } else {
+                codes
+                    .into_iter()
+                    .flat_map(|v| (v as u16 * 4).to_le_bytes())
+                    .collect()
+            };
+            let layout = Layout::SubsampledYuv { bits, vertical };
+            assert_eq!(layout.bytes(4, 2), bytes.len());
+            let mut got = [0; 24];
+            input.convert(layout, 4, 2, &bytes, Transfer::Srgb, &mut got);
+            assert_eq!(got, expected);
+        }
+        let mut stream = json!({"codec_name":"prores","pix_fmt":"yuv422p10le",
+            "width":4,"height":3,"color_space":"bt709","color_range":"tv",
+            "color_primaries":"bt709","color_transfer":"bt709","chroma_location":"left"});
+        assert!(input.inspect(&stream, false, true).is_ok());
+        stream["width"] = json!(3);
+        assert!(input.inspect(&stream, false, true).is_err());
+        stream["width"] = json!(4);
+        stream["pix_fmt"] = json!("yuv420p10le");
+        stream["codec_name"] = json!("hevc");
+        stream["profile"] = json!("Main 10");
+        assert!(input.inspect(&stream, false, true).is_err()); // odd 4:2:0 height
+        stream["height"] = json!(2);
+        assert!(input.inspect(&stream, false, true).is_ok());
+        stream["profile"] = json!("Main");
+        assert!(input.inspect(&stream, false, true).is_err());
+    }
+
     #[test]
     fn transfer_anchors_and_range_endpoints() {
         let input = Input {

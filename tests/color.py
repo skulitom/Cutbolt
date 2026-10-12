@@ -28,13 +28,14 @@ def decode(v,transfer):
     if transfer=='srgb':return v/D('12.92') if v<=D('0.04045') else ((v+D('0.055'))/D('1.055'))**D('2.4')
     return v/D('4.5') if v<D('0.081') else ((v+D('0.099'))/D('1.099'))**(D(1)/D('0.45'))
 @lru_cache(None)
-def convert_pixel(a,b,c,matrix,range_,source,target):
+def convert_pixel(a,b,c,matrix,range_,source,target,bits=8):
     if matrix=='rgb':
         offset,span=(0,255) if range_=='full' else (16,219)
         encoded=[(D(v)-offset)/span for v in (a,b,c)]
     else:
-        offset,ys,cs=(0,255,255) if range_=='full' else (16,219,224)
-        y=(D(a)-offset)/ys;cb=(D(b)-128)/cs;cr=(D(c)-128)/cs
+        scale=2**(bits-8);maximum=2**bits-1;center=2**(bits-1)
+        offset,ys,cs=(0,maximum,maximum) if range_=='full' else (16*scale,219*scale,224*scale)
+        y=(D(a)-offset)/ys;cb=(D(b)-center)/cs;cr=(D(c)-center)/cs
         # Solve public luma and color-difference equations independently in Decimal.
         blue=y+D('1.8556')*cb;red=y+D('1.5748')*cr
         green=(y-D('0.2126')*red-D('0.0722')*blue)/D('0.7152')
@@ -77,18 +78,25 @@ def samples(fmt,transfer,range_,n):
     return b''.join(bytes(v) for v in planes)
 
 def expected(native,fmt,range_,source,target,indices):
-    stride=W*H*(4 if fmt=='bgr0' else 3) if fmt!='yuv420p' else W*H*3//2
+    geometry={'yuv444p':(8,1,1),'yuv420p':(8,2,2),'yuvj420p':(8,2,2),
+              'yuv420p10le':(10,2,2),'yuv422p':(8,2,1),'yuvj422p':(8,2,1),'yuv422p10le':(10,2,1)}
+    bits,horizontal,vertical=(8,1,1) if fmt=='bgr0' else geometry[fmt]
+    sample_bytes=1 if bits==8 else 2
+    plane=(W//horizontal)*(H//vertical)
+    stride=W*H*4 if fmt=='bgr0' else (W*H+2*plane)*sample_bytes
     result=bytearray()
     for n in indices:
         raw=native[n*stride:(n+1)*stride]
+        assert len(raw)==stride
+        def sample(index):return int.from_bytes(raw[index*sample_bytes:(index+1)*sample_bytes],'little')
         for i in range(W*H):
             if fmt=='bgr0':triple=(raw[i*4+2],raw[i*4+1],raw[i*4]);matrix='rgb'
             else:
-                sub=i if fmt=='yuv444p' else (i//W//2)*(W//2)+(i%W//2)
-                plane=W*H if fmt=='yuv444p' else W*H//4
-                triple=(raw[i],raw[W*H+sub],raw[W*H+plane+sub]);matrix='bt709'
-            result.extend(convert_pixel(*triple,matrix,range_,source,target))
+                sub=(i//W//vertical)*(W//horizontal)+(i%W//horizontal)
+                triple=(sample(i),sample(W*H+sub),sample(W*H+plane+sub));matrix='bt709'
+            result.extend(convert_pixel(*triple,matrix,range_,source,target,bits))
     return bytes(result)
+
 
 def run(root):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
@@ -130,6 +138,66 @@ def run(root):
     generate('wrong-primaries','bgr0','srgb','full',overrides={'color_primaries':'bt2020'})
     generate('hdr','bgr0','srgb','full',overrides={'color_trc':'smpte2084'})
     generate('wrong-chroma','yuv420p','bt709','limited',overrides={'chroma_sample_location':'center'})
+    # Independently authored native high-bit-depth/4:2:2 charts. Encoders may be lossy;
+    # the oracle interprets their complete native decode, never an external RGB scaler.
+    extended=[]
+    def generate_extended(name,encoder,fmt,bits,vertical,range_):
+        maximum=2**bits-1;scale=2**(bits-8);center=2**(bits-1)
+        offset,ys,cs=(0,maximum,maximum) if range_=='full' else (16*scale,219*scale,224*scale)
+        def quantize(v):return max(0,min(maximum,int(v+D('0.5'))))
+        frames=[]
+        for n in range(N):
+            planes=[[],[],[]]
+            for y in range(H):
+                for x in range(W):
+                    r,g,b=[encoded_byte(v,'bt709') for v in physical_pixel(x,y,n)]
+                    lum=D('0.2126')*r+D('0.7152')*g+D('0.0722')*b
+                    planes[0].append(quantize(offset+ys*lum))
+                    if x%2==0 and y%vertical==0:
+                        planes[1].append(quantize(center+cs*(b-lum)/D('1.8556')))
+                        planes[2].append(quantize(center+cs*(r-lum)/D('1.5748')))
+            planes[0][-4:]=[0,maximum,16*scale,235*scale]
+            for channel in (1,2):planes[channel][-4:]=[center,center,0,maximum]
+            frames.append(b''.join(v.to_bytes(1 if bits==8 else 2,'little') for plane in planes for v in plane))
+        raw=sources/(name+'.raw');raw.write_bytes(b''.join(frames))
+        path=sources/(name+('.mov' if encoder=='prores_ks' else '.mp4'))
+        args=['-f','rawvideo','-pixel_format',fmt,'-video_size',f'{W}x{H}','-framerate','25','-i',str(raw),
+              '-i',str(sources/'sound.wav'),'-map','0:v:0','-map','1:a:0','-vf','setsar=1',
+              '-c:v',encoder,'-pix_fmt',fmt,'-threads','1','-colorspace','bt709',
+              '-color_range','pc' if range_=='full' else 'tv','-color_primaries','bt709','-color_trc','bt709',
+              '-chroma_sample_location','left','-c:a','pcm_s16le' if encoder=='prores_ks' else 'aac']
+        if encoder=='libx265':args+=['-x265-params','pools=none:frame-threads=1:log-level=error','-crf','12','-tag:v','hvc1']
+        elif encoder=='libx264':args+=['-crf','12','-bf','2']
+        else:args+=['-profile:v','3','-qscale:v','4']
+        ff(args+[str(path)])
+        meta=next(s for s in probe(path) if s['codec_type']=='video')
+        assert meta['pix_fmt']==fmt or (fmt=='yuv422p' and meta['pix_fmt']=='yuvj422p'),meta
+        native=ff(['-i',str(path),'-map','0:v:0','-an','-fps_mode','passthrough','-pix_fmt',meta['pix_fmt'],'-f','rawvideo','-'])
+        sound=ff(['-i',str(path),'-map','0:a:0','-vn','-f','s16le','-'])
+        fixtures[name]=(path,meta['pix_fmt'],'bt709',range_,native,sound,meta)
+        extended.append(name)
+    for label,encoder,fmt,bits,vertical in [('h264-420-10','libx264','yuv420p10le',10,2),
+            ('hevc-420-10','libx265','yuv420p10le',10,2),('h264-422-8','libx264','yuv422p',8,1),
+            ('h264-422-10','libx264','yuv422p10le',10,1),('prores-422-hq','prores_ks','yuv422p10le',10,1)]:
+        for range_ in (('limited',) if encoder=='prores_ks' else ('limited','full')):
+            generate_extended(label+'-'+range_,encoder,fmt,bits,vertical,range_)
+    # A real elementary stream changes from 8 to 10 bits without changing dimensions.
+    # Keep native format changes visible instead of letting rawvideo silently rescale them.
+    parts=[]
+    for name,fmt in [('h264-limited','yuv420p'),('h264-420-10-limited','yuv420p10le')]:
+        part=sources/(name+'-annexb.h264')
+        ff(['-f','rawvideo','-pixel_format',fmt,'-video_size',f'{W}x{H}','-framerate','25',
+            '-i',str(sources/(name+'.raw')),'-an','-vf','setsar=1','-c:v','libx264','-pix_fmt',fmt,
+            '-threads','1','-bf','0','-crf','12','-colorspace','bt709','-color_range','tv',
+            '-color_primaries','bt709','-color_trc','bt709','-chroma_sample_location','left','-f','h264',str(part)])
+        parts.append(part.read_bytes())
+    mixed_raw=sources/'mixed-format.h264';mixed_raw.write_bytes(b''.join(parts))
+    mixed=sources/'mixed-format.mkv'
+    ff(['-fflags','+genpts','-r','25','-i',str(mixed_raw),'-i',str(sources/'sound.wav'),
+        '-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','pcm_s16le',str(mixed)])
+    frame_formats=json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0',
+        '-show_entries','frame=pix_fmt','-of','json',str(mixed)]))['frames']
+    assert [f['pix_fmt'] for f in frame_formats]==['yuv420p']*N+['yuv420p10le']*N
     originals={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     exe=ENGINE
     def call(request,error=None,env=None):
@@ -172,8 +240,17 @@ def run(root):
             r=recipe(name,target,'use_declared' if 'untagged' in name else 'reject');check(name,r,r['id'])
             assert bool(comparisons[-1]['assumed_tags'])==('untagged' in name)
     passed.append('color.tagged_untagged_and_native_yuv420')
+    for name in extended:
+        for target in ('srgb','bt709'):
+            prores=name.startswith('prores-')
+            r=recipe(name,target,'use_declared' if prores else 'reject');check(name,r,r['id'])
+            expected_assumptions=['color_range','chroma_location'] if prores else []
+            assert comparisons[-1]['assumed_tags']==expected_assumptions,comparisons[-1]
+
     name='yuv444p-bt709-limited'
     for label,fields,indices in [('retime',{'source_in':time(1,25),'duration':time(4,25),'rate':time(3,2),'audio':'mute'},[1,2,4,5]),('reverse',{'source_in':time(7,25),'duration':time(4,25),'reverse':True,'audio':'mute'},[7,6,5,4]),('freeze',{'source_in':time(3,25),'duration':time(4,25),'freeze':True,'audio':'mute'},[3]*4)]:check(name,recipe(name,**fields),label,indices)
+    check('hevc-420-10-limited',recipe('hevc-420-10-limited',source_in=time(1,25),duration=time(4,25),rate=time(3,2),audio='mute'),'high10-retime',[1,2,4,5])
+    check('h264-422-10-full',recipe('h264-422-10-full',source_in=time(7,25),duration=time(4,25),reverse=True,audio='mute'),'high10-reverse',[7,6,5,4])
     repeat=check('h264-full',recipe('h264-full'),'repeat');assert repeat==expected_outputs['h264-full-srgb'][0]
     passed.append('color.retime_and_repeatability')
 
@@ -205,6 +282,11 @@ def run(root):
     for name in ('rgb-untagged','yuv-untagged','h264-untagged','wrong-primaries','hdr','wrong-chroma'):reject(recipe(name))
     for name,key,value in [('bgr0-srgb-full','transfer','bt709'),('yuv444p-bt709-limited','range','full'),('h264-full','range','limited'),('bgr0-srgb-full','matrix','bt709')]:
         r=recipe(name,policy='use_declared');r['source']['sdr'][key]=value;reject(r)
+    reject(recipe('prores-422-hq-limited')) # Missing range/chroma tags require an explicit declaration.
+    for name in extended:
+        policy='use_declared' if name.startswith('prores-') else 'reject'
+        r=recipe(name,policy=policy);r['source']['sdr']['range']='full' if fixtures[name][3]=='limited' else 'limited';reject(r)
+        r=recipe(name,policy=policy);r['source']['sdr']['transfer']='srgb';reject(r)
     r=copy.deepcopy(base);r['source']['color']='encoded_rgb';reject(r)
     r=copy.deepcopy(base);r.pop('working_transfer');reject(r)
     r=copy.deepcopy(base);r['source'].pop('sdr');r['source']['color']='encoded_rgb';reject(r)
@@ -214,8 +296,11 @@ def run(root):
     r=copy.deepcopy(base);r['source']['file']['sha256']='0'*64;reject(r,'MEDIA_CHANGED')
     r=copy.deepcopy(base);r['source']['file']['path']='../escape.mkv';reject(r,'INVALID_PATH')
     r=copy.deepcopy(base);r['source']['file']=identity(sources/'sound.wav',sources);reject(r,'UNSUPPORTED_MEDIA')
+    r=recipe('h264-limited');r['source']['file']=identity(mixed,sources);reject(r,'UNSUPPORTED_MEDIA')
     hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir()}
-    for i,(r,code) in enumerate(bad):call(request(r,'bad-'+str(i)),code)
+    for i,(r,code) in enumerate(bad):
+        failure=call(request(r,'bad-'+str(i)),code)
+        if r['source']['file']['path']==mixed.name:assert 'one decoded pixel format' in failure['error']['message'],failure
     call(request(base,base['id']),'OUTPUT_EXISTS')
     req=request(base,'missing-tool');call(req,'TOOL_UNAVAILABLE',{**os.environ,'CUTBOLT_FFMPEG':str(root/'absent.exe')})
     req=request(base,'source');req.update(output_root=str(sources),output=str(fixtures['bgr0-srgb-full'][0]));call(req,'OUTPUT_EXISTS')
@@ -223,7 +308,7 @@ def run(root):
     assert originals=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     assert not list(output.glob('.cutbolt-scene-*')) and not list(output.glob('.cutbolt-export-*'))
     passed.append('color.invalid_metadata_and_preservation')
-    report={'passed':passed,'cases':comparisons,'frames_compared':sum(c['frames'] for c in comparisons)+24,'stereo_sample_frames_compared':(sum(c['frames'] for c in comparisons)+24)*1920,'rejected_cases':len(bad)+3,'maximum_rgb_error':maximum,'threshold':{'maximum_rgb_error':1},'reference':'Original native RGB/YUV chart samples; independent 48-digit Decimal transfer/matrix/range equations and Fraction frame mapping. External tools supply codec encode/decode only. All output RGB/PCM checked; original sources and existing outputs preserved.','limits':'8-bit BT.709 primaries/D65, sRGB or BT.709 OETF interpretation, fixed full/limited ranges; YUV420 nearest 2x2 blocks, no HDR/ICC/wide gamut or display transform'}
+    report={'passed':passed,'cases':comparisons,'frames_compared':sum(c['frames'] for c in comparisons)+24,'stereo_sample_frames_compared':(sum(c['frames'] for c in comparisons)+24)*1920,'rejected_cases':len(bad)+3,'maximum_rgb_error':maximum,'threshold':{'maximum_rgb_error':1},'reference':'Original native RGB/YUV chart samples; independent 48-digit Decimal transfer/matrix/range equations and Fraction frame mapping. External tools supply codec encode/decode only. All output RGB/PCM checked; original sources and existing outputs preserved.','limits':'8/10-bit input to 8-bit RGB, BT.709 primaries/D65, sRGB or BT.709 OETF interpretation, fixed full/limited ranges; YUV420 nearest 2x2 and YUV422 nearest 2x1 blocks, no HDR/ICC/wide gamut or display transform'}
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     (root/'recipe.json').write_text(json.dumps(recipe('yuv-untagged',policy='use_declared'),indent=2)+'\n',encoding='utf-8')
     print(json.dumps(report))

@@ -22,7 +22,7 @@ The source file must be at most 16 GiB, referenced by a relative path inside an 
 
 ## Explicit SDR normalization
 
-Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV and declared full/limited H.264 or HEVC Main YUV420 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
+Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV, H.264/HEVC 8/10-bit YUV420, and H.264 8/10-bit or ProRes 10-bit YUV422 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. Output remains 8-bit RGB; alpha, rotation and non-square pixels are not supported by this profile. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
 
 ### Explicit source clock
 
@@ -51,7 +51,7 @@ float64 YUV arithmetic and integer/Fraction PCM resampling. It includes an edit 
 audio priming with 44.1 kHz rounding, late/short audio, HEVC Main/open GOP, MP4/MOV/MKV and AAC,
 PCM24, MP3, FLAC and Opus. It compares every RGB byte and PCM sample and checks the source index's
 clock policy agrees. Nonqualifying rotation/SAR/VFR/10-bit/ProRes files remain explicit rejections
-from direct qualification; their broader normalization is later work.
+from direct qualification. Explicit SDR conversion now covers the listed 10-bit/4:2:2 formats; automatic cached preparation, rotation, non-square pixels and ProRes alpha remain later stage-2 work.
 
 ## Recipe and timing
 

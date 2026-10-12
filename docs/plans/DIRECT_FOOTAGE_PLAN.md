@@ -289,7 +289,7 @@ Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame 
 
 | Decision | Recommendation |
 | --- | --- |
-| Metadata-gated identity reuse (1.6) | Yes, with a full re-hash before publication. It weakens a current check, so get explicit approval. |
+| Metadata-gated identity reuse (1.6) | Approved by the user on 11 October 2026, with a full re-hash before publication. See DIRECT_SOURCES.md for implementation and evidence. |
 | Conversion cache size cap and default location | Workspace `.cutbolt/cache/conform`, or `CUTBOLT_CONFORM_CACHE`; default cap 50 GB, with an explicit error beyond it. |
 | `Project.schema_version` bump | Not for stage 1's optional `decode` field; bump to 2 at stage 3, with migration. |
 | Effect key clock | Source clock, matching `gain_curve`. |

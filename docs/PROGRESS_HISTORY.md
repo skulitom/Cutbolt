@@ -1,5 +1,35 @@
 # Progress history
 
+## 12 October 2026: stage-2 native 10-bit and 4:2:2 conversion foundation
+
+Explicit SDR conform now decodes H.264 High10 and HEVC Main10 4:2:0, H.264 8/10-bit
+4:2:2 and ProRes 10-bit 4:2:2 samples natively, then applies the declared Rust color
+conversion to RGB8. It preserves the prior 8-bit branches. Chroma reconstruction is
+nearest 2x2 or 2x1, with scaled limited-range codes and a declared 10-bit full-range
+integer convention. Every decoded frame must retain the stream's native pixel format.
+A synthetic H.264 stream changing from 8 to 10 bits is rejected before publication.
+
+Windows (230) and Linux (229) Rust tests pass. Color, conform and the five agent-cost
+replays pass on both platforms (274 and 164 seconds for the respective targeted runs).
+Windows lint, formatting and the repository material check pass. Nine added codec/range
+cases cover both output transfers, high-bit-depth rate/reverse mapping, decoded PCM,
+source preservation and conflicting metadata. All compared RGB stays within the existing
+one-level Decimal-reference tolerance; PCM is exact. Initial fixture runs correctly failed
+on missing ProRes stream range/chroma tags. The final ProRes recipe explicitly declares
+those values, checks the receipt's assumptions and still rejects conflicting frame tags.
+The real mixed-format stream test passes without publishing an output. Replay budgets
+remain unchanged; these are regression replays, not independent model measurements.
+
+This is part of direct-footage stage 2, not its completion: alpha/ProRes 4444, rotation,
+non-square pixels and automatic bounded conversion caching remain open. Stage-1 full
+verification is still running against fixed commit 338e114, so generated evidence remains
+dated 4 October and this checkpoint carries it unchanged. Deferred shipping results must
+be checked after the commit. No v2 points, full milestone pass or comparative lead is claimed.
+
+Also corrected the README's stale FFV1-only paragraph and conditional release installation
+wording, plus MCPB documentation describing the actual compact catalog and capabilities
+route. These preserve the concurrent distribution workflow work; no release is claimed.
+
 ## 12 October 2026: capture scheduling diagnostics and resolved background failures
 
 Both pending background batches are complete: 10367b9 passed 34 fixtures with eleven
