@@ -120,6 +120,10 @@ pub struct Input {
 #[derive(Clone, Copy)]
 pub(crate) enum Layout {
     Bgr0,
+    Bgra,
+    Yuva444 {
+        bits: u8,
+    },
     Yuv444,
     Yuv420,
     /// Other accepted planar 4:2:0/4:2:2 formats. Wider samples are little-endian words.
@@ -129,10 +133,27 @@ pub(crate) enum Layout {
     },
 }
 impl Layout {
+    pub(crate) fn has_alpha(self) -> bool {
+        matches!(self, Self::Bgra | Self::Yuva444 { .. })
+    }
+    /// Alpha is full-range coverage, independent of the declared color range/transfer.
+    pub(crate) fn alpha(self, source: &[u8], pixels: usize, index: usize) -> u8 {
+        match self {
+            Self::Bgra => source[4 * index + 3],
+            Self::Yuva444 { bits } => {
+                let offset = (3 * pixels + index) * 2;
+                let value = u16::from_le_bytes([source[offset], source[offset + 1]]) as u32;
+                let maximum = (1u32 << bits) - 1;
+                ((value.min(maximum) * 255 + maximum / 2) / maximum) as u8
+            }
+            _ => 255,
+        }
+    }
     pub(crate) fn bytes(self, width: u32, height: u32) -> usize {
         let n = width as usize * height as usize;
         match self {
-            Self::Bgr0 => n * 4,
+            Self::Bgr0 | Self::Bgra => n * 4,
+            Self::Yuva444 { .. } => n * 8,
             Self::Yuv444 => n * 3,
             Self::Yuv420 => n * 3 / 2,
             Self::SubsampledYuv { bits, vertical } => {
@@ -157,6 +178,18 @@ impl Input {
                         || stream["codec_name"] == "hevc" && stream["profile"] == "Main") =>
             {
                 Layout::Yuv420
+            }
+            (Matrix::Rgb, Some("bgra")) if mkv && stream["codec_name"] == "ffv1" => Layout::Bgra,
+            (Matrix::Bt709, Some("yuva444p10le" | "yuva444p12le"))
+                if (mp4 || mkv) && stream["codec_name"] == "prores" =>
+            {
+                Layout::Yuva444 {
+                    bits: if stream["pix_fmt"] == "yuva444p12le" {
+                        12
+                    } else {
+                        10
+                    },
+                }
             }
             (Matrix::Bt709, Some("yuv420p10le"))
                 if (mp4 || mkv)
@@ -187,7 +220,7 @@ impl Input {
             }
             _ => {
                 return Err(invalid(
-                    "SDR normalization requires declared FFV1/bgr0 or YUV444 MKV; H.264/HEVC 8/10-bit YUV420; or H.264 8/10-bit/ProRes 10-bit YUV422 in MP4/MOV/MKV",
+                    "SDR normalization requires declared FFV1/bgr0 or YUV444 MKV; H.264/HEVC 8/10-bit YUV420; or H.264 8/10-bit/ProRes 10-bit YUV422 or ProRes 10/12-bit YUVA444 in MP4/MOV/MKV",
                 ));
             }
         };
@@ -284,13 +317,32 @@ impl Input {
         let n = width as usize * height as usize;
         for i in 0..n {
             let values = match layout {
-                Layout::Bgr0 => {
+                Layout::Bgr0 | Layout::Bgra => {
                     let (offset, divisor) = if self.range == Range::Full {
                         (0.0, 255.0)
                     } else {
                         (16.0, 219.0)
                     };
                     [2, 1, 0].map(|c| (source[i * 4 + c] as f64 - offset) / divisor)
+                }
+                Layout::Yuva444 { bits } => {
+                    let sample = |plane: usize| {
+                        let offset = (plane * n + i) * 2;
+                        u16::from_le_bytes([source[offset], source[offset + 1]]) as f64
+                    };
+                    let scale = (1u32 << (bits - 8)) as f64;
+                    let maximum = ((1u32 << bits) - 1) as f64;
+                    let (offset, yscale, cscale) = if self.range == Range::Limited {
+                        (16.0 * scale, 219.0 * scale, 224.0 * scale)
+                    } else {
+                        (0.0, maximum, maximum)
+                    };
+                    let y = (sample(0) - offset) / yscale;
+                    let cb = (sample(1) - 128.0 * scale) / cscale;
+                    let cr = (sample(2) - 128.0 * scale) / cscale;
+                    let r = y + 1.5748 * cr;
+                    let b = y + 1.8556 * cb;
+                    [r, (y - 0.2126 * r - 0.0722 * b) / 0.7152, b]
                 }
                 Layout::SubsampledYuv { bits, vertical } => {
                     let plane = n / 2 / vertical;
@@ -347,11 +399,32 @@ impl Input {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"profile":"sdr-normalization-v1","inputs":["ffv1_bgr0_yuv444_mkv","h264_yuv420_mp4_mov_mkv","hevc_main_yuv420_mp4_mov_mkv","h264_hevc_10bit_yuv420_mp4_mov_mkv","h264_8_10bit_yuv422_mp4_mov_mkv","prores_10bit_yuv422_mp4_mov_mkv"],"input_matrix":["rgb","bt709"],"input_range":["full","limited"],"transfer":["srgb","bt709"],"primaries":"bt709","missing_tags":["reject","use_declared"],"conflicting_tags":"reject","output":"tagged_full_range_rgb_ffv1","precision":"8_or_10bit_samples_f64_conversion_to_8bit","hdr":false,"icc":false})
+    json!({"profile":"sdr-normalization-v1","inputs":["ffv1_bgr0_yuv444_mkv","h264_yuv420_mp4_mov_mkv","hevc_main_yuv420_mp4_mov_mkv","h264_hevc_10bit_yuv420_mp4_mov_mkv","h264_8_10bit_yuv422_mp4_mov_mkv","prores_10bit_yuv422_mp4_mov_mkv","prores_10_12bit_yuva444_mp4_mov_mkv","ffv1_bgra_mkv"],"input_matrix":["rgb","bt709"],"input_range":["full","limited"],"transfer":["srgb","bt709"],"primaries":"bt709","missing_tags":["reject","use_declared"],"conflicting_tags":"reject","output":"tagged_full_range_rgb_ffv1","precision":"native_samples_f64_conversion_to_8bit","alpha":"explicit_straight_source_alpha_to_bgra8_full_range_nearest","hdr":false,"icc":false})
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn alpha_coverage_uses_all_native_levels_without_color_transfer() {
+        for bits in [10, 12] {
+            let maximum = (1u32 << bits) - 1;
+            let pixels = maximum as usize + 1;
+            let mut native = vec![0; pixels * 8];
+            for code in 0..=maximum {
+                let offset = (3 * pixels + code as usize) * 2;
+                native[offset..offset + 2].copy_from_slice(&(code as u16).to_le_bytes());
+            }
+            let layout = Layout::Yuva444 { bits };
+            assert_eq!(layout.bytes(pixels as u32, 1), native.len());
+            for code in 0..=maximum {
+                let reference = (code as f64 * 255.0 / maximum as f64).round() as u8;
+                assert_eq!(layout.alpha(&native, pixels, code as usize), reference);
+            }
+        }
+        assert_eq!(Layout::Bgra.alpha(&[210, 70, 5, 31], 1, 0), 31);
+        assert!(!Layout::Bgr0.has_alpha());
+    }
+
     #[test]
     fn wider_samples_preserve_limited_codes_and_chroma_rows() {
         let input = Input {

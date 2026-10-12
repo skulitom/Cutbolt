@@ -2,7 +2,7 @@
 
 The optional `source.sdr` declaration in `media.conform.inspect` / `media.conform` converts supported native samples into a declared full-range RGB working transfer. Use it before combining media with different interpretations. Inspection reports assumptions and exact time mapping; rendering creates a new tagged FFV1/PCM editing asset. Sources stay immutable and compiled assets use the existing saved-session, preview and export commands. This adds no command, service or runtime dependency.
 
-For 12/16-bit samples, wide-gamut conversion or PQ/HLG, use the separate [high-bit-depth/HDR contract](HDR.md). Its RGB8 SDR outputs feed this existing timeline; its RGB16 intermediates remain in the explicit HDR conversion path.
+For opaque 12/16-bit samples, wide-gamut conversion or PQ/HLG, use the separate [high-bit-depth/HDR contract](HDR.md). Its RGB8 SDR outputs feed this existing timeline; its RGB16 intermediates remain in the explicit HDR conversion path.
 
 ## Recipe
 
@@ -34,15 +34,36 @@ An optional [LUT transform](LUTS_SCOPES.md) can follow this normalization before
 
 | Input | Matrix | Range | Transfer |
 | --- | --- | --- | --- |
-| FFV1/bgr0 MKV | `rgb` | `full` or `limited` | `srgb` or `bt709` |
+| FFV1/bgr0 or bgra MKV | `rgb` | `full` or `limited` | `srgb` or `bt709` |
 | FFV1/yuv444p MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
 | H.264/yuv420p or yuvj420p MP4/MOV/MKV | `bt709` | `full` or `limited`; yuvj420p requires full | `srgb` or `bt709` |
 | HEVC Main/yuv420p MP4/MOV/MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
 | H.264 or HEVC Main10/yuv420p10le MP4/MOV/MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
 | H.264/yuv422p, yuvj422p or yuv422p10le MP4/MOV/MKV | `bt709` | `full` or `limited`; yuvj422p requires full | `srgb` or `bt709` |
 | ProRes/yuv422p10le MP4/MOV/MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
+| ProRes/yuva444p10le or yuva444p12le MP4/MOV/MKV | `bt709` | `full` or `limited` | `srgb` or `bt709` |
 
-All normalized inputs use BT.709 primaries and D65. The working transfer is `srgb` or `bt709`; output matrix is RGB, range full, primaries BT.709, with matching transfer tags. Native samples are 8 or 10 bits; normalized output remains 8-bit RGB. ProRes alpha/4444, rotation and non-square pixels remain unsupported here. Existing conform restrictions on progressive square pixels, source identity, local roots, duration and no-overwrite publication still apply. Explicit SDR video accepts AAC/PCM/MP3/FLAC/Opus mono/stereo audio at any positive decoded rate. Its default timing remains zero-origin; optional [source clock normalization](CONFORM.md#explicit-source-clock) aligns offset video/audio, pads short audio and trims long audio. Reverse/non-monotonic native decode windows are capped at 4 GiB (four bytes per bgr0 pixel; three per 8-bit YUV444 pixel; 1.5 or three per 8/10-bit YUV420 pixel; two or four per 8/10-bit YUV422 pixel); forward CPU decoding streams frames.
+All normalized inputs use BT.709 primaries and D65. The working transfer is `srgb` or `bt709`; output matrix is RGB, range full, primaries BT.709, with matching transfer tags. Native samples are 8 or 10 bits, or 12-bit ProRes YUVA444; normalized output remains RGB8 or straight RGBA8. Rotation and non-square pixels remain unsupported here. Existing conform restrictions on progressive square pixels, source identity, local roots, duration and no-overwrite publication still apply. Explicit SDR video accepts AAC/PCM/MP3/FLAC/Opus mono/stereo audio at any positive decoded rate. Its default timing remains zero-origin; optional [source clock normalization](CONFORM.md#explicit-source-clock) aligns offset video/audio, pads short audio and trims long audio. Reverse/non-monotonic native decode windows are capped at 4 GiB (four bytes per bgr0 pixel; three per 8-bit YUV444 pixel; 1.5 or three per 8/10-bit YUV420 pixel; two or four per 8/10-bit YUV422 pixel; eight per 10/12-bit YUVA444 pixel); forward CPU decoding streams frames.
+
+## Transparent sources
+
+For ProRes 4444/4444 XQ decoded as planar YUVA444, or existing FFV1/bgra, explicitly
+set `source.alpha: "straight"` alongside `source.sdr`. This declares that color values
+are independent of coverage. Omitting the declaration fails with `INVALID_ALPHA`;
+opaque sources must omit it. Premultiplied input is rejected. Alpha interpretation is
+not inferred from color tags or opacity measurements.
+
+Conform writes straight-alpha FFV1/bgra plus PCM16. Color uses the same declared matrix,
+range, clipping and transfer conversion, including RGB values under zero alpha. Coverage
+is always full-range and bypasses color transfer and LUTs. Native 10/12-bit alpha is
+quantized with `floor((code * 255 + floor(maximum/2)) / maximum)`; BGRA8 alpha is unchanged.
+Resize selects the same source pixel for color and coverage. Linear temporal interpolation
+blends the four straight RGBA channels independently after color normalization and LUTs.
+The receipt reports this policy, and publication verifies every decoded RGBA byte and PCM sample.
+
+Use the returned asset on an `alpha_over` video track. Ordinary opaque tracks retain their
+strict source contract. This adds explicit preparation for transparent footage; automatic
+cached conversion remains stage-2 work.
 
 ## Metadata policy
 
@@ -57,7 +78,7 @@ HDR/unsupported primaries, ICC/camera/log conversion, gamut mapping, display cal
 The engine decodes native bgr0 or planar YUV bytes without asking an external scaler to interpret their color. It converts those values in original Rust code before the existing resize/time selection output is encoded.
 
 - Full RGB divides each channel by 255. Limited RGB subtracts 16 and divides by 219.
-- For 8-bit samples, limited YUV uses `(Y-16)/219`, `(Cb-128)/224` and `(Cr-128)/224`. Full YUV uses `Y/255`, `(Cb-128)/255` and `(Cr-128)/255`. For 10-bit little-endian samples, limited offsets and divisors are multiplied by four; full YUV uses `Y/1023`, `(Cb-512)/1023` and `(Cr-512)/1023`. These full-range integer conventions are explicitly selected by this profile.
+- For 8-bit samples, limited YUV uses `(Y-16)/219`, `(Cb-128)/224` and `(Cr-128)/224`. Full YUV uses `Y/255`, `(Cb-128)/255` and `(Cr-128)/255`. For 10-bit little-endian samples, limited offsets and divisors are multiplied by four; full YUV uses `Y/1023`, `(Cb-512)/1023` and `(Cr-512)/1023`. Native 12-bit ProRes uses limited offsets/divisors multiplied by sixteen, or full `Y/4095`, `(Cb-2048)/4095` and `(Cr-2048)/4095`. These full-range integer conventions are explicitly selected by this profile.
 - BT.709 luma coefficients are 0.2126/0.7152/0.0722. The color differences reconstruct red with `Y + 1.5748*Cr` and blue with `Y + 1.8556*Cb`; green follows from the luma equation.
 - Reconstructed encoded RGB is clipped to [0,1] before transfer conversion. No intermediate 8-bit RGB rounding occurs in the YUV path.
 - sRGB decoding uses the 0.04045 piecewise threshold, 12.92 linear divisor and 2.4 exponent; encoding uses the corresponding 0.0031308 threshold. BT.709 interpretation uses its OETF and inverse, with inverse threshold 0.081 and forward threshold 0.018. Matching input/output transfers bypass the round trip.

@@ -55,6 +55,13 @@ pub enum Audio {
 pub enum Clock {
     FirstVideoFrame,
 }
+/// Source alpha association. `straight` declares color channels independent of coverage.
+/// Premultiplied sources are unsupported; omission is required for sources without alpha.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Alpha {
+    Straight,
+}
 /// Identity-bound conform source and its declared color interpretation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -66,6 +73,9 @@ pub struct Source {
     /// Explicit SDR normalization; requires recipe `working_transfer`. Omit for the legacy path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdr: Option<color::Input>,
+    /// Required `straight` for native alpha with SDR normalization; omit for opaque sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha: Option<Alpha>,
     /// Optional `first_video_frame` origin and aligned/padded/trimmed audio; requires `sdr` video.
     /// Omit to retain strict zero-origin timestamps and existing audio interval checks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -228,6 +238,14 @@ fn input_args(path: &Path) -> Vec<String> {
     .collect()
 }
 fn check(source: &Source, root: &Path) -> Result<Checked> {
+    if source.alpha.is_some() && source.sdr.is_none() {
+        return Err(error(
+            "INVALID_CONFORM",
+            "source.alpha requires explicit SDR video normalization",
+        )
+        .with_path("recipe.source.alpha")
+        .with_hint("Declare source.sdr and working_transfer before normalizing an alpha source."));
+    }
     if source.clock.is_some() && source.sdr.is_none() {
         return Err(error(
             "INVALID_CONFORM",
@@ -300,6 +318,14 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
     if let Some(v) = video.first() {
         let accepted = if let Some(sdr) = source.sdr {
             let (layout, report) = sdr.inspect(v, mkv, mp4)?;
+            if layout.has_alpha() != source.alpha.is_some() {
+                return Err(error(
+                    "INVALID_ALPHA",
+                    "Declare source.alpha: straight for native alpha; omit source.alpha for opaque sources",
+                ).with_path("recipe.source.alpha")
+                 .with_hint(if layout.has_alpha() { "Declare straight only if source RGB is independent of alpha; premultiplied input is unsupported." } else { "Remove source.alpha from an opaque source recipe." })
+                 .with_detail(json!({"pixel_format":v["pix_fmt"],"alpha_required":layout.has_alpha(),"observed":source.alpha})));
+            }
             checked.layout = Some(layout);
             checked.normalization = report;
             true
@@ -779,6 +805,11 @@ fn report(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Value {
     let picture = |value: Value| if audio_only { Value::Null } else { value };
     let frames = picture(json!(recipe.duration.units(rate).unwrap_or_default()));
     let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"audio_only":audio_only,"frame_rate":picture(json!(rate)),"frames":frames,"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":picture(json!("latest_source_timestamp_at_or_before_output_clock_plus_half_source_tick")),"resize":picture(json!("nearest_top_left")),"audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
+    if let Some(alpha) = recipe.source.alpha {
+        report["alpha"] = json!({"input":alpha,"output":"straight","format":"bgra",
+            "sampling":"full_range_nearest_8bit_independent_of_color_transfer",
+            "interpolation":"straight_rgba_channels_independently"});
+    }
     if let Some(origin) = source.origin {
         report["clock"] = json!({"origin":"first_video_frame","video_first_timestamp":origin,
             "audio_first_timestamp":source.audio_first,"audio_sample_offset_at_video_zero":source.audio_offset,
@@ -809,13 +840,13 @@ pub fn inspect(recipe: &Recipe, root: &Path) -> Result<Value> {
         .unwrap_or(Value::Null);
     Ok(result)
 }
-/// SHA-256 of the decoded RGB video or 48 kHz stereo PCM of `path`: `bytes` raw bytes, hashed in
+/// SHA-256 of decoded RGB/RGBA video or 48 kHz stereo PCM of `path`: `bytes` raw bytes, hashed in
 /// Rust (crate::digest) rather than by FFmpeg's much slower hash muxer.
-fn decoded_hash(path: &Path, video: bool, bytes: u64, timeout: Duration) -> Result<String> {
+fn decoded_hash(path: &Path, video: Option<&str>, bytes: u64, timeout: Duration) -> Result<String> {
     let mut args = input_args(path);
     args.extend(
-        if video {
-            vec!["-map", "0:v:0", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+        if let Some(format) = video {
+            vec!["-map", "0:v:0", "-pix_fmt", format, "-f", "rawvideo", "-"]
         } else {
             vec!["-map", "0:a:0", "-c:a", "pcm_s16le", "-f", "s16le", "-"]
         }
@@ -1064,7 +1095,7 @@ fn run_audio(
     let verified = crate::pcm_stream::inspect(&temp, &media::Uncontrolled)?;
     if verified.frames != samples
         || verified.pcm_sha256 != written
-        || decoded_hash(&temp, false, samples * 4, timeout)? != written
+        || decoded_hash(&temp, None, samples * 4, timeout)? != written
     {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
@@ -1135,6 +1166,9 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
 
     // Video: decode only frames lo..=hi. Forward mappings stream through a pipe; reverse and
     // other non-monotonic mappings use a bounded random-access window in scratch.
+    let alpha = source.layout.is_some_and(color::Layout::has_alpha);
+    let channels = if alpha { 4 } else { 3 };
+    let pixel_format = if alpha { "rgba" } else { "rgb24" };
     let native_size = source
         .layout
         .map_or(source.width as usize * source.height as usize * 3, |l| {
@@ -1240,7 +1274,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             "-f".into(),
             "rawvideo".into(),
             "-pixel_format".into(),
-            "rgb24".into(),
+            pixel_format.into(),
             "-video_size".into(),
             format!("{}x{}", width, height),
             "-framerate".into(),
@@ -1267,7 +1301,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         "-slices".into(),
         ffv1_slices.into(),
         "-pix_fmt".into(),
-        "bgr0".into(),
+        if alpha { "bgra" } else { "bgr0" }.into(),
         "-threads".into(),
         ffv1_slices.into(),
         "-c:a".into(),
@@ -1307,9 +1341,9 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         args.extend(["-frames:v".into(), count.to_string()]);
     }
     args.push(temp.to_string_lossy().into_owned());
-    let source_size = source.width as usize * source.height as usize * 3;
+    let source_size = source.width as usize * source.height as usize * channels;
     let mut video_hash = Sha256::new();
-    let frame_bytes = width as u64 * height as u64 * 3;
+    let frame_bytes = width as u64 * height as u64 * channels as u64;
     // The expected digest of a silent picture is that of all-zero frames, hashed while it encodes.
     let mut silent_hash = None;
     if silent {
@@ -1327,7 +1361,12 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             let mut first_index = None;
             let mut second_index = None;
             let mut native_pixels = vec![0u8; native_size];
-            let mut pixels = vec![0u8; width as usize * height as usize * 3];
+            let mut pixels = vec![0u8; width as usize * height as usize * channels];
+            let mut color_pixels = if alpha {
+                vec![0u8; source_size / 4 * 3]
+            } else {
+                vec![]
+            };
             for n in 0..count {
                 if let Some(frames_in) = &mut frames_in {
                     let sample = &selected.frames[n as usize];
@@ -1355,19 +1394,34 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
                             }
                         }
                         if let Some(layout) = source.layout {
-                            recipe.source.sdr.expect("checked SDR").convert(
-                                layout,
-                                source.width,
-                                source.height,
-                                &native_pixels,
-                                recipe.working_transfer.expect("checked working transfer"),
-                                buffer,
-                            );
+                            let normalize = |rgb: &mut [u8]| -> Result<()> {
+                                recipe.source.sdr.expect("checked SDR").convert(
+                                    layout,
+                                    source.width,
+                                    source.height,
+                                    &native_pixels,
+                                    recipe.working_transfer.expect("checked working transfer"),
+                                    rgb,
+                                );
+                                if let Some(lut) = &lut {
+                                    lut.apply_rgb(rgb)?;
+                                }
+                                Ok(())
+                            };
+                            if alpha {
+                                normalize(&mut color_pixels)?;
+                                let count = source_size / 4;
+                                for (i, pixel) in
+                                    buffer.as_chunks_mut::<4>().0.iter_mut().enumerate()
+                                {
+                                    pixel[..3].copy_from_slice(&color_pixels[i * 3..i * 3 + 3]);
+                                    pixel[3] = layout.alpha(&native_pixels, count, i);
+                                }
+                            } else {
+                                normalize(buffer)?;
+                            }
                         } else {
                             buffer.copy_from_slice(&native_pixels);
-                        }
-                        if let Some(lut) = &lut {
-                            lut.apply_rgb(buffer)?;
                         }
                         Ok(())
                     };
@@ -1390,9 +1444,9 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
                             let p = ((y * source.height as usize / height as usize)
                                 * source.width as usize
                                 + x * source.width as usize / width as usize)
-                                * 3;
-                            let out = (y * width as usize + x) * 3;
-                            for c in 0..3 {
+                                * channels;
+                            let out = (y * width as usize + x) * channels;
+                            for c in 0..channels {
                                 pixels[out + c] = if weight.num == 0 {
                                     first_pixels[p + c]
                                 } else {
@@ -1417,13 +1471,16 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     let video_hash = silent_hash.unwrap_or_else(|| format!("{:x}", video_hash.finalize()));
     // Frame timing from FFV1 packets: the decoded-content digests below decode every frame and
     // check its exact byte count, so a second full decode for timestamps would add nothing.
-    let verified =
-        render::inspect_reference_audio(&temp, width, height, rate, &media::Uncontrolled)?;
+    let verified = if alpha {
+        render::inspect_timeline_source(&temp, width, height, rate, &media::Uncontrolled)?
+    } else {
+        render::inspect_reference_audio(&temp, width, height, rate, &media::Uncontrolled)?
+    };
     let samples = recipe.duration.units(Time::new(48000, 1)?)?;
     if verified.frames != count
         || verified.samples != samples
-        || decoded_hash(&temp, true, frame_bytes * count, timeout)? != video_hash
-        || decoded_hash(&temp, false, samples * 4, timeout)? != media::file_hash(&raw_audio)?
+        || decoded_hash(&temp, Some(pixel_format), frame_bytes * count, timeout)? != video_hash
+        || decoded_hash(&temp, None, samples * 4, timeout)? != media::file_hash(&raw_audio)?
     {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
@@ -1438,6 +1495,12 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
             .iter()
             .find(|s| s["codec_type"] == "video")
             .expect("verified video");
+        if video["pix_fmt"] != if alpha { "bgra" } else { "bgr0" } {
+            return Err(error(
+                "RENDER_VALIDATION_FAILED",
+                "Normalized output pixel format changed",
+            ));
+        }
         color::Input {
             matrix: color::Matrix::Rgb,
             range: color::Range::Full,
@@ -1471,6 +1534,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
 pub fn capabilities() -> Value {
     let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","audio_only_output":"wav_pcm16_48000_stereo_without_width_height","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
+    value["alpha_output"] = json!({"requires":"source.sdr_and_source.alpha_straight","format":"ffv1_bgra_pcm16","alpha":"full_range_nearest_8bit","premultiplied_input":false});
     value["sdr_audio"] = json!({"containers":["mp4","mov","mkv"],"codecs":["aac","pcm","mp3","flac","opus"],"channels":[1,2],"sample_rate":"positive_native_rate"});
     value["clock_normalization"] = json!({"source_clock":"first_video_frame","requires":"source.sdr",
         "audio_timestamp_quantization":"nearest_native_sample","outside_audio":"silence","transcripts":"unsupported; transcribe output",

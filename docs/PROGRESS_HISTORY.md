@@ -1,5 +1,30 @@
 # Progress history
 
+## 12 October 2026: explicit transparent ProRes and FFV1 normalization
+
+Explicit SDR conform now accepts native ProRes 4444/4444 XQ YUVA444 at 10 or 12 bits,
+and FFV1/bgra, with the required `source.alpha: "straight"` declaration. It preserves
+hidden RGB under zero alpha, converts color independently, quantizes full-range coverage
+to eight bits and writes verified straight-alpha FFV1/bgra plus PCM16. LUTs affect RGB
+only; resize and temporal mapping preserve all four channels. Opaque behavior is unchanged.
+Missing/contradictory alpha declarations and premultiplied input are rejected explicitly.
+
+Windows (231) and Linux (230) Rust tests pass, as do Windows lint/format/material checks.
+The retained alpha fixture passes identically on both platforms: eight cases, five rejected
+requests, exact saved-session compositing and unchanged sources. Every compared RGB value
+has zero observed error against the independent Decimal reference (one-level tolerance),
+with exact alpha and PCM. Cases cover both transfers, hidden color, reverse/nearest resize,
+LUT plus linear temporal sampling, and source/output preservation. Color, conform, overlays
+and agent-cost regressions pass on both platforms in 214 and 112 seconds respectively;
+no replay budget changed. The 131 frozen input files match the Linux test copy, apart from
+the already recorded line-ending-only difference in commands.rs.
+
+This completes the explicit alpha-format slice of direct-footage stage 2. Automatic bounded
+conversion caching, rotation and non-square pixels remain open. Full generated evidence
+still identifies the separately verified 338e114 milestone; it is not evidence for this
+later slice. No points or model-workflow success are claimed. Shipping is queued behind
+the fresh-model measurements, and its gate/background results must be checked afterward.
+
 ## 12 October 2026: complete stage-1 milestone evidence refreshed
 
 The full Windows thorough run passed on fixed commit 338e11436d253a6d3a6ef9d1d4e3a4694627edac:

@@ -309,6 +309,8 @@ def run(root):
     assert not list(output.glob('.cutbolt-scene-*')) and not list(output.glob('.cutbolt-export-*'))
     passed.append('color.invalid_metadata_and_preservation')
     report={'passed':passed,'cases':comparisons,'frames_compared':sum(c['frames'] for c in comparisons)+24,'stereo_sample_frames_compared':(sum(c['frames'] for c in comparisons)+24)*1920,'rejected_cases':len(bad)+3,'maximum_rgb_error':maximum,'threshold':{'maximum_rgb_error':1},'reference':'Original native RGB/YUV chart samples; independent 48-digit Decimal transfer/matrix/range equations and Fraction frame mapping. External tools supply codec encode/decode only. All output RGB/PCM checked; original sources and existing outputs preserved.','limits':'8/10-bit input to 8-bit RGB, BT.709 primaries/D65, sRGB or BT.709 OETF interpretation, fixed full/limited ranges; YUV420 nearest 2x2 and YUV422 nearest 2x1 blocks, no HDR/ICC/wide gamut or display transform'}
+    from support.conform_alpha import run as run_alpha
+    report['alpha']=run_alpha(root/'alpha',convert_pixel)
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     (root/'recipe.json').write_text(json.dumps(recipe('yuv-untagged',policy='use_declared'),indent=2)+'\n',encoding='utf-8')
     print(json.dumps(report))
