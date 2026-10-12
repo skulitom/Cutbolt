@@ -7,6 +7,7 @@ import ctypes
 from ctypes import wintypes
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -20,6 +21,13 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def peak_memory(pid):
+    """A process's peak resident memory in bytes; AssertionError once it has exited."""
+    if os.name!="nt":
+        try:status=Path(f"/proc/{pid}/status").read_text()
+        except OSError as e:raise AssertionError(e) from None
+        peak=[line.split()[1] for line in status.splitlines() if line.startswith("VmHWM:")]
+        assert peak,status  # A zombie has no memory left to report.
+        return int(peak[0])*1024
     class Counters(ctypes.Structure):
         _fields_=[("cb",wintypes.DWORD),("faults",wintypes.DWORD)]+[(name,ctypes.c_size_t) for name in ("peak","working","peak_pool","pool","peak_nonpaged","nonpaged","pagefile","peak_pagefile")]
     kernel=ctypes.WinDLL("kernel32",use_last_error=True)

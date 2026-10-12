@@ -506,7 +506,7 @@ pub fn capabilities() -> Value {
         "rounding":["strict","outward"],"estimates":"explicit_reject_or_allow_reported",
         "collateral_words":"explicit_reject_or_allow_reported","overlapping_cuts":"merge_union",
         "recognition":{"command":"transcript.transcribe","mode":"blocking_cli_library","profile":"local-en-el-context-v1",
-            "platform":"windows_wsl_cuda","minimum_range_seconds":{"num":1,"den":40},"maximum_range_seconds":120,
+            "platforms":["linux_cuda","windows_wsl_cuda"],"minimum_range_seconds":{"num":1,"den":40},"maximum_range_seconds":120,
             "maximum_seconds":600,"network":"isolated_namespace","source_profiles":["stereo_wav","reference_movie"],
             "analysis_rate":16000,"source_clock":48000,"channel_selection":["left","right","mean"],
             "leading_context":{"num":2,"den":25},"trailing_context":{"num":1,"den":50},"review_required":true,

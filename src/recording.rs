@@ -338,6 +338,7 @@ pub fn place(request: &Place) -> Result<Value> {
             bytes: actual.bytes,
         }),
         proxy: None,
+        decode: None,
     };
     let arrangement = match &request.sequence_id {
         Some(id) => &crate::sequences::get(&request.project, id)?.arrangement,
@@ -380,7 +381,13 @@ pub fn place(request: &Place) -> Result<Value> {
         },
         None => crate::model::Operation::Tracks { edit },
     };
-    let operations = vec![crate::model::Operation::AddMedia { asset }, operation];
+    let operations = vec![
+        crate::model::Operation::AddMedia {
+            asset,
+            input_root: None,
+        },
+        operation,
+    ];
     let candidate = request
         .project
         .apply(request.project.revision, operations.clone())?;

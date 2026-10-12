@@ -1,0 +1,291 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-quote-card-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "quote-card",
+    "width": 320,
+    "height": 180,
+    "output_scale": 2,
+    "duration": {
+      "num": 3,
+      "den": 1
+    },
+    "background": [
+      10,
+      17,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "transparent": false,
+    "audio": null,
+    "layers": [
+      {
+        "id": "rule",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "rectangle",
+          "rect": [
+            22,
+            24,
+            4,
+            132
+          ],
+          "fill": [
+            91,
+            225,
+            195,
+            255
+          ],
+          "stroke": null
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "quote",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "An idea worth remembering.",
+          "fonts": [],
+          "size": 24,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            43,
+            30,
+            253,
+            89
+          ],
+          "line_height": 30,
+          "letter_spacing": 0,
+          "align": "left",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "attribution",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 3,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "A thoughtful voice",
+          "fonts": [],
+          "size": 13,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            44,
+            128,
+            250,
+            28
+          ],
+          "line_height": 19,
+          "letter_spacing": 0,
+          "align": "left",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "quote",
+      "definition": {
+        "type": "text",
+        "default": "An idea worth remembering.",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "quote"
+        }
+      ]
+    },
+    {
+      "name": "attribution",
+      "definition": {
+        "type": "text",
+        "default": "A thoughtful voice",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "attribution"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "quote"
+        },
+        {
+          "property": "fonts",
+          "layer": "attribution"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          241,
+          245,
+          251,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "quote"
+        },
+        {
+          "property": "text_color",
+          "layer": "attribution"
+        }
+      ]
+    },
+    {
+      "name": "accent",
+      "definition": {
+        "type": "color",
+        "default": [
+          91,
+          225,
+          195,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "shape_fill",
+          "layer": "rule"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 3,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        }
+      ]
+    }
+  ]
+}

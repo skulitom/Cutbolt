@@ -89,11 +89,47 @@ fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
     }
     Ok(())
 }
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = |p: &Path| {
+        std::ffi::CString::new(p.as_os_str().as_bytes())
+            .map_err(|_| error("INVALID_PATH", "Embedded NUL in directory path"))
+    };
+    let (from, to) = (path(source)?, path(destination)?);
+    // Same-filesystem rename that fails if the destination exists. Neither replacement nor
+    // copy/delete fallback is authorized.
+    // SAFETY: two valid NUL-terminated paths, borrowed for the duration of the call.
+    if unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    } == -1
+    {
+        return Err(error(
+            "PUBLISH_FAILED",
+            format!(
+                "Image directory was not published: {}",
+                std::io::Error::last_os_error()
+            ),
+        ));
+    }
+    // Write the rename through to disk, as the Windows move does. It is already published, so a
+    // failed flush is not a failed publication.
+    if let Some(parent) = destination.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let _ = File::open(parent).and_then(|d| d.sync_all());
+    }
+    Ok(())
+}
+#[cfg(not(any(windows, target_os = "linux")))]
 fn publish_directory(_source: &Path, _destination: &Path) -> Result<()> {
     Err(error(
         "UNSUPPORTED_PLATFORM",
-        "Atomic image directory publication currently requires Windows",
+        "Atomic image directory publication currently requires Windows or Linux",
     ))
 }
 

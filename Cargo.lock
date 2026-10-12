@@ -106,15 +106,18 @@ dependencies = [
 name = "cutbolt"
 version = "0.4.0"
 dependencies = [
+ "flate2",
  "fontdue",
  "harfrust",
  "hound",
+ "libc",
  "png",
  "rusqlite",
  "schemars",
  "serde",
  "serde_json",
  "sha2",
+ "ttf-parser",
  "unicode-bidi",
  "unicode-linebreak",
  "unicode-script",

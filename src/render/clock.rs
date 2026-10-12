@@ -111,7 +111,8 @@ fn thirds(rate: Time, thirds: u64) -> String {
 ///
 /// Inspection tied every frame of a source to its index (`timestamp`): frame `n` is timed `n`
 /// periods, at the container's precision. Reading starts a third of a period before `first`.
-/// FFmpeg moves the demuxer to the last keyframe at or before that time (every FFV1 frame is one),
+/// FFmpeg moves the demuxer to the last keyframe at or before that time (every FFV1 frame is one;
+/// compressed sources use their cached presentation index and may request an earlier GOP),
 /// counts time from it and drops earlier frames; `seek_trim` then keeps the wanted frames by time.
 /// Each boundary lies at least a third of a period (5.5 ms at 60 fps) from every frame time. The
 /// container clock, the offset and the trim each round by at most half a millisecond on the 1 ms
@@ -124,6 +125,29 @@ pub(crate) fn seek_input(rate: Time, first: u64) -> Vec<String> {
         return Vec::new();
     }
     vec!["-ss".into(), thirds(rate, 3 * first - 1)]
+}
+
+/// The same one-third-period seek margin on a source clock with a signed timestamp origin.
+/// `-copyts -seek_timestamp 1` must accompany these options; trim then uses indexed native PTS.
+pub(crate) fn seek_input_at(
+    rate: Time,
+    first: u64,
+    origin: crate::time::Stamp,
+) -> Result<Vec<String>> {
+    if first == 0 {
+        return Ok(Vec::new());
+    }
+    let offset = Time::new(3 * first - 1, 3)?.times(Time::new(rate.den, rate.num)?)?;
+    let stamp = origin.plus(crate::time::Stamp::time(offset)?)?;
+    let (micros, _, _) = stamp.times(Time::new(1_000_000, 1)?)?.sample();
+    let magnitude = micros.unsigned_abs();
+    let seconds = format!(
+        "{}{}.{:06}",
+        if micros < 0 { "-" } else { "" },
+        magnitude / 1_000_000,
+        magnitude % 1_000_000
+    );
+    Ok(vec!["-ss".into(), seconds])
 }
 
 /// The trim keeping source frames `[first, end)` of an input started at frame `seek` by
@@ -142,6 +166,46 @@ pub(crate) fn seek_trim(rate: Time, seek: u64, first: u64, end: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_seeks_retain_signed_origins_and_floor_negative_microseconds() {
+        use crate::time::Stamp;
+        let rate = Time::new(25, 1).unwrap();
+        assert_eq!(
+            seek_input_at(rate, 60, Stamp::time(Time::new(2, 5).unwrap()).unwrap()).unwrap(),
+            ["-ss", "2.786666"]
+        );
+        assert_eq!(
+            seek_input_at(
+                rate,
+                60,
+                Stamp::ticks(-3, Time::new(1, 1).unwrap()).unwrap()
+            )
+            .unwrap(),
+            ["-ss", "-0.613334"]
+        );
+        for rate in [
+            Time::new(24, 1).unwrap(),
+            rate,
+            Time::new(30, 1).unwrap(),
+            Time::new(50, 1).unwrap(),
+            Time::new(60, 1).unwrap(),
+            Time::new(24000, 1001).unwrap(),
+            Time::new(30000, 1001).unwrap(),
+            Time::new(60000, 1001).unwrap(),
+        ] {
+            for frame in [1, 61, 1200, 36000] {
+                assert_eq!(
+                    seek_input_at(rate, frame, Stamp::ZERO).unwrap()[1]
+                        .trim_end_matches('0')
+                        .trim_end_matches('.'),
+                    seek_input(rate, frame)[1]
+                        .trim_end_matches('0')
+                        .trim_end_matches('.')
+                );
+            }
+        }
+    }
 
     #[test]
     fn seeks_start_a_third_of_a_frame_early_and_trim_on_frame_times() {

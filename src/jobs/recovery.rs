@@ -218,9 +218,7 @@ pub(super) fn failed(connection: &Connection, id: &str, failure: &crate::Error) 
         tx.execute("UPDATE jobs SET status='completed',phase='completed',frames=total_frames,result=?2,failure=NULL WHERE id=?1 AND status='running'",params![id,receipt.to_string()])?;
         complete_attempt(&tx, id)?;
     } else {
-        let failure = publication
-            .err()
-            .unwrap_or_else(|| error(failure.code, &failure.message));
+        let failure = publication.err().unwrap_or_else(|| failure.clone());
         let (cancelled, attempt, maximum): (bool, i64, i64) = tx.query_row(
             "SELECT cancel_requested,attempt,max_attempts FROM jobs WHERE id=?1",
             [id],

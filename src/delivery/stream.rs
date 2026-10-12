@@ -366,6 +366,7 @@ mod tests {
             height: 36,
             frames: 50,
             base: Vec::new(),
+            direct: Vec::new(),
             runs: Vec::new(),
             transitions: Vec::new(),
             layers: Vec::new(),

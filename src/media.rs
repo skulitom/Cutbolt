@@ -400,14 +400,39 @@ pub(crate) fn feed_stdin_with(
 /// never blocks on a full pipe. The tool's own failure wins over the producer's, which wins over
 /// the consumer's.
 pub(crate) fn feed_stdin_consuming<T: Send + 'static>(
-    mut command: Command,
+    command: Command,
     program: &str,
     timeout: Duration,
     watch: Watch,
     consume: impl FnOnce(std::process::ChildStdout) -> Result<T> + Send + 'static,
     produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
 ) -> Result<T> {
+    feed_stdin_pipes(
+        command,
+        program,
+        timeout,
+        watch,
+        (consume, |stderr| (Ok(()), drain(stderr, 64 * 1024, None).0)),
+        produce,
+    )
+    .map(|(output, ())| output)
+}
+
+/// Like `feed_stdin_consuming`, with a bounded diagnostic consumer that can retain a second
+/// machine-readable output (for example the PCM clock). Tool errors still precede parse errors.
+pub(crate) fn feed_stdin_pipes<T: Send + 'static, U: Send + 'static>(
+    mut command: Command,
+    program: &str,
+    timeout: Duration,
+    watch: Watch,
+    consumers: (
+        impl FnOnce(std::process::ChildStdout) -> Result<T> + Send + 'static,
+        impl FnOnce(std::process::ChildStderr) -> (Result<U>, Vec<u8>) + Send + 'static,
+    ),
+    produce: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
+) -> Result<(T, U)> {
     use std::sync::{Arc, Mutex};
+    let (consume, diagnostics) = consumers;
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -420,7 +445,7 @@ pub(crate) fn feed_stdin_consuming<T: Send + 'static>(
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
     let out_thread = thread::spawn(move || consume(stdout));
-    let err_thread = thread::spawn(move || drain(stderr, 64 * 1024, None));
+    let err_thread = thread::spawn(move || diagnostics(stderr));
     let child = Arc::new(Mutex::new(ChildGuard(child)));
     let watchdog = Watchdog::start(child.clone(), program, timeout, watch);
     let produced = produce(&mut stdin);
@@ -435,7 +460,7 @@ pub(crate) fn feed_stdin_consuming<T: Send + 'static>(
     let consumed = out_thread
         .join()
         .map_err(|_| error("TOOL_FAILED", "Output reader failed"));
-    let (err, _) = err_thread
+    let (observed, err) = err_thread
         .join()
         .map_err(|_| error("TOOL_FAILED", "Diagnostic reader failed"))?;
     if let Some(failure) = watchdog.failure() {
@@ -449,7 +474,7 @@ pub(crate) fn feed_stdin_consuming<T: Send + 'static>(
     }
     // A producer failure (e.g. a composition error) wins over a broken pipe from the tool.
     produced?;
-    consumed?
+    Ok((consumed??, observed?))
 }
 
 /// A tool whose stdout is read incrementally (e.g. decoded frames), so large outputs never reach disk.
@@ -792,6 +817,7 @@ pub fn file_hash(path: &Path) -> Result<String> {
 }
 pub fn file_hash_controlled(path: &Path, control: &dyn Control) -> Result<String> {
     let mut input = File::open(path)?;
+    let before = crate::identity_cache::fingerprint(path, &input);
     let mut hash = Sha256::new();
     let mut buf = [0; 65536];
     loop {
@@ -802,7 +828,21 @@ pub fn file_hash_controlled(path: &Path, control: &dyn Control) -> Result<String
         }
         hash.update(&buf[..count]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    let digest = format!("{:x}", hash.finalize());
+    crate::identity_cache::remember(path, &input, before, &digest);
+    Ok(digest)
+}
+
+/// Preliminary checks only. Publishing outputs and receipts must use `file_hash_controlled`.
+pub(crate) fn file_hash_reused_controlled(path: &Path, control: &dyn Control) -> Result<String> {
+    control.check()?;
+    let file = File::open(path)?;
+    if let Some(fingerprint) = crate::identity_cache::fingerprint(path, &file)
+        && let Some(digest) = crate::identity_cache::lookup(&fingerprint)
+    {
+        return Ok(digest);
+    }
+    file_hash_controlled(path, control)
 }
 
 pub fn version(name: &str) -> Result<String> {

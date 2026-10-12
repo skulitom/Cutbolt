@@ -2,7 +2,7 @@
 use crate::{
     Result, color, error, media, remap, render,
     scene::{self, Identity},
-    time::Time,
+    time::{Stamp, Time},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -48,6 +48,13 @@ pub enum Audio {
     Resample,
     Mute,
 }
+/// Explicit clock normalization: make the first presented video frame time zero, preserving
+/// audio's relative timestamp offset. Audio outside its decoded interval becomes silence.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Clock {
+    FirstVideoFrame,
+}
 /// Identity-bound conform source and its declared color interpretation.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +66,10 @@ pub struct Source {
     /// Explicit SDR normalization; requires recipe `working_transfer`. Omit for the legacy path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdr: Option<color::Input>,
+    /// Optional `first_video_frame` origin and aligned/padded/trimmed audio; requires `sdr` video.
+    /// Omit to retain strict zero-origin timestamps and existing audio interval checks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock: Option<Clock>,
 }
 /// Media conversion recipe for media.conform: samples a source into a new FFV1/PCM16 editing asset at `frame_rate` (default 25 fps), or a WAV source into an audio-only WAV when `width` and `height` are omitted.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -116,6 +127,9 @@ struct Checked {
     metadata: Value,
     layout: Option<color::Layout>,
     normalization: Value,
+    origin: Option<Stamp>,
+    audio_first: Option<Stamp>,
+    audio_offset: Stamp,
 }
 fn unsupported(message: &str) -> crate::Error {
     error("UNSUPPORTED_MEDIA", message)
@@ -125,6 +139,12 @@ fn number(value: &Value) -> Result<u64> {
         .as_u64()
         .or_else(|| value.as_str()?.parse().ok())
         .ok_or_else(|| unsupported("Missing or negative media integer"))
+}
+fn signed_number(value: &Value) -> Result<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str()?.parse().ok())
+        .ok_or_else(|| unsupported("Missing or invalid signed media timestamp"))
 }
 fn ratio(value: &Value) -> Result<Time> {
     let (n, d) = value
@@ -208,6 +228,12 @@ fn input_args(path: &Path) -> Vec<String> {
     .collect()
 }
 fn check(source: &Source, root: &Path) -> Result<Checked> {
+    if source.clock.is_some() && source.sdr.is_none() {
+        return Err(error(
+            "INVALID_CONFORM",
+            "source.clock requires explicit SDR video normalization",
+        ));
+    }
     if source.color.is_some() && source.sdr.is_some() {
         return Err(error(
             "INVALID_COLOR",
@@ -267,6 +293,9 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
         metadata: metadata.clone(),
         layout: None,
         normalization: Value::Null,
+        origin: None,
+        audio_first: None,
+        audio_offset: Stamp::ZERO,
     };
     if let Some(v) = video.first() {
         let accepted = if let Some(sdr) = source.sdr {
@@ -359,16 +388,24 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
                 }
                 sdr.inspect(&profile, mkv, mp4)?;
             }
-            let t = Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?;
+            let t = if source.clock.is_some() {
+                let timestamp = Stamp::ticks(signed_number(&f["best_effort_timestamp"])?, tb)?;
+                let origin = *checked.origin.get_or_insert(timestamp);
+                timestamp.minus(origin)?.nonnegative()?
+            } else {
+                Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?
+            };
             if (i == 0 && t.num != 0)
                 || (i > 0 && t.compare(checked.pts[i - 1])? != Ordering::Greater)
                 || f["width"] != checked.width
                 || f["height"] != checked.height
                 || f["interlaced_frame"] != 0
             {
-                return Err(unsupported(
-                    "Video requires zero-origin increasing timestamps and fixed progressive dimensions",
-                ));
+                return Err(unsupported(if source.clock.is_some() {
+                    "Video requires increasing timestamps from the declared origin and fixed progressive dimensions"
+                } else {
+                    "Video requires zero-origin increasing timestamps and fixed progressive dimensions"
+                }));
             }
             checked.pts.push(t);
         }
@@ -424,12 +461,19 @@ fn audio_stream(
     (mkv, mp4, wav): (bool, bool, bool),
     timeout: Duration,
 ) -> Result<()> {
-    let valid =
-        (mp4 && a["codec_name"] == "aac") || ((mkv || wav) && a["codec_name"] == "pcm_s16le");
+    let normalized = checked.layout.is_some();
+    let codec = a["codec_name"].as_str().unwrap_or("");
+    let valid = if normalized {
+        (mkv || mp4)
+            && (matches!(codec, "aac" | "mp3" | "flac" | "opus") || codec.starts_with("pcm_"))
+    } else {
+        (mp4 && codec == "aac") || ((mkv || wav) && codec == "pcm_s16le")
+    };
     checked.audio_rate = number(&a["sample_rate"])?;
     checked.channels = number(&a["channels"])?;
     if !valid
-        || ![24000, 44100, 48000].contains(&checked.audio_rate)
+        || checked.audio_rate == 0
+        || (!normalized && ![24000, 44100, 48000].contains(&checked.audio_rate))
         || ![1, 2].contains(&checked.channels)
         || !match a["channel_layout"].as_str() {
             None | Some("unknown") => true,
@@ -439,13 +483,30 @@ fn audio_stream(
         }
     {
         return Err(unsupported(
-            "Audio requires PCM16 or MP4/MOV AAC, mono/stereo, 24/44.1/48 kHz",
+            "Audio requires mono/stereo PCM16 or MP4/MOV AAC at 24/44.1/48 kHz; explicit SDR video also accepts AAC/PCM/MP3/FLAC/Opus at any positive decoded rate",
         ));
     }
     let tb = ratio(&a["time_base"])?;
     let decoded = frames(&checked.path, "a:0", timeout)?;
+    let mut first_container_timestamp = None;
     for f in decoded {
-        let t = Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?;
+        let t = if let Some(origin) = checked.origin {
+            let timestamp = Stamp::ticks(signed_number(&f["best_effort_timestamp"])?, tb)?;
+            let first_tick = timestamp
+                .times(Time::new(checked.audio_rate, 1)?)?
+                .nearest_integer();
+            let first = *checked
+                .audio_first
+                .get_or_insert(Stamp::ticks(first_tick, Time::new(1, checked.audio_rate)?)?);
+            checked.audio_offset = origin
+                .minus(first)?
+                .times(Time::new(checked.audio_rate, 1)?)?;
+            timestamp
+                .minus(*first_container_timestamp.get_or_insert(timestamp))?
+                .nonnegative()?
+        } else {
+            Time::new(number(&f["best_effort_timestamp"])?, 1)?.times(tb)?
+        };
         let expected = Time::new(checked.samples, checked.audio_rate)?;
         let diff = if t.compare(expected)? == Ordering::Less {
             expected.minus(t)?
@@ -455,16 +516,20 @@ fn audio_stream(
         if (checked.samples == 0 && t.num != 0)
             || diff.compare(Time::new(1, 1000)?)? == Ordering::Greater
         {
-            return Err(unsupported(
-                "Audio must be zero-origin and continuous within container precision",
-            ));
+            return Err(unsupported(if checked.origin.is_some() {
+                "Audio must follow the declared origin and be continuous within container precision"
+            } else {
+                "Audio must be zero-origin and continuous within container precision"
+            }));
         }
         let n = number(&f["nb_samples"])?;
         checked.samples = checked
             .samples
             .checked_add(n)
             .ok_or_else(|| unsupported("Audio count overflow"))?;
-        if n == 0 || checked.samples > checked.audio_rate * SOURCE_AUDIO_SECONDS {
+        if n == 0
+            || checked.samples as u128 > checked.audio_rate as u128 * SOURCE_AUDIO_SECONDS as u128
+        {
             return Err(error("LIMIT_EXCEEDED", "Decoded audio exceeds one hour"));
         }
     }
@@ -591,7 +656,7 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
                 if t.compare(end)? == Ordering::Greater {
                     return Err(error("INVALID_RANGE", "Speed map leaves the decoded source interval"));
                 }
-                if source.samples > 0 && matches!(recipe.audio, Audio::Resample)
+                if source.origin.is_none() && source.samples > 0 && matches!(recipe.audio, Audio::Resample)
                     && t.compare(Time::new(source.samples, source.audio_rate)?)? == Ordering::Greater
                 {
                     return Err(error("INVALID_RANGE", "Speed map leaves the decoded audio interval"));
@@ -677,7 +742,11 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
             mapped.frames.push(sample);
         }
     }
-    if recipe.remap.is_none() && matches!(recipe.audio, Audio::Resample) && source.samples > 0 {
+    if source.origin.is_none()
+        && recipe.remap.is_none()
+        && matches!(recipe.audio, Audio::Resample)
+        && source.samples > 0
+    {
         recipe.source_in.units(Time::new(source.audio_rate, 1)?)?;
         if recipe
             .source_in
@@ -701,6 +770,12 @@ fn report(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Value {
     let picture = |value: Value| if audio_only { Value::Null } else { value };
     let frames = picture(json!(recipe.duration.units(rate).unwrap_or_default()));
     let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"audio_only":audio_only,"frame_rate":picture(json!(rate)),"frames":frames,"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":picture(json!("latest_source_timestamp_at_or_before_output_clock_plus_half_source_tick")),"resize":picture(json!("nearest_top_left")),"audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
+    if let Some(origin) = source.origin {
+        report["clock"] = json!({"origin":"first_video_frame","video_first_timestamp":origin,
+            "audio_first_timestamp":source.audio_first,"audio_sample_offset_at_video_zero":source.audio_offset,
+            "audio_timestamp_quantization":"nearest_native_sample","outside_decoded_audio":"silence","output_audio_extent":"recipe_duration",
+            "mono_to_stereo":source.channels == 1,"resample_to_48000":source.audio_rate != 0 && source.audio_rate != 48000});
+    }
     if let Some(remap) = &mapped.remap {
         let request = recipe.remap.as_ref().expect("compiled remap");
         report["remap"] = json!({"segments":remap.spans,"source_times":mapped.times,"video_samples":mapped.frames,"video_sampling":request.video_sampling,"audio_pitch":request.audio_pitch,"clock":"exact_integral_of_linear_speed","interpolation_space":"working_rgb_values_after_normalization_and_lut"});
@@ -745,8 +820,37 @@ fn seconds(t: Time) -> f64 {
     t.num as f64 / t.den as f64
 }
 
+/// Position on the native decoded PCM clock corresponding to a normalized video time.
+fn audio_position(source: &Checked, time: Time) -> Result<Stamp> {
+    source
+        .audio_offset
+        .plus(Stamp::time(time.times(Time::new(source.audio_rate, 1)?)?)?)
+}
+
 /// Inclusive source sample range read by the resampler (each output sample interpolates a, a+1).
 fn audio_window(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Result<(u64, u64)> {
+    if source.origin.is_some() {
+        let (mut low, mut high) = (recipe.source_in, recipe.source_in);
+        if let Some(remap) = &mapped.remap {
+            for span in &remap.spans {
+                for t in [span.source_start, span.source_end] {
+                    if t.compare(low)?.is_lt() {
+                        low = t;
+                    }
+                    if t.compare(high)?.is_gt() {
+                        high = t;
+                    }
+                }
+            }
+        } else {
+            high = recipe.source_in.plus(recipe.duration.times(recipe.rate)?)?;
+        }
+        let clamp = |n: i128| n.clamp(0, source.samples as i128 - 1) as u64;
+        return Ok((
+            clamp(audio_position(source, low)?.sample().0),
+            clamp(audio_position(source, high)?.sample().0 + 1),
+        ));
+    }
     let rate = Time::new(source.audio_rate, 1)?;
     let (first, last) = if let Some(remap) = &mapped.remap {
         // Speed is non-negative with a fixed direction within each span, so every source
@@ -852,7 +956,7 @@ fn resample(
     mut sink: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     const BLOCK: usize = 64 * 1024;
-    let source_in = if decoded.is_empty() || mapped.remap.is_some() {
+    let source_in = if decoded.is_empty() || mapped.remap.is_some() || source.origin.is_some() {
         0
     } else {
         recipe.source_in.units(Time::new(source.audio_rate, 1)?)?
@@ -861,12 +965,19 @@ fn resample(
     for n in 0..recipe.duration.units(Time { num: 48000, den: 1 })? {
         let (a, remainder, denominator) = if decoded.is_empty() {
             (0, 0, 1)
+        } else if source.origin.is_some() {
+            let output_time = Time::new(n, 48000)?;
+            let source_time = match &mapped.remap {
+                Some(remap) => remap.source_time(output_time)?,
+                None => recipe.source_in.plus(output_time.times(recipe.rate)?)?,
+            };
+            audio_position(source, source_time)?.sample()
         } else if let Some(remap) = &mapped.remap {
             let position = remap
                 .source_time(Time::new(n, 48000)?)?
                 .times(Time::new(source.audio_rate, 1)?)?;
             (
-                position.num / position.den,
+                (position.num / position.den) as i128,
                 (position.num % position.den) as i128,
                 position.den as i128,
             )
@@ -874,21 +985,23 @@ fn resample(
             let numerator = n as u128 * source.audio_rate as u128 * recipe.rate.num as u128;
             let denominator = 48000u128 * recipe.rate.den as u128;
             (
-                source_in + (numerator / denominator) as u64,
+                source_in as i128 + (numerator / denominator) as i128,
                 (numerator % denominator) as i128,
                 denominator as i128,
             )
         };
-        if !decoded.is_empty() && a >= source.samples {
+        let outside = a < 0 || a >= source.samples as i128;
+        if !decoded.is_empty() && outside && source.origin.is_none() {
             return Err(error(
                 "INVALID_RANGE",
                 "Mapped audio sample exceeds source duration",
             ));
         }
         for channel in 0..2 {
-            let value = if decoded.is_empty() {
+            let value = if decoded.is_empty() || outside {
                 0
             } else {
+                let a = a as u64;
                 let b = (a + 1).min(source.samples - 1);
                 let ch = if source.channels == 1 { 0 } else { channel };
                 let x = decoded[((a - first) * source.channels + ch) as usize] as i128;
@@ -1349,6 +1462,10 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
 pub fn capabilities() -> Value {
     let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","audio_only_output":"wav_pcm16_48000_stereo_without_width_height","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
+    value["sdr_audio"] = json!({"containers":["mp4","mov","mkv"],"codecs":["aac","pcm","mp3","flac","opus"],"channels":[1,2],"sample_rate":"positive_native_rate"});
+    value["clock_normalization"] = json!({"source_clock":"first_video_frame","requires":"source.sdr",
+        "audio_timestamp_quantization":"nearest_native_sample","outside_audio":"silence","transcripts":"unsupported; transcribe output",
+        "omitted":"legacy_zero_origin_and_audio_extent_checks"});
     value
 }
 
@@ -1370,6 +1487,9 @@ mod tests {
             metadata: json!({"streams":[{"codec_type":"audio"}]}),
             layout: None,
             normalization: Value::Null,
+            origin: None,
+            audio_first: None,
+            audio_offset: Stamp::ZERO,
         }
     }
 
@@ -1397,6 +1517,44 @@ mod tests {
             .iter()
             .map(|b| i16::from_le_bytes(*b))
             .collect()
+    }
+
+    #[test]
+    fn normalized_audio_keeps_fractional_offsets_and_pads_both_ends() {
+        let recipe = audio_only(json!({}));
+        let mut source = wav(24000, 1, 4);
+        source.origin = Some(Stamp::ZERO);
+        let mapped = Mapping {
+            frames: Vec::new(),
+            times: Vec::new(),
+            remap: None,
+        };
+        for (offset, expected) in [
+            (-1, [0, 10, 15, 20, 25, 30, 35, 40]),
+            (1, [15, 20, 25, 30, 35, 40, 40, 0]),
+        ] {
+            source.audio_offset = Stamp::ticks(offset, Time::new(1, 2).unwrap()).unwrap();
+            assert_eq!(audio_window(&recipe, &source, &mapped).unwrap(), (0, 3));
+            let mut bytes = Vec::new();
+            resample(&recipe, &source, &mapped, &[10, 20, 30, 40], 0, |block| {
+                bytes.extend_from_slice(block);
+                Ok(())
+            })
+            .unwrap();
+            let samples: Vec<_> = bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|v| i16::from_le_bytes(*v))
+                .collect();
+            assert_eq!(
+                samples,
+                expected
+                    .into_iter()
+                    .flat_map(|v| [v, v])
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

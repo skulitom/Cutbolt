@@ -388,8 +388,8 @@ pub fn run(request: &Request) -> Result<Value> {
     };
     let output = crate::render::destination_extension(request.output, request.output_root, "json")?;
     if output.try_exists()? {
-        return Err(error(
-            "OUTPUT_EXISTS",
+        return Err(crate::errors::output_exists(
+            &output,
             format!("{} already exists", output.display()),
         ));
     }
@@ -406,9 +406,7 @@ pub fn run(request: &Request) -> Result<Value> {
             prefix,
         ) {
             Ok(file) => planned.push(file),
-            Err(e) if !single => {
-                reports.push(json!({"path":path,"error":{"code":e.code,"message":e.message}}))
-            }
+            Err(e) if !single => reports.push(json!({"path":path,"error":e})),
             Err(e) => return Err(e),
         }
     }
@@ -456,8 +454,7 @@ pub fn run(request: &Request) -> Result<Value> {
                 documents.extend(heard.documents);
                 non_speech.extend(heard.non_speech);
             }
-            Err(e) if !single => reports
-                .push(json!({"source":file.source,"error":{"code":e.code,"message":e.message}})),
+            Err(e) if !single => reports.push(json!({"source":file.source,"error":e})),
             Err(e) => return Err(e),
         }
     }

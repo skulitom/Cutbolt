@@ -134,7 +134,8 @@ struct SavedCommand {
 }
 
 /// Commands that job.start can queue: each writes new files and can take minutes.
-pub const QUEUED_COMMANDS: [&str; 15] = [
+pub const QUEUED_COMMANDS: [&str; 16] = [
+    "graphics.place",
     "export.run",
     "media.transcribe",
     "captions.render",
@@ -257,12 +258,12 @@ fn recover_if_idle(root: &Path, connection: &Connection) -> Result<()> {
     Ok(())
 }
 fn supported() -> Result<()> {
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "linux")) {
         Ok(())
     } else {
         Err(error(
             "UNSUPPORTED_PLATFORM",
-            "Background jobs currently require Windows; synchronous rendering and MCP remain available",
+            "Background jobs currently require Windows or Linux; synchronous rendering and MCP remain available",
         ))
     }
 }
@@ -455,12 +456,64 @@ fn launch_worker(executable: &Path, root: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn launch_worker(executable: &Path, root: &Path) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let mut command = Command::new(executable.canonicalize()?);
+    command
+        .arg("job-worker")
+        .arg(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // The worker gets its own session, so it outlives the caller and its terminal. It inherits
+    // only the null standard handles: everything else is opened close-on-exec, so a CLI reader
+    // waiting for EOF never waits for the background render.
+    // SAFETY: setsid is async-signal-safe and touches no memory of the parent.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        })
+    };
+    let mut child = command.spawn()?;
+    // Collect the exit status, so a long-lived caller such as the MCP server keeps no zombie.
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn launch_worker(_executable: &Path, _root: &Path) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "Background workers require Windows",
+        "Background workers require Windows or Linux",
     ))
+}
+
+/// End the child with SIGKILL when the thread that starts it exits. The queue worker binds each
+/// `job-tool` it starts, and `job-tool` binds its tool, so ending the worker ends its whole tree,
+/// as closing a Windows job object does. Every caller waits for the child on the starting thread.
+#[cfg(target_os = "linux")]
+fn bind_to_parent(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    let parent = std::process::id() as libc::pid_t;
+    // SAFETY: prctl and getppid are async-signal-safe and touch no memory of the parent.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // The parent may have exited before the signal was armed.
+            if libc::getppid() != parent {
+                return Err(std::io::Error::other("The starting process exited"));
+            }
+            Ok(())
+        })
+    };
 }
 
 /// The same request ID and arguments always return the original submission ticket.
@@ -642,7 +695,31 @@ fn run_command(connection: &Connection, id: &str, encoded: &str) -> Result<()> {
         (&saved.ffmpeg_sha256, &saved.ffprobe_sha256),
     )?;
     connection.execute("UPDATE jobs SET phase='running' WHERE id=?1", [id])?;
-    let result = supervise(connection, id, &saved)?;
+    let result = supervise(connection, id, &saved).map_err(|mut failure| {
+        if saved.command["command"] == "graphics.place" {
+            let reason = match failure.code {
+                "JOB_CANCELLED" => Some("Graphic job was cancelled"),
+                "JOB_STALLED" => Some("Graphic job stopped without progress"),
+                "JOB_TIMEOUT" => Some("Graphic job exceeded its time limit"),
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                failure.message = format!("{reason}; check the session receipt to determine whether its edit committed");
+            }
+            let hint = format!("{} Check session.receipt for this edit request before retrying an interrupted graphic job; a committed receipt is authoritative even if the job lost its response.", failure.hint.as_deref().unwrap_or_default());
+            failure = failure.with_hint(hint);
+            let mut detail = match failure.detail.take() {
+                Some(Value::Object(object)) => Value::Object(object),
+                Some(other) => json!({"cause":other}),
+                None => json!({}),
+            };
+            detail["session_receipt"] = json!({"command":"session.receipt",
+                "store_root":saved.command["store_root"],"project_id":saved.command["project_id"],
+                "request_id":saved.command["request_id"]});
+            failure.detail = Some(detail);
+        }
+        failure
+    })?;
     let tx = connection.unchecked_transaction()?;
     tx.execute(
         "UPDATE jobs SET status='completed',phase='completed',frames=total_frames,result=?1 WHERE id=?2",
@@ -689,18 +766,29 @@ fn bounded(mut reader: impl std::io::Read) -> Vec<u8> {
 
 /// Start the command process, relay its progress, and stop it on cancellation, a stall or the
 /// deadline. Returns the command's result.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<Value> {
     use std::io::{BufRead, Write};
-    use std::os::windows::process::CommandExt;
-    let mut child = Command::new(std::env::current_exe()?)
+    let mut command = Command::new(std::env::current_exe()?);
+    command
         .arg("job-command")
         .env("CUTBOLT_FFMPEG", &saved.ffmpeg)
         .env("CUTBOLT_FFPROBE", &saved.ffprobe)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    // Its own process group holds it and every tool it starts.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| error("JOB_LAUNCH_FAILED", format!("Command process: {e}")))?;
     // The process waits for its request on stdin, so it starts nothing before it is contained.
@@ -774,7 +862,7 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
             Ok(line) => relay(&line, stop, &mut active),
             // Output closed: the process is exiting.
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                if let Some(status) = child.try_wait()? {
+                if let Some(status) = containment.settle(&mut child)? {
                     break status;
                 }
                 thread::sleep(Duration::from_millis(5));
@@ -784,7 +872,7 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
         for line in receiver.try_iter() {
             relay(&line, stop, &mut active);
         }
-        if let Some(status) = child.try_wait()? {
+        if let Some(status) = containment.settle(&mut child)? {
             break status;
         }
         if checked.elapsed() < Duration::from_millis(200) {
@@ -855,13 +943,13 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
                 deadline.as_secs()
             ),
         )),
-        (Some(message), _) => Err(error(
+        (Some(message), _) => Err(crate::Error::reported(
             intern(
                 message["error"]["code"]
                     .as_str()
                     .unwrap_or("COMMAND_FAILED"),
             ),
-            message["error"]["message"].as_str().unwrap_or_default(),
+            &message["error"],
         )),
         (None, Some(Stop::Cancelled)) => Err(error(
             "JOB_CANCELLED",
@@ -876,7 +964,7 @@ fn supervise(connection: &Connection, id: &str, saved: &SavedCommand) -> Result<
         )),
     }
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn supervise(_connection: &Connection, _id: &str, _saved: &SavedCommand) -> Result<Value> {
     supported().map(|()| Value::Null)
 }
@@ -948,12 +1036,194 @@ impl Containment {
         // SAFETY: the handle is valid until drop.
         unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) };
     }
+    /// The command's exit status once it has exited; the job object ends anything it left
+    /// running when this value drops.
+    fn settle(
+        &self,
+        child: &mut std::process::Child,
+    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+        child.try_wait()
+    }
 }
 #[cfg(windows)]
 impl Drop for Containment {
     fn drop(&mut self) {
         // SAFETY: closing the owned handle; KILL_ON_JOB_CLOSE ends anything still running.
         unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+/// The process group of one command process, which every tool it starts joins. A command whose
+/// worker has gone stops its own group (see `command_process`), so nothing outlives the worker.
+#[cfg(target_os = "linux")]
+struct Containment {
+    group: Cell<libc::pid_t>,
+    seen: RefCell<Ticks>,
+}
+/// CPU ticks last seen for each live process, by (pid, start time), and their running total.
+#[cfg(target_os = "linux")]
+type Ticks = (std::collections::HashMap<(u64, u64), u64>, u64);
+#[cfg(target_os = "linux")]
+impl Containment {
+    fn new() -> Result<Self> {
+        Ok(Self {
+            group: Cell::new(0),
+            seen: RefCell::new(Default::default()),
+        })
+    }
+    /// The child already leads its own group (`process_group(0)` at spawn).
+    fn assign(&self, child: &std::process::Child) -> Result<()> {
+        self.group.set(child.id() as libc::pid_t);
+        Ok(())
+    }
+    /// CPU time the group's processes used while it watched them: each one's increase since the
+    /// last sample, from /proc. The last moments of a process that exits between samples are not
+    /// counted, which only makes the stall watchdog more patient.
+    fn cpu(&self) -> Option<Duration> {
+        // SAFETY: a plain query with no arguments.
+        let ticks = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+        let group = u64::try_from(self.group.get()).ok()?;
+        if ticks == 0 || group == 0 {
+            return None;
+        }
+        let mut seen = self.seen.borrow_mut();
+        let (last, total) = &mut *seen;
+        let mut now = std::collections::HashMap::new();
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|n| n.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            // Fields after the parenthesized command name start at field 3 (state); field 5 is
+            // the process group, 14 and 15 user and system time, 22 the start time.
+            let Some((_, rest)) = stat.rsplit_once(')') else {
+                continue;
+            };
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            let field = |n: usize| fields.get(n - 3).and_then(|v| v.parse::<u64>().ok());
+            let (Some(owner), Some(user), Some(system), Some(start)) =
+                (field(5), field(14), field(15), field(22))
+            else {
+                continue;
+            };
+            if owner != group {
+                continue;
+            }
+            let used = user + system;
+            *total += used.saturating_sub(last.get(&(pid, start)).copied().unwrap_or(0));
+            now.insert((pid, start), used);
+        }
+        *last = now;
+        Some(Duration::from_nanos(
+            total.saturating_mul(1_000_000_000) / ticks,
+        ))
+    }
+    fn terminate(&self) {
+        // The leader has not been collected (see `settle`), so the group ID cannot have been
+        // reused.
+        // SAFETY: signals a process group this value owns.
+        unsafe { libc::kill(-self.group.get(), libc::SIGKILL) };
+    }
+    /// The command's exit status once it has exited. Anything it left running is ended first,
+    /// while the uncollected leader still holds the group ID, as closing a job object does.
+    fn settle(
+        &self,
+        child: &mut std::process::Child,
+    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+        if !exited(child.id(), false)? {
+            return Ok(None);
+        }
+        self.terminate();
+        child.try_wait()
+    }
+}
+
+/// Whether a child has exited, without collecting it; `block` waits until it has.
+#[cfg(target_os = "linux")]
+fn exited(pid: u32, block: bool) -> std::io::Result<bool> {
+    let flags = libc::WEXITED | libc::WNOWAIT | if block { 0 } else { libc::WNOHANG };
+    loop {
+        // SAFETY: plain data, filled by the call.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: waits on this process's own child without collecting it.
+        if unsafe { libc::waitid(libc::P_PID, pid, &mut info, flags) } == -1 {
+            let failure = std::io::Error::last_os_error();
+            if failure.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(failure);
+        }
+        // WNOHANG leaves the PID zero while the child runs.
+        // SAFETY: the call filled the structure.
+        return Ok(unsafe { info.si_pid() } != 0);
+    }
+}
+
+/// Run a tool as the leader of its own process group, with a guardian process that ends the
+/// group if this wrapper is killed, and end the group once the tool exits. So killing the
+/// wrapper, or the worker above it, kills every process the tool started, as the nested job
+/// object does on Windows.
+#[cfg(target_os = "linux")]
+fn grouped_tool(mut command: Command) -> Result<i32> {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+    bind_to_parent(&mut command);
+    let mut child = command.spawn()?;
+    let group = child.id() as libc::pid_t;
+    let guardian = match guard(group) {
+        Ok(guardian) => guardian,
+        Err(failure) => {
+            // SAFETY: the tool's group is uncollected and owned here.
+            unsafe { libc::kill(-group, libc::SIGKILL) };
+            let _ = child.wait();
+            return Err(failure.into());
+        }
+    };
+    exited(child.id(), true)?;
+    // SAFETY: the uncollected leader still holds the group ID; the guardian is this process's
+    // own child, collected here.
+    unsafe {
+        libc::kill(-group, libc::SIGKILL);
+        libc::kill(guardian, libc::SIGKILL);
+        libc::waitpid(guardian, std::ptr::null_mut(), 0);
+    }
+    Ok(child.wait()?.code().unwrap_or(1))
+}
+
+/// Fork a guardian that kills `group` when this process ends: it blocks SIGTERM, asks for it on
+/// its parent's death, and waits for it. Call it only while this process has one thread.
+#[cfg(target_os = "linux")]
+fn guard(group: libc::pid_t) -> std::io::Result<libc::pid_t> {
+    // SAFETY: the wrapper is single-threaded here (`job-tool` starts no threads), so the forked
+    // child may run any code. It closes its standard handles, so pipes still reach EOF.
+    unsafe {
+        let parent = libc::getpid();
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        match libc::fork() {
+            -1 => Err(std::io::Error::last_os_error()),
+            0 => {
+                for handle in 0..3 {
+                    libc::close(handle);
+                }
+                libc::sigprocmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                if libc::getppid() == parent {
+                    let mut signal = 0;
+                    libc::sigwait(&set, &mut signal);
+                }
+                libc::kill(-group, libc::SIGKILL);
+                libc::_exit(0)
+            }
+            guardian => Ok(guardian),
+        }
     }
 }
 
@@ -969,8 +1239,19 @@ pub fn command_process() -> Result<()> {
     let request: Value = serde_json::from_str(&line)?;
     thread::spawn(move || {
         let mut rest = String::new();
-        let _ = input.read_line(&mut rest);
+        let read = input.read_line(&mut rest);
         media::cancel_ambient();
+        // The end of input without a stop line means the worker has gone. Give the command the
+        // grace period to clean up, then end this process group (it leads it) and every tool in
+        // it, as a Windows job object does when the worker's handle closes.
+        #[cfg(target_os = "linux")]
+        if matches!(read, Ok(0) | Err(_)) {
+            thread::sleep(GRACE);
+            // SAFETY: signals this process's own group.
+            unsafe { libc::kill(0, libc::SIGKILL) };
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = read;
     });
     // Report every 250 ms, and once more as soon as the command returns.
     let (finished, done) = channel::<()>();
@@ -1272,6 +1553,8 @@ impl Control for JobControl<'_> {
     fn command(&self, program: &str, args: &[String]) -> Result<Command> {
         let mut command = Command::new(std::env::current_exe()?);
         command.arg("job-tool").arg(program).args(args);
+        #[cfg(target_os = "linux")]
+        bind_to_parent(&mut command);
         Ok(command)
     }
     fn tool(&self, name: &str) -> String {
@@ -1356,7 +1639,14 @@ fn contain_worker() -> Result<()> {
     }
     Ok(())
 }
-#[cfg(not(windows))]
+/// Every process the worker and `job-tool` start is bound to its starting thread
+/// (`bind_to_parent`), and a command process stops its own group when the worker goes, so ending
+/// the worker ends its whole tree.
+#[cfg(target_os = "linux")]
+fn contain_worker() -> Result<()> {
+    Ok(())
+}
+#[cfg(not(any(windows, target_os = "linux")))]
 fn contain_worker() -> Result<()> {
     supported()
 }
@@ -1569,5 +1859,8 @@ pub fn tool_worker(program: &std::ffi::OsStr, args: &[std::ffi::OsString]) -> Re
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
+    #[cfg(target_os = "linux")]
+    return grouped_tool(command);
+    #[cfg(not(target_os = "linux"))]
     Ok(command.status()?.code().unwrap_or(1))
 }

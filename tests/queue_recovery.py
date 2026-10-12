@@ -200,21 +200,28 @@ fn main(){
         assert not list(output.glob('bounded-*.mkv'))
         passed.append('recovery.all_32_slots_single_worker_and_cancel_no_retry')
 
-        # A pool of four runs two reference renders (heavy jobs hold half the pool) at once. A job
-        # writing the same file, spelled in another case, waits for the first even with room
-        # free, while a later independent job overtakes it. Killing the worker interrupts every
-        # running job, and recovery requeues each one.
+        # A pool of four runs two reference renders (heavy jobs hold half the pool) at once. On
+        # Windows, whose names ignore case, a job writing the same file spelled in another case
+        # waits for the first even with room free, while a later independent job overtakes it.
+        # Linux names are exact, so the file has one name, which submission refuses outright.
+        # Killing the worker interrupts every running job, and recovery requeues each one.
         queue, env = setup('pool', 'park'); env['CUTBOLT_JOB_WORKERS'] = '4'
         held = lambda: sorted(queue.glob('held-*.txt'))
         first, _ = start(queue, env, 'a')
         until(lambda: len(held()) == 1, bool)
         shifted = copy.deepcopy(project); shifted['clips'][0]['source_in'] = time(4, 25)
-        same, _ = start(queue, env, 'same', name='POOL-A.mkv', timeline=shifted)
+        same = None
+        if os.name == 'nt':
+            same, _ = start(queue, env, 'same', name='POOL-A.mkv', timeline=shifted)
+        else:
+            call('render.start', 'OUTPUT_RESERVED', env=env, **request(queue, 'same', name='pool-a.mkv', timeline=shifted))
         second, _ = start(queue, env, 'b')
         until(lambda: len(held()) == 2, bool)
         third, _ = start(queue, env, 'c')
-        live = {t['job_id']: status(queue, t) for t in (first, second, same, third)}
-        assert [live[t['job_id']]['status'] for t in (first, second, same, third)] == ['running', 'running', 'queued', 'queued'], live
+        tickets = [t for t in (first, second, same, third) if t]
+        waiting = len(tickets) - 2
+        live = {t['job_id']: status(queue, t) for t in tickets}
+        assert [live[t['job_id']]['status'] for t in tickets] == ['running', 'running'] + ['queued'] * waiting, live
         assert live[first['job_id']]['worker_pid'] == live[second['job_id']]['worker_pid']
         # Each submission also started a standby worker that waits up to 2 s for the queue lock;
         # let those exit, so none takes over the moment the worker below is killed.
@@ -222,19 +229,20 @@ fn main(){
         worker = ProcessHandle(live[first['job_id']]['worker_pid']); handles.append(worker)
         tools = [ProcessHandle(int(p.stem.split('-')[1])) for p in held()]; handles.extend(tools)
         worker.stop(); until(lambda: worker.exited() and all(t.exited() for t in tools), bool, seconds=5)
-        settled = [status(queue, t) for t in (first, second, same, third)]
-        assert [v['status'] for v in settled] == ['queued'] * 4, settled
-        assert [[h['status'] for h in v['attempts']['history']] for v in settled] == [['interrupted'], ['interrupted'], [], []], settled
+        settled = [status(queue, t) for t in tickets]
+        assert [v['status'] for v in settled] == ['queued'] * len(tickets), settled
+        assert [[h['status'] for h in v['attempts']['history']] for v in settled] == [['interrupted'], ['interrupted']] + [[]] * waiting, settled
         (queue/'release').touch(); call('job.resume', job_root=str(queue), env=env)
         done = [terminal(queue, t) for t in (first, second, third)]
         for result in done:
             compare(result)
             assert result['attempts']['current'] == (2 if result['ticket'] != third else 1), result
-        kept = Path(done[0]['result']['output']).read_bytes()
-        result = terminal(queue, same)
-        # It started only after the first job published, so it stops before rendering anything.
-        assert result['status'] == 'failed' and result['error']['code'] == 'OUTPUT_EXISTS', result
-        assert Path(done[0]['result']['output']).read_bytes() == kept
+        if same:
+            kept = Path(done[0]['result']['output']).read_bytes()
+            result = terminal(queue, same)
+            # It started only after the first job published, so it stops before rendering anything.
+            assert result['status'] == 'failed' and result['error']['code'] == 'OUTPUT_EXISTS', result
+            assert Path(done[0]['result']['output']).read_bytes() == kept
         passed.append('recovery.parallel_pool_path_order_and_multi_job_interruption')
 
         # Queued commands (job.start) run in their own contained process: frame progress is relayed,
@@ -271,6 +279,24 @@ fn main(){
         until(tool.exited, bool, seconds=5)
         assert not target.exists() and set(output.glob('.cutbolt-*')) == retained, list(output.glob('.cutbolt-*'))
         passed.append('recovery.command_progress_cancellation_and_stall_watchdog')
+        # A queued command fails in its child process, then preserves the optional recovery
+        # fields through supervision, persistence and the job.status API.
+        queue, env = setup('command-guidance', 'pass')
+        existing = output/'retained.mkv'
+        existing.write_bytes(b'original occupied output')
+        arguments = {'project':project, 'input_root':str(sources), 'output_root':str(output),
+                     'output':str(existing), 'start':0, 'duration':time(1, 25)}
+        ticket = call('job.start', env=env, job_root=str(queue), request_id='guidance', run='preview.range', arguments=arguments)
+        jobs.append((queue, ticket['job_id']))
+        result = terminal(queue, ticket)
+        assert result['status'] == 'failed', result
+        failure = result['error']
+        assert failure.get('retry') == 'changed' and failure.get('path') == 'output' and failure.get('hint'), failure
+        candidate = Path(failure['detail']['suggested_output'])
+        assert candidate.parent.samefile(output) and not candidate.exists()
+        assert existing.read_bytes() == b'original occupied output'
+        assert status(queue, ticket)['error'] == failure
+        passed.append('recovery.child_error_guidance_persists_without_overwrite')
         assert original=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
         report={'passed':passed,'frames_compared':compared,'stereo_sample_frames_compared':samples,'rejections':rejected,'reference':'Original generated RGB/PCM slices; real encoded output, transient failures, killed worker/process tree, pinned source mutation and all 32 queue slots. Publication crash points have separate Rust child-process evidence.'}
         (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')

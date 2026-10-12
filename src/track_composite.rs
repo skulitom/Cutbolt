@@ -42,6 +42,8 @@ pub(crate) struct Layer {
     pub opacity: u8,
     pub position: [i32; 2],
     pub arguments: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct: Option<crate::direct::Picture>,
 }
 impl Layer {
     fn frame_bytes(&self) -> usize {
@@ -64,6 +66,16 @@ pub(crate) struct Mix {
     pub offset: u64,
     /// Decoder of the incoming side: planar G, B, R frames of the canvas size on stdout.
     pub arguments: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct: Option<crate::direct::Picture>,
+}
+
+/// An indexed original replacing the base graph's black placeholder during this run.
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct DirectRun {
+    pub first: u64,
+    pub end: u64,
+    pub picture: crate::direct::Picture,
 }
 
 /// The base picture's decoder plus the transitions mixed into it and the overlay clips
@@ -75,6 +87,8 @@ pub(crate) struct Compositor {
     pub frames: u64,
     /// Decoder of the opaque base picture: planar G, B, R frames on stdout.
     pub base: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub direct: Vec<DirectRun>,
     /// Window frame runs `[start, end)` and the index of the visible opaque track (None: black).
     #[serde(skip)]
     pub runs: Vec<(u64, u64, Option<usize>)>,
@@ -96,6 +110,51 @@ impl Compositor {
     }
 }
 
+/// All commands are prepared on the controlling thread; only decoding moves to workers.
+enum PreparedReader {
+    Tool(Command),
+    Direct(crate::direct::PreparedPicture),
+}
+impl PreparedReader {
+    fn prepare(
+        arguments: &[String],
+        direct: Option<&crate::direct::Picture>,
+        program: &str,
+        control: &dyn Control,
+    ) -> Result<Self> {
+        match direct {
+            Some(picture) => Ok(Self::Direct(picture.prepare(control)?)),
+            None => Ok(Self::Tool(control.command(program, arguments)?)),
+        }
+    }
+    fn start(self, program: &str, timeout: Duration, watch: Watch) -> Result<Reader> {
+        match self {
+            Self::Tool(command) => Ok(Reader::Tool(StreamReader::spawn_with(
+                command, program, timeout, watch,
+            )?)),
+            Self::Direct(picture) => Ok(Reader::Direct(picture.start(watch, timeout)?)),
+        }
+    }
+}
+enum Reader {
+    Tool(StreamReader),
+    Direct(crate::direct::PlanarFrames),
+}
+impl Reader {
+    fn read_exact(&mut self, bytes: &mut [u8]) -> Result<()> {
+        match self {
+            Self::Tool(r) => r.read_exact(bytes),
+            Self::Direct(r) => r.read_exact(bytes),
+        }
+    }
+    fn finish(self) -> Result<()> {
+        match self {
+            Self::Tool(r) => r.finish(),
+            Self::Direct(r) => r.finish(),
+        }
+    }
+}
+
 /// A decoder whose frames are read on their own thread, up to two ahead, so the pipe transfers
 /// of all decoders overlap one another and the composition. Read frames can be handed back for
 /// reuse.
@@ -106,7 +165,7 @@ struct Ahead {
 impl Ahead {
     /// Read `count` frames of `size` bytes, then require the decoder to end cleanly; its result
     /// is the last message. The thread stops when the receiver is dropped, and the decoder with it.
-    fn start(mut reader: StreamReader, size: usize, count: u64) -> Self {
+    fn start(mut reader: Reader, size: usize, count: u64) -> Self {
         let (sender, frames) = mpsc::sync_channel(2);
         let (spare, spares) = mpsc::channel::<Vec<u8>>();
         std::thread::spawn(move || {
@@ -150,10 +209,12 @@ struct Decoders<'a> {
     base: Ahead,
     /// Transition decoders not yet started, in window order, then the started ones; the first
     /// supplies frames during its run.
-    mixes: VecDeque<(usize, Command)>,
+    mixes: VecDeque<(usize, PreparedReader)>,
     mixing: VecDeque<(usize, Ahead)>,
     /// Layer decoders not yet started, by first frame, then the started ones by track.
-    pending: VecDeque<(usize, Command)>,
+    pending: VecDeque<(usize, PreparedReader)>,
+    direct: VecDeque<(usize, PreparedReader)>,
+    direct_active: Option<(usize, Ahead)>,
     active: Vec<(usize, Ahead)>,
     program: String,
     timeout: Duration,
@@ -161,9 +222,8 @@ struct Decoders<'a> {
 }
 impl Decoders<'_> {
     /// Start a decoder of `count` frames of `size` bytes.
-    fn start(&self, command: Command, size: usize, count: u64) -> Result<Ahead> {
-        let reader = StreamReader::spawn_with(
-            command,
+    fn start(&self, command: PreparedReader, size: usize, count: u64) -> Result<Ahead> {
+        let reader = command.start(
             &self.program,
             self.timeout,
             Watch {
@@ -209,6 +269,30 @@ impl Decoders<'_> {
         let c = self.compositor;
         self.start_due(n)?;
         let mut frame = self.base.next()?;
+        if self
+            .direct
+            .front()
+            .is_some_and(|(i, _)| c.direct[*i].first == n)
+        {
+            let (index, prepared) = self.direct.pop_front().expect("direct run");
+            let run = &c.direct[index];
+            self.direct_active = Some((
+                index,
+                self.start(prepared, c.plane() * 3, run.end - run.first)?,
+            ));
+        }
+        if let Some((index, decoder)) = &self.direct_active {
+            let replacement = decoder.next()?;
+            self.base.recycle(frame);
+            frame = replacement;
+            if c.direct[*index].end == n + 1 {
+                self.direct_active
+                    .take()
+                    .expect("direct decoder")
+                    .1
+                    .finish()?;
+            }
+        }
         if let Some((index, decoder)) = self.mixing.front()
             && c.transitions[*index].first <= n
         {
@@ -255,26 +339,39 @@ fn decoders<'a>(
 ) -> Result<Decoders<'a>> {
     let program = control.tool("ffmpeg");
     let base = Ahead::start(
-        StreamReader::spawn_with(
+        Reader::Tool(StreamReader::spawn_with(
             control.command(&program, &compositor.base)?,
             &program,
             timeout,
             Watch {
                 abort: Some(abort.clone()),
             },
-        )?,
+        )?),
         compositor.plane() * 3,
         compositor.frames,
     );
     let mixes = (compositor.transitions.iter().enumerate())
-        .map(|(index, mix)| Ok((index, control.command(&program, &mix.arguments)?)))
+        .map(|(index, mix)| {
+            Ok((
+                index,
+                PreparedReader::prepare(&mix.arguments, mix.direct.as_ref(), &program, control)?,
+            ))
+        })
         .collect::<Result<VecDeque<_>>>()?;
     let mut layers: Vec<usize> = (0..compositor.layers.len()).collect();
     layers.sort_by_key(|&index| compositor.layers[index].first);
     let pending = (layers.into_iter())
         .map(|index| {
-            let arguments = &compositor.layers[index].arguments;
-            Ok((index, control.command(&program, arguments)?))
+            let layer = &compositor.layers[index];
+            Ok((
+                index,
+                PreparedReader::prepare(
+                    &layer.arguments,
+                    layer.direct.as_ref(),
+                    &program,
+                    control,
+                )?,
+            ))
         })
         .collect::<Result<VecDeque<_>>>()?;
     Ok(Decoders {
@@ -283,6 +380,13 @@ fn decoders<'a>(
         mixes,
         mixing: VecDeque::new(),
         pending,
+        direct: compositor
+            .direct
+            .iter()
+            .enumerate()
+            .map(|(i, r)| Ok((i, PreparedReader::Direct(r.picture.prepare(control)?))))
+            .collect::<Result<_>>()?,
+        direct_active: None,
         active: Vec::new(),
         program,
         timeout,
@@ -320,6 +424,7 @@ pub(crate) fn encode_consuming<T: Send + 'static>(
     let program = control.tool("ffmpeg");
     let abort = Arc::new(AtomicBool::new(false));
     let mut decoders = decoders(compositor, timeout, control, &abort)?;
+    let mut composition_error = None;
     let stopped = media::feed_stdin_consuming(
         control.command(&program, encoder)?,
         &program,
@@ -349,7 +454,7 @@ pub(crate) fn encode_consuming<T: Send + 'static>(
                     let mut written = 0;
                     let mut reported = Instant::now();
                     for frame in receiver.iter() {
-                        let frame = frame?;
+                        let frame = frame.inspect_err(|e| composition_error = Some(e.clone()))?;
                         if written == frames {
                             break;
                         }
@@ -370,7 +475,12 @@ pub(crate) fn encode_consuming<T: Send + 'static>(
                     }
                     control.frames(done + written)
                 })();
-                if outcome.is_err() {
+                if let Err(e) = &outcome {
+                    // Preserve the initiating decoder/control failure across shutdown. A stdin
+                    // write error alone may instead be explained by the encoder's diagnostics.
+                    if composition_error.is_none() && e.code != "IO_ERROR" {
+                        composition_error = Some(e.clone());
+                    }
                     // Stop every decoder so the producer cannot block on a pipe.
                     abort.store(true, Ordering::SeqCst);
                 }
@@ -381,7 +491,10 @@ pub(crate) fn encode_consuming<T: Send + 'static>(
         },
     );
     abort.store(true, Ordering::SeqCst);
-    stopped
+    match composition_error {
+        Some(error) => Err(error),
+        None => stopped,
+    }
 }
 
 /// The single composited frame of a one-frame window, as packed RGB.
@@ -702,6 +815,7 @@ mod tests {
             opacity,
             position,
             arguments: Vec::new(),
+            direct: None,
         }
     }
 

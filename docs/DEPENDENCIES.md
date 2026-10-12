@@ -118,7 +118,9 @@ Original [LUT conversion and numerical scopes](LUTS_SCOPES.md) use project-owned
 | schemars | 1.2.2 | MIT |
 | png | 0.18.1 | MIT OR Apache-2.0 |
 | hound | 3.5.1 | Apache-2.0 |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 |
 | fontdue (std only, default features disabled) | 0.9.4 | MIT OR Apache-2.0 OR Zlib |
+| ttf-parser (font names and format inspection) | 0.25.1 | MIT OR Apache-2.0 |
 | harfrust | 0.13.3 | MIT |
 | unicode-bidi | 0.3.18 | MIT OR Apache-2.0 |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
@@ -127,10 +129,13 @@ Original [LUT conversion and numerical scopes](LUTS_SCOPES.md) use project-owned
 | windows (Windows target only) | 0.62.2 | MIT OR Apache-2.0 |
 | windows-core (Windows target only) | 0.62.2 | MIT OR Apache-2.0 |
 | windows-sys (Windows target only) | 0.61.2 | MIT OR Apache-2.0 |
+| libc (Unix targets only) | 0.2.189 | MIT OR Apache-2.0 |
+
+Source indexes use flate2 1.1.10 directly for bounded gzip storage. It was already selected transitively; no version, license or package count changed. Cargo keeps its code outside this repository.
 
 The 91-package lockfile includes the project and build/transitive/other-target dependencies. The tested Windows metadata includes 77 external packages. SQLite 3.53.2 is compiled through `libsqlite3-sys` 0.38.2 from Cargo's external package cache; neither the SQLite source nor compiled binary is vendored in this repository. The bundled build removes the need for a runtime SQLite installation and requires a C compiler when building. SQLite's embedded source declares public-domain status; the Rust wrapper has its own MIT license.
 
-Text layers use [fontdue](https://github.com/mooman219/fontdue) 0.9.4 with scalar rasterization. Default scalar text omits shaping; the optional [Unicode layout](UNICODE_TEXT.md) enables indexed substitution glyph loading and uses external HarfRust 0.13.3 for shaping, unicode-bidi 0.3.18 for paragraph ordering, unicode-segmentation 1.13.3 for graphemes, unicode-script 0.5.8 for script properties and unicode-linebreak 0.1.5 for break opportunities. Original Cutbolt code selects fonts, combines visual/script/font runs, wraps and positions lines, enforces work bounds and composites coverage. The independent acceptance generator authors its own rectangle fonts and GSUB/GPOS facts; no selected shaper is used by its pixel oracle. Fonts remain content-checked external inputs, with no system discovery, bundled typeface or runtime download. Exact versions/licenses and their parser/math dependencies are recorded here; no dependency implementation is vendored.
+Text layers use [fontdue](https://github.com/mooman219/fontdue) 0.9.4 with scalar rasterization. Default scalar text omits shaping; the optional [Unicode layout](UNICODE_TEXT.md) enables indexed substitution glyph loading and uses external HarfRust 0.13.3 for shaping, unicode-bidi 0.3.18 for paragraph ordering, unicode-segmentation 1.13.3 for graphemes, unicode-script 0.5.8 for script properties and unicode-linebreak 0.1.5 for break opportunities. Original Cutbolt code selects fonts, combines visual/script/font runs, wraps and positions lines, enforces work bounds and composites coverage. The independent acceptance generator authors its own rectangle fonts and GSUB/GPOS facts; no selected shaper is used by its pixel oracle. Fonts remain content-checked external inputs, with no bundled typeface or runtime download. [Installed-font discovery](FONTS.md) reads OS font folders in place; ttf-parser 0.25.1 (already in the rasterizer dependency graph) is now an exact direct dependency for family/full-name and format inspection. Exact versions/licenses and their parser/math dependencies are recorded here; no dependency implementation is vendored.
 
 The original local cache also selects rusqlite's `blob` feature for incremental payload I/O. It adds no new crate or version. Cache ownership checks use the public [SQLite database header format](https://www.sqlite.org/fileformat.html), including application ID and user version, before opening an existing file for recovery. Cache keys and content checks use the existing SHA-256 dependency. The development build optimizes sha2 0.10.9 to retain full content verification without dominating preview latency; no algorithm or integrity check is removed. The original build script embeds a producer fingerprint from project source, dependency selection and declared compiler configuration. See [cache limits and tests](CACHE_PREVIEWS.md).
 
@@ -223,10 +228,14 @@ Original fixture generation uses Python's standard library and external tools. T
 
 Graphics verification additionally uses external FontTools 4.25.0 (MIT) to generate original abstract rectangle glyphs into external TrueType fixtures. No existing font or font implementation is copied into this repository. The pixel reference uses analytic rectangle coverage and known original advances; it does not call the engine's rasterizer.
 
-Install these exact direct development versions into an external environment when needed: `python -m pip install jsonschema==4.25.0 mcp==1.12.3 Pillow==10.3.0 fonttools==4.25.0`. The original controlled media-tool fixture compiles with rustc into an external test directory; its executable is never committed. The optional, explicit model-setup helper described below additionally uses the separately installed `huggingface-hub` package; it is never called by the engine or verification suite.
+Install these exact direct development versions into an external environment when needed: `python -m pip install jsonschema==4.25.0 mcp==1.12.3 Pillow==10.3.0 fonttools==4.25.0 psutil==7.1.0`. `tools/verify.py` and `tools/ship.py` use psutil to check run markers. The original controlled media-tool fixture compiles with rustc into an external test directory; its executable is never committed. The optional, explicit model-setup helper described below additionally uses the separately installed `huggingface-hub` package; it is never called by the engine or verification suite.
 
 
 The local recording backend selects **windows 0.62.2** and **windows-core 0.62.2** (MIT OR Apache-2.0) for typed COM/audio bindings and callback support. These remain in Cargo’s external package cache. Original project code implements input selection, packet accounting, streaming WAV output and placement; it uses the installed Windows shared audio engine for explicitly requested format conversion. Public [audio initialization](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize), [packet capture](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiocaptureclient-getbuffer) and [process-specific activation](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-activateaudiointerfaceasync) describe the called interfaces. The original playback fixture uses its own nonpersistent audio session. No driver, SDK implementation, binary or generated recording is vendored.
+
+The Linux job backend, image-directory publication and speech launch select **libc 0.2.189** (MIT OR Apache-2.0), already in the lockfile as a transitive dependency, for `setsid`, `prctl`, `waitid`, `kill`, `fork`, `sigwait` and `renameat2`. Original project code implements the process groups, parent-death binding and tool guardian; no implementation is copied.
+
+Linux verification on 11 October 2026 used WSL2 Ubuntu 22.04 (kernel 6.18.40.1-microsoft-standard-WSL2) with Rust 1.98.1 and conda-forge FFmpeg/ffprobe **7.0.2** (a GPL build with libx264, installed in its own external environment and not redistributed). Its Python was CPython 3.12.1 with the development packages above, plus pydantic 2.11.7: mcp 1.12.3 imports an interface that newer pydantic releases removed. That FFmpeg build has no NVDEC, so the hardware-decode fixtures were not run on Linux. Speech used the existing external runtime's `/usr/bin/python3` and package directories directly.
 
 ## External media tools
 
@@ -235,6 +244,13 @@ The original [caption parser/editor](CAPTIONS.md) adds no dependencies. Its boun
 Existing local paths: `C:\ffmpeg\bin\ffmpeg.exe` and `C:\ffmpeg\bin\ffprobe.exe`. Tested build: `7.0-full_build-www.gyan.dev`. Its reported configuration enables GPL and version 3 components; `ffmpeg -L` reports GPL-3.0-or-later for this exact executable. Cutbolt invokes these existing executables as local subprocesses; it does not copy, bundle, modify, or redistribute them in this repository. Keep any future packaged-tool licensing review separate from Cutbolt's MIT grant. [FFmpeg license guidance](https://ffmpeg.org/legal.html)
 
 The reference renderer uses FFV1 and PCM. The bounded [media-conform matrix](CONFORM.md) additionally selects this same build's H.264/AAC decoders for MP4/MOV inputs, with explicit color, timestamp and audio constraints. Original acceptance fixtures use its external libx264 encoder and native AAC encoder; neither is bundled. The fixed [delivery profile](EXPORT.md) also selects libx264 and native AAC for engine exports, using `lutrgb` for original public transfer expressions and `scale` for declared BT.709 matrix/range/chroma conversion. The recorded local build has libavcodec 61.3.100, libavformat 61.1.100, libavfilter 10.1.100 and libswscale 8.1.100; its emitted encoder identity is x264 core 164 r3190 7ed753b. These components remain within the separately installed GPL/version-3-enabled build and are not redistributed. Public interfaces are described in the [FFmpeg codec](https://ffmpeg.org/ffmpeg-codecs.html) and [filter](https://ffmpeg.org/ffmpeg-filters.html) documentation. Public sRGB and BT.709 facts and the independent numerical reference are cited in the export contract; no implementation or specification copy is included.
+
+The 11 October direct-footage preparation corpus additionally exercises this same external build's
+libx265 and prores_ks encoders (HEVC Main/Main10 and ProRes 422 HQ). Linux uses the already recorded
+conda-forge FFmpeg 7.0.2. Exact command lines and executable version strings are retained in each
+external fixture manifest; no binary, source, media or new runtime package is bundled. These are
+fixture encoders and do not yet expand the engine's accepted timeline-source matrix. See
+[the corpus contract](FOOTAGE_FIXTURES.md).
 
 Other formats/encoders present in the build remain outside the declared engine contract. No dependency version changed for these additions.
 

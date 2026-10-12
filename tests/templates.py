@@ -209,6 +209,14 @@ def run(root):
     # The instantiation path must remain read-only even on deep post-binding failures.
     before_files={str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
     for t,v,code in invalid:instantiate(t,v,error=code)
+    for change, code, words in [
+        (lambda t,v:v.update(typo=value("text","A")), "UNKNOWN_PARAMETER", ["typo", "undeclared", "text", "available parameters"]),
+        (lambda t,v:v.update(label=value("integer",1)), "INVALID_PARAMETER", ["label", "declared text", "given integer"]),
+        (lambda t,v:t["parameters"][0]["bindings"][0].update(property="opacity"), "INVALID_TEMPLATE", ["label", "declared text", "requires integer"]),
+    ]:
+        t=copy.deepcopy(templates[0]);v=copy.deepcopy(base_values);change(t,v)
+        rejected=instantiate(t,v,error=code)["error"]
+        assert all(word in rejected["message"] for word in words), rejected
     assert before_files=={str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
     assert instantiate(instances[0][0],instances[0][1],instances[0][2])==instances[0][3]
     passed.append("templates.invalid_constraints_and_atomicity")

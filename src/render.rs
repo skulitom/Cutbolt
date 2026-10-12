@@ -40,7 +40,7 @@ pub struct Plan {
         serialize_with = "chunk_summary"
     )]
     pub chunks: Vec<Plan>,
-    /// Gain streams and limited mixes this graph reads, written when it runs.
+    /// Gain streams, direct audio windows and limited mixes, written when the graph runs.
     #[serde(skip)]
     pub(crate) generated: Vec<Generated>,
     /// When top-level `alpha_over` clips show: the engine compositor whose frames `arguments`
@@ -60,6 +60,13 @@ pub(crate) enum Generated {
         start: Time,
         samples: u64,
     },
+    /// Only the requested normalized audio window, owned for this render like gain/mix inputs.
+    DirectAudio {
+        path: PathBuf,
+        video: std::sync::Arc<crate::direct::Video>,
+        first: u64,
+        samples: u64,
+    },
     /// A window's audio mixed through track and master limiters.
     Mix(Box<crate::dynamics::Premix>),
 }
@@ -67,6 +74,21 @@ impl Generated {
     fn write(&self, control: &dyn media::Control, timeout: Duration) -> Result<TempFile> {
         use std::io::Write;
         let (path, curve, start, samples) = match self {
+            Generated::DirectAudio {
+                path,
+                video,
+                first,
+                samples,
+            } => {
+                control.check()?;
+                // Establish ownership before arming cleanup; a collision must preserve its file.
+                let output = fs::File::create_new(path)?;
+                let file = TempFile(path.clone());
+                let mut wave = crate::pcm_stream::Writer::new(output, *samples)?;
+                video.read_audio(*first, *samples, control, |bytes| wave.push(bytes))?;
+                wave.finish_file()?;
+                return Ok(file);
+            }
             Generated::Gain {
                 path,
                 curve,
@@ -490,20 +512,93 @@ fn parameters(width: u32, height: u32, rate: Time, alpha: bool, timing: Timing) 
 }
 /// A source with its video pixel format, or why its inspection failed.
 pub(crate) type Inspected = Result<(Source, String)>;
+#[derive(Clone, Copy)]
+pub(crate) enum IdentityCheck {
+    Full,
+    /// Preliminary reuse only. The caller must fully hash before publishing its output/receipt.
+    DeferredToPublication,
+}
+/// Acceptance and decoding are paired: indexed YUV must never enter a native RGB graph.
+enum SourceProfile<'a> {
+    Reference {
+        path: &'a Path,
+        check: Check,
+    },
+    Indexed {
+        project: &'a Project,
+        asset: &'a crate::model::Asset,
+        root: &'a Path,
+        identity: IdentityCheck,
+    },
+}
+enum AcceptedSource {
+    Reference(Source, String),
+    Indexed(Source, std::sync::Arc<crate::direct::Video>),
+}
+fn inspect_source_with(
+    profile: SourceProfile<'_>,
+    control: &dyn media::Control,
+) -> Result<AcceptedSource> {
+    match profile {
+        SourceProfile::Reference { path, check } => {
+            let (source, format) = inspect_reference_with(
+                path,
+                check.width,
+                check.height,
+                check.rate,
+                control,
+                check.alpha,
+                check.timing,
+            )?;
+            Ok(AcceptedSource::Reference(source, format))
+        }
+        SourceProfile::Indexed {
+            project,
+            asset,
+            root,
+            identity,
+        } => {
+            let (video, source) = crate::direct::bound_video(
+                project,
+                asset,
+                root,
+                control,
+                matches!(identity, IdentityCheck::DeferredToPublication),
+            )?;
+            Ok(AcceptedSource::Indexed(source, std::sync::Arc::new(video)))
+        }
+    }
+}
+pub(crate) fn inspect_indexed(
+    project: &Project,
+    asset: &crate::model::Asset,
+    root: &Path,
+    control: &dyn media::Control,
+    identity: IdentityCheck,
+) -> Result<(Source, std::sync::Arc<crate::direct::Video>)> {
+    match inspect_source_with(
+        SourceProfile::Indexed {
+            project,
+            asset,
+            root,
+            identity,
+        },
+        control,
+    )? {
+        AcceptedSource::Indexed(source, video) => Ok((source, video)),
+        AcceptedSource::Reference(..) => unreachable!("requested indexed profile"),
+    }
+}
 /// Inspect as `check` says.
 pub(crate) fn inspect_checked(
     path: &Path,
     check: Check,
     control: &dyn media::Control,
 ) -> Inspected {
-    let Check {
-        width,
-        height,
-        rate,
-        alpha,
-        timing,
-    } = check;
-    inspect_source_with(path, width, height, rate, control, alpha, timing)
+    match inspect_source_with(SourceProfile::Reference { path, check }, control)? {
+        AcceptedSource::Reference(source, format) => Ok((source, format)),
+        AcceptedSource::Indexed(..) => unreachable!("requested reference profile"),
+    }
 }
 /// Inspect several sources: largest file first and up to `inspection_cache::LANES` at a time
 /// when `control` can be shared between threads, otherwise one after another. A cold timeline
@@ -559,8 +654,17 @@ pub(crate) fn inspect_overlay(
     rate: Time,
     control: &dyn media::Control,
 ) -> Result<(Source, bool)> {
-    let (source, pix_fmt) =
-        inspect_source_with(path, width, height, rate, control, true, Timing::Decoded)?;
+    let (source, pix_fmt) = inspect_checked(
+        path,
+        Check {
+            width,
+            height,
+            rate,
+            alpha: true,
+            timing: Timing::Decoded,
+        },
+        control,
+    )?;
     Ok((source, pix_fmt == "bgra"))
 }
 fn inspect_source_at(
@@ -572,7 +676,18 @@ fn inspect_source_at(
     allow_alpha: bool,
     timing: Timing,
 ) -> Result<Source> {
-    inspect_source_with(path, width, height, rate, control, allow_alpha, timing).map(|(s, _)| s)
+    inspect_checked(
+        path,
+        Check {
+            width,
+            height,
+            rate,
+            alpha: allow_alpha,
+            timing,
+        },
+        control,
+    )
+    .map(|(s, _)| s)
 }
 /// One packet listing supplies the metadata, FFV1 video timing and exact PCM16 sample counts without
 /// decoding; strict (`Decoded`) inspection then also decodes every video frame. Metadata is validated
@@ -581,7 +696,7 @@ fn inspect_source_at(
 /// hashed, and identical bytes with identical parameters, ffprobe and engine skip the probe.
 /// A pass also records the other parameters it proves (see `implied`).
 /// Returns the video pixel format with the source.
-fn inspect_source_with(
+fn inspect_reference_with(
     path: &Path,
     width: u32,
     height: u32,
@@ -801,6 +916,13 @@ pub(crate) fn output_folder(output: &Path, root: &Path) -> Result<PathBuf> {
                 output.display()
             ),
         )
+        .with_path("output")
+        .with_hint(if e.kind() == std::io::ErrorKind::NotFound {
+            "Create detail.directory inside detail.output_root, then retry with the same output path."
+        } else {
+            "Check the output parent directory and access permissions."
+        })
+        .with_detail(json!({"directory":parent,"output_root":root}))
     })
 }
 
@@ -811,6 +933,11 @@ pub(crate) fn output_root(root: &Path) -> Result<PathBuf> {
             "IO_ERROR",
             format!("output_root {} cannot be resolved ({e})", root.display()),
         )
+        .with_path("output_root")
+        .with_hint(
+            "Choose an existing output_root directory, or create the intended directory first.",
+        )
+        .with_detail(json!({"directory":root}))
     })
 }
 
@@ -835,8 +962,8 @@ pub(crate) fn destination_extension(
             .ok_or_else(|| error("INVALID_PATH", "Missing filename"))?,
     );
     if output.try_exists()? {
-        return Err(error(
-            "OUTPUT_EXISTS",
+        return Err(crate::errors::output_exists(
+            &output,
             "Existing outputs are never overwritten",
         ));
     }
@@ -864,6 +991,31 @@ pub fn plan(
     )
 }
 
+/// Reuse the placed-track streaming pipeline for sequential originals without editing the snapshot.
+fn direct_tracks(project: &Project) -> Result<Option<Project>> {
+    if project.tracks.is_some()
+        || !project.assets.iter().any(|asset| {
+            asset.decode.is_some()
+                && project
+                    .clips
+                    .iter()
+                    .any(|c| c.asset_id.as_ref() == Some(&asset.id))
+        })
+    {
+        return Ok(None);
+    }
+    let mut mapped = project.clone();
+    crate::tracks::edit(
+        &mut mapped,
+        crate::tracks::Edit::Promote {
+            video_track_id: "direct-video".into(),
+            audio_track_id: "direct-audio".into(),
+        },
+    )?;
+    mapped.validate()?;
+    Ok(Some(mapped))
+}
+
 fn plan_controlled(
     project: &Project,
     input_root: &Path,
@@ -874,6 +1026,9 @@ fn plan_controlled(
     control.phase("inspecting")?;
     project.validate()?;
     media::input_root(input_root)?;
+    if let Some(mapped) = direct_tracks(project)? {
+        return plan_controlled(&mapped, input_root, output_root, output, control);
+    }
     if let Some(plan) = chunked(
         project,
         output_root,
@@ -1207,6 +1362,9 @@ pub(crate) fn plan_audio_range(
     duration: Time,
 ) -> Result<Plan> {
     project.validate()?;
+    if let Some(mapped) = direct_tracks(project)? {
+        return plan_audio_range(&mapped, input_root, output_root, output, start, duration);
+    }
     media::input_root(input_root)?;
     start.units(project.frame_rate)?;
     if duration.units(project.frame_rate)? == 0

@@ -217,10 +217,10 @@ impl Export {
             return Err(invalid("gif settings require the gif profile"));
         }
         if self.profile == Profile::PngSequence {
-            if !cfg!(windows) {
+            if !cfg!(any(windows, target_os = "linux")) {
                 return Err(error(
                     "UNSUPPORTED_PLATFORM",
-                    "Atomic image directory publication currently requires Windows",
+                    "Atomic image directory publication currently requires Windows or Linux",
                 ));
             }
             let first = self.sequence_first.unwrap_or(0) as u64;

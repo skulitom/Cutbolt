@@ -28,8 +28,9 @@ fn relative(label: &str, identity: &Identity, root: &Path, remedy: &str) -> Resu
 pub fn inspect(project: &Project, expected_revision: u64, input_root: &Path) -> Result<Value> {
     project.validate()?;
     if project.revision != expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            expected_revision,
+            project.revision,
             "Expected revision does not match the supplied project",
         ));
     }

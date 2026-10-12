@@ -661,15 +661,31 @@ pub enum Request {
     CaptionsScene(crate::captions::SceneRequest),
     #[serde(rename = "graphics.instantiate")]
     GraphicsInstantiate {
-        /// Template to expand: a scene with typed, bound parameters.
-        template: crate::templates::Template,
+        /// Inline template to expand; provide exactly one of template or template_id.
+        template: Option<crate::templates::Template>,
+        /// Original built-in ID from templates.list; alternative to an inline template.
+        template_id: Option<String>,
         /// ID for the returned scene instance.
         instance_id: String,
         /// Values keyed by parameter ID; a parameter without a value uses its declared default.
+        #[serde(default)]
         values: std::collections::BTreeMap<String, crate::templates::ParameterValue>,
+        /// Optional target snapshot: defaults the output canvas, scale 1 and native frame rate. Built-in layouts fit it; inline layer coordinates remain authored.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
+    /// Instantiate and compile a graphic, then place its asset and clip in one revision-checked saved edit. Queue through job.start in MCP.
+    #[serde(rename = "graphics.place")]
+    GraphicsPlace(crate::graphics_place::Place),
+    #[serde(rename = "templates.list")]
+    TemplatesList {
+        /// Optional exact built-in ID; omit to list the whole catalog with typed defaults and output sizes.
+        template_id: Option<String>,
+    },
+    #[serde(rename = "fonts.find")]
+    FontsFind(crate::fonts::Find),
     #[serde(rename = "proxy.generate")]
     ProxyGenerate(proxy::Generate),
     #[serde(rename = "proxy.status")]
@@ -801,14 +817,22 @@ pub enum Request {
     #[serde(rename = "scene.inspect")]
     SceneInspect {
         /// Scene to validate and sample.
+        #[schemars(with = "crate::scene_short::SceneInput")]
         scene: scene::Scene,
+        /// Optional target for shorthand size/project and default frame rate; full scenes remain explicit.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
     },
     #[serde(rename = "scene.render")]
     SceneRender {
         /// Scene to compile, normally checked first with scene.inspect.
+        #[schemars(with = "crate::scene_short::SceneInput")]
         scene: scene::Scene,
+        /// Optional shorthand target canvas/clock, snapshot or saved reference.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory; every source file must lie inside it.
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
@@ -819,7 +843,11 @@ pub enum Request {
     #[serde(rename = "scene.still")]
     SceneStill {
         /// Scene to show, as for scene.inspect and scene.render.
+        #[schemars(with = "crate::scene_short::SceneInput")]
         scene: scene::Scene,
+        /// Optional shorthand target canvas/clock, snapshot or saved reference.
+        #[schemars(with = "Option<crate::reference::ProjectInput>")]
+        project: Option<Project>,
         /// Existing absolute directory containing the scene's media and fonts.
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
@@ -1043,7 +1071,7 @@ pub enum Request {
         job_root: PathBuf,
         /// Caller-chosen ID unique within job_root, 1-128 bytes. An identical resubmission returns the original ticket.
         request_id: String,
-        /// Command to run in the background: export.run, export.review, captions.render, media.prepare, media.transcribe, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
+        /// Command to run in the background: graphics.place, export.run, export.review, captions.render, media.prepare, media.transcribe, media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe.
         run: String,
         /// That command's arguments exactly as for a direct call, without `command`; cutbolt_schema with its name gives the schema.
         arguments: serde_json::Map<String, Value>,
@@ -1214,7 +1242,9 @@ pub fn handle_json_as(
         }
     };
     crate::documents::load(&mut request, workspace)?;
+    let short_scene = crate::scene_short::is_short(&request);
     let mut completed = prepare(&mut request, workspace)?;
+    let mut expanded_scene = short_scene.then(|| request["scene"].clone());
     // A queued command's arguments get the same preparation now, in the caller's workspace.
     if request["command"] == "job.start"
         && let Some(run) = request["run"].as_str()
@@ -1233,9 +1263,15 @@ pub fn handle_json_as(
     {
         let mut queued = Value::Object(std::mem::take(arguments));
         queued["command"] = request["run"].clone();
-        completed.extend(prepare(&mut queued, workspace)?);
-        parse(queued.clone())
-            .map_err(|e| crate::error(e.code, format!("arguments: {}", e.message)))?;
+        let short_scene = crate::scene_short::is_short(&queued);
+        completed.extend(prepare(&mut queued, workspace).map_err(|mut failure| {
+            failure.path = crate::prefixed_path("arguments", failure.path.as_deref());
+            failure
+        })?);
+        if short_scene {
+            expanded_scene = Some(queued["scene"].clone());
+        }
+        parse(queued.clone()).at(|| "arguments".into())?;
         // The command would reject a missing output folder only once the job ran.
         if let (Some(output), Some(root)) =
             (queued["output"].as_str(), queued["output_root"].as_str())
@@ -1257,6 +1293,11 @@ pub fn handle_json_as(
     let schema = matches!(request, Request::Schema { .. });
     let capabilities = matches!(&request, Request::Capabilities { section } if section.as_deref().is_none_or(|s| s == "all"));
     let mut result = handle(request)?;
+    if let Some(scene) = expanded_scene {
+        // The queued request is already expanded and pinned; return that exact recipe at enqueue.
+        result["expanded_scene"] =
+            serde_json::to_value(serde_json::from_value::<scene::Scene>(scene)?)?;
+    }
     if !completed.is_empty() && result.is_object() {
         result["resolved_identities"] = Value::Array(completed);
     }
@@ -1295,7 +1336,10 @@ fn prepare(
     }
     let store = workspace.map(crate::workspace::Workspace::store_root);
     crate::reference::resolve(request, store.as_deref())?;
-    crate::identity::complete(request)
+    crate::scene_short::prepare(request)?;
+    let mut completed = crate::fonts::prepare(request)?;
+    completed.extend(crate::identity::complete(request)?);
+    Ok(completed)
 }
 
 /// Parse a request, naming the first field its schema rejects when it fails.
@@ -1310,7 +1354,7 @@ fn parse(request: Value) -> Result<Request> {
             (Some(field), Some(original)) if !field.is_empty() => {
                 let message = e.to_string();
                 let note = crate::schema::given(&original, &field, &message).unwrap_or_default();
-                crate::error("INVALID_JSON", format!("{field}: {message}{note}"))
+                crate::error("INVALID_JSON", format!("{field}: {message}{note}")).with_path(field)
             }
             _ => crate::Error::from(e),
         }
@@ -1319,6 +1363,8 @@ fn parse(request: Value) -> Result<Request> {
 
 pub fn handle(request: Request) -> Result<Value> {
     match request {
+        Request::GraphicsPlace(request) => crate::graphics_place::run(&request),
+        Request::FontsFind(request) => crate::fonts::find(&request),
         Request::NativeImport(request) => crate::native_project::import(&request),
         Request::ProjectPortable {
             project,
@@ -1690,14 +1736,36 @@ pub fn handle(request: Request) -> Result<Value> {
         ),
         Request::GraphicsInstantiate {
             template,
+            template_id,
             instance_id,
             values,
+            project,
             input_root,
-        } => crate::templates::instantiate(&template, &instance_id, &values, &input_root),
+        } => {
+            let selected = crate::templates::select(
+                template_id.as_deref(),
+                template.as_ref(),
+                project.as_ref(),
+                &values,
+            )?;
+            crate::templates::instantiate_for_project(
+                &selected,
+                &instance_id,
+                &values,
+                &input_root,
+                project.as_ref(),
+            )
+        }
+        Request::TemplatesList { template_id } => crate::templates::list(template_id.as_deref()),
         Request::ExpressionInspect { request } => crate::expressions::inspect(&request),
-        Request::SceneInspect { scene, input_root } => scene::inspect(&scene, &input_root),
+        Request::SceneInspect {
+            scene,
+            input_root,
+            project: _,
+        } => scene::inspect(&scene, &input_root),
         Request::SceneRender {
             scene,
+            project: _,
             input_root,
             output_root,
             output,
@@ -2056,6 +2124,7 @@ pub fn handle(request: Request) -> Result<Value> {
         }),
         Request::SceneStill {
             scene,
+            project: _,
             input_root,
             output_root,
             output,
@@ -2140,9 +2209,13 @@ pub fn handle(request: Request) -> Result<Value> {
             let path = media::allowed_file(&path, &input_root)?;
             let identity = crate::identity::relative(&path, &input_root)?;
             let metadata = media::probe(&path)?;
-            let relative = identity["path"].as_str().expect("identity path");
-            let timeline = crate::readiness::timeline(&path, relative, &metadata);
-            Ok(json!({"path":path,"identity":identity,"timeline":timeline,"metadata":metadata}))
+            let (timeline, index) = crate::readiness::inspect(&path, &identity, &metadata)?;
+            let mut result =
+                json!({"path":path,"identity":identity,"timeline":timeline,"metadata":metadata});
+            if let Some(index) = index {
+                result["source_index"] = index;
+            }
+            Ok(result)
         }
         Request::Plan {
             project,
@@ -2173,10 +2246,10 @@ fn all_capabilities() -> Value {
     let mut result = json!({"version":env!("CARGO_PKG_VERSION"),"license":"MIT","local_only":true,"reframing":crate::reframe::capabilities(),
     "interchange":crate::interchange::capabilities(),
     "project_store":{"schema_version":2,"read_versions":[1,2],"migration":"explicit_transactional","backup_maximum_bytes":268435456,"relative_media":true},
-    "commands":["expression.inspect","native.import","image.sequence.inspect","image.sequence.compile","project.portable","session.check","session.migrate","session.backup","session.recover","interchange.import","interchange.export.inspect","interchange.export","cache.run","cache.inspect","cache.prune","preview.sheet","transcript.transcribe","transcript.inspect","transcript.correct","transcript.plan","transcript.fillers","transcript.assemble","audio.inputs","audio.record.inspect","audio.record","audio.record.place","audio.repair.inspect","audio.repair.render","stabilization.inspect","reframe.inspect","tracking.inspect","sync.inspect","hdr.inspect","hdr.conform","lut.inspect","scopes.inspect","export.inspect","export.run","export.review","effects.preset","captions.import","captions.inspect","captions.apply","captions.encode","captions.export","captions.draft","captions.render","captions.scene","graphics.instantiate","proxy.generate","proxy.status","proxy.relink","media.conform.inspect","media.conform","audio.inspect","audio.render","registry.search","registry.status","registry.bind","registry.relink","scene.inspect","scene.still","scene.render","preview.frame","preview.range","capabilities","schema","project.create","project.validate","timeline.apply","session.create","session.get","session.apply","session.undo","session.restore","session.preview","session.history","session.receipt","files.list","timeline.meters","timeline.outline","timeline.check","preview.cuts","media.sheet","media.shots","media.prepare","media.transcribe","color.match","audio.beats","audio.duck","audio.normalize","audio.tighten","media.inspect","render.plan","render.run","render.start","job.status","job.cancel","job.resume","job.start","job.wait"],
-    "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
+    "commands":crate::schema::commands().collect::<Vec<_>>(),
+    "operations":["media.paths","transcript.cut","multicam.create","multicam.edit","sequence.create","sequence.edit","sequence.remove","tracks.edit","media.proxy.attach","media.proxy.detach","media.proxy.relink","preview.proxy","project.transfer","clip.insert","clip.overwrite","timeline.ripple_delete","clip.slip","clip.roll","clip.slide","media.metadata","media.bind","media.relink","media.add","media.index","clip.append","clip.split","clip.trim","clip.move","clip.remove"],
     "state":"immutable snapshots plus local transactional sessions with durable request IDs, revision conflicts and undo/history",
-    "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"],"results":"summary_unless_detail_full"},"jobs":{"platform":"windows","available":cfg!(windows),"maximum_active_per_root":32,"maximum_jobs_per_wait":jobs::MAX_WAIT_JOBS,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
+    "mcp":{"transport":"stdio","protocol_versions":["2025-11-25","2025-06-18"],"results":"summary_unless_detail_full"},"jobs":{"platforms":["windows","linux"],"available":cfg!(any(windows, target_os = "linux")),"maximum_active_per_root":32,"maximum_jobs_per_wait":jobs::MAX_WAIT_JOBS,"concurrent_renders_per_root":1,"default_attempts":1,"maximum_attempts":3,"retry_errors":["TOOL_FAILED","TOOL_TIMEOUT","WORKER_INTERRUPTED"],"source_pinning":"first_validated_plan","tool_content_pinning":true,"publication_recovery":"validated_receipt_and_output_hash","queue_schema_version":2},
     "transcripts":crate::transcript::capabilities(),
     "audio_repair":crate::audio_repair::capabilities(),
     "audio_recording":{"platform":"windows","sample_rate":48000,"channels":2,"sample_format":"s16le","maximum_seconds":7200,"input_selection":"explicit_endpoint_or_process","recording":"blocking_cli_library","placement":"existing_native_audio_tracks","latency_compensation":"explicit_exact_shift","source_preservation":true},
@@ -2190,6 +2263,7 @@ fn all_capabilities() -> Value {
     "export":crate::delivery::capabilities(),
     "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
     "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
+    result["scenes"]["shorthand"] = json!({"form":"short","content":["text","rectangle","ellipse"],"project_size":true,"expanded_recipe":true,"guide":"docs/SCENE_SHORTHAND.md"});
     result["build"] = json!(
         crate::BUILD_COMMIT
             .map(|(commit, modified)| json!({"commit": commit, "sources_modified": modified}))
@@ -2239,7 +2313,7 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
         .map(rate)
         .collect();
     let essentials = [
-        "Timeline sources must be FFV1 video with 48 kHz stereo PCM16 audio at the project size (the reference profile); convert other media with media.conform into editing assets.".to_owned(),
+        "Timelines accept the strict FFV1/PCM reference profile and bound indexed H.264/HEVC 8-bit originals at the project size/rate. media.inspect returns eligible original assets; media.prepare converts supported files that need preparation.".to_owned(),
         format!(
             "Timelines (sequential or placed tracks) run at {} fps; scenes, captions and H.264 delivery follow the timeline's rate, while proxies and camera groups stay at 25 fps.",
             rates.join(", ")
@@ -2288,6 +2362,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn queued_parse_errors_expose_the_arguments_field_path() {
+        let scratch = crate::tracking::Scratch::new("job-field-path");
+        let root = &scratch.0;
+        let mut scene: Value =
+            serde_json::from_str::<Value>(include_str!("../examples/title-card-template.json"))
+                .unwrap()["scene"]
+                .clone();
+        scene["width"] = json!("wide");
+        let failure = handle_json(
+            json!({"command":"job.start","job_root":root,"request_id":"bad-width","run":"scene.render",
+                "arguments":{"scene":scene,"input_root":root,"output_root":root,"output":root.join("title.mkv")}}),
+            None,
+        ).unwrap_err();
+        assert_eq!(failure.code, "INVALID_JSON");
+        assert_eq!(failure.path.as_deref(), Some("arguments.scene.width"));
+        assert_eq!(failure.retry, Some(crate::errors::Retry::Changed));
+        assert!(failure.message.starts_with("arguments: scene.width: "));
+        assert!(!root.join("title.mkv").exists());
+    }
+
+    #[test]
     fn queued_jobs_reject_a_missing_output_folder_at_submission() {
         let scratch = crate::tracking::Scratch::new("job-output-folder");
         let root = &scratch.0;
@@ -2302,6 +2397,10 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.code, "IO_ERROR");
+        assert_eq!(error.retry, Some(crate::errors::Retry::Changed));
+        assert_eq!(error.path.as_deref(), Some("arguments.output"));
+        assert_eq!(error.detail.as_ref().unwrap()["directory"], json!(folder));
+        assert!(error.hint.as_ref().unwrap().contains("Create"));
         let expected = format!(
             "arguments.output: Output folder {} for {} does not exist (",
             folder.display(),

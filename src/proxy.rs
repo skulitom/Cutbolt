@@ -88,8 +88,9 @@ pub fn generate(request: &Generate) -> Result<Value> {
     let project = &request.project;
     project.validate()?;
     if project.revision != request.expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            request.expected_revision,
+            project.revision,
             "Expected revision does not match supplied snapshot",
         ));
     }
@@ -132,6 +133,7 @@ pub fn generate(request: &Generate) -> Result<Value> {
             },
             color: Some(conform::Color::EncodedRgb),
             sdr: None,
+            clock: None,
         },
         source_in: Time::ZERO,
         duration: asset.duration,
@@ -204,6 +206,7 @@ pub fn status(project: &Project, root: &Path) -> Result<Value> {
             let mut a = a.clone();
             a.path = proxy.path.clone();
             a.identity = Some(proxy.identity.clone());
+            a.decode = None;
             a.proxy = None;
             mapped.assets.push(a);
         } else {
@@ -288,6 +291,7 @@ pub(crate) fn preview_project(project: &Project, root: &Path) -> Result<Project>
             }
             a.path = path.to_string_lossy().into_owned();
             a.identity = Some(proxy.identity.clone());
+            a.decode = None;
         }
         a.proxy = None;
     }

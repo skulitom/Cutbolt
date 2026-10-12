@@ -11,6 +11,7 @@ from fractions import Fraction as F
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
 import subprocess
@@ -744,10 +745,17 @@ def run(root):
             if request.get('project') is None:request.pop('project')
             call(request, code)
             assert not (output/'review-rejected').exists(), fields
-        wrong = {'distribution':'Ubuntu', 'python':'/usr/bin/python3', 'python_paths':['/opt/speech'],
+        wrong = {'python':'/usr/bin/python3', 'python_paths':['/opt/speech'],
                  'model':str(delivered), 'alignment_root':str(root), 'threads':1}
+        if os.name == 'nt':
+            wrong['distribution'] = 'Ubuntu'
+        else:
+            # A WSL distribution means nothing on Linux, so such a runtime is refused before any work.
+            call({**reviewing, 'heard':[], 'runtime':{**wrong, 'distribution':'Ubuntu'}, 'language':'en',
+                  'output':str(output/'review-wsl'), 'rendition_height':0}, 'INVALID_TRANSCRIPTION')
+            assert not (output/'review-wsl').exists()
         unheard = call({**reviewing, 'heard':[], 'runtime':wrong, 'language':'en', 'output':str(output/'review-unheard'), 'rendition_height':0})
-        failed = {'code':'MODEL_CHANGED', 'message':'Selected speech profile requires its pinned local model'}
+        failed = {'code':'MODEL_CHANGED', 'message':'Selected speech profile requires its pinned local model', 'retry':'changed'}
         assert unheard['speech']['recognition'] == {'ok':False, 'error':failed}, unheard['speech']
         assert unheard['speech']['expected_words'] == 3 and 'comparison' not in unheard['speech']
         assert (unheard['picture']['black'], unheard['sound'], unheard['timing']) == (reviewed['picture']['black'], reviewed['sound'], reviewed['timing'])

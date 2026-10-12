@@ -1,16 +1,18 @@
 # Cutbolt
 
-An original, local video editing engine for agents. Designed to let agents pick up where they left off.
+An original, local video editing engine for agents. Edit recorded footage, add captions, mix audio and export through structured commands, with saved revisions, retries and undo.
 
-**Verified acceptance coverage: 100/100 core and 108/108 total (100%), with 466 passing checks.** See the [implementation tracker](docs/IMPLEMENTATION_PROGRESS.md) for the unchanged scope and documented limits.
+Qualifying [H.264 and HEVC originals](docs/DIRECT_SOURCES.md) now feed frame previews, track renders and exports directly. Other formats still need explicit conversion within the [supported matrix](docs/CONFORM.md). The compact MCP catalog, [20 original graphics templates](docs/TEMPLATES.md) and [six tested skill recipes with a local plugin](docs/INSTALLATION.md#install-the-optional-agent-plugin) reduce setup work. Binary releases and fresh-model workflow measurements remain in development.
 
-Full verification includes [typed property expressions](docs/EXPRESSIONS.md), [shutter sampling and motion blur](docs/TEMPORAL.md), [3D planes, cameras and lighting](docs/GEOMETRY.md), and [local annotated foreground masks](docs/SEGMENTATION.md). These use the existing scene and saved-edit workflows; the optional segmentation worker keeps its pinned dependencies external.
+**Development status: v0.4.0, 12 October 2026.** A Rust library and JSON command-line program create project snapshots, validate and edit timelines, inspect local media, plan renders and produce verified output. Local sessions persist revisions, reject conflicting edits, replay successful requests, preview edit diffs and support undo/restoration with history.
 
-**Status: v0.4 native tracks, scenes, audio mixes, media conversion and previews, 4 October 2026.** An original Rust library and JSON command-line program can create project snapshots, validate timelines, append/trim/split/reorder/remove clips, inspect local media, plan renders, and produce verified lossless output. Local sessions now persist revisions, reject conflicting edits, replay successful requests safely, preview edit diffs, and support undo/restoration with history. See the [live progress checklist](docs/PROGRESS.md).
+The last full acceptance run, **4 October 2026**, passed 466 checks for the bounded v1 checklist (100/100 core, 108/108 total). This is dated checklist evidence, not a comparative claim or full verification of the newer work. See the [implementation tracker](docs/IMPLEMENTATION_PROGRESS.md), [full evidence](docs/PROGRESS.md) and [subsequent targeted checks and open work](docs/PROGRESS_HISTORY.md).
+
+That full run covered [typed property expressions](docs/EXPRESSIONS.md), [shutter sampling and motion blur](docs/TEMPORAL.md), [3D planes, cameras and lighting](docs/GEOMETRY.md), and [local annotated foreground masks](docs/SEGMENTATION.md). These use the scene and saved-edit workflows; optional workers keep their dependencies external.
 
 [Productions from a manifest](docs/PRODUCTION.md): `tools/production.py` builds a narrated, captioned and mixed pixel-art explainer from one JSON manifest (script lines, one visual beat per scene, palette, music, delivery). It drives PixelForge, a local Qwen narration worker and this engine with resumable stage receipts, so a new video in that style takes a handful of agent calls instead of about 170.
 
-Agents use structured commands and local library calls. No hosted API, web server, account, or network connection is required at runtime. A native MCP stdio adapter exposes the same commands. On Windows, background render jobs persist status and progress, support cancellation, and detect interrupted workers. Full-size frame and exact-range previews are available. Optional [bounded render retries and publication recovery](docs/RENDER_RECOVERY.md) pass full verification with bounded retries and checked publication recovery.
+Agents use structured commands and local library calls. No hosted API, web server, account, or network connection is required at runtime. A native MCP stdio adapter exposes the same commands. On Windows and Linux, background render jobs persist status and progress, support cancellation, and detect interrupted workers. Full-size frame and exact-range previews are available. Optional [bounded render retries and publication recovery](docs/RENDER_RECOVERY.md) pass full verification with bounded retries and checked publication recovery.
 
 [Editorial interchange](docs/INTERCHANGE.md) imports and exports a bounded public OTIO subset with explicit local media bindings, exact track/audio timing, generic dissolves and path-specific loss acknowledgements. Import returns a proposed snapshot for the existing saved-session workflow. Reference-library, decoded-output and full integration verification pass.
 
@@ -22,7 +24,7 @@ The [local asset registry](docs/REGISTRY.md) adds searchable bins, tags and meta
 
 Sequential editing includes explicit insert, overwrite and ripple deletion, plus slip, slide and rolling edits. These preserve declared frame boundaries and linked audio/video source ranges, with inspectable before/after placements through saved sessions. A separate [audio mix recipe](docs/AUDIO.md) provides sample-based cuts, mono/stereo conversion, gain, mute, fades, automation and track mixing. It exports WAV or supplies a scene soundtrack; compiled scenes use the existing session contract. Ordered master EQ/compression and final PCM loudness, sample-peak and RMS meters are also available.
 
-[Native tracks and linked groups](docs/TRACKS.md) add explicitly placed video/audio, track order, enabled state, locks, targeting and whole-clip collision policies. Video uses the highest active opaque track, with optional straight-alpha `alpha_over` tracks composited above it exactly; audio sums exact sample placements. Linked moves/removals and collateral replacements use saved diffs, retries, undo and history. Existing sequential projects can be promoted explicitly. [Native boundary edits](docs/TRACK_EDITS.md) add linked splits, slip/slide/roll and interval insert/overwrite/ripple with explicit survivor IDs, end policies and transition handling. Placed-track output retains its documented 25 fps restriction.
+[Native tracks and linked groups](docs/TRACKS.md) add explicitly placed video/audio, track order, enabled state, locks, targeting and whole-clip collision policies. Video uses the highest active opaque track, with optional straight-alpha `alpha_over` tracks composited above it exactly; audio sums exact sample placements. Linked moves/removals and collateral replacements use saved diffs, retries, undo and history. Existing sequential projects can be promoted explicitly. [Native boundary edits](docs/TRACK_EDITS.md) add linked splits, slip/slide/roll and interval insert/overwrite/ripple with explicit survivor IDs, end policies and transition handling. Placed-track output uses all eight exact [native frame rates](docs/NATIVE_TIMING.md), including fractional rates.
 
 [Editable transitions](docs/TRANSITIONS.md) add dissolves, dips to black and directional wipes with explicit incoming/outgoing source handles. Stereo audio supports linear crossfades and dips through silence. Transition clocks survive occlusion, inside-transition range cuts, proxy previews and queued full-quality output; settings remain in saved sessions.
 
@@ -33,6 +35,8 @@ Sequential editing includes explicit insert, overwrite and ripple deletion, plus
 [Long-form reference rendering](docs/LONG_FORM.md) adds explicit large-raster thread/deadline budgets and bounded Windows temporary-file cleanup. The complete 30-minute moving 4K fixture and queue/write-failure gates pass full verification.
 
 Explicit timeline gaps produce black video and silence, including in previews and queued renders. They can be split, trimmed, moved, inserted or overwritten through the same editing commands. Mixed-rate compressed video and audio-only sources use the declared conversion path before precise timeline trimming; first/last-frame and keyframe boundaries are covered by independent output checks.
+
+[Direct footage](docs/DIRECT_SOURCES.md) uses eligible H.264/HEVC 8-bit originals in sequential and placed-track previews and exports, with indexed frame order, exact audio normalization and content verification. Inspection returns the original asset ready for `media.add`; no converted video is created. The documented long-source performance gate passes; nested direct pictures and later stages remain open.
 
 [Validated media conversion](docs/CONFORM.md) brings a bounded matrix of FFV1/PCM MKV, tagged BT.709 H.264/AAC MP4/MOV and PCM16 WAV into the reference timeline. It preserves source files, checks identities and decoded timestamps, and provides constant speed, reverse and freeze recipes with an explicit audio policy. Sources up to 16 GiB and outputs up to 30 minutes stream only the frames they need; reverse mappings use a bounded random-access window. Converted assets use ordinary saved-session editing and export.
 
@@ -82,11 +86,14 @@ Explicit timeline gaps produce black video and silence, including in previews an
 
 ## Run locally
 
+See [installation and setup checks](docs/INSTALLATION.md) for source installation and MCP setup.
+
 Requires Rust/Cargo with a C build toolchain for SQLite, Python 3 with the development packages in [the dependency ledger](docs/DEPENDENCIES.md) for verification, and separately installed FFmpeg/ffprobe on PATH. The tested environment is recorded in [verification/latest.json](verification/latest.json); dependency details are in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
 ```powershell
 cargo build --locked
 .\target\debug\cutbolt.exe --version
+.\target\debug\cutbolt.exe doctor
 .\target\debug\cutbolt.exe capabilities
 .\target\debug\cutbolt.exe examples/create-project.json
 python tools/verify.py                              # quick pre-commit check
@@ -95,8 +102,9 @@ python tools/verify.py --thorough --decode-device 0  # evidence run
 .\target\debug\cutbolt.exe mcp
 # Or bind one workspace: roots default inside it and paths may be relative.
 .\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp
-# Or list a compact catalog (everyday tools plus cutbolt_run for the rest) to save model context.
-.\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp --tools core
+# The default is compact (17 shared/recovery tools plus cutbolt_run).
+# Opt into all 86 direct tools when needed.
+.\target\debug\cutbolt.exe --workspace C:\DEV\CutboltData\demo mcp --tools full
 ```
 
 For a retained demo, use a new output directory outside the repository:
@@ -131,6 +139,7 @@ Maintainers: see [Publishing](mcpb/PUBLISHING.md).
 
 ## Plan
 
+- [Draft 1.0 roadmap: release gates, comparative benchmark and proposed v2 criteria](docs/ROADMAP_1_0.md)
 - [Local jobs and MCP setup](docs/AGENT_INTERFACE.md)
 - [Implementation plan and milestones](docs/PLAN.md)
 - [Research implementation roadmap](docs/IMPLEMENTATION_ROADMAP.md) and [combined completion percentage](docs/IMPLEMENTATION_PROGRESS.md)

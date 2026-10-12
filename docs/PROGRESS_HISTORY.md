@@ -1,5 +1,799 @@
 # Progress history
 
+## 12 October 2026: tested intent recipes and local plugin installation
+
+Added six original skills and a local marketplace/plugin registering the existing stdio MCP
+engine. All 26 fenced JSON requests are parsed and executed by a new `skills` fixture, which
+also checks repeated command argument keys, plugin metadata, source preservation and session
+integrity. Requests use observed asset IDs/revisions; multicam output is compared against the
+original source pictures and complete fixed-camera audio. Runtime platform limits are explicit.
+Skills and manifests are included in verification cache inputs and the shipping dirty-code guard.
+
+The four scripted recipes pass on Windows (36 seconds) and Linux (18 seconds): talking head
+with supplied transcript/captions/export/review takes 15 editing calls, tutorial 11, two-camera
+edit 8 and OTIO delivery 9, with zero schema lookups. These counts exclude skill loading and
+model interaction. Initial development failures exposed mistaken use of `save_as` as if it also
+returned the original job receipt, and a fixture omission of the declared-transfer OTIO loss.
+The recipes now return reviewable results directly and describe both handoff losses. All six
+skill format checks pass. The clean-profile documented plugin install discovers all six skills,
+matches their source bytes and connects through local stdio; the tested client build is in
+INSTALLATION.md. Its initial health check pointed PATH at a nonexistent build directory; using
+the actual executable fixed it without changing the plugin. Raw install records remain external.
+
+An overlapping four-lane regression run saturated the host during the full 4K oracle: the Linux
+skills run reported STORE_BUSY, and background media checks reported timeouts. The redundant
+Windows regression was stopped, new background scheduling was held for the full milestone, and
+the four related regressions are queued to run sequentially on each platform afterward. Their
+results, and failures from f79bcdf's unfinished background run, must be checked after this commit.
+No limits were relaxed or failed runs relabeled as passes. Earlier 206209d background verification
+finished with 21 passes; its remaining checks were superseded by f79bcdf's descendant run.
+
+The frozen 633fde0 full milestone has passed the complete 30-minute 4K check, direct sources,
+optional runtimes and the long graphics/agent-interface checks. Sustained capture and final
+latency acceptance are still running. Generated progress/evidence remain the 4 October baseline
+until that complete run succeeds. Fresh-model workflows 1/3/5, actual token use and the approved
+talking-head targets remain open, as do the later direct-footage stages. This is a stage-5
+installation/recipe checkpoint, not full-plan completion, a comparative lead or new editing points.
+
+## 12 October 2026: explicit scene shorthand and agent-cost stage 4 acceptance
+
+Added an explicit `form:short` text/shape scene syntax, accepted by scene inspection, stills,
+rendering and inline templates. Exact numeric seconds, hex colors, safe-area anchors, default
+transforms and two-key named easing curves expand to the existing scene contract. Installed
+font names and path-only identities use the existing resolver. Project dimensions and native
+clock can default from a supplied snapshot/reference or graphics.place's requested revision.
+Successful direct scene requests return the expanded recipe; queued renders return it at
+enqueue and persist the pinned form. Full scene semantics and renderer defaults remain intact.
+The original title example is 384 bytes. MCP guidance now points to built-in placement and
+shorthand before schema study. Shorthand intentionally covers text, rectangles and ellipses;
+advanced sources, audio, effects and geometry retain the full format.
+
+Six shorthand acceptance groups pass on Windows and Linux. Independently authored full scenes
+match decoded RGB/alpha, complete PCM, stills and serialized scene digests. Fractional project
+clocks, inline parameter/template digests, named fonts, project-sized saved placement and retry
+are covered, along with invalid colors, fields, bounds, clocks, curves and bound identities.
+The tests compare 40 frames and render the compact example. Initial failures found omitted font
+identity fields being serialized as empty values; expansion now preserves their omission so
+ordinary preparation binds the actual file. The fixture's initial assumptions about inspection
+digests, terminal job status and unaligned-time errors were corrected to the existing contracts.
+Those failed development runs are superseded by the complete passing runs.
+
+Format/lint and Rust tests pass (229 Windows / 228 Linux). The final six-fixture regressions
+pass on each platform: shorthand, scenes, templates, fonts, graphic placement and agent costs
+(80 seconds Windows / 82 seconds Linux). Call counts remain 15/6/10/8/8, including two calls /
+775 sent bytes for the tutorial title, with zero failures or schema lookups. All budgets are
+unchanged; the core workspace listing remains 21198 bytes. Updated received wire counts are
+recorded in AGENT_COSTS.md. This completes agent-cost stage 4's scripted acceptance, not stage 5's
+fresh-model/token trial or either complete plan. No editing points or comparative lead is claimed.
+
+Graphic placement commit 206209d reached main after its gate passed 15 fixtures; its 49 deferred
+checks are still running and require follow-up. The fixed 633fde0 thorough milestone has passed
+direct footage and its optional runtime checks so far, with long-form and quiet acceptance still
+pending. Progress evidence remains the unchanged 4 October run until that milestone succeeds.
+
+## 12 October 2026: one-job graphic placement and verification follow-up
+
+`graphics.place` expands an original built-in or inline template against a saved project,
+compiles a durable asset, and attaches its video clip in one revision-checked edit. MCP uses
+`job.start` and `job.wait`; the catalogs remain 18 core / 86 full tools. Rendering runs outside
+the store write transaction, with revision and request replay checked again before commit.
+Ordinary failed preparation removes only its owned asset; undo retains committed assets for
+history restore. An ambiguous commit or crash can retain an unreferenced generated folder.
+Job errors provide the inner edit's session-receipt lookup without losing existing error detail.
+This is compiled graphic placement, not the direct-footage plan's generated scene clips.
+
+Six original fixture groups pass on Windows and Linux: queued placement versus explicit
+instantiate/render/apply, inline opaque graphics on an empty fractional-rate timeline, retry
+and undo/history, rejected edits and root escapes, concurrent replay/revision conflicts and
+encoder failure, and queued cancellation. They compare 70 decoded frames and 112016 stereo
+sample frames and preserve all original inputs. The fixture's queued title costs two calls,
+833 sent wire bytes on Windows / 830 on Linux, with no schema lookup. Format/lint and Rust
+tests pass on both platforms (229 Windows / 228 Linux). Windows queue-recovery, render-failure
+and built-in-template regressions also pass; final placement and agent-cost replays pass again
+after the platform-specific enum-layout lint fix.
+
+The scripted tutorial now uses the built-in title's project fitting instead of manually
+rewriting an inline template: 12 to 10 calls, 7920 to 3619 sent bytes. Its title step alone is
+two calls / 775 sent bytes, and the tutorial ceiling tightens to 10 calls / 4000 sent bytes.
+Final Windows received bytes are 53287; Linux 53186. The other four workflows remain at
+15/6/8/8 calls. These are regression wire measurements, not tokens or independent model trials.
+Scene shorthand, tested skills/plugin distribution and the approved fresh-agent trial remain
+required; no stage-4 or full-plan completion is claimed.
+
+The inclusive c108fd9 full quick run completed: 68 fixtures passed, none failed, skipped or
+unstarted (2066 seconds). It includes direct-source, recording, optional-runtime and hardware
+decode checks, but predates doctor and graphic placement. Shipping follow-ups have now been
+checked: b910d49 passed 14 and c108fd9 passed 26 before their remaining checks were superseded;
+633fde0's deferred run passed all 53. `verify --status` has no unresolved failures. This closes
+the earlier entries' pending result checks, including the superseded 506114f recording failure.
+An inclusive milestone thorough run is in progress on the fixed 633fde0 checkout, with all five
+external prerequisites and CUDA configured. Its result must be checked before refreshing
+progress evidence or declaring direct stage 1 complete. The 4 October full evidence remains
+unchanged and stale for these additions. No editing points, comparative lead, release tag,
+roadmap adoption or v2 scope change is claimed.
+
+## 11 October 2026: installation diagnostics and completed long-source proof
+
+Added the local `cutbolt doctor` CLI command. It reports the selected external FFmpeg/ffprobe
+versions, executable identities and required feature listings, compiled platform features, and
+optional existing-workspace structure. It creates no workspace state, checks ancestor links as
+well as final directories, and reports failures with repair guidance and exit status 1. It does
+not claim a render, GPU, optional-model, write-permission or database-integrity test. The MCP
+catalog stays at 18 core / 86 full tools. Source-install instructions now distinguish runtime
+requirements from development and optional dependencies.
+
+Five original diagnostic checks pass on Windows and Linux, including real tool identities,
+missing/failed/malformed tools, exact missing codec/muxer names, unchanged workspace contents,
+escaping state ancestors, and the compact MCP first command. Both platforms also installed the
+debug executable into a fresh external directory using `cargo install --path . --locked --debug`
+and passed the same five checks against that installed executable. These are local source-install
+checks with existing toolchains/media tools, not the clean-container binary-release gate. Rust
+tests pass (229 Windows / 228 Linux), with format/lint and the Windows agent-ergonomics regression.
+The targeted doctor verifier passes while using an isolated Cargo target directory. Both verifier
+and ship now select that directory's executable instead of accidentally copying an older default
+build. Thorough reports now retain doctor, built-in-template and font-discovery results, whose
+fixtures are separate from editing points.
+
+The frozen long-source proof now passes in full: five alternating after-build previews all meet
+the predeclared ten-second limit (median 5.073 seconds, versus 12.298 before). A queued ten-second
+export at 1190 seconds seeks the original-video decoder to 1187.988888 seconds without a full
+original-video scan; decoded RGB and PCM equal the explicit full-source-conform reference. The
+original identity and all ten before/after preview digests remain unchanged. The driver's first
+export assertion mistakenly included the encoded output's required verification scan. Its
+corrected source-only check reran the export proof after checking the frozen binaries and preview
+digests, without retiming or discarding preview samples. Details are in DIRECT_SOURCES.md; the
+retained report is `footage-long-exact/ws/remeasure/direct-preview-hashes/runs/20261011T222440/verification-recovered.json`
+under the external `plan-fixes-20261011` data root.
+
+The inclusive full quick run of c108fd9 and deferred shipping runs still need their final results
+checked. A milestone thorough run remains required before refreshing progress evidence or
+declaring stage 1 complete. The 4 October full evidence remains dated and unchanged. No release
+tag, comparative lead, roadmap adoption, v2 points or completion of either full plan is claimed.
+
+## 11 October 2026: evidence follow-up and installation-first priorities
+
+The b910d49 standalone recording rerun passed in 43 seconds with its original timestamp-gap
+threshold. The earlier 506114f failure is therefore superseded in verify --status; no capture
+code or acceptance bound changed. Commits 13807bb and b910d49 passed the shipping gate and
+reached main. Their remaining background checks and the long-source export oracle still need
+completion checks. No missing result is counted as a pass.
+
+Following review of the two fix plans, installation, tested intent skills and fresh-agent
+measurements take priority over the larger clip-effect/generated-clip/precision changes after
+the current direct-source acceptance. Both plans retain their complete scope. Scripted agent
+replays remain regression evidence, not independent model trials. The approved 15-call/40000
+received-token talking-head target still requires an actual fresh-agent result. A small,
+repeatable footage comparison against plain FFmpeg will inform subsequent priorities; it is
+not evidence for an unmeasured lead or a replacement for the draft comparative release gate.
+
+README now leads with supported footage work and explicitly dates the 4 October full v1
+checklist evidence. The draft 1.0 roadmap, G2 wording and unadopted v2 points are unchanged.
+The five retained external verification selections were located and checked: both Python
+environments import their pinned packages, speech model paths exist, and the original legacy
+engine and native-capture fixture identities match. CUDA device 0 is available. This prepares
+an inclusive verification run; it is not yet a refreshed full-verification claim or release.
+
+## 11 October 2026: one final source hash for direct frame publication
+
+The approved identity cache now serves the preliminary checks of a single-frame direct
+preview on sequential timelines and the single opaque placed-clip path. The prepared decoder
+still requires exactly one complete frame and a successful exit. The original is fully hashed
+after the provisional PNG is written and immediately before publication; this consolidates
+four full source passes into one for a warm preview. Public library receipts, scope/sheet
+reads, render plans and other render gates retain their full checks.
+
+The persistent-process fault fixture warms the cache, then tests short/excess decoder output,
+a late decoder failure and a changed synthetic source copy whose size, mtime and file ID are
+preserved. Each fails with its original error and no published/provisional image. The original
+fixture is unchanged. All eight render/preview failure cases pass separately on Windows and
+inside direct_sources on both platforms. Windows Rust tests pass 228; Linux passes 227;
+formatting and warning-free Windows lint pass. direct_sources, native_timing and cache_previews
+pass together on Windows (1220 seconds, direct_sources 1217) and Linux (471 seconds).
+
+The prior full A/V checkpoint's nine-fixture runs completed successfully on Windows (1458
+seconds) and Linux (615 seconds). The later readiness direct_sources checks also passed on
+Windows (1227 seconds) and Linux (600 seconds). Those five-fixture readiness reports retain
+the old conform expected-conversion failure; the corrected conform/integration/agent_costs
+checks recorded in the preceding entry supersede it. The 506114f background run passed 48
+fixtures but both recording attempts reported real timestamp discontinuities; a separate
+rerun remains required, with the existing one-millisecond threshold unchanged.
+
+The retained 20-minute release benchmark passes its declared ten-second warm-preview ceiling
+for all five interleaved requests. Before: median 12.298 seconds, range 10.311-13.017, sampled
+CPU busy fraction 36.1-63.9%. After: median 5.073 seconds, range 4.717-7.693, load 25.9-80.5%.
+Every request reads frame 35999 through a sought native-YUV decoder and produces identical RGB;
+no compilation occurs during a measured request. The benchmark excludes a known noncompiler
+name collision (Gigabyte Control Center's GCC.exe); its initial warmup-only run was retained.
+The explicit-conform comparison for the queued final ten-second export is still running.
+The first export completed with sought original decoding; a harness assertion incorrectly
+counted required output-file validation as a source scan. The assertion now selects the
+original source, and the export/reference proof can rerun separately with the same frozen
+release while retaining all ten timed samples. This test correction changes no engine code.
+No complete long-source acceptance, stage-1 completion, v2 adoption or points are claimed here.
+Thorough evidence and PROGRESS.md remain unchanged and stale for the new capabilities.
+
+## 11 October 2026: shared indexed-source gate and truthful readiness
+
+The renderer's source gate now has explicit Reference and Indexed profiles. Native callers
+retain the existing FFV1/RGB/PCM validator and graph; indexed callers receive the checked
+original plus its native-YUV reader. Frame previews and track renders use that gate. A
+compressed file without its saved decode binding still fails the reference profile.
+
+media.inspect and media.prepare share a readiness decision. Eligible originals return ready,
+direct and indexed-profile metadata with exact duration/rate/size, audio policy, original
+identity and index-bound asset. Preparation returns converted:false and creates no output
+file, including with a supplied filename. Nonmatching project rates/sizes still take the
+explicit preparation path. The agent instructions and capability summary now describe both
+profiles; existing FFV1 restrictions and unsupported-source reasons remain in place.
+
+The conform fixture initially expected an eligible fractional-rate original to be converted.
+It now verifies unchanged-original/no-output preparation, while retaining exact explicit-conform
+comparison for preparation to a different project rate. Final conform, integration and
+agent_costs fixtures pass on Windows (134 seconds) and Linux (54 seconds). Final Rust tests
+pass 228/227 respectively; formatting and Windows warning-free lint pass. The final Windows
+H.264 readiness smoke passes all 11 comparisons, including exact RGB/PCM, gaps, gain/fades,
+audio/video transitions, range and audio-only delivery, queued export replay and source/scratch
+preservation. Linux's preceding full audio/video checkpoint passed all nine selected fixtures,
+including all 21 eligible source profiles, in 615 seconds. The broader Windows audio/video run
+and the expanded readiness direct_sources runs remain in progress and must be checked after
+this commit; the earlier conform expectation failure is superseded by the corrected fixture.
+
+Catalogs remain 18 core tools (21,262 bytes; 21,104 in a workspace) and 86 full tools. Scripted
+workflow calls remain 15/6/12/8/8 with zero failed calls or schema lookups. Windows received
+wire bytes are 209539/46618/62675/40809/185670; these are not token counts or fresh-agent trials.
+No budgets were relaxed. Long-source latency/identity-cost acceptance and later footage and
+agent-cost stages remain open. No v2 scope or points are adopted. Thorough evidence and
+PROGRESS.md remain unchanged and stale for these new capabilities.
+
+## 11 October 2026: exact audio windows in original-footage timelines
+
+Bound compressed originals now supply exact sound as well as pictures to sequential and
+placed-track renders, range previews and reference/H.264-AAC exports. Sequential originals
+compile through an internal promoted copy; saved snapshots and revisions are unchanged.
+The verified direct audio reader writes only requested normalized windows into exclusively
+created temporary PCM16 WAV inputs. Existing gain, fades, transitions and mixing consume those
+samples. Owned inputs are removed on success/failure; creation collisions preserve existing
+files. A graph rejects more than 1 GiB of requested direct PCM payload. This render scratch
+space is distinct from the approved bounded AAC cache; no video intermediate is created,
+original sources are preserved, and publication retains full source hashing.
+
+The new direct_timeline comparison runs inside direct_sources for all 21 eligible profiles.
+It compares decoded RGB/PCM against complete explicit-conform sources for sequential/track
+cuts, linked slip and roll across GOP boundaries, gain/fades, range previews, reference ranges,
+audio-only ranges and H.264/AAC delivery. Extra H.264 cases cover a gap, simultaneous audio/video
+transitions and queued export replay. Each CLI process is checked for owned WAV cleanup.
+The first Windows H.264 comparison passed all eight initial render/export cases exactly.
+Windows Rust checks pass 228 tests, formatting and warning-free lint; Linux Rust checks pass
+227 tests. Linux's eight selected existing timing/render/delivery/integration fixtures pass.
+The expanded all-profile direct_sources run and corresponding Windows regression run are
+still in progress at this commit; their results must be checked and failures fixed forward.
+The previous picture-composition checkpoint's final Windows direct_sources run also passed.
+
+The shared indexed/readiness gate, media.prepare no-conversion response, long-source latency
+and further plan stages remain open. Readiness flags remain conservative for this checkpoint.
+This is implementation progress, not a completed stage-1 acceptance or v2 scope/points award.
+Thorough evidence and PROGRESS.md remain unchanged and stale for these new capabilities.
+
+## 11 October 2026: indexed original pictures in the track compositor
+
+Bound originals now supply placed-track base pictures, incoming/outgoing transition sides and
+opaque alpha-over pictures through the existing engine compositor. The native-YUV reader has a
+prepared streaming form: the caller prepares commands under its process-control policy, workers
+start as their windows become due, and a bounded two-frame queue carries Rust-converted RGB.
+Cropping copies RGB exactly; the existing integer transition, shrink, opacity and placement
+operations follow. Native inputs retain their base graph. Direct base intervals replace black
+placeholders rather than going through FFmpeg's YUV-to-RGB conversion. No video intermediate is
+created. All original identities are fully checked before preview/render publication.
+
+The shared library reader retains its exact frame-count/clean-exit checks and final full hash.
+New real-decoder fault injection found that compositor cleanup could replace the initiating
+failure with TOOL_ABORTED. Preserve that decoder/control failure while stopping workers. Short
+and excess output now retain RENDER_VALIDATION_FAILED, a late failed decoder retains TOOL_FAILED,
+and source mutation retains MEDIA_CHANGED. Each test verifies no published or partial output
+and preserves the original (only an explicit synthetic source copy is mutated).
+
+Windows and Linux compare 28 twenty-frame direct/native compositions (560 decoded RGB frames)
+and 140 composed PNG previews against complete explicit-conform references for all 21 eligible
+files: all eight native clocks, all four transition kinds, GOP boundaries, crop/divisor shrink,
+partial opacity, negative placement and opaque covering. Audio in these compositions is silence;
+this is not evidence for direct audio tracks. The existing 168 direct frame previews and library
+video/audio comparisons remain in the fixture. Final Rust checks pass 228 tests on Windows and
+227 on Linux, with formatting and warning-free lint. Linux passed all eight selected fixtures
+(direct_sources, native_timing, tracks, overlays, transitions, delivery, cache_previews, integration)
+in 252 seconds, then the final direct_sources/integration/render_failures checks in 274 seconds.
+Windows passed the picture/timing/render fixtures; one integration batch-wait assertion failed
+in the concurrent run, then separate integration/render_failures passed in 79 seconds and another
+integration run in 30 seconds. Batch-wait assertions now retain the returned job details to make
+any recurrence diagnosable. The four new decoder-failure cases also pass separately on Windows;
+the final expanded Windows direct_sources run is still in progress at this commit.
+
+Direct audio-track feeding, nested direct pictures, sequential range rendering, full original
+A/V exports and the long-source performance gate remain pending. Static readiness stays false.
+No stage-1 completion, v2 adoption, editing points or thorough evidence is claimed; the existing
+PROGRESS.md and capabilities evidence are retained unchanged.
+
+## 11 October 2026: bound compressed originals and exact timeline frame previews
+
+Added optional Asset.decode direct-index bindings and explicit source inspection through
+media.add input_root. media.inspect supplies an already-bound original asset for eligible files;
+legacy metadata-only adds retain their behavior. The additive optional property keeps project
+schema 1 (older engines reject its unknown field). Source/index identities, actual dimensions,
+rate and complete duration are checked before direct frame use. Sequential and ordinary opaque
+track previews use the verified native-YUV reader, project transfer (default BT.709), exact
+source clocks and full source verification before publication. No video intermediate is created.
+
+Timeline checks now report missing/corrupt or stale indexes without rebuilding them. Missing
+entries rebuild at preview time; media.index refreshes an index only for the unchanged bound
+original. Refresh changes participate in diffs/undo. Transactional replay precedes source I/O,
+including media.add, so a retry after source mutation keeps the first committed identity and
+receipt. Explicit operation roots resolve inside a workspace; schemas distinguish an explicit
+add root from the defaulted refresh root and malformed supplied roots are not overwritten.
+
+Windows/Linux pass 228/227 Rust tests, lint/format, direct_sources, native_timing, sessions,
+proxies and agent_costs. The direct fixture compares 168 published timeline frames from 21
+original qualifying sources with explicit conform, plus a declared-sRGB preview against the
+unchanged f64 path, and checks identity, cache diagnosis, repair, diffs, undo, replay and rejection
+before publication. The final schema-root refinement also passes its focused test on both.
+The five-fixture runs took 237 s Windows / 112 s Linux; no preview latency claim follows from that.
+The earlier c096075 background run passed 45 of 46 deferred fixtures; queue_recovery hit a
+10-second tool timeout. Its standalone rerun passed in 32 s; no timeout bound was changed.
+
+Core/full catalogs retain 18/86 tools. Core listings are 21,262 / 21,104 bytes without/with a
+workspace (+14 bytes); full listings are 226,394 / 232,535. Scripted calls remain 15/6/12/8/8
+with no failed calls or schema lookups; byte counts are recorded in AGENT_COSTS.md. Range/export
+integration, composed/nested direct previews and long-source measurements still remain open;
+readiness flags do not claim full direct rendering. No points or new thorough evidence;
+PROGRESS.md retains older evidence.
+
+## 11 October 2026: exact direct audio and bounded canonical AAC cache
+
+Added native PCM block hashes and cumulative sample anchors to source-index schema 2, and a
+streaming direct-audio reader that matches explicit conform's rational linear resampling,
+mono duplication, offset trimming and silence padding. PCM/MP3/FLAC/Opus seek with verified block
+anchors; AAC uses the user-approved bounded canonical cache because preroll alone does not
+reproduce every full-decoded sample. The original index pass records 1 MiB chunk hashes and,
+when configured, stores their native PCM under the existing owned SQLite cache with a 1 GiB
+payload/4,096-entry bound. Chunk keys bind the complete source/tool/engine index identity and
+canonical hash. Reuse checks the trusted index, corruption/eviction rebuilds exact content,
+public pruning works, and one rebuild repairs all corrupted chunks. Unconfigured reads decode
+without retaining PCM. All callback output stays provisional until source rehash and success.
+
+Windows/Linux pass 226/225 Rust tests, formatting/lint, direct_sources and cache_previews.
+All 189 audio windows across 21 eligible original sources match complete conform PCM; existing
+video RGB oracles also pass. Tests cover fresh-process AAC reuse with no decoder, corruption,
+eviction, LRU, bounded payloads, changed sources, altered decoder bytes, callback errors and
+silent video-only sources. The final targeted runs took 182 s on Windows and 90 s on Linux;
+these are correctness run timings, not preview latency measurements. Direct timeline integration
+and long-source performance remain pending. The preceding 8a26e5212b background run passed
+all 45 deferred fixtures. No points or new thorough evidence; PROGRESS.md retains older evidence.
+
+## 11 October 2026: embedded recipes participate in cache identity
+
+Follow-up to 09cdb8d: the build's engine-source identity now includes the 18 new catalog JSON
+recipes and the two embedded example recipes. Template-only edits therefore invalidate derived
+cache keys and are reported as modified engine sources. The catalog test requires the exact
+bytes of every compiled recipe to occur in the producer manifest, guarding future additions.
+Windows/Linux pass that Rust check and cache_previews. No points or new thorough evidence;
+PROGRESS.md retains older evidence. The 09cdb8d deferred run remains in progress at this entry.
+
+## 11 October 2026: original built-in templates and exact transparent enlargement
+
+Implemented agent-cost plan sections 4.1.1-4.1.3: 20 original embedded designs, the read-only
+`templates.list` catalog, built-in-ID or inline instantiation, five typed output bindings
+(including boolean transparency), and optional target-project canvas/clock defaults. Built-ins
+fit authored rectangles/positions and uniform font/stroke metrics, with exact rational timing
+and frame-aligned activation boundaries. Explicit values override defaults. Inline templates
+retain authored coordinates and explicit keyframe timing; previous no-project calls stay equal.
+No fonts, third-party templates or generated media are bundled. Embedded JSON now participates
+in progress fingerprints and cached-verification invalidation.
+
+Default transparent exports exposed an existing scaler bug: alpha 238 became 239 during integer
+enlargement. Transparent scene movies now replicate pixels in Rust using one enlarged row of
+working memory, sharing that code with still previews. Opaque compilation keeps its existing
+path. The new fixture renders every design's real defaults (1,525 frames), compares selected
+RGB/RGBA movie frames with stills and every silent PCM sample, checks whole-pixel synthetic-glyph
+variants against independent geometric/integer RGB oracles, exercises all 256 alpha values at
+all eight output scales, and checks project overrides, inline bindings, 16 native-clock cases,
+rejections, source preservation and core/full MCP parity.
+
+Windows/Linux pass 224/223 Rust tests and the builtin_templates, templates, scenes, agent_costs
+and agent_ergonomics fixtures; font checks also pass on Windows. Formatting and lint pass on both.
+The previous a6d9acf background run passed all 45 deferred fixtures. The core catalog remains
+18 tools and grows by 17 bytes over font discovery to 21,248 bytes (21,090 with a workspace),
+within the unchanged 40,000-byte ceiling. Full catalogs have 86 tools. Scripted workflows still
+use 15/6/12/8/8 calls, with no failed calls or schema lookups. Received bytes on this run are
+209,520/46,599/62,656/40,792/185,653 on Windows and
+209,388/46,473/62,526/40,666/185,523 on Linux. Placement, shorthand and the fresh-agent title/token
+gates remain unfinished; no model-trial or whole-stage completion is claimed.
+
+The user approved a bounded, content-verified audio cache for codecs whose seeks cannot reproduce
+the full decode, explicitly amending direct-footage section 1.1's PCM-on-disk prohibition.
+Implementation is next; direct timeline integration remains pending. No editing points, scope
+adoption or new thorough evidence: PROGRESS.md retains older verified evidence.
+
+## 11 October 2026: installed fonts without copying or manual hashing
+
+Implemented agent-cost plan section 4.2: `fonts.find` lists bounded OS-font-folder scans with
+family/full-name filtering, pagination, exact identities and explicit rendering-support reasons.
+Scene text, caption layouts and template font parameters/defaults accept an unambiguous exact
+family or full name. Preparation resolves it to a content identity before a queued job is saved,
+and reports the original name and file. Absolute installed fonts are read in place and fully
+checked before publication; other image/audio containment rules and legacy path-error codes
+remain unchanged. No typefaces are bundled or installed. Existing ttf-parser 0.25.1 is now an
+exact direct dependency for font names and table inspection; its license is already in the ledger.
+
+Original synthetic-font checks cover filtering, pagination, malformed/unsupported collections,
+ambiguous names, exact glyph pixels, named/explicit equivalence and scene digests, captions,
+templates, path-only identities, changed hashes, containment, core/full MCP, workspace defaults,
+source preservation and durable job pinning. Windows/Linux pass 223/222 Rust tests, formatting
+and lint, and fonts, graphics, templates, captions, unicode_text and agent_costs fixtures. macOS
+folder selection is implemented but has not been run on a macOS host. The prior 9315989 background
+run passed all 44 deferred fixtures.
+
+The default MCP catalog remains 18 tools: discovery uses its router. It grew by 30 bytes to
+21,231 bytes (21,073 with a workspace), below the unchanged 40,000-byte ceiling; the optional full
+catalog has 85 tools. Replay workflows remain at 15/6/12/8/8 calls, with zero failed calls or
+schema lookups. No fresh-model token or title-workflow claim is made. Built-in templates,
+one-job placement and scene shorthand remain unfinished stage-4 work; direct audio still awaits
+the requested cache decision. No scope change, points or new thorough evidence: PROGRESS.md
+retains older evidence.
+
+## 11 October 2026: approved preliminary identity reuse
+
+Implemented the user's approval to reuse hashes when path, size, modification time and OS file
+identity are unchanged, with a full hash before publication. A bounded process-local cache keeps
+4,096 verified hashes and evicts the least recently used. Windows compares volume serial plus
+128-bit file ID; Linux compares device/inode. Missing metadata disables reuse, and insertion
+checks both the held file and current path after hashing. No persistent cache or media is added.
+
+The direct video library reuses a hash only in its preliminary read check. Its final check,
+existing publication checks and public file-hash functions still read the full content. Other
+render gates retain full preliminary hashing pending their direct-source integration. Tests cover
+mtime changes, replacement IDs despite equal size/time, and the explicitly approved limitation:
+a same-size in-place edit with restored mtime can reuse a preliminary hash, while the mandatory
+full hash detects it and refreshes the cache. The existing windows-sys 0.61.2 dependency enables
+its file-information feature; no dependency version or license changes.
+
+Both open-GOP fixtures now span six GOPs (360 frames), extending late-seek validation beyond
+initial preroll. Windows/Linux pass 221/220 Rust tests, formatting and lint, plus direct_sources,
+cache_previews and render_failures. The preceding d2f8b7b background run passed all 44 deferred
+fixtures. No latency claim, scope change, points or new thorough evidence; PROGRESS.md retains
+older evidence.
+
+Separately, unshipped audio-reader experiments found a reproducible AAC seek mismatch against
+full decoding even after preroll. Exact block-hash checks reject it. The user has been asked
+whether to allow a bounded canonical audio cache (changing stage 1.1's disk-free PCM rule) or
+retain disk-free audio with decoding from the beginning. This decision remains pending and the
+experimental audio work is saved separately. See DIRECT_SOURCES.md for the measured counterexample.
+
+## 11 October 2026: indexed native video reads and exact GOP seeking
+
+The public `direct::Video` library now opens pinned H.264/HEVC sources under an explicit input
+root and streams exact presentation-order RGB ranges without intermediate media. It reuses the
+compressed source index, retains absolute timestamps through the decoder, trims in native integer
+PTS and converts native YUV420/YUVJ420 in Rust with the verified table. Signed-origin seeking uses
+the existing third-frame margin; B pictures conservatively retain a preceding GOP. Reads require
+an exact frame count and clean decoder exit, reject invalid ranges, and fully hash the source
+before and after decoding. Callback output remains provisional until success. See
+[DIRECT_SOURCES.md](DIRECT_SOURCES.md) for the library contract and limits.
+
+The original fixture generator now has 26 short sources: all eight native frame rates, full-range
+YUV and open GOPs in H.264 and HEVC are included. Every one of 21 qualifying sources passes nine
+RGB range comparisons against full explicit conform (189 windows), including first/key/B/last
+frames, a cross-GOP range and the whole source. The independent float64/Fraction reference still
+checks all RGB bytes and PCM samples of conform. Five unsupported profiles reject explicitly;
+source mutations before and during a library read return MEDIA_CHANGED. Actual decoder arguments
+prove native YUV output and late-range input seeking. No long-source latency claim is made.
+
+Windows/Linux pass 220/219 Rust tests, formatting and lint, plus direct_sources and unchanged
+native_timing. The preceding e2fe6d6 background run completed all 44 deferred fixtures successfully.
+This is a stage-1 library increment: direct audio, saved asset binding, timeline integration and
+approved metadata hash reuse remain pending. CLI/MCP direct readiness is still false. No points,
+scope change, v2 baseline adoption or new thorough evidence; PROGRESS.md retains older evidence.
+
+## 11 October 2026: explicit compressed-source clock and audio reference
+
+Explicit SDR conform now accepts H.264/HEVC Main 8-bit YUV420 in MP4/MOV/MKV and AAC, PCM,
+MP3, FLAC or Opus mono/stereo audio at positive native rates. The original float64 pixel converter
+remains the numerical path. Optional `source.clock: first_video_frame` anchors picture to its first
+presented frame and preserves the decoded audio offset. Native PCM timestamps use nearest-sample
+rescaling with signed ties away from zero; exact rational positions then use the existing linear
+resampler. Early/long audio is trimmed, late/short audio is padded with silence, and mono duplicates.
+Omitting the option preserves the old zero-origin/alignment/extent checks. Project times remain
+nonnegative; the signed internal source-clock helper retains the same safe-integer rational bounds.
+
+Index summaries now report explicit start/tail/channel/resampling policies. Audio continuity is
+checked against cumulative sample count with the existing 1 ms container tolerance, rather than
+requiring exact adjacent timestamps; this admits ordinary MKV rounding without accumulating drift.
+The reference and index agree on the fractional native clock, including negative 44.1 kHz MP3
+priming. This extends the oracle needed by direct decoding; direct playback, asset bindings and
+approved metadata hash reuse remain unimplemented. Transcript propagation explicitly rejects the
+new clock option before publication; callers can transcribe the normalized output. Existing
+transcript behavior is unchanged. See [CONFORM.md](CONFORM.md) and [DIRECT_SOURCES.md](DIRECT_SOURCES.md).
+
+The original direct_sources generator now has 20 short cases. All 15 qualifying cases complete
+explicit conversion, comparing every RGB byte to independent full-frame float64 YUV arithmetic
+and every PCM sample to independent integer/Fraction resampling. They include HEVC/open GOP,
+AAC edit lists, PCM24 MOV, FLAC at 96 kHz, MP3 at 44.1 kHz, Opus MKV and late/short audio. The other
+five retain named direct-qualification rejections. Counted tool reuse, input hashes and index
+policies pass, and omission of clock normalization still rejects the edit-list source.
+
+Windows/Linux pass 218/217 Rust tests, lint, and direct_sources, conform, remapping, integration
+and agent_costs. The five workflow call counts remain 15/6/12/8/8, with zero failed calls or schema
+lookups and unchanged budget ceilings. Windows receives 209,775/46,554/62,609/40,745/185,606 bytes;
+Linux receives 209,341/46,426/62,483/40,621/185,480. These are scripted wire measurements, not model
+tokens. The material check passes 306 candidate files. The previous lookup commit's 42 deferred
+fixtures all passed. This commit uses the ordinary gate/background loop; thorough milestone
+proof and points remain unchanged. All remaining requirements of both plans remain in the goal.
+
+## 11 October 2026: exact YUV lookup and long-source index validation
+
+The library now provides `color::Yuv420Converter`, a native 8-bit 4:2:0-to-RGB lookup for the
+planned direct decoder. Each table holds all 2^24 RGB triples in exactly 48 MiB and is initialized
+once per range/transfer mapping. Equal input/output transfer declarations share a table, bounding
+retained storage to six tables/288 MiB; construction can temporarily use another 48 MiB buffer.
+The original f64 converter and explicit conform path remain unchanged as the reference. The new
+component validates matrix, even positive dimensions and exact source/output buffer lengths.
+
+The normal Rust suite exhaustively checks all 16,777,216 triples for all eight declared
+range/input-transfer/output-transfer combinations, with exact equality on Windows and Linux.
+A separate nonuniform planar frame compares chroma addressing with the f64 YUV420 path and checks
+invalid dimensions and buffer lengths. Windows passes all 216 Rust tests, formatting and lint;
+Linux's exhaustive and layout tests pass as well. The material check passes 304 candidate files.
+No speed comparison is inferred from these correctness tests.
+
+The source-index foundation's retained 20-minute 1080p30 MP4 passes the independent frame/PCM and
+counted-launch fixture: 36,000 frames, 600 keys, 26,400 B-frames and 57,600,000 audio samples. The
+2,768,314,141-byte source has a 176,032-byte compressed index; a fresh-process repeat launches only
+metadata probing, and source hashes remain unchanged. The earlier history entry's pending long
+check is therefore resolved. This is an index storage/correctness result, not a late-preview or
+10-second seek/export benchmark. Direct timeline decoding and all subsequent plan stages remain
+open. No v1/v2 points, scope or thorough evidence changed; ordinary shipping verification continues.
+
+## 11 October 2026: direct-footage source-index foundation
+
+`media.inspect` now builds a compressed presented-frame and decoded-PCM index for compressed
+footage. One incremental frame scan records timestamps, keyframes, picture types and changing
+format/color declarations. One audio decode feeds a byte counter and clock reader concurrently,
+without a PCM file. Actual decoded sample counts and first timestamps expose AAC padding and
+edit-list offsets. The summary reports eligibility/reasons, GOP statistics, audio format and
+cache information. It explicitly reports that direct decoding is not yet available; timeline
+readiness and renderer acceptance have not been broadened. See [DIRECT_SOURCES.md](DIRECT_SOURCES.md).
+
+Cache keys bind source content, both external tool executables, engine producer and schema.
+Compressed entries validate identity/key/schema/payload digest, bound expansion and publish without
+overwriting existing files. Source bytes are fully rehashed after building an index. Fresh-process
+fixture calls prove that reuse skips both frame scanning and audio decoding. The existing flate2
+1.1.10 dependency is now directly selected for gzip; versions/licenses and package count are unchanged.
+
+Windows/Linux pass 214/213 Rust tests and all six targeted fixtures: direct_sources, integration,
+conform, transcripts, queue_recovery and render_failures. All 14 short compressed fixtures compare
+against independently decoded frame/sample observations and preserve source identities. Windows
+lint and the 303-file material check pass. The retained 20-minute fixture is being checked separately;
+no long-source seek/preview speed or full stage-1 claim is made here.
+
+The preceding error-recovery commit's background suite passed 48 fixtures and found one transcript
+fixture expecting the old two-field error. Its exact expected recognition failure now includes
+`retry: changed`; the complete transcript fixture passes on both systems. This commit uses the usual
+shipping gate and deferred verification. Thorough progress evidence remains the prior milestone;
+no v1/v2 points or scope changed. Remaining direct-decode work includes playback, clock/audio policy,
+asset bindings, approved metadata-based hash reuse and the render/seek oracles. All later direct
+stages and agent-cost stages 4–5 remain open.
+
+## 11 October 2026: agent-cost stage 3, structured error recovery
+
+Errors now add optional `retry`, `path` and `hint`, with repair values in `detail`. One sorted
+registry classifies all 234 engine codes; a Rust source scan checks registration and the exact
+public code/class/meaning table. Existing codes and messages, MCP envelopes and successful
+responses remain. Paths cover parser failures, nested field prefixes and queued arguments.
+Missing references carry up to 20 available IDs and their count; conflicts report both revisions;
+occupied outputs suggest an unused sibling; missing folders, migration and unsupported queued
+commands provide mechanical guidance. Child-process supervision, saved failures and batch reports
+preserve the optional fields. Compact boxed strings avoid enlarging every Result's error variant.
+
+A revision conflict is classified `changed`, refining the plan's ambiguous "same after refresh"
+example: an identical stale expected_revision cannot succeed. The recipe must read and reconsider
+the current head. Job guidance also respects existing attempt limits: job.resume runs eligible
+queued/interrupted attempts and cannot restart terminal failures. No retry policy was expanded.
+
+The separate official-SDK recovery replay fixes three deliberate mistakes in nine calls, without
+reading error code/message or looking up schemas. It checks `retry`/`path`/`hint` and uses structured
+revision/filename details. Windows sends 2,235 and receives 34,120 bytes; Linux sends 2,191 and
+receives 33,974. All five normal recipes retain their 15/6/12/8/8 calls and budgets, zero failures
+and zero schema/capability lookups. The compact workspace listing stays 21,043 bytes; normal result
+sizes remain within six bytes of stage 2. See [AGENT_COSTS.md](AGENT_COSTS.md) for exact measurements.
+
+Windows/Linux pass 212/211 Rust tests, formatting and lint, integration/SDK, all workflow/recovery
+replays and real queue-recovery fixtures. Windows agent-ergonomics also passes. The new queued
+failure test proves repair details survive an actual child process and store round-trip while
+retaining existing output bytes. The material check passes 301 candidate files. The prior compact
+catalog commit's 44 deferred fixtures all passed; this commit uses the usual gate/background loop.
+Thorough progress evidence remains the prior milestone; no v1/v2 points or scope changed. Agent-cost
+stages 4–5 and direct-footage stages 1–6 remain open; this is not completion of either full plan.
+
+## 11 October 2026: agent-cost stage 2, compact MCP by default
+
+Bare `cutbolt mcp` now lists 17 direct shared-workflow/recovery tools plus `cutbolt_run`.
+`--tools full` and `CUTBOLT_MCP_TOOLS=full` retain all 84 direct tools; a flag overrides the
+variable. Selection follows the five recorded workflows: five commands occur in multiple
+workflows and twelve support discovery/repair, missing media, session recovery, interrupted
+jobs or cache capacity. The [measurement document](AGENT_COSTS.md) records the rationale.
+
+The exact compact JSON-RPC listing is 21,201 bytes without a workspace and 21,043 with one,
+against preparation's 224,321-byte full workspace response: 90.6% fewer bytes. The largest
+compact tool is 2,191 bytes. Tests enforce 40,000 bytes for both listings and 4 KiB per tool;
+full listing budgets remain unchanged. An A/B read of the saved `f8d680d` executable and this
+build found identical full-mode tool arrays, both with and without a workspace.
+
+Compact schemas omit the default dialect, use a 96-byte exact-time shape summary and bound
+optional field descriptions to one clause/120 characters. Required descriptions, full lookups
+and strict parsing remain. Default annotation values are omitted, with equivalent effective
+hints tested through the wire client and official Python SDK 1.12.3. The SDK retains absent
+hints as None, so clients must apply the documented protocol defaults. No universal host claim.
+
+Windows and Linux pass the updated integration/SDK tests and all five workflow replays with
+unchanged 15 / 6 / 12 / 8 / 8 calls, zero failures and zero schema/capability lookups. Windows
+received bytes are 209,465 / 46,552 / 62,609 / 40,745 / 185,604, versus preparation's 412,758 /
+249,511 / 265,568 / 243,704 / 388,563. Linux receives 209,341 / 46,426 / 62,479 / 40,619 /
+185,476. The title still costs four calls and 5,073 sent bytes; title simplification remains
+stage 4. Default/core byte and call ceilings were tightened; explicit full-mode compatibility
+runs retain the original ceilings. No token or speed claim is inferred from byte counts.
+
+Rust tests pass 208 on Windows and 207 on Linux; formatting, Windows clippy and material checks
+pass. The preparation engine snapshot's full quick run finished with 61 fixtures passing and
+five unconfigured external-runtime fixtures skipped (OTIO, native projects, legacy stores,
+speech and segmentation). The old verifier stamped that long run with the newer HEAD at its
+end; its per-fixture fingerprints still describe the original snapshot. Quick summaries now
+capture the starting revision and include it in `--report`, preventing that misleading label.
+Stage 1 commit `f8d680d` passed its shipping gate and was pushed; its deferred checks continue.
+No v1/v2 points or scope change. Generated progress/thorough evidence remain stale until a
+milestone run, and the remaining stages of both plans stay open.
+
+## 11 October 2026: agent-cost stage 1, consistent instructions and named errors
+
+Completed the quick fixes in [the agent-cost plan](plans/AGENT_COST_PLAN.md).
+MCP descriptions now direct scene/template compilation, proxy generation, image-sequence
+compilation, audio rendering and conforming through `job.start`. README, usage, native timing,
+scene, template and agent-interface documentation agree on the eight native clocks, workspace
+roots, resolved identities, concurrent calls and progress notifications. The strategy report
+retains its historical figures with a dated measurement/platform note.
+
+Template failures name the parameter, declared type and supplied or binding type. Unknown names
+include the available parameter names/types. Existing error codes and read-only behavior remain;
+the template fixture asserts the useful error context as well as all existing pixel checks.
+
+`cutbolt_run` advertises `destructiveHint: false` and tells callers to prefer direct tools.
+To make that annotation true, it rejects `job.cancel` and `cache.prune`; both are now direct tools
+in the compact catalog (33 direct tools plus the router). Routing other direct tools still works.
+The wire fixture checks the annotation, direct availability and rejection of both destructive
+routes. The default remains full until stage 2's measured compact-catalog change.
+
+Windows and Linux pass `integration` (including the wire and official SDK checks), `templates`,
+`agent_ergonomics` and `agent_costs`; Rust tests pass 206/205 respectively. Formatting, Windows
+clippy and the repository material check pass. The Windows quick ergonomics run recorded one
+wall-time budget overrun under concurrent verification load; correctness passed. No speed claim.
+The five workflow call counts remain 15 / 6 / 12 / 8 / 8, with zero failed calls, schema lookups
+or capabilities lookups. Windows received bytes are 412,483 / 249,524 / 265,581 / 243,717 /
+388,576, versus preparation's 412,758 / 249,511 / 265,568 / 243,704 / 388,563. Linux received
+bytes are 412,319 / 249,400 / 265,455 / 243,593 / 388,452. No budgets were loosened.
+
+Preparation commit `9554596` passed its ship gate and was pushed; its deferred checks and the
+preparation snapshot's full quick check continue independently. This entry awards no editing
+points and changes no scope. Generated progress and thorough evidence remain stale pending a
+milestone run; neither plan is complete.
+
+## 11 October 2026: direct-footage and agent-cost preparation
+
+Started both [direct-footage](plans/DIRECT_FOOTAGE_PLAN.md) and
+[agent-cost](plans/AGENT_COST_PLAN.md) plans from `c4064df`, which includes the Linux port.
+This entry covers preparation, not completion of the plans' later stages.
+
+- Fixed opaque single-clip and gap previews that constructed a 1/25-second temporary clip
+  regardless of the project rate. The unmodified release failed the new 24 fps case with
+  `UNALIGNED_TIME`. The temporary duration now uses the project's exact frame period.
+  `native_timing` independently compares 48 additional PNG previews (clip and gap boundaries
+  at all eight native rates) to authored pixels.
+- Added the original [footage corpus](FOOTAGE_FIXTURES.md): 14 short codec/clock cases,
+  including deliberately reordered B-frames, an offset edit list, VFR, SAR, display rotation,
+  HEVC Main/Main10, open/closed GOPs, a 250-frame H.264 GOP and ProRes 422 HQ. The opt-in
+  20-minute 1080p30 case has been decoded and checked at exactly 36,000 frames. No generated
+  media enters Git. The fixture explicitly reports that direct timeline decoding is not verified yet.
+- Added [five SDK workflow replays](AGENT_COSTS.md), with exact JSON-RPC request/response bytes,
+  initialization/listing bytes, calls, failures and schema/capability lookups. Both Windows and
+  Linux complete all five with no failed calls or lookups. Calls are 15 / 6 / 12 / 8 / 8 for talking
+  head / interview / tutorial / revision / handoff. Windows received bytes are 412,758 / 249,511 /
+  265,568 / 243,704 / 388,563; the workspace tool listing alone is 224,321 bytes. The title needs
+  four calls and 5,043 sent bytes. Explicit per-workflow ceilings now fail regressions.
+  These are scripted recipes on six-second synthetic sources, not model trials or recognition claims.
+- Registered `direct_sources` and `agent_costs` with the verifier; cost tables print in quick runs,
+  and `--report` retains their measurements. Thorough runs can retain the fixture reports without
+  assigning new capability points. A fixtures-only mode prepares clean inputs for later fresh-agent trials.
+- Rebuilt the shared impact map at `c4064df`: 59 passing fixtures, 2,969 executed functions in
+  103 files. It now includes `track_composite.rs`, `readiness.rs`, `delivery/stream.rs` and
+  `inspection_cache.rs`. Five optional external-runtime fixtures were not configured.
+- Retained the unmodified release externally at
+  `C:\DEV\CutboltData\plan-fixes-20261011\baseline-c4064df\cutbolt.exe`, SHA-256
+  `cebe27f0f86d126bfb4faec982017041194582ad66b7f89cf2cc81a6c47204b4`.
+  Future speed comparisons will alternate before/after runs, record system busy fractions and
+  avoid compilation during measured runs. No speed improvement is claimed here.
+
+**User decisions recorded in this chat.** Metadata-gated reuse of a verified source hash is approved
+when path, byte count, modification time and OS file ID match, with a full re-hash before publication;
+implementation belongs to direct-footage stage 1.6. The final talking-head model trial targets are
+approved: at most 15 calls, at most 40,000 received tokens, and no schema lookup. Wire bytes above
+are not a substitute for actual model token measurements.
+
+**Verification so far.** Windows `cargo test` passes 206 tests; Linux passes 205. Formatting,
+Windows clippy and the material check pass. `native_timing`, `direct_sources` and `agent_costs`
+pass on Windows and Linux. The complete generated long source passes on Windows. The end-of-stage
+full quick check and ship gate are pending. No v1/v2 points or scope change; `verification/latest.json`
+and generated progress remain stale until a milestone thorough run.
+
+## 11 October 2026: background jobs, image directories and speech on Linux
+
+Agents on Linux could not finish a job over MCP:
+- `job.start` and `render.start` returned `UNSUPPORTED_PLATFORM`, so media preparation, scene compilation and export were out of reach;
+- speech recognition and PNG-sequence export needed Windows.
+
+All of these now run on Linux. This covers strategy item A1 and most of A2 in [HYPERFRAMES_STRATEGY](HYPERFRAMES_STRATEGY.md).
+
+**Changes.**
+
+The job queue ([AGENT_INTERFACE](AGENT_INTERFACE.md), [RENDER_RECOVERY](RENDER_RECOVERY.md)) replaces the Windows job objects on Linux as follows:
+- The worker starts in its own session (`setsid`) with null standard handles.
+- Each `job-tool` wrapper it starts is killed when the thread that started it ends (`PR_SET_PDEATHSIG`).
+- `job-tool` runs its tool as the leader of a new process group, with a forked guardian:
+  - the guardian kills the group if the wrapper is killed;
+  - once the tool exits, the wrapper kills whatever the tool left running, before collecting the tool's status, so the group ID cannot be reused in between.
+- A queued command (`job-command`) leads its own process group:
+  - its supervisor ends the group once the command exits (again before collecting it), or after the grace period on cancellation;
+  - the stall watchdog sums the CPU time of the group's processes from `/proc`;
+  - when its worker goes (input ends without a stop line), the command cancels itself and kills its own group after the grace period.
+- Named events stay Windows-only. Linux waits use the existing polling fallback.
+
+Other areas:
+- **Image directories** ([EXPORT_FORMATS](EXPORT_FORMATS.md)). `png_sequence` exports publish with `renameat2(RENAME_NOREPLACE)`, then flush the parent directory.
+- **Speech** ([TRANSCRIPTS](TRANSCRIPTS.md)).
+  - On Linux the supervisor starts directly under `unshare -Urnpf` and reads files by their own paths.
+  - `runtime.distribution` is now optional: required on Windows, rejected on Linux.
+  - Capabilities list `platforms` for jobs and recognition.
+- **Not ported.**
+  - Audio recording (WASAPI) stays Windows-only; the draft 1.0 roadmap lists this as an open decision.
+  - macOS still reports `UNSUPPORTED_PLATFORM` for all of these.
+- **Dependency.** New direct dependency libc 0.2.189 (Unix only), already in the lockfile ([DEPENDENCIES](DEPENDENCIES.md)).
+- **Production coordinator.** It accepts POSIX manifest paths, and runs the narration worker directly on Linux. Its fixture's offline checks pass on Linux; the narration launch itself has not been run there.
+
+**Fixtures made platform-neutral** (test code only):
+- process handles use pidfd system calls;
+- peak memory and process trees are read from `/proc`;
+- disk-full codes accept 28 (`ENOSPC`) as well as 112;
+- the copied-ffprobe case keeps the execute bit and names the build's libraries;
+- the production stand-in font is chosen per platform;
+- `CREATE_NO_WINDOW` is used only on Windows.
+
+Two tests now check the Linux behaviour itself:
+- On Linux, file names are exact, so the queue's "same file, other spelling" case becomes an immediate `OUTPUT_RESERVED` at submission.
+- A speech runtime that names a WSL distribution is refused on Linux.
+
+Off Windows, `tools/verify.py` skips three fixtures and names the reason:
+- `recording`: Windows audio capture;
+- `audio_repair` and `transcription`: their fixture speech is synthesized with Windows System.Speech voices.
+
+**Verification.**
+- **Windows.** `cargo test` (206) and clippy pass. These fixtures pass: integration, queue_recovery, render_failures, transcripts, cache_previews, registry, production, unicode_text, audio_routing, reframing, audio_repair, long_form_4k, long_form_stress, recording. Transcription was not run (no runtime configured for this run).
+- **Linux.** WSL2 Ubuntu 22.04; the environment is in [DEPENDENCIES](DEPENDENCIES.md). Clippy `-D warnings` and `cargo test` (205) pass. Every fixture was listed with `--only`:
+  - 54 passed, including integration (MCP jobs, tree cancellation, worker crash), queue_recovery and render_failures;
+  - 9 were skipped:
+    - external runtimes not configured: interchange, native_projects, portable_projects, segmentation;
+    - no `--decode-device`: delivery_profiles, acceleration;
+    - Windows-only: transcription, recording, audio_repair;
+  - 1 failed: `hdr`. Its independent reference uses FFmpeg's `zscale`, which this FFmpeg build lacks.
+
+  A full run stops earlier, at `tests/repository.py`: Git 2.34 has no `worktree add --orphan`.
+- **Speech, both platforms.** The same `media.transcribe` job ran on the 5 October demo narration `s1.wav`: 25.1 s through WSL from Windows, 21.9 s natively on Linux. Both returned the same 23 words, with identical starts, ends, alignment records and probabilities.
+
+No points change. Platform parity is a separately reported score in the draft v2 baseline, which is not adopted. Evidence (`verification/latest.json`, PROGRESS.md) is not refreshed by this commit.
+
 ## 6 October 2026: track renders and previews seek their sources
 
 Findings 38 and 41 of the effects reel (`C:\DEV\CutboltData\demo-vfx-20261006\FINDINGS.md`): every picture input of a track render was opened at its start and cut with `trim=start_frame=...`, so a late range or frame decoded every earlier frame of its sources. A 12-frame export at 111.6 s took 4.0 s against 1.65 s at 13.2 s, because the full-length caption overlay was decoded up to the range, and `preview.frame` took 2.3-7.4 s per frame.
@@ -1752,6 +2546,19 @@ Every request field, shared type and tagged variant now has a description taken 
 - the catalog exceeds 240 KiB.
 
 The MCP fixtures' tool-count assertions move from 64 to 65. No baseline, criteria, evidence, weights, exclusions or denominators changed. The recorded source fingerprints are stale until the next full verification.
+
+## 4 October 2026: drafted 1.0 roadmap
+
+The user defined 1.0 as features and quality high enough that agents prefer Cutbolt over any other available video software: the fastest and most efficient option, with the best output quality. Windows and Linux are the 1.0 platforms; macOS follows 1.0. No headline demonstration is fixed in advance.
+
+The [draft roadmap](ROADMAP_1_0.md) turns this into:
+- five release gates;
+- a growing comparative benchmark, which replaces a fixed demonstration;
+- phases 0.5–0.9;
+- interface planning for the sister Inkbolt engine;
+- a proposed `cutbolt-local-v2` baseline of 152 checkpoints.
+
+None of it is adopted yet. No baseline, criteria, evidence, weights, exclusions or denominators changed. The core and combined trackers remain 100/100 and 108/108.
 
 ## 4 October 2026: verified 108/108 implementation completion
 

@@ -1,14 +1,18 @@
 //! Request schemas sized for agents. Each command's schema carries only the definitions it
 //! uses, and listings abbreviate the largest shared types; `schema` returns any of them in full.
+mod compact;
+pub(crate) use compact::listing as compact_listing;
+
 use crate::{Result, commands::Request, error};
 use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, sync::OnceLock};
 
 /// Shared types abbreviated in tool listings, by public lookup name and definition name.
-pub const DEFERRED: [(&str, &str); 7] = [
+pub const DEFERRED: [(&str, &str); 8] = [
     ("project", "Project"),
     ("operation", "Operation"),
     ("scene", "Scene"),
+    ("scene_short", "ShortScene"),
     ("template", "Template"),
     ("audio_routing", "Routing"),
     ("transcript", "Document"),
@@ -615,6 +619,15 @@ pub fn relax_roots(schema: &mut Value) {
                 *text = workspace_wording(text);
             }
             for (field, relative) in crate::workspace::DEFAULTS {
+                if field == "input_root"
+                    && object
+                        .get("properties")
+                        .is_some_and(|p| p["op"]["const"] == "media.add")
+                {
+                    // Adding a root opts an existing metadata-only edit into source I/O.
+                    // The workspace resolves explicit roots but never supplies one for an add.
+                    continue;
+                }
                 let Some(property) = object.get_mut("properties").and_then(|p| p.get_mut(field))
                 else {
                     continue;
@@ -824,7 +837,8 @@ mod tests {
     }
 
     /// The workspace and reference resolution visit only the request, render.start's `render` and
-    /// cache.run's `task`; a root or project input anywhere else would silently be skipped.
+    /// cache.run's `task`, plus explicit roots on media.add/media.index operations.
+    /// A root or project input anywhere else would silently be skipped.
     #[test]
     fn roots_and_project_inputs_live_where_they_are_resolved() {
         assert_eq!(
@@ -847,8 +861,15 @@ mod tests {
                     .into_iter()
                     .flatten()
                 {
+                    let media_root = name == "Operation"
+                        && field == "input_root"
+                        && matches!(
+                            node["properties"]["op"]["const"].as_str(),
+                            Some("media.add" | "media.index")
+                        );
                     assert!(
-                        !roots.contains(&field.as_str()) && !accepts_reference(property),
+                        media_root
+                            || (!roots.contains(&field.as_str()) && !accepts_reference(property)),
                         "{name}.{field} is outside the resolved request contexts"
                     );
                 }
@@ -998,6 +1019,24 @@ mod tests {
 
     #[test]
     fn workspace_schemas_make_supplied_roots_optional() {
+        for op in ["media.add", "media.index"] {
+            let mut schema = lookup("operation", Some(op), false).unwrap()["schema"].clone();
+            relax_roots(&mut schema);
+            let root = root(&schema);
+            assert!(
+                !root["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("input_root"))
+            );
+            assert_eq!(
+                root["properties"]["input_root"]["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Optional: defaults to the workspace."),
+                op == "media.index"
+            );
+        }
         let mut render = arguments("render.start", true).unwrap();
         relax_roots(&mut render);
         assert_eq!(render["required"], json!(["request_id", "render"]));

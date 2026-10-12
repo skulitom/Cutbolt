@@ -18,6 +18,7 @@ const APPLICATION_ID: i64 = 0x45565431;
 const STORE_VERSION: i64 = 2;
 mod backup;
 mod integrity;
+pub(crate) mod prepared;
 pub use backup::{Backup, Recover, backup, recover};
 pub use integrity::{check, migrate};
 
@@ -716,8 +717,9 @@ pub fn mutate(
     }
     let current = head(&tx, project_id)?;
     if current != expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            expected_revision,
+            current,
             format!("Expected {expected_revision}; current revision is {current}"),
         ));
     }
@@ -889,6 +891,7 @@ mod tests {
             metadata: Default::default(),
             identity: None,
             proxy: None,
+            decode: None,
             id: "a".into(),
             path: "external.mkv".into(),
             duration: t(20),

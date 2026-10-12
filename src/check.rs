@@ -263,6 +263,18 @@ pub fn check(request: &Request) -> Result<Value> {
             } else {
                 root.join(&asset.path)
             };
+            if asset.decode.is_some()
+                && path.is_file()
+                && let Err(e) = crate::media::project_file(Path::new(&asset.path), root)
+            {
+                find(
+                    "error",
+                    "direct_source",
+                    e.message,
+                    json!({"asset_id":asset.id,"path":asset.path,"error_code":e.code}),
+                );
+                continue;
+            }
             if !path.is_file() {
                 find(
                     "error",
@@ -284,6 +296,31 @@ pub fn check(request: &Request) -> Result<Value> {
                     e.message,
                     json!({"asset_id":asset.id,"path":asset.path}),
                 );
+            } else if asset.decode.is_some() {
+                // Report missing/stale derived data without decoding or repopulating it here.
+                match crate::direct::index_status(asset) {
+                    Ok(Some(status)) if status["status"] != "ready" => find(
+                        if status["status"] == "stale" {
+                            "error"
+                        } else {
+                            "warning"
+                        },
+                        "direct_index",
+                        format!(
+                            "asset {} direct source index is {}",
+                            asset.id, status["status"]
+                        ),
+                        json!({"asset_id":asset.id,"path":asset.path,"index":status,
+                            "repair":{"op":"media.index","asset_id":asset.id,"input_root":root}}),
+                    ),
+                    Err(e) => find(
+                        "error",
+                        "direct_index",
+                        e.message,
+                        json!({"asset_id":asset.id,"path":asset.path,"error_code":e.code}),
+                    ),
+                    _ => {}
+                }
             }
         }
     }

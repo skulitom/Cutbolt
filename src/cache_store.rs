@@ -551,6 +551,14 @@ impl Store {
             }
         }
     }
+    pub(crate) fn discard(&mut self, key: &str) -> Result<()> {
+        if !key_ok(key) {
+            return Err(error("INVALID_CACHE", "Malformed cache key"));
+        }
+        self.connection
+            .execute("DELETE FROM entries WHERE key=?1", [key])?;
+        Ok(())
+    }
     fn evict(
         tx: &rusqlite::Transaction<'_>,
         policy: &Policy,

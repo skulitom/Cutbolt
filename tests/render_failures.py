@@ -82,7 +82,8 @@ def run(root):
 
     def fault(queue, attempt):
         record = json.loads((queue/f'failure-{attempt}.json').read_text())
-        assert record == {'written':8192,'raw_os_error':112,'injected':True}, record
+        # The tool injects the platform's disk-full error: ERROR_DISK_FULL or ENOSPC.
+        assert record == {'written':8192,'raw_os_error':112 if os.name == 'nt' else 28,'injected':True}, record
         saved = queue/f'encoded-{attempt}.mkv'
         assert saved.stat().st_size == 8192 and saved.read_bytes()[:4] == bytes.fromhex('1a45dfa3')
         faults.append({**record, 'partial_sha256':sha(saved)})

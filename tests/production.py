@@ -171,7 +171,13 @@ def check_offline(out, passed):
     work = out / "work"
     work.mkdir()
     (work / "fonts").mkdir()
-    font = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts" / "arial.ttf"
+    # An installed sans serif with Arial-like widths, since the beat layouts are sized for Arial:
+    # Arial on Windows; on Linux Liberation Sans (Arial's metrics), Lato or Ubuntu.
+    candidates = ([Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts" / "arial.ttf"] if os.name == "nt" else
+                  [Path("/usr/share/fonts/truetype") / name for name in
+                   ("liberation/LiberationSans-Regular.ttf", "lato/Lato-Regular.ttf", "ubuntu/Ubuntu-R.ttf")])
+    font = next((f for f in candidates if f.is_file()), None)
+    assert font, f"No stand-in font installed; tried {[str(f) for f in candidates]}"
     (work / "fonts" / "bold.ttf").write_bytes(font.read_bytes())
     (work / "fonts" / "regular.ttf").write_bytes(font.read_bytes())
     art = stand_in_art(work, recipes)

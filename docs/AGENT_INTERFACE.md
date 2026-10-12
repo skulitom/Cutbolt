@@ -10,6 +10,10 @@ The ten foundational checks cover local commands, saved editing sessions, render
 
 ## Local background renders
 
+For installation and a read-only setup check before starting MCP, see
+[INSTALLATION.md](INSTALLATION.md). `cutbolt doctor` is a CLI command and does not enlarge the
+MCP catalog.
+
 Create an existing absolute local `job_root` outside the repository. It contains `jobs.sqlite3` and `worker.lock`, separate from the editing-session store. The queue migrates its own schema from version 1 to 2 transactionally; it does not migrate editing sessions. Do not delete or replace the lock file while workers run. Use trusted local storage with normal file locks, not network shares.
 
 | Command | Arguments besides `command` | Result |
@@ -21,9 +25,13 @@ Create an existing absolute local `job_root` outside the repository. It contains
 | `job.start` | `job_root`, `request_id`, `run` (a long-running command), `arguments` (its arguments) | Stable ticket: `job_id`, `command` |
 | `job.wait` | `job_root`, `job_id` or `job_ids` (up to 64) with optional `until` (`all`, the default, or `any`), optional `timeout_seconds` (1-120, default 30) | One job: the `job.status` view once it finishes or the wait ends, with `finished`. Several: `finished`, `until`, `counts` by status, and `jobs`, each with `job_id`, `command`, `status` and its `result`, `error` or `progress` |
 
-`job.start` queues the long-running commands that are not direct MCP tools: `export.run`, `media.prepare`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe`. Its `arguments` are prepared and validated at submission exactly like a direct call. That includes workspace defaults, saved-project references and path-only identities, and an invalid argument fails immediately, named `arguments.<field>`. So does a missing output folder: `IO_ERROR` names it as `arguments.output: Output folder ... does not exist`. The job's result is the command's own receipt.
+`job.start` queues the long-running commands that are not direct MCP tools: `graphics.place`, `export.run`, `media.prepare`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe`. Its `arguments` are prepared and validated at submission exactly like a direct call. That includes workspace defaults, saved-project references and path-only identities, and an invalid argument fails immediately, named `arguments.<field>`. So does a missing output folder: `IO_ERROR` names it as `arguments.output: Output folder ... does not exist`. The job's result is the command's own receipt.
 
-These jobs share the queue's request IDs, ticket replay, output reservation and 32-job limit. Each runs in its own process inside a Windows job object, so it can be stopped as a whole:
+These jobs share the queue's request IDs, ticket replay, output reservation and 32-job limit. Each runs in its own process, inside a Windows job object or its own Linux process group, so it can be stopped as a whole:
+
+`graphics.place` also carries an inner edit request ID for its atomic session change. Its result
+includes the new revision; interrupted-job errors include a `session.receipt` lookup to determine
+whether that edit committed. See [graphic placement](TEMPLATES.md#place-a-graphic-in-one-job).
 
 - **Cancellation.** `job.cancel` stops a queued job at once and a running one within seconds. The command is told to stop: its tools are killed and its partial files removed. Anything still running 20 s later is terminated. The job ends `cancelled` with `JOB_CANCELLED`, unless its output was already published.
 - **Watchdog.** A command whose processes together use less than 1 s of CPU in 180 s, without reporting progress, is stuck (a deadlocked tool sits at 0 %); it is stopped the same way and fails with `JOB_STALLED`. A command running longer than 12 hours fails with `JOB_TIMEOUT`. Neither publishes output.
@@ -84,7 +92,7 @@ Publication and cancellation serialize through the job-store writer transaction.
 - `job.status`, `job.wait`, `job.cancel`, a new worker and `job.resume` reconcile abandoned running work: every job a dead worker was running, not just one. Eligible interrupted jobs become queued; `job.resume` starts a worker. Status inspection itself starts no worker. Completed, cancelled and exhausted jobs do not rerun.
 - Before publication, a durable validated receipt records the expected output. Recovery accepts an existing file only when its content and saved receipt agree. A mismatch rejects and retains the file; a matching completed output can win simultaneous cancellation. See [the full recovery contract](RENDER_RECOVERY.md).
 - A crash can leave `.cutbolt-job-<id>.partial.mkv` files. Later attempts use a different `.attempt-<number>.partial.mkv` suffix. Normal failure/cancellation cleans its own scratch file. Crash partials are retained; no orphan cleanup, mid-codec resume, job-history pruning or power-loss guarantee is provided.
-- The background worker backend supports Windows only. Other platforms receive `UNSUPPORTED_PLATFORM`; synchronous rendering remains separate.
+- The background worker backend supports Windows and Linux. On Linux the worker runs in its own session. The tool wrappers it starts die with the thread that started them, and each external tool leads its own process group, watched by a small guardian. A queued command's process group is ended once the command exits, or after the grace period once its worker goes. So ending the worker, a job or a tool ends everything it started, as a Windows job object does. macOS and other platforms receive `UNSUPPORTED_PLATFORM`; synchronous rendering remains separate.
 
 Rust embedders can call `commands::handle` or the library modules. Background jobs need the Cutbolt executable: set `CUTBOLT_EXECUTABLE` to its absolute path when embedding in a different executable. The CLI defaults to itself. No hosted API or network dependency is required.
 
@@ -92,11 +100,14 @@ Rust embedders can call `commands::handle` or the library modules. Background jo
 
 Launch `cutbolt.exe mcp`. The native adapter reads one JSON-RPC message per line and reserves stdout for protocol messages. EOF shuts down the adapter; submitted jobs continue. It negotiates `2025-11-25` or `2025-06-18`, supports initialize/initialized, ping, tools/list and tools/call, and advertises only tools. No resources, prompts, sampling, HTTP listener or MCP Tasks extension is advertised.
 
-Clients load the whole tool catalog into model context. `cutbolt.exe mcp --tools core`, or `CUTBOLT_MCP_TOOLS=core`, lists a compact catalog instead:
-- **Core tools.** Thirty-one everyday tools appear with their full schemas: sessions, files, media and preview images, outline, check and meters, jobs, paper edits, fillers, captions drafting, ducking, normalizing, tightening and beats, scene inspect and still, and export inspect.
-- **`cutbolt_run`.** One more tool runs every other tool command by name with its usual arguments: `{"command": "media.shots", "arguments": {...}}`. Its description lists those commands, and `cutbolt_schema` returns each one's arguments.
+Clients load the whole tool catalog into model context. Bare `cutbolt mcp` now lists the compact catalog:
 
-Every command stays reachable, and results, inline images and progress are unchanged. The compact catalog is about 65 KB against 217 KB for the full one (68 KB and 223 KB with a workspace), and a unit test keeps it under 96 KiB. `--tools full`, the default, lists every tool.
+- **Direct tools.** Seventeen shared workflow and recovery tools: session create/get/apply/undo/history/receipt; job start/wait/status/cancel/resume; schema; files list; media inspect; timeline check; cache inspect/prune.
+- **`cutbolt_run`.** One router runs the remaining tool commands with their usual arguments: `{"command":"audio.tighten","arguments":{...}}`. Its command enum gives exact names, and its description groups them by purpose. Prefer a direct tool when listed. Routed commands never delete files or cancel jobs; `job.cancel` and `cache.prune` are direct only. `cutbolt_schema` returns full argument descriptions.
+
+The default `tools/list` response is **21,262 bytes**, or **21,104 bytes with a workspace** (compact UTF-8 JSON-RPC including newline). Tests cap each at 40,000 bytes and each tool at 4 KiB. Calls, images, progress and every command remain available. `--tools full` opts into all 86 direct tools, with their previous schemas and annotations. `CUTBOLT_MCP_TOOLS=full` or `core` also selects a catalog; an explicit flag wins. See [AGENT_COSTS.md](AGENT_COSTS.md) for the measured workflows and selection rationale.
+
+Compact schemas omit the default dialect, summarize exact time shapes, and keep only the first clause of optional field descriptions (at most 120 characters). Required descriptions and full schema lookups retain their text. Time still uses the same strict parser and exact bounds. The [MCP schema rules](https://modelcontextprotocol.io/specification/2025-11-25/basic#schema-dialect) default to JSON Schema 2020-12. Compact annotations omit values equal to the [protocol defaults](https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations): `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`; `openWorldHint: false` remains explicit. Wire tests and Python SDK 1.12.3 check both catalogs and effective hints. The SDK preserves absent hints as `None`; it does not itself apply the defaults. This does not certify every client host.
 
 An example for clients accepting the common `mcpServers` configuration shape:
 
@@ -143,7 +154,7 @@ The document-producing tools, the proposals (`audio.duck`, `audio.normalize`, `a
 ### Compact results
 
 Agents read every byte a tool returns, so MCP results are summaries by default. A summary keeps what an agent acts on: `ok`, errors, frames, work, outputs and their identities. Bulky parts an agent rarely reads become one-line summaries or counts:
-- **Scenes.** `scene.inspect` and `scene.render` receipts replace `timing` (per-layer selected frames and sampled-parameter runs) with `layers`, one line per layer. A line gives the frames the layer shows, its source frames, how each sampled parameter changes, and its blend, mask, graphics (with clipped pixels) and tilemap. For example: `"title: frames 12-95, source frame 0, opacity 0→255 (13 values), position [960,312]"`. `sources` becomes a count; the per-sample arrays of `expressions`, `temporal` and `geometry` become counts, without their echoed specifications; `frame_matte` keeps `matted_pairs`; tool versions are left out. `graphics.instantiate` and `captions.scene` summarize their `inspection` the same way and return the scene whole.
+- **Scenes.** `scene.inspect` and `scene.render` receipts replace `timing` (per-layer selected frames and sampled-parameter runs) with `layers`, one line per layer. A line gives the frames the layer shows, its source frames, how each sampled parameter changes, and its blend, mask, graphics (with clipped pixels) and tilemap. For example: `"title: frames 12-95, source frame 0, opacity 0→255 (13 values), position [960,312]"`. `sources` becomes a count; the per-sample arrays of `expressions`, `temporal` and `geometry` become counts, without their echoed specifications; `frame_matte` keeps `matted_pairs`; tool versions are left out. `templates.list` discovers 20 original built-in designs with typed defaults; `graphics.instantiate` accepts their `template_id` or an inline recipe, with optional target-project sizing and clock defaults. `graphics.instantiate` and `captions.scene` summarize their `inspection` the same way and return the scene whole.
 - **Jobs.** `job.wait` and `job.status` summarize a job's receipt as its command's own result would be.
 - **Lists.** `resolved_identities` on any command, `audio.beats` onset times and `export.run` sources become counts; `preview.cuts` leaves out the cell rectangles, since each cut lists its cells and times.
 
@@ -155,7 +166,7 @@ Replaying the progress demo's scene traffic shows the effect. Its 22 `scene.insp
 
 Scene images and fonts, caption sources, conform and HDR sources, LUTs and mix clips name their files as `{path, sha256, bytes}` identities. Give an identity as `{"path": ...}` alone, or without one of the two values, and the engine hashes the file under the request's `input_root` before the request runs. The result then lists what it used in `resolved_identities`. Giving both values still pins exact content, and a mismatch fails with `MEDIA_CHANGED`, naming the file with its expected and actual values. `files.list` lists what is under `input_root` (the workspace by default), optionally recursively and by extension, with sizes and relative paths, so an agent can find its media without a shell. `media.inspect` returns a source's identity with its path relative to `input_root`, and compiled assets from `scene.render`, `media.conform` and similar commands carry theirs.
 
-Eighty-four tools use `cutbolt_`: capabilities; schema; files list; project create/validate/portable; timeline apply, meters, outline and check; session create/get/apply/preview/undo/restore/history/receipt/check/migrate/backup/recover; interchange import/export inspect/export; native import; expression inspect; media inspect, sheet, shots and conform inspect; HDR inspect, LUT inspect, color match and scopes inspect; registry search/status/bind/relink; proxy status/relink; render plan/start; export inspect; job status/cancel/resume/start/wait; image sequence inspect; scene inspect and still; effects preset; graphics instantiate; captions draft/import/inspect/apply/encode/export/scene; audio beats, inspect, duck, normalize, tighten and repair inspect; audio inputs, record inspect and record place; sync inspect; tracking inspect; stabilization inspect; reframe inspect; transcript inspect/correct/plan/fillers/assemble; cache inspect/prune; preview frame, sheet and cuts. Replace each command dot with an underscore, e.g. `media.conform.inspect` becomes `cutbolt_media_conform_inspect`; command names never contain underscores, and a unit test keeps it so. Arguments omit `command`. `export.run`, `export.review`, `captions.render`, `media.prepare`, `media.transcribe`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe` are not direct tools; `job.start` queues them in the background. `render.run` (use `render.start`) and `audio.record` stay CLI/library-only. See [SCENES.md](SCENES.md), [audio mixing](AUDIO.md), [dialogue cleanup](DIALOGUE_REPAIR.md), [validated media import](CONFORM.md), [HDR conversion](HDR.md), [proxy previews](PROXIES.md), [range/delivery exports](EXPORT.md) and [the registry workflow](REGISTRY.md).
+In full mode, eighty-four tools use `cutbolt_`: capabilities; schema; files list; project create/validate/portable; timeline apply, meters, outline and check; session create/get/apply/preview/undo/restore/history/receipt/check/migrate/backup/recover; interchange import/export inspect/export; native import; expression inspect; media inspect, sheet, shots and conform inspect; HDR inspect, LUT inspect, color match and scopes inspect; registry search/status/bind/relink; proxy status/relink; render plan/start; export inspect; job status/cancel/resume/start/wait; image sequence inspect; scene inspect and still; effects preset; graphics instantiate; captions draft/import/inspect/apply/encode/export/scene; audio beats, inspect, duck, normalize, tighten and repair inspect; audio inputs, record inspect and record place; sync inspect; tracking inspect; stabilization inspect; reframe inspect; transcript inspect/correct/plan/fillers/assemble; cache inspect/prune; preview frame, sheet and cuts. Replace each command dot with an underscore, e.g. `media.conform.inspect` becomes `cutbolt_media_conform_inspect`; command names never contain underscores, and a unit test keeps it so. Arguments omit `command`. `export.run`, `export.review`, `captions.render`, `media.prepare`, `media.transcribe`, `media.conform`, `scene.render`, `audio.render`, `audio.repair.render`, `hdr.conform`, `image.sequence.compile`, `proxy.generate`, `preview.range`, `cache.run` and `transcript.transcribe` are not direct tools; `job.start` queues them in the background. `render.run` (use `render.start`) and `audio.record` stay CLI/library-only. See [SCENES.md](SCENES.md), [audio mixing](AUDIO.md), [dialogue cleanup](DIALOGUE_REPAIR.md), [validated media import](CONFORM.md), [HDR conversion](HDR.md), [proxy previews](PROXIES.md), [range/delivery exports](EXPORT.md) and [the registry workflow](REGISTRY.md).
 
 `session.receipt` (read-only) returns the stored receipt of an already committed `request_id` without replaying or re-sending its operations. Use it after a lost response or timeout to learn whether a request committed and at which revision; an unknown ID returns `REQUEST_NOT_FOUND`, and nothing is written either way.
 
@@ -171,7 +182,7 @@ Eighty-four tools use `cutbolt_`: capabilities; schema; files list; project crea
 
 `sync.inspect` is the fortieth MCP tool. It reads two bound reference sources and returns audio/timecode measurements, an exact clock map and explicit conversion recipes without writing files or changing a session. Audio matching requires declared search windows and confidence limits; constant drift correction runs separately through CLI/library `media.conform` into new assets. See [synchronization](SYNCHRONIZATION.md) for scope, confidence and sample-rounding policies.
 
-Scene inspection also exposes [text/shape layout](GRAPHICS.md), chosen fallback fonts and sampled position/opacity/mask animation. `graphics.instantiate` validates [typed templates](TEMPLATES.md) and returns a new scene with parameter/default and identity reports; it writes no files or saved state. The same scene schema is used by the CLI and MCP; fonts stay external and content-checked. Optional [Unicode layout](UNICODE_TEXT.md) reports original UTF-8 shaping clusters, font choices and visual positions; `captions.scene` forwards the same profile through `layouts.<style>.text_layout`.
+Scene inspection also exposes [text/shape layout](GRAPHICS.md), chosen fallback fonts and sampled position/opacity/mask animation. `graphics.instantiate` validates [typed templates](TEMPLATES.md) and returns a new scene with parameter/default and identity reports; it writes no files or saved state. The same scene schema is used by the CLI and MCP; fonts stay external and content-checked. [fonts.find](FONTS.md) returns installed-font identities; font fields also accept an unambiguous installed family/full name, resolved and pinned before queueing. Optional [Unicode layout](UNICODE_TEXT.md) reports original UTF-8 shaping clusters, font choices and visual positions; `captions.scene` forwards the same profile through `layouts.<style>.text_layout`.
 
 The existing scene schema also accepts [spatial transforms](SPATIAL.md) in `transform.spatial`. Inspection includes per-frame translation/scale/rotation and source/scene matrices. Static template scene payloads preserve the complete declaration and curves; the template binding property set is unchanged. There is no new tool or implicit recompilation of existing timeline assets. Spatial mapping itself adds no tool.
 
@@ -202,9 +213,9 @@ A `job.wait` request whose `_meta` carries a `progressToken` receives `notificat
 
 This lets a client show the phase, and lets clients that reset timeouts on progress keep long waits alive. The final result is the same as without a token.
 
-The engine checks every argument strictly, including abbreviated objects. Unknown fields are rejected with the list of expected names; a wrongly typed value reports the expected type but not its field path.
+The engine checks every argument strictly, including abbreviated objects. Unknown fields are rejected with the list of expected names; a wrongly typed value reports the expected type and the first rejected field path.
 
-Calls are serial. Inspection/planning can block until its bounded subprocess work finishes. Use `job.cancel` for persistent job cancellation: MCP request-cancellation notifications do not cancel previously submitted jobs. MCP progress notifications, roots negotiation and parallel tool calls are not implemented. File roots are explicit caller-supplied boundaries, not an OS sandbox or a substitute for trusted client/tool configuration.
+Inspection/planning occupies one of the concurrent tool-call slots until its bounded subprocess work finishes. Use `job.cancel` for persistent job cancellation: MCP request-cancellation notifications do not cancel previously submitted jobs. Roots negotiation is not implemented. File roots are explicit caller-supplied boundaries, not an OS sandbox or a substitute for trusted client/tool configuration.
 
 Protocol references: [stdio transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports), [lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle), [tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools). Process lifetime handling follows [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects). Tests exercise our original wire client and official Python MCP SDK 1.12.3; they do not certify every MCP host.
 
@@ -214,19 +225,281 @@ Protocol references: [stdio transport](https://modelcontextprotocol.io/specifica
 
 `stabilization.inspect` is the forty-second MCP tool. It measures distributed camera patches, fits translation or planar rigid motion, and returns editable source-space compensation plus explicit cut/smoothing/crop reports. It writes no files. [Stabilization](STABILIZATION.md) defines the confidence limits and explicit compilation workflow; `scene.inspect` exposes compensation values and composed matrices.
 
-The existing `media.conform.inspect` schema accepts [variable-speed remapping](REMAPPING.md). Declare exact speed segments, frame sampling and audio pitch policy; inspection returns source/output endpoints and every frame's contributing indices/weights. Rendering stays a blocking CLI/library conversion into a new bound asset.
+The existing `media.conform.inspect` schema accepts [variable-speed remapping](REMAPPING.md). Declare exact speed segments, frame sampling and audio pitch policy; inspection returns source/output endpoints and every frame's contributing indices/weights. Convert into a new bound asset with `job.start run: "media.conform"`, or through the blocking CLI/library.
 
-The existing `audio.inspect` schema accepts optional [audio routing](AUDIO_ROUTING.md): named track/bus/output layouts, acyclic routes, explicit matrices, pan/balance curves and bus effects. It reports layout, graph work, exact PCM identity and channel meters. `audio.render` remains CLI/library-only; a scene soundtrack must explicitly output stereo.
+The existing `audio.inspect` schema accepts optional [audio routing](AUDIO_ROUTING.md): named track/bus/output layouts, acyclic routes, explicit matrices, pan/balance curves and bus effects. It reports layout, graph work, exact PCM identity and channel meters. `audio.render` runs through `job.start` or the blocking CLI/library; a scene soundtrack must explicitly output stereo.
 
-`audio.repair.inspect` adds typed read-only [dialogue-cleanup inspection](DIALOGUE_REPAIR.md). The recipe binds a PCM source and exact output/noise-profile ranges, with explicit suppression, DC removal and processing settings. Results include learned noise powers, unchanged sample timing, PCM identity and meters. Publish a fresh WAV through the blocking `audio.repair.render` CLI/library command, then use a routed scene soundtrack for existing saved sessions.
+`audio.repair.inspect` adds typed read-only [dialogue-cleanup inspection](DIALOGUE_REPAIR.md). The recipe binds a PCM source and exact output/noise-profile ranges, with explicit suppression, DC removal and processing settings. Results include learned noise powers, unchanged sample timing, PCM identity and meters. Publish a fresh WAV with `job.start run: "audio.repair.render"` or the blocking CLI/library command, then use a routed scene soundtrack for existing saved sessions.
 
 The three [recording inspection tools](RECORDING.md), `audio.inputs`, `audio.record.inspect` and `audio.record.place`, discover explicit inputs, inspect recording settings and propose sample-exact native audio placement. They do not start capture or alter a saved session. The blocking `audio.record` remains CLI/library-only. The complete recording acceptance suite includes a 15-minute native capture; see the generated tracker for awarded points.
 
-`reframe.inspect` provides read-only [subject reframing](REFRAMING.md) from authored boxes or explicitly selected local patch tracking. It returns crop/source clocks, subject changes, motion constraints, confidence and a new editable scene. Compile that scene through the existing CLI/library route; soundtrack timing and saved-session workflows remain intact. Its seven acceptance groups and three crop/fitting unit checks target G05 basic/extended only.
+`reframe.inspect` provides read-only [subject reframing](REFRAMING.md) from authored boxes or explicitly selected local patch tracking. It returns crop/source clocks, subject changes, motion constraints, confidence and a new editable scene. Compile that scene with `job.start run: "scene.render"` or the CLI/library; soundtrack timing and saved-session workflows remain intact. Its seven acceptance groups and three crop/fitting unit checks target G05 basic/extended only.
 
 The [transcript editing tools](TRANSCRIPTS.md), `transcript.inspect`, `transcript.correct` and `transcript.plan`, return validated immutable records, explicit caller corrections and content-bound word-cut plans. Apply the returned `transcript.cut` through saved-session preview/apply; these three tools write no state. The blocking `transcript.transcribe` command and both G04 checkpoints pass bounded local English/Greek acceptance; estimated intervals remain subject to explicit review.
 
-The [local cache](CACHE_PREVIEWS.md) exposes `cache.inspect` and `cache.prune` over stdio. Inspection is read-only; pruning removes only derived cache entries under caller-specified payload/count limits. Actual cache production and contact-sheet rendering stay blocking CLI/library work. Cache hits return checked results and proxy attachment proposals without silently changing a saved project.
+The [local cache](CACHE_PREVIEWS.md) exposes `cache.inspect` and `cache.prune` over stdio. Inspection is read-only; pruning removes only derived cache entries under caller-specified payload/count limits. Cache production runs through `job.start run: "cache.run"`; contact sheets use the direct `preview.sheet` tool. Both remain available through the CLI/library. Cache hits return checked results and proxy attachment proposals without silently changing a saved project.
+
+## Structured error recovery
+
+Errors keep `{code, message, detail?}` and add optional `retry`, `path` and `hint`. Existing messages
+remain for people; agents should use the structured fields instead of parsing prose. `path` names
+the first known request field, including nested operations and `job.start`'s `arguments` prefix.
+`hint` explains the repair. `detail` can provide `current_revision`, `suggested_output`, or bounded
+`available` IDs and their `total`. A suggested filename is advisory and is rechecked at publication.
+
+- `same`: a transient failure may clear without changing the underlying operation. Use a bounded
+  retry. Inspect a persisted job first: `job.resume` runs queued or opted-in interrupted attempts
+  within their saved limit; it does not restart terminal failures. Replaying `job.start` with the
+  same ID retrieves the existing ticket. Diagnose a terminal failure before an explicit new submission.
+- `changed`: repair the request or local configuration first. A revision conflict belongs here:
+  refreshing cannot make the same stale `expected_revision` valid. Read the current snapshot,
+  reconsider the edit, and submit the corrected revision; never blindly overwrite newer work.
+- `never`: stop automatic retries and diagnose the integrity/invariant/platform failure.
+
+The table below is checked against `src/errors.rs` and error codes in the source tree. A library
+caller may construct an unregistered private code; it receives no guessed retry advice. MCP keeps
+the same `isError` and `{ok:false,error:...}` envelope. Queued command failures preserve the same
+structured guidance in the durable job result.
+
+<!-- error-registry:start -->
+| Code | Retry | Meaning |
+| --- | --- | --- |
+| `ADJACENT_WORD_CUT` | `changed` | A word cut touches another boundary without the required adjacency policy. |
+| `AMBIGUOUS_MEDIA` | `changed` | More than one candidate matches the requested media identity. |
+| `ANALYSIS_CLOCK` | `never` | Analysis output disagrees with the requested sample clock. |
+| `ANGLE_COVERAGE` | `changed` | A camera angle does not cover the required interval. |
+| `ANGLE_IN_USE` | `changed` | An angle still has saved cut decisions referencing it. |
+| `AUDIO_IO` | `changed` | A PCM stream could not be read or written. |
+| `AUDIO_OVERFLOW` | `changed` | The scene audio operation exceeds its bounded sample range. |
+| `AUDIO_PROCESSING_OVERFLOW` | `changed` | Audio processing arithmetic or work exceeds its limit. |
+| `AUDIO_ROUTING_OVERFLOW` | `changed` | Audio routing arithmetic or work exceeds its limit. |
+| `CACHE_CORRUPT` | `never` | A derived cache entry fails integrity validation; inspect or rebuild it explicitly. |
+| `CACHE_MISSING` | `changed` | The requested derived cache entry does not exist. |
+| `CAPTION_OVERLAP` | `changed` | Caption intervals overlap contrary to the selected policy. |
+| `CAPTURE_DEVICE_CHANGED` | `changed` | The selected capture device changed during recording. |
+| `CAPTURE_DEVICE_ERROR` | `same` | The local capture backend reported a device error. |
+| `CAPTURE_DISCONTINUITY` | `changed` | Capture packets contain a sample gap or discontinuity. |
+| `CAPTURE_PROCESS_EXITED` | `changed` | The selected process ended during capture; select a running process. |
+| `CAPTURE_TIMEOUT` | `same` | Capture did not produce data before the deadline. |
+| `CAPTURE_TIMESTAMP_ERROR` | `never` | Capture timestamps violate the declared clock. |
+| `CAPTURE_VALIDATION_FAILED` | `never` | Recorded output failed independent decoded validation. |
+| `CLIP_COLLISION` | `changed` | A placement overlaps another clip under the reject policy. |
+| `CLOCK_ERROR` | `never` | The system clock could not provide a required timestamp. |
+| `COMMAND_FAILED` | `changed` | A child command ended without a valid successful result. |
+| `CUT_OUTSIDE_CLIP` | `changed` | A requested word cut lies outside the clip interval. |
+| `DEVICE_UNAVAILABLE` | `same` | The selected local compute or capture device is unavailable. |
+| `DIRECT_INDEX_STALE` | `changed` | A saved direct-source index belongs to different source, decoder or engine identities; verify and refresh it with media.index. |
+| `DISK_FULL` | `changed` | Storage is full; free space before retrying. |
+| `DUPLICATE_ID` | `changed` | An identifier duplicates another object in the same scope. |
+| `ENCODE_FAILED` | `changed` | The external encoder did not complete the requested output. |
+| `ESTIMATED_BOUNDARY` | `changed` | A word boundary needs explicit acknowledgement of estimated timing. |
+| `EXPORT_VALIDATION_FAILED` | `never` | Exported data did not pass independent validation. |
+| `EXPRESSION_CYCLE` | `changed` | Expression dependencies contain a cycle. |
+| `EXPRESSION_DOMAIN` | `changed` | An expression operation is outside its mathematical domain. |
+| `EXPRESSION_PRECISION` | `changed` | Expression arithmetic exceeds the exact precision contract. |
+| `EXPRESSION_RANGE` | `changed` | An expression result exceeds its permitted range. |
+| `EXPRESSION_TYPE` | `changed` | An expression value or connection has an incompatible type. |
+| `GEOMETRY_CYCLE` | `changed` | Geometry parent dependencies contain a cycle. |
+| `GEOMETRY_PRECISION` | `changed` | Geometry evaluation exceeds its numeric precision bound. |
+| `IDENTITY_MISMATCH` | `changed` | A supplied identity conflicts with the asset or proxy it describes. |
+| `IDENTITY_REQUIRED` | `changed` | The operation requires an explicit bound content identity. |
+| `INCOMPLETE_CAPTURE` | `changed` | Capture ended before all required samples arrived. |
+| `INPUT_LIMIT` | `changed` | Speech input exceeds the configured worker input bound. |
+| `INSUFFICIENT_HANDLES` | `changed` | A transition requires source frames outside available handles. |
+| `INTERNAL_ERROR` | `never` | An engine invariant failed; retain the request for diagnosis. |
+| `INVALID_ACCELERATION` | `changed` | The acceleration value or structure violates its declared constraints. |
+| `INVALID_ALIGNMENT` | `changed` | The alignment value or structure violates its declared constraints. |
+| `INVALID_ALPHA` | `changed` | The alpha value or structure violates its declared constraints. |
+| `INVALID_ANIMATION` | `changed` | The animation value or structure violates its declared constraints. |
+| `INVALID_ARGUMENT` | `changed` | The argument value or structure violates its declared constraints. |
+| `INVALID_AUDIO` | `changed` | The audio value or structure violates its declared constraints. |
+| `INVALID_AUDIO_EFFECT` | `changed` | The audio effect value or structure violates its declared constraints. |
+| `INVALID_AUDIO_REPAIR` | `changed` | The audio repair value or structure violates its declared constraints. |
+| `INVALID_AUDIO_ROUTING` | `changed` | The audio routing value or structure violates its declared constraints. |
+| `INVALID_BATCH` | `changed` | The batch value or structure violates its declared constraints. |
+| `INVALID_BINDING` | `changed` | The binding value or structure violates its declared constraints. |
+| `INVALID_CACHE` | `changed` | The cache value or structure violates its declared constraints. |
+| `INVALID_CAPTIONS` | `changed` | The captions value or structure violates its declared constraints. |
+| `INVALID_CAPTURE_INPUT` | `changed` | The capture input value or structure violates its declared constraints. |
+| `INVALID_CAPTURE_PACKET` | `changed` | The capture packet value or structure violates its declared constraints. |
+| `INVALID_CAPTURE_PLACEMENT` | `changed` | The capture placement value or structure violates its declared constraints. |
+| `INVALID_CLIP_SOURCE` | `changed` | The clip source value or structure violates its declared constraints. |
+| `INVALID_COLOR` | `changed` | The color value or structure violates its declared constraints. |
+| `INVALID_CONFORM` | `changed` | The conform value or structure violates its declared constraints. |
+| `INVALID_EDIT` | `changed` | The edit value or structure violates its declared constraints. |
+| `INVALID_EFFECT` | `changed` | The effect value or structure violates its declared constraints. |
+| `INVALID_EXPORT` | `changed` | The export value or structure violates its declared constraints. |
+| `INVALID_EXPRESSION` | `changed` | The expression value or structure violates its declared constraints. |
+| `INVALID_GAP` | `changed` | The gap value or structure violates its declared constraints. |
+| `INVALID_GEOMETRY` | `changed` | The geometry value or structure violates its declared constraints. |
+| `INVALID_GRAPHIC` | `changed` | The graphic value or structure violates its declared constraints. |
+| `INVALID_HDR` | `changed` | The hdr value or structure violates its declared constraints. |
+| `INVALID_ID` | `changed` | The id value or structure violates its declared constraints. |
+| `INVALID_IDENTITY` | `changed` | The identity value or structure violates its declared constraints. |
+| `INVALID_IMAGE_SEQUENCE` | `changed` | The image sequence value or structure violates its declared constraints. |
+| `INVALID_INDEX` | `changed` | The index value or structure violates its declared constraints. |
+| `INVALID_JSON` | `changed` | The json value or structure violates its declared constraints. |
+| `INVALID_LIMIT` | `changed` | The limit value or structure violates its declared constraints. |
+| `INVALID_LOSS_ACKNOWLEDGEMENT` | `changed` | The loss acknowledgement value or structure violates its declared constraints. |
+| `INVALID_LUT` | `changed` | The lut value or structure violates its declared constraints. |
+| `INVALID_MASK` | `changed` | The mask value or structure violates its declared constraints. |
+| `INVALID_MATTE` | `changed` | The matte value or structure violates its declared constraints. |
+| `INVALID_MEDIA` | `changed` | The media value or structure violates its declared constraints. |
+| `INVALID_METADATA` | `changed` | The metadata value or structure violates its declared constraints. |
+| `INVALID_MULTICAM` | `changed` | The multicam value or structure violates its declared constraints. |
+| `INVALID_NATIVE_TRANSFER` | `changed` | The native transfer value or structure violates its declared constraints. |
+| `INVALID_PARAMETER` | `changed` | The parameter value or structure violates its declared constraints. |
+| `INVALID_PATH` | `changed` | The path value or structure violates its declared constraints. |
+| `INVALID_PROXY` | `changed` | The proxy value or structure violates its declared constraints. |
+| `INVALID_QUERY` | `changed` | The query value or structure violates its declared constraints. |
+| `INVALID_RANGE` | `changed` | The range value or structure violates its declared constraints. |
+| `INVALID_REFRAME` | `changed` | The reframe value or structure violates its declared constraints. |
+| `INVALID_REMAP` | `changed` | The remap value or structure violates its declared constraints. |
+| `INVALID_RESULT` | `changed` | The result value or structure violates its declared constraints. |
+| `INVALID_RETRY` | `changed` | The retry value or structure violates its declared constraints. |
+| `INVALID_REVISION` | `changed` | The revision value or structure violates its declared constraints. |
+| `INVALID_SCENE` | `changed` | The scene value or structure violates its declared constraints. |
+| `INVALID_SCOPE` | `changed` | The scope value or structure violates its declared constraints. |
+| `INVALID_SELECTION` | `changed` | The selection value or structure violates its declared constraints. |
+| `INVALID_SEQUENCE` | `changed` | The sequence value or structure violates its declared constraints. |
+| `INVALID_SEQUENCE_EDIT` | `changed` | The sequence edit value or structure violates its declared constraints. |
+| `INVALID_SHEET` | `changed` | The sheet value or structure violates its declared constraints. |
+| `INVALID_SPATIAL` | `changed` | The spatial value or structure violates its declared constraints. |
+| `INVALID_STABILIZATION` | `changed` | The stabilization value or structure violates its declared constraints. |
+| `INVALID_SYNC` | `changed` | The sync value or structure violates its declared constraints. |
+| `INVALID_TEMPLATE` | `changed` | The template value or structure violates its declared constraints. |
+| `INVALID_TEMPORAL` | `changed` | The temporal value or structure violates its declared constraints. |
+| `INVALID_TIME` | `changed` | The time value or structure violates its declared constraints. |
+| `INVALID_TIMECODE` | `changed` | The timecode value or structure violates its declared constraints. |
+| `INVALID_TRACKING` | `changed` | The tracking value or structure violates its declared constraints. |
+| `INVALID_TRACKS` | `changed` | The tracks value or structure violates its declared constraints. |
+| `INVALID_TRACK_EDIT` | `changed` | The track edit value or structure violates its declared constraints. |
+| `INVALID_TRANSCRIPT` | `changed` | The transcript value or structure violates its declared constraints. |
+| `INVALID_TRANSCRIPTION` | `changed` | The transcription value or structure violates its declared constraints. |
+| `INVALID_TRANSITION` | `changed` | The transition value or structure violates its declared constraints. |
+| `IO_ERROR` | `changed` | A local filesystem operation failed; repair the named path or permissions. |
+| `ISOLATION_REQUIRED` | `changed` | The speech worker requires the configured process isolation. |
+| `JOB_CANCELLED` | `changed` | The durable job was cancelled; the same start request will replay its ticket. |
+| `JOB_LAUNCH_FAILED` | `same` | A local job worker could not be launched. |
+| `JOB_NOT_FOUND` | `changed` | The requested job ID is absent from the queue. |
+| `JOB_STALLED` | `changed` | A worker stopped reporting progress; inspect its terminal ticket before a new submission. |
+| `JOB_TIMEOUT` | `changed` | A job exceeded its deadline; inspect its terminal ticket before a new submission. |
+| `LIMIT_EXCEEDED` | `changed` | The requested work exceeds a declared engine limit. |
+| `LINKED_SELECTION` | `changed` | The edit requires the complete linked clip selection. |
+| `LOSSY_CAPTION_EXPORT` | `changed` | Caption export would lose unsupported semantics without acknowledgement. |
+| `LOUDNESS_UNMEASURED` | `changed` | The selected sound has no usable loudness measurement. |
+| `MANAGED_SEQUENCE` | `changed` | A managed sequence must be edited through its owning camera group. |
+| `MEDIA_CHANGED` | `changed` | Current source bytes differ from the bound identity; inspect and rebind explicitly. |
+| `MEDIA_DURATION_MISMATCH` | `changed` | Probed media duration disagrees with the declared source duration. |
+| `MIGRATION_REQUIRED` | `changed` | The old store needs explicit session.migrate before new writes. |
+| `MISSING_ANGLE` | `changed` | The requested angle is absent; use available IDs or provide the required input. |
+| `MISSING_ASSET` | `changed` | The requested asset is absent; use available IDs or provide the required input. |
+| `MISSING_CLIP` | `changed` | The requested clip is absent; use available IDs or provide the required input. |
+| `MISSING_CUT` | `changed` | The requested cut is absent; use available IDs or provide the required input. |
+| `MISSING_GLYPH` | `changed` | The requested glyph is absent; use available IDs or provide the required input. |
+| `MISSING_LINK` | `changed` | The requested link is absent; use available IDs or provide the required input. |
+| `MISSING_MEDIA` | `changed` | The requested media is absent; use available IDs or provide the required input. |
+| `MISSING_NEIGHBOR` | `changed` | The requested neighbor is absent; use available IDs or provide the required input. |
+| `MISSING_PARAMETER` | `changed` | The requested parameter is absent; use available IDs or provide the required input. |
+| `MISSING_SEQUENCE` | `changed` | The requested sequence is absent; use available IDs or provide the required input. |
+| `MISSING_TRACK` | `changed` | The requested track is absent; use available IDs or provide the required input. |
+| `MISSING_TRANSCRIPT` | `changed` | The requested transcript is absent; use available IDs or provide the required input. |
+| `MISSING_TRANSITION` | `changed` | The requested transition is absent; use available IDs or provide the required input. |
+| `MISSING_WORD` | `changed` | The requested word is absent; use available IDs or provide the required input. |
+| `MODEL_CHANGED` | `changed` | Speech model bytes differ from the configured identity. |
+| `MODEL_UNAVAILABLE` | `changed` | The configured local speech model is missing or unavailable. |
+| `MULTICAM_PROJECTION_MISMATCH` | `never` | Saved camera decisions and their projected sequence disagree. |
+| `NATIVE_ADAPTER_MISMATCH` | `changed` | The declared native-project adapter identity does not match. |
+| `NATIVE_SOURCE_MISMATCH` | `changed` | Native-project source identities do not match the supplied bindings. |
+| `NOTHING_TO_UNDO` | `changed` | The saved session has no earlier edit to undo. |
+| `NO_WORDS` | `changed` | Speech analysis returned no usable words in the requested interval. |
+| `OUTPUT_EXISTS` | `changed` | The output path already exists and will not be overwritten. |
+| `OUTPUT_RESERVED` | `changed` | Another queued job already reserves this output path. |
+| `OWNER_GONE` | `same` | The process owning the speech request ended. |
+| `PATH_OUTSIDE_ROOT` | `changed` | A resolved path leaves the explicitly allowed file root. |
+| `PATH_OUTSIDE_WORKSPACE` | `changed` | A resolved path leaves the configured workspace. |
+| `PROJECT_EXISTS` | `changed` | A saved project with this ID already exists. |
+| `PROJECT_NOT_FOUND` | `changed` | The requested saved project is absent. |
+| `PROXY_MISSING` | `changed` | An enabled bound proxy cannot be found. |
+| `PUBLICATION_CONFLICT` | `never` | Existing publication bytes or receipts conflict; preserve them for diagnosis. |
+| `PUBLISH_FAILED` | `changed` | The verified temporary output could not be published without overwrite. |
+| `QUEUE_FULL` | `same` | The local queue has reached its outstanding-job bound. |
+| `REFRAME_INFEASIBLE` | `changed` | The authored boxes and crop constraints have no feasible framing. |
+| `REFRAME_UNAVAILABLE` | `changed` | The requested reframing mode cannot use this source. |
+| `RENDER_VALIDATION_FAILED` | `never` | Rendered pixels, samples, metadata or counts failed validation. |
+| `REQUEST_ID_CONFLICT` | `changed` | An idempotency key was already used with different arguments. |
+| `REQUEST_NOT_FOUND` | `changed` | No saved receipt exists for this request ID. |
+| `RESOURCE_LIMIT` | `changed` | The speech worker exceeds its configured resource bound. |
+| `RESULT_LIMIT` | `changed` | The worker result exceeds its declared bounded size. |
+| `REVISION_CONFLICT` | `changed` | The expected revision is stale; refresh, reconsider, and change the request. |
+| `REVISION_NOT_FOUND` | `changed` | The requested saved revision does not exist. |
+| `RUNTIME_UNAVAILABLE` | `changed` | The configured local speech runtime is unavailable. |
+| `RUNTIME_VERSION` | `changed` | The installed speech runtime does not match the required version. |
+| `SEQUENCE_CYCLE` | `changed` | Nested sequence references contain a cycle. |
+| `SEQUENCE_IN_USE` | `changed` | A sequence still has references and cannot be removed. |
+| `SPLIT_ID_REQUIRED` | `changed` | The edit creates a surviving clip that needs an explicit ID. |
+| `STABILIZATION_CROP_LIMIT` | `changed` | Stabilization would exceed the declared crop or zoom limit. |
+| `STABILIZATION_UNRELIABLE` | `changed` | Measured camera motion does not meet the declared confidence limits. |
+| `STORE_BUSY` | `same` | Another local transaction holds the store lock. |
+| `STORE_CORRUPT` | `never` | Saved storage fails integrity checks; use explicit recovery, not blind retries. |
+| `STORE_ERROR` | `changed` | A database operation failed for a non-transient storage reason. |
+| `STORE_NOT_FOUND` | `changed` | The requested saved store does not exist. |
+| `SYNC_AMBIGUOUS` | `changed` | Multiple synchronization offsets fit the measured signal. |
+| `SYNC_CONFLICT` | `changed` | Linked or synchronized clip placements disagree. |
+| `SYNC_DRIFT_EXCEEDED` | `changed` | Measured clock drift exceeds the allowed correction bound. |
+| `SYNC_INCONSISTENT` | `changed` | Independent synchronization windows disagree. |
+| `SYNC_INSUFFICIENT_SIGNAL` | `changed` | The selected sound does not provide enough synchronization evidence. |
+| `TEXT_OVERFLOW` | `changed` | Text exceeds its declared box, line or glyph bound. |
+| `TEXT_PLAN_STALE` | `changed` | The transcript edit proposal no longer matches the saved timeline. |
+| `TIME_OVERFLOW` | `changed` | Exact time arithmetic exceeds the supported integer range. |
+| `TOOL_ABORTED` | `changed` | An external tool was cancelled by the controlling operation. |
+| `TOOL_CHANGED` | `changed` | An external executable differs from the identity pinned to the job. |
+| `TOOL_FAILED` | `changed` | An external tool returned an unsuccessful result. |
+| `TOOL_TIMEOUT` | `same` | An external tool exceeded its deadline. |
+| `TOOL_UNAVAILABLE` | `changed` | A required external executable could not be started. |
+| `TOO_MANY_COLORS` | `changed` | The lossless palette output exceeds the supported color count. |
+| `TRACKING_UNRELIABLE` | `changed` | Tracking confidence failed; detail may retain accepted observations. |
+| `TRACK_LOCKED` | `changed` | The edit would alter a locked track. |
+| `TRANSCRIPTION_FAILED` | `changed` | The speech worker reported an unrecognized failure. |
+| `TRANSCRIPT_CONFLICT` | `changed` | The transcript revision or fingerprint differs from the expected value. |
+| `TRANSCRIPT_SOURCE_MISMATCH` | `changed` | Transcript words refer to a different bound media source. |
+| `TRANSITION_COLLISION` | `changed` | Transition intervals overlap contrary to the supported layout. |
+| `TRANSITION_CONFLICT` | `changed` | The edit would invalidate an existing transition without a policy. |
+| `UNALIGNED_TIME` | `changed` | A time does not fall on the required exact frame or sample boundary. |
+| `UNKNOWN_PARAMETER` | `changed` | A template value names a parameter the template does not declare. |
+| `UNKNOWN_SCHEMA` | `changed` | The requested schema name or selection is absent. |
+| `UNKNOWN_SECTION` | `changed` | The requested capabilities section is absent. |
+| `UNSUPPORTED_ACCELERATION` | `changed` | The requested acceleration is outside the supported profile. |
+| `UNSUPPORTED_ALIGNMENT_TEXT` | `changed` | The requested alignment text is outside the supported profile. |
+| `UNSUPPORTED_AUDIO` | `changed` | The requested audio is outside the supported profile. |
+| `UNSUPPORTED_CAPTIONS` | `changed` | The requested captions is outside the supported profile. |
+| `UNSUPPORTED_FONT` | `changed` | The requested font is outside the supported profile. |
+| `UNSUPPORTED_GEOMETRY` | `changed` | The requested geometry is outside the supported profile. |
+| `UNSUPPORTED_IMAGE` | `changed` | The requested image is outside the supported profile. |
+| `UNSUPPORTED_INTERCHANGE` | `changed` | The requested interchange is outside the supported profile. |
+| `UNSUPPORTED_JOB` | `changed` | The requested job is outside the supported profile. |
+| `UNSUPPORTED_MEDIA` | `changed` | The requested media is outside the supported profile. |
+| `UNSUPPORTED_MULTICAM` | `changed` | The requested multicam is outside the supported profile. |
+| `UNSUPPORTED_NATIVE_BUILD` | `changed` | The requested native build is outside the supported profile. |
+| `UNSUPPORTED_OUTPUT` | `changed` | The requested output is outside the supported profile. |
+| `UNSUPPORTED_PLATFORM` | `never` | The requested platform is outside the supported profile. |
+| `UNSUPPORTED_PREVIEW` | `changed` | The requested preview is outside the supported profile. |
+| `UNSUPPORTED_SCENE` | `changed` | The requested scene is outside the supported profile. |
+| `UNSUPPORTED_SCHEMA` | `changed` | The requested schema is outside the supported profile. |
+| `UNSUPPORTED_STORE` | `changed` | The requested store is outside the supported profile. |
+| `UNSUPPORTED_TEXT` | `changed` | The requested text is outside the supported profile. |
+| `UNSUPPORTED_TIMECODE` | `changed` | The requested timecode is outside the supported profile. |
+| `UNSUPPORTED_TIMELINE` | `changed` | The requested timeline is outside the supported profile. |
+| `UNSUPPORTED_TRANSCRIPT_BINDING` | `changed` | The requested transcript binding is outside the supported profile. |
+| `UNUSED_SPLIT_ID` | `changed` | The edit supplied a split ID but produces no corresponding survivor. |
+| `WORD_OUTSIDE_CLIP` | `changed` | A selected transcript word lies outside the clip source interval. |
+| `WORKER_CHANGED` | `changed` | The local speech worker differs from its configured identity. |
+| `WORKER_FAILED` | `changed` | The speech worker process did not return a valid result. |
+| `WORKER_INTERRUPTED` | `same` | The durable worker was interrupted; inspect and resume its ticket. |
+| `WORKER_LIFETIME` | `never` | The worker could not be contained within the required process lifetime. |
+| `WORKER_SETUP_FAILED` | `changed` | The background worker could not initialize its required local environment. |
+| `WORKER_TIMEOUT` | `same` | The local speech worker exceeded its request deadline. |
+<!-- error-registry:end -->
 
 ## Editorial interchange
 
@@ -236,7 +509,7 @@ The [interchange tools](INTERCHANGE.md), `interchange.import`, `interchange.expo
 
 [Project portability and history](PORTABLE_PROJECTS.md) add `project.portable`, `session.check`, `session.migrate`, `session.backup` and `session.recover`. Portability/check are read-only. Migration is explicit and idempotent; backups and recovery write new files and are not marked idempotent. A ready portability proposal uses ordinary `session.preview`/`session.apply` and `media.paths`. Version-1 stores remain readable and replay prior receipts; new writes require explicit migration to version 2. Recovery preserves the archived schema and never replaces an existing database or journals.
 
-Sequential native renders and their queued jobs accept the [exact native frame clocks](NATIVE_TIMING.md). Their receipts include the rational frame rate; publication recovery derives video and audio counts from the saved duration. Frame/range previews, caches, contact sheets and numerical scopes use the same sequential clock. Placed tracks, proxy creation and H.264 delivery retain their separate 25 fps bounds; lossless sequential exports accept native rates.
+Sequential native renders and their queued jobs accept the [exact native frame clocks](NATIVE_TIMING.md). Their receipts include the rational frame rate; publication recovery derives video and audio counts from the saved duration. Frame/range previews, caches, contact sheets and numerical scopes use the same sequential clock. Placed tracks, nested sequences, proxy creation, scenes, captions, H.264 delivery and lossless sequential exports also use these eight native clocks, within each path's separate size and duration bounds.
 
 ### Native project proposals
 

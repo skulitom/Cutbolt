@@ -96,6 +96,13 @@ if args.decode_device is not None and not 0 <= args.decode_device < 31:
 if args.thorough and args.decode_device is None:
     raise SystemExit("Full verification requires --decode-device; there is no software substitution for hardware-decode acceptance.")
 available["device"] = None if args.decode_device is None else str(args.decode_device)
+# Windows-only facilities: elsewhere the fixtures that need them are skipped, and say why.
+WINDOWS_ONLY = {
+    "capture": "Windows audio capture (no local capture backend on this platform)",
+    "voices": "Windows speech voices (fixture speech is synthesized with System.Speech)",
+}
+for key in WINDOWS_ONLY:
+    available[key] = "windows" if os.name == "nt" else None
 # Tools on PATH, checked in seconds rather than discovered by a failing fixture an hour later.
 TOOLS = {"ffmpeg": None, "ffprobe": None, "cargo": None, "pwsh": "speech"}
 for tool, needed_by in TOOLS.items():
@@ -116,6 +123,7 @@ def command(args):
 
 
 starting_hashes = source_hashes()
+commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
 
 def rust_checks():
@@ -144,7 +152,7 @@ if args.engine:
     source_engine = args.engine.resolve()
 else:
     command(["cargo", "build", "--locked"])
-    source_engine = ROOT / "target" / "debug" / ENGINE_NAME
+    source_engine = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "debug" / ENGINE_NAME
 # Fixtures run a private copy of the engine, so target/debug stays free to rebuild during verification.
 run_directory = Path(tempfile.mkdtemp(prefix="cutbolt-verify-run-"))
 engine_copy = run_directory / ENGINE_NAME
@@ -195,6 +203,12 @@ STAGES = [
     {"name": "integration", "lane": "pool", "check": None, "needs": [],
      "commands": [[sys.executable, "tests/integration.py", "--output", "{dir}"], [sys.executable, "tests/agents.py", "--fixture", "{dir}"]],
      "results": {"integration": "verification.json", "agents": "agents/verification.json"}},
+    fixture("direct_sources"),
+    fixture("agent_costs"),
+    fixture("doctor"),
+    fixture("graphics_place"),
+    fixture("scene_short"),
+    fixture("skills"),
     fixture("native_timing", long=["--long-form"], check=require("long_form", "Full timing verification requires the complete long-form fractional render")),
     fixture("image_sequences", long=["--long-form"], check=require("long_form", "Full lossless alpha acceptance requires the complete long-form render")),
     fixture("queue_recovery"),
@@ -207,16 +221,16 @@ STAGES = [
     fixture("sessions", result="sessions/verification.json", utf8=False),
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
     fixture("audio_processing"), fixture("conform"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
-    fixture("templates"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
+    fixture("templates"), fixture("builtin_templates"), fixture("fonts"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
     fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
-    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech"]), fixture("remapping"),
+    fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech", "voices"]), fixture("remapping"),
     # Offline checks always; the full companion build only with CUTBOLT_PRODUCTION_CONFIG, _MUSIC and _FONT set.
     fixture("production"),
     # Real-time capture is rejected (correctly) when a busy machine delays a packet; outside the thorough
     # run's quiet phase it may retry once, and the record says so.
-    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"], retry=True,
+    fixture("recording", lane="quiet", quick_lane="quiet", quick=["--native-seconds", "30"], retry=True, needs=["capture"],
             check=require("sustained.long_gate_passed", "Full recording verification requires the sustained native capture gate")),
     fixture("long_form_4k", lane="long", long=["--long-form"],
             check=require("long_gate_passed", "Full performance acceptance requires every frame/sample of the 30-minute moving 4K fixture")),
@@ -224,7 +238,7 @@ STAGES = [
     fixture("geometry", lane="gated"), fixture("segmentation", "--runtime-python", segmentation_python or "", lane="gated", needs=["segmentation"]),
     fixture("registry", lane="quiet"), fixture("acceleration", "--device", device, lane="gated", needs=["device"]),
     fixture("unicode_text", lane="gated"), fixture("reframing", lane="gated"), fixture("cache_previews", lane="gated"),
-    fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated"),
+    fixture("audio_routing", lane="gated"), fixture("audio_repair", lane="gated", needs=["voices"]),
     fixture("native_scenes", lane="gated", result="run/verification.json", long=["--long-form"],
             check=require("long_form", "Full native scene verification requires the two-minute long scene")),
     fixture("agent_ergonomics", lane="gated", result="run/verification.json"),
@@ -248,7 +262,8 @@ skipped = {}
 for stage in list(STAGES):
     missing = [need for need in stage["needs"] if not available[need]]
     if missing:
-        reason = "needs " + ", ".join(EXTERNAL[m][0] if m in EXTERNAL else "--decode-device" if m == "device" else m for m in missing)
+        reason = "needs " + ", ".join(EXTERNAL[m][0] if m in EXTERNAL else "--decode-device" if m == "device"
+                                      else WINDOWS_ONLY.get(m, m) for m in missing)
         if args.strict:
             raise SystemExit(f"{stage['name']} {reason} (--strict)")
         skipped[stage["name"]] = reason
@@ -486,7 +501,6 @@ if deadline_passed.is_set():  # Never started because the gate's time ran out: t
     not_run = []
 if rust_outcome.get("error"):
     failures["rust"] = {"ok": False, "log": rust_outcome["error"], "seconds": 0, "budget_misses": []}
-commit = args.commit or subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 passed_fingerprints = {name: fingerprints[name] for name, o in outcomes.items() if o["ok"] and fingerprints.get(name)}
 # Passes the map cannot fingerprint are never reused, but they still resolve an earlier failure.
 unmapped_passes = sorted(name for name, o in outcomes.items() if o["ok"] and not fingerprints.get(name))
@@ -495,10 +509,16 @@ if run_rust and "rust" not in failures:
 impact.record(RUN, passed_fingerprints, unmapped_passes=unmapped_passes,
               commit=commit, failures=sorted(failures), deferred=deferred, reused=reused,
               not_impacted=len(not_impacted), skipped=sorted(skipped))
+cost_measurements = outcomes.get("agent_costs", {}).get("values", {}).get("agent_costs")
+if cost_measurements:
+    print("Agent-cost replay (wire bytes; tool calls exclude initialize/list):", flush=True)
+    for name, row in cost_measurements["workflows"].items():
+        print(f"  {name:14} {row['calls']:3} calls  {row['sent_bytes']:8} sent  {row['received_bytes']:8} received"
+              f"  {row['failed_calls']} failed  {row['schema_lookups']} schema lookups", flush=True)
 if args.report:
-    args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN,
+    args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN, "commit": commit,
                                        "ran": sorted(outcomes), "failed": sorted(failures), "deferred": deferred, "reused": reused,
-                                       "not_impacted": not_impacted, "skipped": skipped}, indent=1), encoding="utf-8")
+                                       "not_impacted": not_impacted, "skipped": skipped, "agent_costs": cost_measurements}, indent=1), encoding="utf-8")
 if args.cleanup_worktree:
     common = Path(subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
     main_checkout = (ROOT / common).resolve().parent
@@ -610,6 +630,8 @@ report = {
     "overlay_evidence": overlays,
     "large_import_evidence": large_imports,
     "agent_ergonomics_evidence": agent_ergonomics,
+    "agent_costs_evidence": agent_costs,
+    "direct_sources_evidence": direct_sources,
 }
 report["passed"] += cache_previews["passed"]
 report["passed"] += expressions["passed"]
@@ -653,6 +675,20 @@ report["passed"] += native_scenes["passed"]
 report["passed"] += overlays["passed"]
 report["passed"] += large_imports["passed"]
 report["passed"] += agent_ergonomics["passed"]
+report["passed"] += agent_costs["passed"]
+report["passed"] += direct_sources["passed"]
+report["passed"] += doctor["passed"]
+report["doctor_evidence"] = doctor
+report["passed"] += graphics_place["passed"]
+report["graphics_place_evidence"] = graphics_place
+report["passed"] += scene_short["passed"]
+report["scene_short_evidence"] = scene_short
+report["passed"] += skills["passed"]
+report["skills_evidence"] = skills
+report["passed"] += builtin_templates["passed"]
+report["builtin_templates_evidence"] = builtin_templates
+report["passed"] += fonts["passed"]
+report["fonts_evidence"] = fonts
 (ROOT / "verification").mkdir(exist_ok=True)
 (ROOT / "verification/latest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 print(command([sys.executable, "tools/progress.py"]).strip())

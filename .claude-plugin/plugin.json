@@ -1,0 +1,13 @@
+{
+  "name": "cutbolt",
+  "version": "0.1.0",
+  "description": "Local footage editing, captions and delivery through Cutbolt's stdio MCP engine.",
+  "author": {"name": "Cutbolt contributors"},
+  "license": "MIT",
+  "mcpServers": {
+    "cutbolt": {
+      "command": "cutbolt",
+      "args": ["--workspace", "${CLAUDE_PROJECT_DIR}", "mcp"]
+    }
+  }
+}

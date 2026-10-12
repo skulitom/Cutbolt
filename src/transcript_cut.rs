@@ -395,8 +395,9 @@ pub fn plan(
 ) -> Result<Value> {
     document.verify_source(input_root)?;
     if project.revision != expected_revision {
-        return Err(error(
-            "REVISION_CONFLICT",
+        return Err(crate::errors::revision(
+            expected_revision,
+            project.revision,
             "Expected project revision does not match",
         ));
     }
@@ -479,6 +480,7 @@ mod tests {
             metadata: Default::default(),
             identity: Some(document.source.identity.clone()),
             proxy: None,
+            decode: None,
         });
         let clips: Vec<_> = ["v", "a"]
             .iter()

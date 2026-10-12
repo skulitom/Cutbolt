@@ -1,5 +1,5 @@
 """Wire-level MCP and persisted job acceptance against original generated media."""
-from engine import ENGINE, MCP_TOOLS
+from engine import ENGINE, MCP_TOOLS, MCP_CORE_TOOLS
 import argparse
 import asyncio
 from datetime import timedelta
@@ -10,6 +10,8 @@ import json
 import os
 from pathlib import Path
 import queue
+import select
+import signal
 import subprocess
 import sys
 import threading
@@ -21,7 +23,7 @@ TERMINAL = {"completed", "cancelled", "failed", "interrupted"}
 
 
 class Client:
-    def __init__(self, executable, env=None, args=("mcp",)):
+    def __init__(self, executable, env=None, args=("mcp", "--tools", "full")):
         self.process = subprocess.Popen([str(executable), *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         self.lines = queue.Queue()
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -113,7 +115,7 @@ def decoded_hash(path, audio=False):
     return digest
 
 
-class ProcessHandle:
+class WindowsProcessHandle:
     """Hold a real process handle so PID reuse cannot affect interruption tests."""
     def __init__(self, pid):
         self.api = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -135,23 +137,69 @@ class ProcessHandle:
         self.api.CloseHandle(self.handle)
 
 
+class LinuxProcessHandle:
+    """The same on Linux: a pidfd names the process, never a reused PID. The system calls are
+    made directly, since Python builds against older C libraries lack os.pidfd_open; their
+    numbers are the same on every architecture."""
+    def __init__(self, pid):
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        self.fd = self.libc.syscall(434, pid, 0)  # pidfd_open
+        assert self.fd >= 0, os.strerror(ctypes.get_errno())
+
+    def stop(self):
+        sent = self.libc.syscall(424, self.fd, signal.SIGKILL, None, 0)  # pidfd_send_signal
+        assert sent == 0, os.strerror(ctypes.get_errno())
+
+    def exited(self):
+        return bool(select.select([self.fd], [], [], 0)[0])
+
+    def close(self):
+        os.close(self.fd)
+
+
+ProcessHandle = WindowsProcessHandle if os.name == "nt" else LinuxProcessHandle
+
+
 async def sdk_roundtrip(executable):
-    # Exercise an independently maintained client, not only our wire test helper.
+    # Independently maintained SDK: explicit full and the bare compact default.
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    params = StdioServerParameters(command=str(executable), args=["mcp"])
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as session:
-            initialized = await session.initialize()
-            assert initialized.protocolVersion == "2025-06-18"
-            listing = await session.list_tools()
-            assert len(listing.tools) == MCP_TOOLS
-            created = await session.call_tool("cutbolt_project_create", {"id": "sdk", "width": 320, "height": 180, "frame_rate": {"num": 25, "den": 1}})
-            assert not created.isError and created.structuredContent["result"]["id"] == "sdk"
-            invalid = await session.call_tool("cutbolt_project_validate", {"project": {}})
-            assert invalid.isError and invalid.structuredContent["error"]["code"] == "INVALID_JSON"
-            await session.send_ping()
-
+    from jsonschema import Draft202012Validator
+    defaults = {"readOnlyHint":False, "destructiveHint":True, "idempotentHint":False, "openWorldHint":True}
+    full_hints = {}
+    for mode in ("full", None):
+        params = StdioServerParameters(command=str(executable), args=["mcp", "--tools", mode] if mode else ["mcp"],
+            env={k:v for k,v in os.environ.items() if k != "CUTBOLT_MCP_TOOLS"})
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as session:
+                initialized = await session.initialize()
+                assert initialized.protocolVersion == "2025-06-18"
+                listing = await session.list_tools()
+                assert len(listing.tools) == (MCP_TOOLS if mode else MCP_CORE_TOOLS)
+                names = {t.name for t in listing.tools}
+                for tool in listing.tools:
+                    Draft202012Validator.check_schema(tool.inputSchema)
+                    # SDK 1.12.3 preserves omitted hints as None; apply the protocol defaults.
+                    hints = tool.annotations.model_dump(exclude_none=True)
+                    effective = {k:hints.get(k, v) for k,v in defaults.items()}
+                    if mode:
+                        full_hints[tool.name] = effective
+                    elif tool.name != "cutbolt_run":
+                        assert effective == full_hints[tool.name]
+                    if not mode:
+                        assert all(hints.get(k) != v for k,v in defaults.items())
+                    for definition in tool.inputSchema.get("$defs", {}).values():
+                        if definition.get("type") == ["number", "string", "object"]:
+                            for time in (2.5, "5/2", {"num":5,"den":2}):
+                                Draft202012Validator(definition).validate(time)
+                async def call(command, arguments):
+                    name = "cutbolt_" + command.replace(".", "_")
+                    return await session.call_tool(name, arguments) if name in names else await session.call_tool("cutbolt_run", {"command":command, "arguments":arguments})
+                created = await call("project.create", {"id":"sdk", "width":320, "height":180, "frame_rate":{"num":25,"den":1}})
+                assert not created.isError and created.structuredContent["result"]["id"] == "sdk"
+                invalid = await call("project.validate", {"project":{}})
+                assert invalid.isError and invalid.structuredContent["error"]["code"] == "INVALID_JSON"
+                await session.send_ping()
 
 def run(executable, fixture):
     from jsonschema import Draft202012Validator
@@ -164,8 +212,8 @@ def run(executable, fixture):
     handles = []
     jobs = []
 
-    def check(name, condition):
-        assert condition, name
+    def check(name, condition, detail=None):
+        assert condition, name if detail is None else (name, detail)
         passed.append(name)
 
     # These checks cover one worker's serial queue (a second job waits while the first runs), so
@@ -205,21 +253,45 @@ def run(executable, fixture):
         core_names = [tool["name"] for tool in core]
         others = next(t for t in core if t["name"] == "cutbolt_run")["inputSchema"]["properties"]["command"]["enum"]
         routed = {"cutbolt_" + c.replace(".", "_") for c in others}
-        check("mcp.compact_catalog", len(core_names) == len(set(core_names)) == 32 and not routed & set(core_names)
+        check("mcp.compact_catalog", len(core_names) == len(set(core_names)) == MCP_CORE_TOOLS and not routed & set(core_names)
               and (set(core_names) - {"cutbolt_run"}) | routed == set(names) and len(json.dumps(core)) * 3 < len(json.dumps(catalog)))
+        router = next(t for t in core if t["name"] == "cutbolt_run")
+        assert router["annotations"]["destructiveHint"] is False
+        assert {"cutbolt_job_cancel", "cutbolt_cache_prune"}.issubset(core_names)
+        for name in ("cutbolt_job_cancel", "cutbolt_cache_prune"):
+            assert next(t for t in core if t["name"] == name)["annotations"].get("destructiveHint", True) is True
+        direct_routed = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"files.list", "arguments":{"input_root":str(root)}}})["result"]
+        assert direct_routed["structuredContent"]["result"] == normal.call("files.list", input_root=str(root))
         made = normal.call("project.create", id="compact", width=16, height=16, frame_rate={"num":25, "den":1})
         routed_call = compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":"project.validate", "arguments":{"project":made}}})["result"]
         assert routed_call["structuredContent"]["result"] == normal.call("project.validate", project=made) and not routed_call["isError"]
         assert compact.call("files.list", input_root=str(root))["entries"] == normal.call("files.list", input_root=str(root))["entries"]
-        for command in ("export.run", "nope"):
+        for command in ("export.run", "nope", "job.cancel", "cache.prune"):
             assert compact.rpc("tools/call", {"name":"cutbolt_run", "arguments":{"command":command, "arguments":{}}})["error"]["code"] == -32602
-        by_env = Client(executable, env={**os.environ, "CUTBOLT_MCP_TOOLS":"core"});clients.append(by_env)
-        by_env.initialize()
-        assert [t["name"] for t in by_env.rpc("tools/list")["result"]["tools"]] == core_names
+        # Bare default, variable override, and flag precedence in both directions.
+        clean_env = {k:v for k,v in os.environ.items() if k != "CUTBOLT_MCP_TOOLS"}
+        for env, args, expected in [
+            (clean_env, ("mcp",), core_names),
+            ({**clean_env, "CUTBOLT_MCP_TOOLS":"core"}, ("mcp",), core_names),
+            ({**clean_env, "CUTBOLT_MCP_TOOLS":"full"}, ("mcp",), names),
+            ({**clean_env, "CUTBOLT_MCP_TOOLS":"core"}, ("mcp", "--tools", "full"), names),
+            ({**clean_env, "CUTBOLT_MCP_TOOLS":"full"}, ("mcp", "--tools", "core"), core_names),
+        ]:
+            selected = Client(executable, env=env, args=args);clients.append(selected)
+            selected.initialize()
+            result = selected.rpc("tools/list")
+            assert [t["name"] for t in result["result"]["tools"]] == expected
+            if expected == core_names:
+                assert len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 40_000
+                for tool in result["result"]["tools"]:
+                    Draft202012Validator.check_schema(tool["inputSchema"])
+                    assert "$schema" not in tool["inputSchema"]
+                    assert len(json.dumps(tool, ensure_ascii=False, separators=(",", ":")).encode()) <= 4096
+        check("mcp.compact_default_and_explicit_overrides", True)
         assert subprocess.run([str(executable), "mcp", "--tools", "nope"], capture_output=True, timeout=30).returncode == 1
         # Workspace piping: a proposal saved with save_as reaches session.apply by file, uncopied.
         space = root / "space";space.mkdir()
-        piped = Client(executable, args=("--workspace", str(space), "mcp"));clients.append(piped)
+        piped = Client(executable, args=("--workspace", str(space), "mcp", "--tools", "full"));clients.append(piped)
         piped.initialize()
         listing = {t["name"]:t for t in piped.rpc("tools/list")["result"]["tools"]}
         assert all("save_as" in listing[name]["inputSchema"]["properties"] for name in ("cutbolt_transcript_assemble", "cutbolt_audio_tighten", "cutbolt_job_wait"))
@@ -452,7 +524,7 @@ def run(executable, fixture):
         check("jobs.batch_wait", batch["finished"] and batch["until"] == "all" and batch["counts"] == {"completed": 3}
               and [e["job_id"] for e in entries] == tickets and "jobs[].result.timing" in batch["detail"]
               and all(e["command"] == "scene.render" and e["status"] == "completed" and e["result"]["layers"] == brief["layers"]
-                      and e["result"]["asset"]["path"].endswith(f"tiny-{n}.mkv") for n, e in enumerate(entries)))
+                      and e["result"]["asset"]["path"].endswith(f"tiny-{n}.mkv") for n, e in enumerate(entries)), batch)
         whole = normal.call("job.wait", job_root=str(job_root), job_ids=tickets, detail="full")
         assert all(e["result"]["timing"] == full["timing"] for e in whole["jobs"]), whole
         later, _ = start(normal, "after-batch", root / "after-batch.mkv")

@@ -1,0 +1,457 @@
+{
+  "schema_version": 1,
+  "id": "cutbolt-countdown-v1",
+  "scene": {
+    "schema_version": 1,
+    "id": "countdown",
+    "width": 320,
+    "height": 180,
+    "output_scale": 2,
+    "duration": {
+      "num": 4,
+      "den": 1
+    },
+    "background": [
+      10,
+      17,
+      29
+    ],
+    "color": "srgb_straight_encoded",
+    "transparent": false,
+    "audio": null,
+    "layers": [
+      {
+        "id": "ring",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 4,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "shape",
+          "shape": "ellipse",
+          "rect": [
+            93,
+            19,
+            134,
+            134
+          ],
+          "fill": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "stroke": {
+            "width": 2,
+            "color": [
+              91,
+              225,
+              195,
+              255
+            ]
+          }
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "beat_1",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 0,
+          "den": 1
+        },
+        "duration": {
+          "num": 1,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "3",
+          "fonts": [],
+          "size": 64,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            102,
+            27,
+            116,
+            116
+          ],
+          "line_height": 70,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "beat_2",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 1,
+          "den": 1
+        },
+        "duration": {
+          "num": 1,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "2",
+          "fonts": [],
+          "size": 64,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            102,
+            27,
+            116,
+            116
+          ],
+          "line_height": 70,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "beat_3",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 2,
+          "den": 1
+        },
+        "duration": {
+          "num": 1,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "1",
+          "fonts": [],
+          "size": 64,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            102,
+            27,
+            116,
+            116
+          ],
+          "line_height": 70,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      },
+      {
+        "id": "beat_4",
+        "canvas": [
+          320,
+          180
+        ],
+        "start": {
+          "num": 3,
+          "den": 1
+        },
+        "duration": {
+          "num": 1,
+          "den": 1
+        },
+        "frames": [],
+        "graphics": {
+          "kind": "text",
+          "text": "GO",
+          "fonts": [],
+          "size": 64,
+          "color": [
+            241,
+            245,
+            251,
+            255
+          ],
+          "rect": [
+            102,
+            27,
+            116,
+            116
+          ],
+          "line_height": 70,
+          "letter_spacing": 0,
+          "align": "center",
+          "valign": "middle",
+          "wrap": "character",
+          "overflow": "reject"
+        },
+        "timing": "strict",
+        "end": "hold_last",
+        "transform": {
+          "position": [
+            0,
+            0
+          ],
+          "crop": [
+            0,
+            0,
+            320,
+            180
+          ],
+          "scale": 1,
+          "quarter_turns": 0,
+          "opacity": 255
+        }
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "beat_1",
+      "definition": {
+        "type": "text",
+        "default": "3",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "beat_1"
+        }
+      ]
+    },
+    {
+      "name": "beat_2",
+      "definition": {
+        "type": "text",
+        "default": "2",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "beat_2"
+        }
+      ]
+    },
+    {
+      "name": "beat_3",
+      "definition": {
+        "type": "text",
+        "default": "1",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "beat_3"
+        }
+      ]
+    },
+    {
+      "name": "beat_4",
+      "definition": {
+        "type": "text",
+        "default": "GO",
+        "max_chars": 256
+      },
+      "bindings": [
+        {
+          "property": "text",
+          "layer": "beat_4"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "definition": {
+        "type": "fonts",
+        "default": null
+      },
+      "bindings": [
+        {
+          "property": "fonts",
+          "layer": "beat_1"
+        },
+        {
+          "property": "fonts",
+          "layer": "beat_2"
+        },
+        {
+          "property": "fonts",
+          "layer": "beat_3"
+        },
+        {
+          "property": "fonts",
+          "layer": "beat_4"
+        }
+      ]
+    },
+    {
+      "name": "ink",
+      "definition": {
+        "type": "color",
+        "default": [
+          241,
+          245,
+          251,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "text_color",
+          "layer": "beat_1"
+        },
+        {
+          "property": "text_color",
+          "layer": "beat_2"
+        },
+        {
+          "property": "text_color",
+          "layer": "beat_3"
+        },
+        {
+          "property": "text_color",
+          "layer": "beat_4"
+        }
+      ]
+    },
+    {
+      "name": "accent",
+      "definition": {
+        "type": "color",
+        "default": [
+          91,
+          225,
+          195,
+          255
+        ]
+      },
+      "bindings": [
+        {
+          "property": "stroke_color",
+          "layer": "ring"
+        }
+      ]
+    },
+    {
+      "name": "duration",
+      "definition": {
+        "type": "time",
+        "default": {
+          "num": 4,
+          "den": 1
+        }
+      },
+      "bindings": [
+        {
+          "property": "scene_duration"
+        }
+      ]
+    }
+  ]
+}

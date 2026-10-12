@@ -82,8 +82,8 @@ fn create_folder(output: &Path, root: &Path) -> Result<Folder> {
     }
     let path = parent.join(name);
     fs::create_dir(&path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::AlreadyExists => error(
-            "OUTPUT_EXISTS",
+        std::io::ErrorKind::AlreadyExists => crate::errors::output_exists(
+            &path,
             format!("{} already exists; reviews never overwrite", path.display()),
         ),
         _ => error("INVALID_PATH", format!("{}: {e}", path.display())),

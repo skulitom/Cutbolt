@@ -82,7 +82,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Compute exact per-channel/luma histograms, waveform/parade and a chroma vectorscope for one full-quality timeline frame. Explicit color interpretation and missing-tag policy required; proxy selection is ignored. No files or saved state change."
         }
         "export.inspect" => {
-            "Inspect an exact timeline range and full-quality sources for reference, lossless PNG movie/image-directory or H.264/AAC export. Lossless sequential output supports native clocks; H.264 and placed tracks retain 25 fps. PNG/H.264 video needs input_transfer unless the project declares its transfer with the project.transfer operation; sequence_first selects image numbering, h264 selects delivery controls and aac_bitrate selects audio rate. Returns timing, source identities and color/publication policy without writing. Run the export with job.start run export.run."
+            "Inspect an exact timeline range and full-quality sources for reference, lossless PNG movie/image-directory or H.264/AAC export. Lossless, H.264 and placed-track output use the project's native frame clock. PNG/H.264 video needs input_transfer unless the project declares its transfer with the project.transfer operation; sequence_first selects image numbering, h264 selects delivery controls and aac_bitrate selects audio rate. Returns timing, source identities and color/publication policy without writing. Run the export with job.start run export.run."
         }
         "effects.preset" => {
             "Return an independent editable scene effect chain from an original green/blue hard/soft chroma-key preset. Explicit strength and spill controls must be 0..1000. Copy effects into a layer, inspect the scene, then compile it. No files or saved state are changed."
@@ -117,20 +117,29 @@ pub(crate) fn description(command: &str) -> &'static str {
         "captions.scene" => {
             "Append caption layers to a supplied scene using explicit per-style fonts/boxes and exact frame-start sampling. Reports unsampled and out-of-window cues. Returns an editable scene and inspection; does not render or save it."
         }
+        "fonts.find" => {
+            "List installed TrueType/OpenType files in OS font folders, with optional family/full-name substring and pagination. Returns content identities and rendering support; pass a usable entry's identity directly to scene or caption fonts. Exact family/full names also work when unambiguous. Files are read in place; output contains rasterized glyphs and font licensing remains the user's responsibility."
+        }
         "graphics.instantiate" => {
-            "Expand an original scene template using explicit typed parameters. Validates bindings, complete scene semantics and external source identities; returns a fresh editable scene and inspection. No files or saved sessions are changed. Render the returned scene through the blocking CLI/library."
+            "Expand a built-in template_id from templates.list or an inline template using typed values. Optional project defaults its canvas, scale 1 and frame rate; built-in layouts fit the canvas. Validates bindings and font identities; returns an editable scene and inspection. No files or sessions change. Compile with job.start run scene.render, then job.wait."
+        }
+        "graphics.place" => {
+            "Instantiate and compile a built-in or inline graphic against a saved project, then attach its asset and clip on a video alpha_over track in one revision-checked edit. Queue with job.start; job.wait returns its session revision. Repeated edit request IDs replay safely."
+        }
+        "templates.list" => {
+            "List original built-in graphics by ID and purpose, with typed parameters, defaults and output sizes. Optional template_id selects one. Use an ID with graphics.instantiate; supply external font identities or unambiguous installed names. No files or sessions change."
         }
         "proxy.status" => {
             "Check proxy availability and identities. Preview selection is saved with preview.proxy through session.apply; final exports always use full-quality media."
         }
         "proxy.relink" => {
-            "Find an unambiguous proxy by bound content identity and return a proposal for session.apply. Does not move files or save edits. Proxy generation is a blocking CLI/library command."
+            "Find an unambiguous proxy by bound content identity and return a proposal for session.apply. Does not move files or save edits. Generate proxies with job.start run proxy.generate."
         }
         "media.conform.inspect" => {
-            "Validate a supported source identity, codec/container and exact timestamp mapping into a 25 fps editing asset. Reports constant or variable-speed source clocks, frame selection/blend weights and explicit audio pitch policy; media.conform rendering uses the blocking CLI/library."
+            "Validate a supported source identity, codec/container and exact timestamp mapping into an editing asset at the declared native frame rate. Reports constant or variable-speed source clocks, frame selection/blend weights and explicit audio pitch policy. Convert with job.start run media.conform."
         }
         "audio.inspect" => {
-            "Validate and evaluate a bounded PCM mix: sample-aligned trims, gain/fade automation and multiple tracks, plus optional buses, explicit channel matrices, panning and named surround layouts. Reports output samples, PCM hash, layout, routing and clipping counts. Read-only; WAV rendering uses the blocking CLI/library command audio.render."
+            "Validate and evaluate a bounded PCM mix: sample-aligned trims, gain/fade automation and multiple tracks, plus optional buses, explicit channel matrices, panning and named surround layouts. Reports output samples, PCM hash, layout, routing and clipping counts. Read-only; render a WAV with job.start run audio.render."
         }
         "registry.search" => {
             "Search project assets by text, bin prefix and exact tags. Stable ID order and pagination; content duplicates are reported without merging assets."
@@ -145,13 +154,13 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Match explicit candidate paths to a bound asset identity. Reject ambiguous or mismatching content. Returns an updated snapshot and operations for session.apply; does not save or move media."
         }
         "image.sequence.inspect" => {
-            "Validate every numbered PNG identity and exact source window/repeat, alpha association, color interpretation and native output clock. Returns the explicit transparent or opaque compilation policy without writing. image.sequence.compile is blocking CLI/library-only."
+            "Validate every numbered PNG identity and exact source window/repeat, alpha association, color interpretation and native output clock. Returns the explicit transparent or opaque compilation policy without writing. Compile with job.start run image.sequence.compile."
         }
         "expression.inspect" => {
             "Evaluate a bounded typed property graph at explicit rational times. Reports exact values and rounded position/opacity bindings, with property links, cycle/type checks and deterministic seeded operations. Reads no media, executes no source code and writes no files."
         }
         "scene.inspect" => {
-            "Validate a bounded pixel scene, source identities, rational frame selection, text layout, sampled grading/selection/keying parameters and WAV conversion. Read-only; returns explicit color/timing/audio policies. scene.render is available through the blocking CLI/library, not this MCP connection."
+            "Validate a bounded pixel scene, source identities, exact frame timing, text, effects and WAV conversion. Also accepts form:short text/shape recipes with project-sized layout, hex colors and named easing, returning expanded_scene. Compile with job.start run scene.render, then job.wait."
         }
         "cache.inspect" => {
             "Inspect the owned local cache, entry identities, logical and physical sizes without generating media."
@@ -208,7 +217,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Validate the narrow reference media profile and inspect an export plan. Requires absolute input/output roots and an unused .mkv output. May take time to decode source metadata."
         }
         "render.start" => {
-            "Submit an asynchronous local Windows render. render contains a fixed snapshot and absolute input/output roots/path, with optional retry.max_attempts (1..3 total). Retry applies only to transient tool failures and interruptions. Reuse request_id only with identical arguments. Returns a durable ticket; poll job.status."
+            "Submit an asynchronous local render (Windows or Linux). render contains a fixed snapshot and absolute input/output roots/path, with optional retry.max_attempts (1..3 total). Retry applies only to transient tool failures and interruptions. Reuse request_id only with identical arguments. Returns a durable ticket; poll job.status."
         }
         "job.status" => {
             "Read saved state, frame progress, attempt history and completion/error receipt. An exited worker triggers checked publication reconciliation or an opted-in retry within its saved limit. This can update internal job metadata but does not start a worker."
@@ -217,7 +226,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Request cancellation of a queued/running job without deleting final output. Poll until cancelled or completed; publication can win a simultaneous cancellation. Safe to repeat for the same job."
         }
         "job.resume" => {
-            "Reconcile saved publication and wake a Windows worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
+            "Reconcile saved publication and wake the queue worker to drain queued jobs, including explicitly opted-in interrupted retries within their saved attempt limit. Completed, cancelled and exhausted jobs are not rerun."
         }
         "timeline.meters" => {
             "Measure a timeline range's loudness without exporting: sample peak, RMS and BS.1770 integrated loudness (LKFS) of the mix of enabled audio tracks and, by default, of each enabled audio track alone. Use it to set clip gain_milli against a target such as -14 LKFS. With curve, also loudness per second and the silent and clipped runs, to find dead air, music that buries speech, or distortion. Read-only; at most 4 hours per call."
@@ -232,7 +241,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "List files and folders under input_root (the workspace by default), sorted, with sizes and paths relative to it, optionally recursive and filtered by extension; engine state folders are skipped. Read-only."
         }
         "job.start" => {
-            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Independent jobs run at once, so queue several, then wait for them all with one job.wait job_ids; job.cancel stops one."
+            "Queue a long-running command in the background and return a durable ticket: export.run (H.264/AAC or lossless delivery), export.review (a review folder for a rendered cut), captions.render (a whole caption track as one transparent overlay), graphics.place (instantiate, compile and attach a graphic in one saved edit), media.transcribe (a whole file's speech into transcripts, or a known script aligned to it), media.prepare (any camera or phone file to a timeline asset, optionally for a project's rate and size), media.conform, scene.render, audio.render, audio.repair.render, hdr.conform, image.sequence.compile, proxy.generate, preview.range, cache.run or transcript.transcribe. Arguments are prepared and validated now. Follow with job.wait or job.status; the result holds the command's receipt. Independent jobs run at once, so queue several, then wait for them all with one job.wait job_ids; job.cancel stops one."
         }
         "job.wait" => {
             "Wait up to timeout_seconds (default 30, at most 120) for a queued or running job to finish, then return its status, progress and result, with finished true or false. With job_ids, wait for several jobs in one call, until all (default) or any have finished: the result counts jobs by status and lists each job's receipt, error or progress. Receipts are summaries unless detail is full."
@@ -271,7 +280,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Recognize a whole source file's speech with the local speech runtime, any length and any decodable format: its audio is extracted losslessly, recognized in overlapping 120 s windows, stitched at word boundaries into non-overlapping transcript documents bound to the source file, and saved as one JSON file. Sound that is not speech, such as [Music], is reported apart from the words, and speech no word covers (a left-out um) as uncovered. Given text (the script of a synthesized narration, up to 120 s), its words are aligned to the audio instead of recognized, keeping names and spelling exact. Run it with job.start."
         }
         "media.prepare" => {
-            "Turn any decodable video file, such as a phone or camera MP4, or a PCM16 WAV (an audio-only asset), into a timeline asset in one step:a ready file that fits is returned as it is; anything else is converted with the readiness recipe at the project's rate and size, or at the source's own rate. A source longer than 45000 frames at that rate (30 min at 25 fps, 12.5 at 60), or a WAV over an hour, is refused with UNSUPPORTED_MEDIA, never shortened. With paths, several files are prepared in one job and the result includes their media.add operations. Run it with job.start; the result's asset goes to media.add."
+            "Prepare a supported video file or PCM16 WAV for the timeline. Eligible indexed H.264/HEVC originals and matching reference assets return unchanged, without an output file. Other supported inputs use the readiness recipe at the project's size/rate or their own rate. Conversion is capped at 45000 output frames or one hour for audio-only WAV; unsupported inputs fail explicitly. With paths, prepare several files in one job and receive their media.add operations. Run with job.start; add the returned asset."
         }
         "media.sheet" => {
             "See a source file without adding it to a project: a sheet of frames at given times or spread evenly through it, from any format FFmpeg decodes, returned as an inline image with each cell's time."
@@ -321,7 +330,8 @@ pub(crate) fn description(command: &str) -> &'static str {
 pub(crate) const UNDESCRIBED: &str = "Unsupported command";
 
 /// Long renders belong in persisted jobs so the MCP connection stays usable.
-const BLOCKING: [&str; 17] = [
+const BLOCKING: [&str; 18] = [
+    "graphics.place",
     "media.prepare",
     "media.transcribe",
     "captions.render",
@@ -381,38 +391,26 @@ const SUMMARIZED: [&str; 7] = [
 
 /// The everyday tools a compact catalog (`mcp --tools core`) lists in full; `cutbolt_run` runs
 /// every other tool command by name.
-pub(crate) const CORE: [&str; 31] = [
-    "capabilities",
-    "schema",
-    "files.list",
-    "project.create",
+pub(crate) const CORE: [&str; 17] = [
+    // Used by at least two measured workflows.
     "session.create",
     "session.get",
     "session.apply",
-    "session.preview",
-    "session.undo",
-    "session.history",
-    "media.inspect",
-    "media.sheet",
-    "preview.frame",
-    "preview.sheet",
-    "preview.cuts",
-    "timeline.outline",
-    "timeline.check",
-    "timeline.meters",
     "job.start",
     "job.wait",
+    // Recovery: discover valid input, find media, inspect state, undo, or resume interrupted work.
+    "schema",
+    "files.list",
+    "media.inspect",
+    "timeline.check",
+    "session.undo",
+    "session.history",
+    "session.receipt",
     "job.status",
-    "transcript.assemble",
-    "transcript.fillers",
-    "captions.draft",
-    "audio.duck",
-    "audio.normalize",
-    "audio.tighten",
-    "audio.beats",
-    "scene.inspect",
-    "scene.still",
-    "export.inspect",
+    "job.cancel",
+    "job.resume",
+    "cache.inspect",
+    "cache.prune",
 ];
 
 /// The compact catalog: the core tools, plus `cutbolt_run` for every other tool command.
@@ -431,13 +429,39 @@ pub fn core_tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 .is_some_and(|n| CORE.contains(&n.replace('_', ".").as_str()))
         })
         .collect();
+    for tool in &mut listed {
+        crate::schema::compact_listing(&mut tool["inputSchema"]);
+        compact_annotations(tool);
+    }
     listed.push(json!({"name":"cutbolt_run",
-        "description":format!("Run any other Cutbolt tool command by name, with its arguments exactly as for a direct call (cutbolt_schema {{\"name\": command}} returns their schema): {}. Long-running commands still go through job.start.", others.join(", ")),
+        "description":concat!(
+            "Run a command from the enum with its usual arguments. Prefer direct tools when listed. Routed commands never delete files or cancel jobs; use direct job.cancel/cache.prune. Long-running work uses job.start. cutbolt_schema returns complete arguments.\n",
+            "Editing: project, timeline, sessions and transcript assembly.\n",
+            "Media: source images, registry, proxy, conform and synchronization inspection.\n",
+            "Graphics: scenes, templates, installed fonts, captions, effects, tracking and stabilization.\n",
+            "Audio: levels, loudness, pause/filler edits, routing and recording inspection.\n",
+            "Delivery: render/export planning, interchange, portability and backups."),
         "inputSchema":{"type":"object","additionalProperties":false,"required":["command"],"properties":{
             "command":{"type":"string","enum":others,"description":"Command to run."},
             "arguments":{"type":"object","description":"The command's arguments, without command; default none."}}},
-        "annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}}));
+        "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}));
+    compact_annotations(listed.last_mut().expect("router"));
     listed
+}
+
+/// Protocol defaults need no repeated hints; full listings retain their existing annotations.
+fn compact_annotations(tool: &mut Value) {
+    if let Some(hints) = tool["annotations"].as_object_mut() {
+        for (name, default) in [
+            ("readOnlyHint", false),
+            ("destructiveHint", true),
+            ("idempotentHint", false),
+        ] {
+            if hints.get(name).and_then(Value::as_bool) == Some(default) {
+                hints.remove(name);
+            }
+        }
+    }
 }
 
 /// Whether a command is offered as an MCP tool.
@@ -459,7 +483,7 @@ pub fn tools(workspace: Option<&Workspace>) -> Vec<Value> {
                 input["properties"]["save_as"] = json!({"type":"string","description":"Write the result to this new workspace .json file and return a summary; pass it on as {\"file\": path, \"select\": field}."});
             }
         }
-        let read_only=matches!(command,"timeline.check"|"transcript.assemble"|"transcript.fillers"|"audio.beats"|"captions.draft"|"audio.tighten"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
+        let read_only=matches!(command,"templates.list"|"fonts.find"|"timeline.check"|"transcript.assemble"|"transcript.fillers"|"audio.beats"|"captions.draft"|"audio.tighten"|"audio.duck"|"audio.normalize"|"timeline.meters"|"timeline.outline"|"files.list"|"schema"|"expression.inspect"|"native.import"|"image.sequence.inspect"|"project.portable"|"session.check"|"interchange.import"|"interchange.export.inspect"|"cache.inspect"|"transcript.inspect"|"transcript.correct"|"transcript.plan"|"audio.inputs"|"audio.record.inspect"|"audio.record.place"|"audio.repair.inspect"|"stabilization.inspect"|"reframe.inspect"|"tracking.inspect"|"sync.inspect"|"hdr.inspect"|"lut.inspect"|"scopes.inspect"|"export.inspect"|"effects.preset"|"captions.import"|"captions.inspect"|"captions.apply"|"captions.encode"|"captions.scene"|"graphics.instantiate"|"proxy.status"|"proxy.relink"|"media.conform.inspect"|"audio.inspect"|"registry.search"|"registry.status"|"registry.bind"|"registry.relink"|"capabilities"|"project.create"|"project.validate"|"timeline.apply"|"session.get"|"session.preview"|"session.history"|"session.receipt"|"media.inspect"|"render.plan"|"scene.inspect");
         let text = match workspace {
             Some(_) => crate::schema::workspace_wording(description(command)),
             None => description(command).to_owned(),
@@ -600,23 +624,23 @@ impl Server {
         let mut text = concat!(
             "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
             "Typical cut: session.create with id, width, height and frame_rate (30 or 60 fps footage keeps every frame on a 30 or 60 fps project); ",
-            "job.start run media.prepare with each source's path (camera or phone video, or a PCM WAV voice-over or music track for an audio track) and the project, then job.wait, gives an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
+            "media.inspect returns a timeline-ready asset for eligible originals; for files needing preparation, job.start run media.prepare with the path and project, then job.wait, returns an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
             "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait; check the delivered file with job.start run export.review. ",
             "Independent jobs run side by side (jobs writing the same output keep their order), so start every scene render or prepare, then wait for all of them with one job.wait job_ids. ",
             "Results are summaries: scene timing becomes one line per layer and long lists become counts, as a result's detail field says; any call takes detail \"full\" for everything. ",
-            "Titles and graphics: write a scene (cutbolt_schema scene, select Layer or Graphic), check it with scene.inspect, look at it with scene.still, compile it with job.start run scene.render, ",
-            "and media.add the returned asset. Captions: captions.draft drafts cues from transcripts, or captions.import reads a file; job.start run captions.render burns a whole track into one overlay; then captions.scene onto a scene. ",
+            "Titles: templates.list lists original designs; fonts.find finds local fonts. job.start run graphics.place with a template_id, values, project_id, expected_revision and stable inner request_id compiles and attaches a title in one saved edit; job.wait returns its revision. ",
+            "Custom text/shapes can use explicit form:short scenes (docs/SCENE_SHORTHAND.md); scene.inspect/still/render accept them and return the expanded recipe. Captions: captions.draft drafts cues from transcripts, or captions.import reads a file; job.start run captions.render burns a whole track into one overlay; then captions.scene onto a scene. ",
             "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech, audio.normalize proposes levels that bring the mix to a loudness target such as -14 LKFS, audio.tighten proposes jump cuts that shorten pauses in speech, and transcript.fillers removes um and uh (lift silences them on the voice track without moving anything); start and end limit both to a window. Recognition leaves many fillers out and splits names: give media.transcribe a vocabulary such as [\"um\", \"uh\", \"PixelForge\"], and check the uncovered sounds transcript.fillers lists. ",
             "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
             "Review your work: timeline.check lists likely mistakes without rendering; timeline.outline reads the whole cut as text, one line per clip, with what is said in it when given transcripts; preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
             "A whole narrated pixel-art explainer (script, one visual beat per scene, palette, music) is one local command outside the engine: python tools/production.py build <manifest> --root <folder> in the Cutbolt repository drives PixelForge, the Qwen narration worker and these tools with resumable stage receipts; see docs/PRODUCTION.md. ",
             "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
-            "Times may be 2.5, \"5/2\" or {num, den} seconds on frame boundaries. Tool listings abbreviate the project, operation, scene, template, audio_routing, transcript and captions schemas; ",
+            "Times may be 2.5, \"5/2\" or {num, den} exact nonnegative seconds on frame boundaries; outputs use {num, den}. Audio-bearing cuts also need whole 48 kHz samples. Tool listings abbreviate the project, operation, scene, template, audio_routing, transcript and captions schemas; ",
             "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
         )
         .to_owned();
         if self.core {
-            text.push_str(" This compact catalog lists the everyday tools; cutbolt_run runs any other command named here, with the same arguments.");
+            text.push_str(" This compact catalog is the default: shared workflow and recovery tools plus cutbolt_run for the remaining listed commands. Full schemas remain available through cutbolt_schema; launch with --tools full for every direct tool.");
         }
         if let Some(workspace) = &self.workspace {
             text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file (select may be a dotted path such as result.operations), and save_as writes a large result to a new .json file instead of returning it. Proposals (audio.duck, audio.normalize, audio.tighten, transcript.fillers, transcript.assemble) take save_as; then pass session.apply operations as {{\"file\": that file, \"select\": \"operations\"}} instead of copying them.", workspace.root().display()));
@@ -724,12 +748,15 @@ impl Server {
                 // cutbolt_run names the command and nests its arguments.
                 let (command, arguments) = if name == "cutbolt_run" {
                     let command = params["arguments"]["command"].as_str().unwrap_or_default();
-                    if !crate::schema::commands().any(|c| c == command) || !exposed(command) {
+                    if !crate::schema::commands().any(|c| c == command)
+                        || !exposed(command)
+                        || matches!(command, "job.cancel" | "cache.prune")
+                    {
                         return Some(rpc_error(
                             id,
                             -32602,
                             &format!(
-                                "cutbolt_run cannot run {command:?}; its description lists the commands, and long-running ones go through job.start"
+                                "cutbolt_run cannot run {command:?}; use its listed commands or a direct tool; long-running commands go through job.start"
                             ),
                         ));
                     }
@@ -898,10 +925,32 @@ mod tests {
         for command in CORE {
             assert!(commands.contains(&command) && exposed(command), "{command}");
         }
-        let compact = core_tools(None);
-        assert_eq!(compact.len(), CORE.len() + 1);
-        let bytes: usize = compact.iter().map(|t| t.to_string().len()).sum();
-        assert!(bytes <= 96 * 1024, "compact catalog uses {bytes} bytes");
+        let temp =
+            std::env::temp_dir().join(format!("cutbolt-core-catalog-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let workspace = Workspace::open(&temp).unwrap();
+        for context in [None, Some(&workspace)] {
+            let compact = core_tools(context);
+            assert_eq!(compact.len(), CORE.len() + 1);
+            for tool in &compact {
+                assert!(
+                    tool.to_string().len() <= 4096,
+                    "core tool {} exceeds 4 KiB",
+                    tool["name"]
+                );
+                assert_eq!(undescribed(&tool["inputSchema"]), 0, "{}", tool["name"]);
+            }
+            let bytes = response(json!(1), json!({"tools":compact}))
+                .to_string()
+                .len()
+                + 1;
+            assert!(bytes <= 40_000, "default catalog uses {bytes} bytes");
+            eprintln!(
+                "default catalog (workspace={}): {bytes} bytes",
+                context.is_some()
+            );
+        }
+        std::fs::remove_dir_all(&temp).unwrap();
     }
 
     /// Tool names replace dots with underscores, and calls map them back, so a command name with

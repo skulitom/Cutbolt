@@ -44,6 +44,16 @@ pub(crate) fn read_frame(
     input_root: &Path,
     time: Time,
 ) -> Result<(Vec<u8>, Value)> {
+    read_frame_with_publication(project, input_root, time, false)
+}
+/// Only frame() defers a direct source's full check; it hashes after writing the provisional PNG,
+/// immediately before publication. Scope and sheet readers retain their complete read checks.
+fn read_frame_with_publication(
+    project: &Project,
+    input_root: &Path,
+    time: Time,
+    defer_identity: bool,
+) -> Result<(Vec<u8>, Value)> {
     media::input_root(input_root)?;
     let preview_scale = project.preview_scale;
     let mapped = crate::proxy::preview_project(project, input_root)?;
@@ -121,7 +131,7 @@ pub(crate) fn read_frame(
         if let Some((track, clip)) = a.visible(time)? {
             let mut c = clip.legacy();
             c.source_in = c.source_in.plus(time.minus(clip.start)?)?;
-            c.duration = Time::new(1, 25)?;
+            c.duration = Time::new(project.frame_rate.den, project.frame_rate.num)?;
             single.clips.push(c);
             track_id = Some(track.id.clone());
         } else {
@@ -130,10 +140,11 @@ pub(crate) fn read_frame(
                 asset_id: None,
                 gap: true,
                 source_in: Time::ZERO,
-                duration: Time::new(1, 25)?,
+                duration: Time::new(project.frame_rate.den, project.frame_rate.num)?,
             });
         }
-        let (pixels, mut receipt) = read_frame(&single, input_root, Time::ZERO)?;
+        let (pixels, mut receipt) =
+            read_frame_with_publication(&single, input_root, Time::ZERO, defer_identity)?;
         receipt["time"] = json!(time);
         receipt["timeline_frame"] = json!(selected);
         receipt["track_id"] = json!(track_id);
@@ -180,13 +191,31 @@ pub(crate) fn read_frame(
         ));
     }
     let path = media::project_file(Path::new(&asset.path), input_root)?;
-    let source = render::inspect_reference_at(
-        &path,
-        project.width,
-        project.height,
-        project.frame_rate,
-        &media::Uncontrolled,
-    )?;
+    let (source, direct) = if asset.decode.is_some() {
+        let (source, video) = render::inspect_indexed(
+            project,
+            asset,
+            input_root,
+            &media::Uncontrolled,
+            if defer_identity {
+                render::IdentityCheck::DeferredToPublication
+            } else {
+                render::IdentityCheck::Full
+            },
+        )?;
+        (source, Some(video))
+    } else {
+        (
+            render::inspect_reference_at(
+                &path,
+                project.width,
+                project.height,
+                project.frame_rate,
+                &media::Uncontrolled,
+            )?,
+            None,
+        )
+    };
     crate::registry::verify_source(asset, &source)?;
     let source_end = clip.source_in.plus(clip.duration)?;
     if source_end.units(project.frame_rate)? > source.frames {
@@ -204,40 +233,68 @@ pub(crate) fn read_frame(
         ));
     }
     let source_frame = clip.source_in.units(project.frame_rate)? + selected - offset;
-    // Decoding starts at the frame shown.
-    let rate = project.frame_rate;
-    let mut args: Vec<String> = ["-v", "error", "-nostdin"].map(str::to_owned).to_vec();
-    args.extend(render::clock::seek_input(rate, source_frame));
-    args.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
-    args.push(path.to_string_lossy().into_owned());
-    args.extend([
-        "-vf".into(),
-        render::clock::seek_trim(rate, source_frame, source_frame, source_frame + 1),
-    ]);
-    args.extend(
-        [
-            "-frames:v",
-            "1",
-            "-an",
-            "-pix_fmt",
-            "rgb24",
-            "-f",
-            "rawvideo",
-            "pipe:1",
-        ]
-        .map(str::to_owned),
-    );
-    let pixels = media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(120))?;
+    let (pixels, decode) = if let Some(video) = direct {
+        let transfer = project.transfer.unwrap_or(crate::color::Transfer::Bt709);
+        if defer_identity {
+            // This stream enforces exact pixels/count/exit. Its receipt is provisional until
+            // frame() rehashes the original immediately before publishing the finished PNG.
+            let prepared = video.prepare(source_frame, 1, transfer, &media::Uncontrolled)?;
+            let mut stream = prepared
+                .stream
+                .start(media::Watch::default(), Duration::from_secs(1800))?;
+            let mut pixels = vec![0; project.width as usize * project.height as usize * 3];
+            stream.read_exact(&mut pixels)?;
+            stream.finish()?;
+            (pixels, Some(prepared.receipt))
+        } else {
+            let mut pixels = Vec::new();
+            let receipt =
+                video.read(source_frame, 1, transfer, &media::Uncontrolled, |_, rgb| {
+                    pixels.extend_from_slice(rgb);
+                    Ok(())
+                })?;
+            (pixels, Some(receipt))
+        }
+    } else {
+        // Decoding starts at the frame shown.
+        let rate = project.frame_rate;
+        let mut args: Vec<String> = ["-v", "error", "-nostdin"].map(str::to_owned).to_vec();
+        args.extend(render::clock::seek_input(rate, source_frame));
+        args.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
+        args.push(path.to_string_lossy().into_owned());
+        args.extend([
+            "-vf".into(),
+            render::clock::seek_trim(rate, source_frame, source_frame, source_frame + 1),
+        ]);
+        args.extend(
+            [
+                "-frames:v",
+                "1",
+                "-an",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ]
+            .map(str::to_owned),
+        );
+        let pixels = media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(120))?;
+        (pixels, None)
+    };
     if pixels.len() != project.width as usize * project.height as usize * 3 {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
             "Preview frame size differs",
         ));
     }
-    if media::file_hash(&path)? != source.sha256 {
+    if (!defer_identity || decode.is_none()) && media::file_hash(&path)? != source.sha256 {
         return Err(error("MEDIA_CHANGED", "Source changed during preview"));
     }
-    let receipt = json!({"project_revision":project.revision,"time":time,"timeline_frame":selected,"clip_id":clip.id,"source_frame":source_frame,"source":source,"width":project.width,"height":project.height,"source_quality":if preview_scale.is_some() {"proxy"} else {"original"},"preview_scale":preview_scale});
+    let mut receipt = json!({"project_revision":project.revision,"time":time,"timeline_frame":selected,"clip_id":clip.id,"source_frame":source_frame,"source":source,"width":project.width,"height":project.height,"source_quality":if preview_scale.is_some() {"proxy"} else {"original"},"preview_scale":preview_scale});
+    if let Some(decode) = decode {
+        receipt["decode"] = serde_json::to_value(decode)?;
+    }
     Ok((pixels, receipt))
 }
 pub fn frame(
@@ -247,7 +304,7 @@ pub fn frame(
     output: &Path,
     time: Time,
 ) -> Result<Value> {
-    let (pixels, mut receipt) = read_frame(project, input_root, time)?;
+    let (pixels, mut receipt) = read_frame_with_publication(project, input_root, time, true)?;
     let output = render::destination_extension(output, output_root, "png")?;
     let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
     let temp = scratch.0.join("frame.png");
