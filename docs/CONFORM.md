@@ -22,7 +22,19 @@ The source file must be at most 16 GiB, referenced by a relative path inside an 
 
 ## Explicit SDR normalization
 
-Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV, H.264/HEVC 8/10-bit YUV420, and H.264 8/10-bit or ProRes 10-bit YUV422 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. ProRes 4444 and FFV1/bgra also normalize with an explicit `source.alpha: "straight"` declaration. Output remains RGB8, or straight FFV1/bgra for alpha sources placed on `alpha_over` tracks; rotation and non-square pixels remain unsupported. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
+Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV, H.264/HEVC 8/10-bit YUV420, and H.264 8/10-bit or ProRes 10-bit YUV422 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. ProRes 4444 and FFV1/bgra also normalize with an explicit `source.alpha: "straight"` declaration. Output remains RGB8, or straight FFV1/bgra for alpha sources placed on `alpha_over` tracks; optional `source.geometry` normalizes quarter-turn rotation and non-square pixels as described below. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
+
+### Explicit display geometry
+
+With `source.sdr` and `working_transfer`, set `source.geometry: {"fit":"contain"}` to interpret a source's display metadata before resizing. `fit` is required and accepts `contain`, `cover` or `stretch`. Only exact identity/90/180/270-degree matrices and fixed positive rational sample aspect ratios are supported. Reflection, shear, translation, matrix scale, contradictory rotation tags, and changing decoded geometry are rejected before output publication. Missing sample aspect is explicitly reported as an assumed 1:1; frame metadata falls back to the container value when absent. SAR components are integers in 1..2147483647. Other side data remains unsupported.
+
+The source is rotated counterclockwise, then fitted according to its physical display aspect (coded width times SAR divided by coded height, inverted for a quarter turn). `contain` preserves the whole picture and pads black, or transparent black for an alpha source. `cover` fills the canvas with centered cropping. `stretch` fills both axes independently. Contain dimensions round down, cover dimensions round up, and centering leaves odd excess on the right/bottom. Nearest top-left sampling uses exact integer coordinates. A contain fit smaller than one pixel fails explicitly. RGB and straight alpha use the same coordinates, including hidden RGB under zero alpha; audio and temporal sampling keep their declared policies.
+
+Receipts include rotation, source SAR and any assumption, source/oriented/canvas dimensions, virtual fitted dimensions, crop/padding, rounding, sampling and square-pixel output. The virtual fitted picture is never allocated: at most four bytes per output pixel (32 MB under the existing 8-million-pixel cap) store source coordinates. Existing 4096x2160 source/canvas bounds still apply. Omitting `source.geometry` retains legacy resizing and rejects display transforms/non-square stream metadata.
+
+`media.inspect` and explicit `media.prepare` propose `contain` for supported rotated or non-square sources, with the proposed canvas axes oriented before existing size limits are applied. Agents can inspect or change the returned recipe. Automatic timeline conversion and a persistent conversion cache are still pending.
+
+`tests/color.py` runs the original `tests/support/conform_geometry.py` fixture: independent NumPy quarter turns and Fraction fit coordinates, native YUV/Decimal color references, all four rotations, three SAR values and all three fits, straight ProRes alpha, reverse and blended temporal sampling, unchanged legacy resizing, and explicit preparation. Oblique/reflected matrices and invalid policies fail without changing sources or publishing partial outputs.
 
 ### Explicit source clock
 
@@ -51,7 +63,7 @@ float64 YUV arithmetic and integer/Fraction PCM resampling. It includes an edit 
 audio priming with 44.1 kHz rounding, late/short audio, HEVC Main/open GOP, MP4/MOV/MKV and AAC,
 PCM24, MP3, FLAC and Opus. It compares every RGB byte and PCM sample and checks the source index's
 clock policy agrees. Nonqualifying rotation/SAR/VFR/10-bit/ProRes files remain explicit rejections
-from direct qualification. Explicit SDR conversion now covers the listed 10-bit/4:2:2 formats; automatic cached preparation, rotation and non-square pixels remain later stage-2 work.
+from direct qualification. Explicit SDR conversion now covers the listed 10-bit/4:2:2 formats; explicit display geometry is supported above, while automatic cached preparation remains later stage-2 work.
 
 ## Recipe and timing
 

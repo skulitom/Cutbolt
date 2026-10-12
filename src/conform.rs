@@ -15,6 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) mod geometry;
+pub use geometry::{Fit, Geometry};
+
 const FPS: Time = Time { num: 25, den: 1 };
 /// Random-access decode window (reverse/freeze/non-monotonic speed maps) kept in scratch.
 const VIDEO_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -80,6 +83,10 @@ pub struct Source {
     /// Omit to retain strict zero-origin timestamps and existing audio interval checks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<Clock>,
+    /// Explicit canvas fit after canonical display rotation and sample-aspect normalization.
+    /// Requires `sdr`; omit to retain square pixels, no display transform and legacy resizing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<Geometry>,
 }
 /// Media conversion recipe for media.conform: samples a source into a new FFV1/PCM16 editing asset at `frame_rate` (default 25 fps), or a WAV source into an audio-only WAV when `width` and `height` are omitted.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -137,6 +144,7 @@ struct Checked {
     metadata: Value,
     layout: Option<color::Layout>,
     normalization: Value,
+    geometry: Option<geometry::Display>,
     origin: Option<Stamp>,
     audio_first: Option<Stamp>,
     audio_offset: Stamp,
@@ -179,7 +187,7 @@ fn frames(path: &Path, selector: &str, timeout: Duration) -> Result<Vec<Value>> 
         "-select_streams",
         selector,
         "-show_entries",
-        "frame=best_effort_timestamp,duration,pkt_duration,nb_samples,width,height,pix_fmt,interlaced_frame,color_space,color_range,color_primaries,color_transfer,chroma_location",
+        "frame=best_effort_timestamp,duration,pkt_duration,nb_samples,width,height,pix_fmt,interlaced_frame,color_space,color_range,color_primaries,color_transfer,chroma_location,sample_aspect_ratio:frame_side_data=displaymatrix,rotation",
         "-of",
         "compact=p=0:nk=0",
     ];
@@ -198,6 +206,18 @@ fn frames(path: &Path, selector: &str, timeout: Duration) -> Result<Vec<Value>> 
             };
             if value == "N/A" || value.is_empty() {
                 continue;
+            }
+            if object.contains_key(key)
+                && (key.ends_with("displaymatrix")
+                    || key.ends_with(":rotation")
+                    || key == "rotation")
+            {
+                return Err(error(
+                    "UNSUPPORTED_MEDIA",
+                    "Duplicate decoded display metadata is unsupported",
+                )
+                .with_path("recipe.source.geometry")
+                .with_hint("Use a source with one unambiguous display matrix."));
             }
             object.insert(
                 key.into(),
@@ -238,6 +258,14 @@ fn input_args(path: &Path) -> Vec<String> {
     .collect()
 }
 fn check(source: &Source, root: &Path) -> Result<Checked> {
+    if source.geometry.is_some() && source.sdr.is_none() {
+        return Err(error(
+            "INVALID_CONFORM",
+            "source.geometry requires explicit SDR video normalization",
+        )
+        .with_path("recipe.source.geometry")
+        .with_hint("Declare source.sdr and working_transfer to normalize display geometry."));
+    }
     if source.alpha.is_some() && source.sdr.is_none() {
         return Err(error(
             "INVALID_CONFORM",
@@ -311,6 +339,7 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
         metadata: metadata.clone(),
         layout: None,
         normalization: Value::Null,
+        geometry: None,
         origin: None,
         audio_first: None,
         audio_offset: Stamp::ZERO,
@@ -363,20 +392,24 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
             }
         };
         if !accepted
-            || v.get("side_data_list").is_some()
-            || v["tags"].get("rotate").is_some()
+            || (source.geometry.is_none()
+                && (v.get("side_data_list").is_some() || v["tags"].get("rotate").is_some()))
             || !matches!(
                 v["field_order"].as_str(),
                 Some("progressive") | Some("unknown") | None
             )
-            || !matches!(
-                v["sample_aspect_ratio"].as_str(),
-                Some("1:1") | Some("N/A") | None
-            )
+            || (source.geometry.is_none()
+                && !matches!(
+                    v["sample_aspect_ratio"].as_str(),
+                    Some("1:1") | Some("N/A") | None
+                ))
         {
             return Err(unsupported(
                 "Video requires the declared RGB or tagged limited BT.709 profile, progressive square pixels and no transform/HDR side data",
             ));
+        }
+        if source.geometry.is_some() {
+            checked.geometry = Some(geometry::Display::inspect(v)?);
         }
         checked.width =
             u32::try_from(number(&v["width"])?).map_err(|_| unsupported("Video width overflow"))?;
@@ -399,6 +432,15 @@ fn check(source: &Source, root: &Path) -> Result<Checked> {
             ));
         }
         for (i, f) in decoded.iter().enumerate() {
+            if let Some(display) = checked.geometry {
+                display.check_frame(f, i)?;
+            } else if geometry::frame_has_transform(f) {
+                return Err(unsupported(
+                    "Decoded display transforms require explicit source.geometry normalization",
+                )
+                .with_path("recipe.source.geometry")
+                .with_detail(json!({"frame":i})));
+            }
             if let Some(sdr) = source.sdr {
                 let mut profile = (*v).clone();
                 for key in [
@@ -584,6 +626,7 @@ struct Mapping {
     frames: Vec<FrameSample>,
     times: Vec<Time>,
     remap: Option<remap::Compiled>,
+    geometry: Option<geometry::Plan>,
 }
 impl Recipe {
     /// The validated output frame rate.
@@ -701,6 +744,16 @@ fn mapping(recipe: &Recipe, source: &Checked) -> Result<Mapping> {
         Ok(compiled)
     }).transpose()?;
     let mut mapped = Mapping {
+        geometry: source
+            .geometry
+            .map(|display| {
+                display.plan(
+                    [source.width, source.height],
+                    [width, height],
+                    recipe.source.geometry.expect("checked geometry").fit,
+                )
+            })
+            .transpose()?,
         frames: Vec::new(),
         times: Vec::new(),
         remap,
@@ -805,6 +858,10 @@ fn report(recipe: &Recipe, source: &Checked, mapped: &Mapping) -> Value {
     let picture = |value: Value| if audio_only { Value::Null } else { value };
     let frames = picture(json!(recipe.duration.units(rate).unwrap_or_default()));
     let mut report = json!({"profile":"media-conform-v1","source":{"path":source.path,"identity":recipe.source.file,"metadata":source.metadata,"video_frames":source.pts.len(),"video_end":source.video_end,"audio_samples":source.samples,"audio_rate":source.audio_rate,"audio_channels":source.channels},"source_frame_indices":selected,"source_frame_times":selected.iter().map(|i|source.pts[*i]).collect::<Vec<_>>(),"audio_only":audio_only,"frame_rate":picture(json!(rate)),"frames":frames,"samples":recipe.duration.units(Time{num:48000,den:1}).expect("validated"),"width":recipe.width,"height":recipe.height,"duration":recipe.duration,"rate":recipe.rate,"reverse":recipe.reverse,"freeze":recipe.freeze,"audio":recipe.audio,"video_sampling":picture(json!("latest_source_timestamp_at_or_before_output_clock_plus_half_source_tick")),"resize":picture(json!("nearest_top_left")),"audio_sampling":"linear_pitch_changes_with_rate","color":recipe.source.color,"normalization":source.normalization,"working_transfer":recipe.working_transfer});
+    if let Some(geometry) = &mapped.geometry {
+        report["geometry"] = geometry.report(recipe.source.alpha.is_some());
+        report["resize"] = json!("display_geometry_nearest_top_left");
+    }
     if let Some(alpha) = recipe.source.alpha {
         report["alpha"] = json!({"input":alpha,"output":"straight","format":"bgra",
             "sampling":"full_range_nearest_8bit_independent_of_color_transfer",
@@ -1342,6 +1399,7 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     }
     args.push(temp.to_string_lossy().into_owned());
     let source_size = source.width as usize * source.height as usize * channels;
+    let geometry_map = selected.geometry.as_ref().map(geometry::Plan::indices);
     let mut video_hash = Sha256::new();
     let frame_bytes = width as u64 * height as u64 * channels as u64;
     // The expected digest of a silent picture is that of all-zero frames, hashed while it encodes.
@@ -1441,11 +1499,20 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
                     let weight = sample.second_weight;
                     for y in 0..height as usize {
                         for x in 0..width as usize {
-                            let p = ((y * source.height as usize / height as usize)
-                                * source.width as usize
-                                + x * source.width as usize / width as usize)
-                                * channels;
                             let out = (y * width as usize + x) * channels;
+                            let index = if let Some(map) = &geometry_map {
+                                let index = map[y * width as usize + x];
+                                if index == u32::MAX {
+                                    pixels[out..out + channels].fill(0);
+                                    continue;
+                                }
+                                index as usize
+                            } else {
+                                (y * source.height as usize / height as usize)
+                                    * source.width as usize
+                                    + x * source.width as usize / width as usize
+                            };
+                            let p = index * channels;
                             for c in 0..channels {
                                 pixels[out + c] = if weight.num == 0 {
                                     first_pixels[p + c]
@@ -1534,6 +1601,11 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
 pub fn capabilities() -> Value {
     let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","audio_only_output":"wav_pcm16_48000_stereo_without_width_height","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
+    value["display_geometry"] = json!({"requires":"source.sdr_and_explicit_source.geometry.fit",
+        "rotation_counterclockwise":[0,90,180,270],"sample_aspect_component_maximum":2147483647,
+        "fit":["contain","cover","stretch"],"sampling":"nearest_top_left",
+        "contain_rounding":"floor","cover_rounding":"ceil","centering":"floor_left_top_excess_right_bottom",
+        "changing_sample_aspect":false,"other_display_transforms":false,"maximum_mapping_bytes":32000000});
     value["alpha_output"] = json!({"requires":"source.sdr_and_source.alpha_straight","format":"ffv1_bgra_pcm16","alpha":"full_range_nearest_8bit","premultiplied_input":false});
     value["sdr_audio"] = json!({"containers":["mp4","mov","mkv"],"codecs":["aac","pcm","mp3","flac","opus"],"channels":[1,2],"sample_rate":"positive_native_rate"});
     value["clock_normalization"] = json!({"source_clock":"first_video_frame","requires":"source.sdr",
@@ -1560,6 +1632,7 @@ mod tests {
             metadata: json!({"streams":[{"codec_type":"audio"}]}),
             layout: None,
             normalization: Value::Null,
+            geometry: None,
             origin: None,
             audio_first: None,
             audio_offset: Stamp::ZERO,
@@ -1598,6 +1671,7 @@ mod tests {
         let mut source = wav(24000, 1, 4);
         source.origin = Some(Stamp::ZERO);
         let mapped = Mapping {
+            geometry: None,
             frames: Vec::new(),
             times: Vec::new(),
             remap: None,

@@ -8,6 +8,8 @@ The existing `scene.inspect` tool accepts optional typed [geometry](GEOMETRY.md)
 
 The ten foundational checks cover local commands, saved editing sessions, render job control and MCP stdio. Passing them does not validate every editing feature, operating system, failure mode or client. The tested environment is Windows with the narrow FFV1/PCM render profile. See [PROGRESS.md](PROGRESS.md) and [verification evidence](../verification/latest.json).
 
+Explicit SDR conform recipes accept `source.geometry: {"fit":"contain"}` for canonical quarter-turn display rotation and fixed sample aspect. `cover` and `stretch` are also supported; receipts disclose rotation, aspect, fitting and rounding. The existing `media.conform.inspect`, `job.start` and explicit `media.prepare` paths use this policy; no new MCP tool is added. See [display geometry](CONFORM.md#explicit-display-geometry).
+
 ## Local background renders
 
 For installation and a read-only setup check before starting MCP, see

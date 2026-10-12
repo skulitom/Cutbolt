@@ -136,7 +136,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Find an unambiguous proxy by bound content identity and return a proposal for session.apply. Does not move files or save edits. Generate proxies with job.start run proxy.generate."
         }
         "media.conform.inspect" => {
-            "Validate a supported source identity, codec/container and exact timestamp mapping into an editing asset at the declared native frame rate. Reports constant or variable-speed source clocks, frame selection/blend weights and explicit audio pitch policy. Convert with job.start run media.conform."
+            "Validate a supported source identity, codec/container and exact timestamp mapping into an editing asset at the declared native frame rate. Reports source clocks, frame selection/blend weights, audio pitch policy and explicit SDR display geometry (quarter turns, sample aspect and contain/cover/stretch). Convert with job.start run media.conform."
         }
         "audio.inspect" => {
             "Validate and evaluate a bounded PCM mix: sample-aligned trims, gain/fade automation and multiple tracks, plus optional buses, explicit channel matrices, panning and named surround layouts. Reports output samples, PCM hash, layout, routing and clipping counts. Read-only; render a WAV with job.start run audio.render."

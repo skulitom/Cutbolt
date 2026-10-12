@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-12",
+  "scope": "Explicit SDR display geometry; automatic cached preparation remains pending.",
+  "source_base": "5f7b3aa3ba02514413650fd85efdc569d5ac3003",
+  "source_sha256": {
+    "src/conform.rs": "e64d84cdddca1dcd8a71cd9b04cd01af7a7b00028cffe7abf03c5a56c0e25c27",
+    "src/conform/geometry.rs": "f72ff17b3164ba7d583f501780a4502066ed1f334c9737dee7c9b1969b972da3",
+    "src/readiness.rs": "51a769dedbb2be77d57a6020f232db3657157cbc766781fe04184d326fb4512c",
+    "src/proxy.rs": "a54303746cbbc244e6c2cba1f81bb77d62ceeccf7a7c56cd9f663917608427d1",
+    "src/sync.rs": "e158e84897f8dc0072c8f3abe0c4793c5a4af69a6ca47a583fee903c4cba9736",
+    "src/mcp.rs": "5423d298f95eaa419bfb01b6150a547a3a104cb2b303e6265af71b066a49e7c2",
+    "tests/color.py": "dc24eba9339fd7e173e7c1879ff653dabe79d0b8c3899291414187efbfb533d2",
+    "tests/support/conform_geometry.py": "3bded12816c6e667cfa9ed32483c7066d05d9a2cb8dc0cbcfe10848dea1cf867"
+  },
+  "reference": "Independent NumPy rotations and Fraction fit coordinates; native YUV RGB and Decimal ProRes conversion; exact alpha and PCM.",
+  "cases": {
+    "geometry_renders": 44,
+    "quarter_turns": [
+      0,
+      90,
+      180,
+      270
+    ],
+    "sample_aspects": [
+      "1:1",
+      "4:3",
+      "3:4"
+    ],
+    "fits": [
+      "contain",
+      "cover",
+      "stretch"
+    ],
+    "legacy_resize_identical": true,
+    "explicit_preparation_oriented_canvas_exact": true,
+    "negative_cases": 5,
+    "sources_preserved": true,
+    "alpha_rgb_tolerance": 1,
+    "opaque_rgb_tolerance": 0,
+    "alpha_exact": true,
+    "pcm_exact": true
+  },
+  "tests": {
+    "windows": {
+      "ok": true,
+      "run": "quick",
+      "commit": "5f7b3aa3ba02514413650fd85efdc569d5ac3003",
+      "ran": [
+        "agent_costs",
+        "color",
+        "conform",
+        "remapping"
+      ],
+      "failed": [],
+      "skipped": {}
+    },
+    "linux": {
+      "ok": true,
+      "run": "quick",
+      "commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5",
+      "ran": [
+        "agent_costs",
+        "color",
+        "conform",
+        "remapping"
+      ],
+      "failed": [],
+      "skipped": {}
+    }
+  },
+  "binaries": {
+    "windows_sha256": "47ddf521ef67ee25476dc142314e142a521fa27b8e435dd5cd3c28e03b910c0b",
+    "linux_sha256": "2a7165bce5737af7953da76d8c77903c1261881754ece895704299c0ad9631ff"
+  },
+  "rust_tests": {
+    "windows": 236,
+    "linux": 235
+  },
+  "format_and_clippy": "pass on both platforms; no warnings",
+  "limitations": [
+    "No automatic timeline conversion or conversion cache",
+    "Nearest top-left sampling only",
+    "Canonical quarter turns and fixed sample aspect only",
+    "Existing 4096x2160/8M-pixel bounds",
+    "No new full milestone or points claim"
+  ],
+  "linux_checkout_note": "The Linux checkout has an older Git HEAD with current source files copied in. source_sha256 and tested binary identity describe this geometry patch; the test report retains that checkout HEAD honestly."
+}

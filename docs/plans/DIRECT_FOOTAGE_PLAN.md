@@ -184,6 +184,12 @@ Every use hashes the whole file (see the inspection cache notes). For a 4 GB pho
 
 ## Stage 2: automatic, cached conversion for everything else
 
+Implementation note, 12 October 2026: explicit SDR conform now covers the listed 10-bit,
+4:2:2 and straight-alpha formats, plus exact quarter-turn display rotation and fixed sample
+aspect with declared contain/cover/stretch fitting. See [CONFORM](../CONFORM.md#explicit-display-geometry)
+for behavior and independent geometry checks. This broadens explicit conversion only;
+the conversion cache, automatic preparation phases, provenance and stage exit remain pending.
+
 Goal: an agent never has to call `media.prepare` by hand. Files that cannot be decoded directly are converted once, cached and reused, and the conversion is visible.
 
 1. Broaden the conform matrix:

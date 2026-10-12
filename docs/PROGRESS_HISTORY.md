@@ -1,5 +1,30 @@
 # Progress history
 
+## 12 October 2026: explicit display rotation and sample-aspect normalization
+
+SDR conform accepts an explicit `source.geometry.fit` policy: contain, cover or stretch.
+Canonical quarter-turn matrices and fixed positive rational SAR are interpreted with exact
+integer coordinates. Receipts disclose the interpretation, fitting, rounding and padding.
+Opaque padding is black; straight-alpha padding is transparent black. RGB beneath zero alpha
+is preserved. The mapping stays bounded by the output canvas, including extreme SAR values.
+Missing policy retains legacy resizing and rejection rules. Explicit `media.prepare` proposes
+an oriented contain canvas; automatic cached preparation and the rest of stage 2 remain open.
+
+Windows and Linux pass cargo test (236/235 tests), warning-free clippy and the targeted color,
+conform, remapping and agent_costs fixtures (four passes each, no skips or failures). The color
+fixture now includes 44 independently checked geometry renders, exact PCM/alpha, legacy resize
+equality, explicit preparation and five invalid cases with source/output preservation. Rust
+tests additionally reject changing decoded geometry, malformed metadata and excessive bounds.
+The first bounds test used an already-unsupported 4096x2160 source; it was corrected to remain
+inside the existing eight-million-pixel limit. See verification/display-geometry-2026-10-12.json.
+
+The completed background run for 5f7b3aa passed all 47 deferred checks, including direct_sources
+and recording. This supersedes those historical failed checks in verification status; the
+intermittent H.264 comparison's cause is still unproven, and failure-artifact retention remains
+enabled. This commit must also pass its ship gate and its deferred results must be checked.
+Full milestone evidence remains the 12 October run at 338e114, before this change; no generated
+progress evidence, points, acceptance criteria, G2 or scope was changed.
+
 ## 12 October 2026: initial review coverage and measured talking-head call budget
 
 The standalone skill requests 16 delivered-file frames and checks cue coverage before review.

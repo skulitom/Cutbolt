@@ -135,6 +135,7 @@ pub fn generate(request: &Generate) -> Result<Value> {
             sdr: None,
             alpha: None,
             clock: None,
+            geometry: None,
         },
         source_in: Time::ZERO,
         duration: asset.duration,

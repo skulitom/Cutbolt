@@ -803,7 +803,20 @@ pub(crate) fn conform(
     if frames == 0 {
         return Err("the source is shorter than one frame at the proposed rate".into());
     }
+    let geometry = if video.get("side_data_list").is_some()
+        || video["tags"].get("rotate").is_some()
+        || !matches!(
+            video["sample_aspect_ratio"].as_str(),
+            None | Some("N/A") | Some("1:1")
+        ) {
+        Some(crate::conform::geometry::Display::inspect(video).map_err(|e| e.message)?)
+    } else {
+        None
+    };
     let (mut width, mut height) = (dimension(&video["width"]), dimension(&video["height"]));
+    if let Some(display) = geometry {
+        [width, height] = display.oriented_size([width, height]);
+    }
     if width > 4096 || height > 2160 || u64::from(width) * u64::from(height) > 8_294_400 {
         // Fit 3840x2160, keeping the aspect ratio with even dimensions.
         let scale = (3840.0 / f64::from(width)).min(2160.0 / f64::from(height));
@@ -816,7 +829,10 @@ pub(crate) fn conform(
     if rate != (Time { num: 25, den: 1 }) {
         recipe["frame_rate"] = json!(rate);
     }
-    if video["codec_name"] == "ffv1" && pix_fmt == "bgr0" {
+    if geometry.is_some() {
+        recipe["source"]["geometry"] = json!({"fit":"contain"});
+    }
+    if video["codec_name"] == "ffv1" && pix_fmt == "bgr0" && geometry.is_none() {
         recipe["source"]["color"] = json!("encoded_rgb");
     } else {
         let full = tag("color_range") == Some("pc") || pix_fmt.starts_with("yuvj") || rgb;

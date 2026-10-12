@@ -509,6 +509,7 @@ fn recipe(
             sdr: None,
             alpha: None,
             clock: None,
+            geometry: None,
         },
         source_in: start,
         duration: request.duration,
