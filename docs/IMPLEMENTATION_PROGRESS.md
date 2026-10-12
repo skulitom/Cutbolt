@@ -2,7 +2,7 @@
 
 **Total verified implementation: 108/108 (100.0%).**
 
-Baseline: `research-implementation-v1`. Verified: 2026-10-04.
+Baseline: `research-implementation-v1`. Verified: 2026-10-12.
 
 - Core engine: **100/100 (100.0%)**, under the unchanged `cutbolt-local-v1` acceptance scope.
 - Supplemental research-derived capabilities: **8/8**.

@@ -277,8 +277,20 @@ connected to the workspace's MCP server. Its first model request then returned `
 the process exited with code 1 after 2.72 seconds. Provider-reported inference tokens and tool
 calls were both zero, and no delivery was created. Source identities were unchanged.
 
-This establishes a working plugin connection and an authentication prerequisite, not a model
-workflow result or a passing cost target. The complete raw startup/wire records and binary
-identities are retained outside Git. After sign-in is renewed, the measured workflow must start
-again with fresh inputs; the failed startup record remains separate. Workflows 1, 3 and 5 and
-the Cutbolt/plain-FFmpeg comparison still need actual independent model runs.
+This establishes a working plugin connection and a failed client startup, not a model workflow
+result or a passing cost target. The complete raw startup/wire records and binary identities
+are retained outside Git; the failed startup record remains separate.
+
+A follow-up found that the empty test profile used a different authentication source from
+the normal client. The normal credential source was still valid. Using it in another isolated
+profile produced an actual successful model response, with no tools: 2 input tokens, 2178 cache
+creation input tokens, 4 output tokens and USD 0.017512 reported by the provider. The temporary
+credential copy was removed. Renewing the user's sign-in was unnecessary. This probe validates
+the corrected client setup only; it is not a workflow success or part of the workflow budget.
+
+Three fresh plugin-only trials (talking head, tutorial and handoff) now have separate original
+input copies, empty sessions and a pinned 6c3447a engine. They are queued after milestone and
+alpha verification so compilation cannot distort their elapsed-time records. Each records
+skill-loading calls as well as editing calls, actual provider input/cache/output usage, wire
+bytes, errors and source identities. Output correctness requires a separate audit. Workflows
+1, 3 and 5 and the Cutbolt/plain-FFmpeg comparison still have no passing model result.

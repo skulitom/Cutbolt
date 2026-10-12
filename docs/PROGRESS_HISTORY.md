@@ -1,5 +1,41 @@
 # Progress history
 
+## 12 October 2026: complete stage-1 milestone evidence refreshed
+
+The full Windows thorough run passed on fixed commit 338e11436d253a6d3a6ef9d1d4e3a4694627edac:
+72 fixture stages, 766 recorded passing checks, no failures, skips, deferred stages or reused
+results. Rust, formatting, lint and material checks passed. The original 266 input hashes
+were checked against the evidence checkout before copying the generated `verification/latest.json`,
+`docs/PROGRESS.md` and `docs/IMPLEMENTATION_PROGRESS.md` unchanged. They now report 12 October.
+The unchanged v1 scope remains 100/100 core and 108/108 total; this refresh awards no new points.
+
+The full 30-minute 4K check passed in 2329 seconds. Sustained recording passed all seven
+checks, including 900 seconds and 43200000 sample frames, zero accumulated QPC/sample-clock
+deviation and 23494656 bytes peak working set. The 1000-edit batch took 2.901 seconds against
+the unchanged five-second limit. Fixture wall time was 4723.6 seconds. The prior 633fde0
+recording failure remains in history; this is a complete passing follow-up, with no relaxed
+timing or duration rules. Optional configured runtimes and direct-source regressions ran.
+
+This evidence covers the fixed 338e114 sources. The subsequently shipped 6c3447a conversion
+foundation retains its separately recorded Windows/Linux targeted evidence. The alpha draft
+and fresh-model workflows are still being checked and are not covered by this full-run claim.
+No comparative win, v2 adoption, first release or completed stage-2 conversion cache is claimed.
+
+## 12 October 2026: corrected fresh-client authentication setup
+
+The earlier empty-profile startup used a different authentication source from the normal
+client; the user's normal credential source was still valid. An isolated, tool-free model
+probe using that source succeeded: the provider reported 2 input tokens, 2178 cache-creation
+input tokens, 4 output tokens and USD 0.017512. The private temporary credential copy was
+removed. The earlier statement that the user needed to renew sign-in was incorrect. The
+failed startup remains retained separately and is not relabeled as a workflow result.
+
+Three fresh plugin workflows have separate original inputs and no existing sessions, with
+a pinned 6c3447a engine. They are queued after verification. The declared measurement counts
+all agent calls, including skill loading, and retains input/cache/output token usage. Output
+correctness is independently audited; no model workflow pass, cost-target pass or comparative
+result is claimed by the authentication probe. See [AGENT_COSTS.md](AGENT_COSTS.md).
+
 ## 12 October 2026: stage-2 native 10-bit and 4:2:2 conversion foundation
 
 Explicit SDR conform now decodes H.264 High10 and HEVC Main10 4:2:0, H.264 8/10-bit
