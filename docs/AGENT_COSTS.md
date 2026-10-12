@@ -438,3 +438,36 @@ the declared cumulative accounting. The largest request is below 40,000, but the
 been asked to clarify which token metric the target means; no target is silently redefined.
 Call reduction remains necessary either way. Recognition, long-form quality, a second model,
 repeatability and comparison with plain FFmpeg remain separate unfinished measurements.
+
+## Standalone talking-head skill, 12 October 2026
+
+The talking-head recipe now includes setup, captions, export and review in one skill. Setup
+uses the existing validated `session.create` snapshot to bind inspected footage and linked
+picture/sound tracks together. This removes a separate setup edit without changing engine
+interfaces or source verification. Existing-project edits still require the actual saved IDs
+and revision. The modular caption and delivery skills remain independently usable.
+
+Trial `fresh-plugin-trials-06` uses the same prompts and original inputs, frozen f5fe95f
+engine and exact 19-tool/six-skill inventory. All independent 19/17/21 output checks and
+visual audits pass, with zero failed calls, zero schema lookups and no manual output repair.
+The [retained summary](../verification/agent-cost-trials-2026-10-12-standalone.json) records
+the tested skill patch, engine identity and unchanged accounting.
+
+| Workflow | All calls | Skill / MCP | Total input with cache rereads | Peak request input | Output tokens | Seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| talking-head | 17 | 1 / 16 | 376,172 | 33,901 | 5,577 | 55.156 |
+| tutorial | 15 | 3 / 12 | 304,795 | 29,517 | 3,826 | 48.516 |
+| handoff | 10 | 2 / 8 | 150,626 | 23,766 | 2,634 | 36.406 |
+
+Talking head loads one skill instead of four. Its initial four-frame contact sheet missed
+the second cue, so the agent correctly requested a denser review, adding two calls. Both
+caption cues are visible in that actual-delivery sheet. The observed 17 calls still exceed
+15, and cumulative input still exceeds 40,000. The scripted recipe's 14 MCP calls plus one
+skill load are not substituted for the measured result. Sampling guidance is the next
+improvement; additional review remains required whenever it is needed for correctness.
+
+Windows and Linux execute all 35 fenced examples across six scripted cases, including
+direct H.264/PCM input and modular caption reuse. Talking-head cases independently assemble
+the requested source frames/samples and caption alpha composition and match both encoder-input
+hashes exactly. These tests validate the instructions, not autonomous model cost or recognition.
+No comparative benchmark, new points or full stage-5 completion is claimed.

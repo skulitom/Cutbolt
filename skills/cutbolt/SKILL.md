@@ -1,6 +1,6 @@
 ---
 name: cutbolt
-description: "Edit existing local video or audio with Cutbolt: trim footage, tighten speech, add captions, switch cameras, adjust loudness, revise saved edits and deliver with review."
+description: "Set up, revise and recover general Cutbolt timelines, and route specialized edits to their workflow skills. For a complete talking-head cut with captions and delivery, use recut-talking-head directly."
 ---
 
 # Edit existing footage
@@ -32,42 +32,39 @@ identical arguments when retrying an uncertain edit.
 
 ## Start a cut
 
-Choose dimensions and a native frame rate matching the intended delivery. Compare inspected
-source dimensions/rate with that project. $PROJECT_ID is a new stable project name; $SOURCE is a workspace
-path. $WIDTH, $HEIGHT and $FRAME_RATE describe the project.
-
-<!-- example: create -->
-~~~json
-{"command":"session.create","id":"$PROJECT_ID","width":"$WIDTH","height":"$HEIGHT","frame_rate":"$FRAME_RATE","request_id":"create"}
-~~~
+Inspect the source before choosing the project clock and canvas. $SOURCE is a workspace
+path; use the returned size/rate for $WIDTH, $HEIGHT and $FRAME_RATE unless the user requested
+another delivery. A mismatch requires preparation before editing.
 
 <!-- example: inspect -->
 ~~~json
 {"command":"media.inspect","path":"$SOURCE"}
 ~~~
 
-If timeline.ready is true and the size/rate fit, take timeline.asset as $ASSET and its
-id/duration as $ASSET_ID/$DURATION. If asset.identity is absent, bind its identity using
-the bytes and sha256 fields of the inspection's identity (not that object's path field).
-Eligible indexed originals remain original files. If preparation is required, follow the
-returned proposal through job.start run media.prepare and wait for its ready asset before
-editing. Do not label unsupported or mismatched footage ready by changing its metadata.
+When timeline.ready is true and the size/rate fit, use timeline.asset as $ASSET and its
+id/duration as $ASSET_ID/$DURATION. If asset.identity is absent, add the inspection identity's
+bytes and sha256 (not its path). Preserve the returned decode binding. For preparation-required
+sources, queue the returned media.prepare proposal and wait for the ready asset; do not change
+metadata to label an unsupported original ready. $TRANSFER declares the working RGB transfer,
+for example bt709, from the media/project policy.
 
-$REVISION is the latest saved revision (zero just after creation). $TRANSFER declares
-the working RGB transfer (for example bt709), based on the media/project policy.
-This edit imports and appends the asset, then creates linked picture and sound tracks.
+For a new project, create its initial linked picture/sound arrangement in one validated
+snapshot. $PROJECT_ID is a new stable name. The clip and link IDs below are new IDs chosen
+here; when revising an existing project, read and use its actual IDs instead.
 
-<!-- example: append -->
+<!-- example: create -->
 ~~~json
-{"command":"session.apply","project_id":"$PROJECT_ID","expected_revision":"$REVISION","request_id":"append-source","operations":[{"op":"media.add","asset":"$ASSET"},{"op":"project.transfer","transfer":"$TRANSFER"},{"op":"clip.append","clip":{"id":"shot","asset_id":"$ASSET_ID","source_in":0,"duration":"$DURATION"}},{"op":"tracks.edit","edit":{"op":"promote","video_track_id":"v","audio_track_id":"a"}}]}
+{"command":"session.create","request_id":"create","project":{"schema_version":1,"id":"$PROJECT_ID","revision":0,"width":"$WIDTH","height":"$HEIGHT","frame_rate":"$FRAME_RATE","transfer":"$TRANSFER","assets":["$ASSET"],"clips":[],"tracks":{"duration":"$DURATION","tracks":[{"id":"v","kind":"video","enabled":true,"locked":false,"clips":[{"id":"shot","asset_id":"$ASSET_ID","start":0,"source_in":0,"duration":"$DURATION"}]},{"id":"a","kind":"audio","enabled":true,"locked":false,"clips":[{"id":"shot-audio","asset_id":"$ASSET_ID","start":0,"source_in":0,"duration":"$DURATION"}]}],"links":[{"id":"shot-link","members":[{"clip_id":"shot","start":0,"source_in":0},{"clip_id":"shot-audio","start":0,"source_in":0}]}]}}}
 ~~~
 
-Keep the returned revision. The promoted clip/link IDs come from the saved project;
-do not infer them from track names. Additional sources require inspection and media.add.
+Keep the returned revision as $REVISION (zero for a new session). The creation receipt records
+its initial assets and tracks. Subsequent changes use session.apply with that revision and a
+new request ID; retry an uncertain creation with identical arguments and the same request ID.
 
 ## Choose the next recipe
 
-- Tighten speech: recut-talking-head, then captions, then deliver-and-review.
+- Talking head through captions and delivery: recut-talking-head is self-contained; load it
+  directly for that request. Its setup is only for a new project, so retain an existing head.
 - Screen capture: screen-tutorial, then deliver-and-review.
 - Two synchronized cameras: interview-multicam, then deliver-and-review.
 - Existing captions: captions; retain the same project and current revision.

@@ -1,5 +1,28 @@
 # Progress history
 
+## 12 October 2026: standalone talking-head skill and another isolated trial
+
+Setup now uses the existing validated initial snapshot with inspected source identity and
+linked picture/sound tracks. The talking-head skill includes the complete workflow; modular
+caption reuse remains tested. All 35 fenced examples across six cases pass on Windows and
+Linux, including direct H.264 footage and independent RGB/PCM/caption composition checks.
+
+Fresh plugin trial 06 uses unchanged prompts/originals, f5fe95f and exactly 18 MCP tools,
+Skill and six plugin skills. Talking head/tutorial/handoff pass 19/17/21 independent checks
+and visual review with unchanged sources, zero failed calls and zero schema requests.
+All-tool counts are 17/15/10. Talking head loads one skill, then adds a denser delivered-file
+review because the first sheet misses a cue. The 15-call target remains open; cumulative
+input is 376172/304795/150626 and the token metric clarification is still pending.
+Detailed metrics and tested identities are in the standalone trial summary and AGENT_COSTS.
+
+The f5fe95f shipping gate passed (10 fixtures, five reused, 57 deferred); background
+direct_sources subsequently failed again for the HEVC/Opus H.264 range. Its new diagnostics
+show identical pre-conversion RGB and PCM hashes but different decoded H.264 pixels, also
+confirmed in native YUV. Source decoding is not the failing boundary. Encoder-input YUV
+capture is in progress to distinguish color conversion from encoding. This is unresolved,
+not waived as flaky. Other background fixtures and this commit's shipping run must be checked.
+Full milestone evidence remains pinned to 338e114; no score or scope changes.
+
 ## 12 October 2026: valid isolated plugin workflows and strict comparison diagnostics
 
 Fresh trial 05 exposes exactly eighteen Cutbolt MCP tools, Skill and six plugin skills, with

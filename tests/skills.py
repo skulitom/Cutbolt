@@ -9,11 +9,14 @@ from pathlib import Path
 import re
 import subprocess
 
+import numpy as np
+
 from agents import Client
 from agent_costs import transcript
 from engine import ENGINE
 from footage_sources import encode, identity, FFMPEG
 from graphics import make_font, PRIMARY
+from source_clocks import decoded as source_decoded, rgb_reference
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = {'cutbolt', 'recut-talking-head', 'screen-tutorial', 'interview-multicam', 'captions', 'deliver-and-review'}
@@ -89,7 +92,9 @@ def run(root):
     reports = {}
     passed = ['skills.six_small_original_recipes_with_consistent_command_argument_keys']
     cases = {
-        'talking-head': [('cutbolt', None), ('recut-talking-head', None), ('captions', None), ('deliver-and-review', 4)],
+        'talking-head': [('recut-talking-head', None)],
+        'talking-head-direct': [('recut-talking-head', None)],
+        'caption-reuse': [('cutbolt', None), ('recut-talking-head', ['pauses','apply-pauses','fillers','apply-fillers']), ('captions', None), ('deliver-and-review', 4)],
         'tutorial': [('cutbolt', None), ('screen-tutorial', None), ('deliver-and-review', 2)],
         'interview': [('cutbolt', None), ('interview-multicam', None), ('deliver-and-review', 2)],
         'handoff': [('cutbolt', None), ('deliver-and-review', None)],
@@ -99,7 +104,8 @@ def run(root):
         workspace.mkdir()
         assets = []
         for n in range(2):
-            source = encode(workspace, f'camera{n}', codec='ffv1', rate=Fraction(25), count=150, pix_fmt='bgr0', phase=n*61)
+            encoding = {'codec':'h264','pix_fmt':'yuv420p','container':'mkv','audio_codec':'pcm_s16le'} if case == 'talking-head-direct' else {'codec':'ffv1','pix_fmt':'bgr0'}
+            source = encode(workspace, f'camera{n}', rate=Fraction(25), count=150, phase=n*61, **encoding)
             assets.append({'id': f'camera{n}', 'path': source['path'], 'duration': 6,
                            'identity': {k: source[k] for k in ('bytes', 'sha256')}})
         make_font(workspace / 'font.ttf', PRIMARY)
@@ -123,7 +129,10 @@ def run(root):
             for skill, count in sequence:
                 if skill == 'interview-multicam':
                     context['SOURCE'] = assets[1]['path']
-                for label, example in recipes[skill][:count]:
+                examples = [entry for entry in recipes[skill] if entry[0] in count] if isinstance(count,list) else recipes[skill][:count]
+                if isinstance(count,list):
+                    assert {label for label,_ in examples} == set(count)
+                for label, example in examples:
                     request = substitute(example, context)
                     command = request.pop('command')
                     name = 'cutbolt_' + command.replace('.', '_')
@@ -146,8 +155,10 @@ def run(root):
                         assert timeline['ready'] and timeline['width'] == 160 and timeline['height'] == 90
                         assert timeline['frame_rate'] == {'num':25, 'den':1}
                         asset = copy.deepcopy(timeline['asset'])
+                        if case == 'talking-head-direct':
+                            assert timeline['direct'] and asset['decode']['mode'] == 'direct'
                         asset.setdefault('identity', {k:result['identity'][k] for k in ('bytes','sha256')})
-                        if skill == 'cutbolt':
+                        if skill in ('cutbolt','recut-talking-head'):
                             context.update(ASSET=asset, ASSET_ID=asset['id'], ASSET_A_ID=asset['id'], DURATION=asset['duration'])
                         else:
                             context.update(ASSET_B=asset, ASSET_B_ID=asset['id'])
@@ -180,17 +191,34 @@ def run(root):
         finally:
             client.close()
         assert 'schema' not in calls
-        export = results['deliver-and-review/wait-export']['result']
-        wanted = {'talking-head':124,'tutorial':120,'interview':150,'handoff':150}[case]
+        deliver_skill = 'recut-talking-head' if case in ('talking-head','talking-head-direct') else 'deliver-and-review'
+        export = results[deliver_skill + '/wait-export']['result']
+        wanted = {'talking-head':124,'talking-head-direct':124,'caption-reuse':124,'tutorial':120,'interview':150,'handoff':150}[case]
         assert export['timeline_frames'] == wanted, (case, export['timeline_frames'])
         assert (workspace / 'delivery.mp4').is_file()
-        if case in ('talking-head','handoff'):
-            reviewed = results['deliver-and-review/wait-review']['result']
+        if case in ('talking-head','talking-head-direct','caption-reuse','handoff'):
+            reviewed = results[deliver_skill + '/wait-review']['result']
             assert reviewed['timing']['video']['ok'] and reviewed['timing']['audio']['ok']
-        if case == 'talking-head':
-            document = results['captions/draft']['document']
-            assert document['cues'] and all('um' not in c['text'] for c in document['cues'])
-            assert len(calls) == 15
+        if case in ('talking-head','talking-head-direct','caption-reuse'):
+            caption_skill = 'recut-talking-head' if case in ('talking-head','talking-head-direct') else 'captions'
+            document = results[caption_skill + '/draft']['document']
+            assert [cue['text'] for cue in document['cues']] == ['A B','A B']
+            # Independent assembly of requested source frames/samples and straight-alpha
+            # captions: an initially populated session must preserve the former linked edit.
+            spans = [(0,20),(25,74),(95,150)]
+            source_path = workspace/assets[0]['path']
+            source_rgb = rgb_reference(source_decoded(source_path,True,'yuv420p'),160,90) if case == 'talking-head-direct' else decoded(source_path)
+            rgb = np.frombuffer(source_rgb,dtype=np.uint8).reshape(150,90,160,3)
+            expected_rgb = np.concatenate([rgb[start:end] for start,end in spans]).astype(np.uint32)
+            rgba = np.frombuffer(subprocess.check_output([FFMPEG,'-v','error','-i',str(workspace/'captions.mkv'),
+                '-map','0:v:0','-pix_fmt','rgba','-f','rawvideo','-'],timeout=120),dtype=np.uint8).reshape(wanted,90,160,4).astype(np.uint32)
+            alpha = rgba[:,:,:,3:4]
+            composed = ((rgba[:,:,:,:3]*alpha + expected_rgb*(255-alpha) + 127)//255).astype(np.uint8)
+            assert export['verification']['timeline_video_sha256'] == hashlib.sha256(composed.tobytes()).hexdigest()
+            samples = np.frombuffer(decoded(workspace/assets[0]['path'],True),dtype='<i2').reshape(-1,2)
+            expected_pcm = np.concatenate([samples[start*1920:end*1920] for start,end in spans])
+            assert export['verification']['timeline_audio_sha256'] == hashlib.sha256(expected_pcm.tobytes()).hexdigest()
+            assert len(calls) == 14
         if case == 'interview':
             a,b = [decoded(workspace / asset['path']) for asset in assets]
             cut = 75*160*90*3
@@ -200,7 +228,7 @@ def run(root):
             assert results['deliver-and-review/handoff']['ready'] and (workspace/'handoff.otio').is_file()
         assert originals == {name:identity(workspace/name) for name in originals}
         assert cli(workspace, {'command':'session.check'})
-        assert len(calls) == {'talking-head':15,'tutorial':11,'interview':8,'handoff':9}[case]
+        assert len(calls) == {'talking-head':14,'talking-head-direct':14,'caption-reuse':14,'tutorial':10,'interview':7,'handoff':8}[case]
         reports[case] = {'calls':len(calls), 'schema_lookups':0, 'failed_calls':0, 'commands':calls, 'frames':wanted, 'revision':context['REVISION']}
         (workspace/'recipe-results.json').write_text(json.dumps(results,indent=2)+'\n',encoding='utf-8')
         passed.append('skills.'+case.replace('-','_')+'_recipe_outputs_and_source_preservation')
