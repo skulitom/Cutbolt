@@ -1,5 +1,41 @@
 # Progress history
 
+## 12 October 2026: capture scheduling diagnostics and resolved background failures
+
+Both pending background batches are complete: 10367b9 passed 34 fixtures with eleven
+superseded, and 02a6b2d passed all twelve deferred fixtures. The five earlier media-tool
+timeouts have passing follow-ups; `verify.py --status` lists no unresolved failures. The
+recording pass in that background batch is the short development check, not a new full run.
+
+An unchanged-scheduling diagnostic build then passed all seven recording acceptance checks,
+including 900 seconds, 43200000 sample frames, zero accumulated QPC deviation, source preservation
+and 23314432 bytes peak working set. Its maximum capture poll interval was 26.27 ms and its
+playback helper observed no empty buffer. This shows the previous 80 ms gap is intermittent;
+it neither establishes its cause nor replaces the failed 633fde0 whole-milestone run.
+
+The recorder and original playback helper now request scoped Windows MMCSS Audio scheduling,
+with explicit registration/fallback reporting and automatic reversion. Timing limits remain
+unchanged. Receipts measure poll/read/write intervals; packet errors retain accepted timing,
+rejected fields, device scheduling and elapsed pacing. The fixture preserves sustained results
+and playback pacing, and can use a pinned original helper for controlled diagnostics. The
+injected packet-gap check still refuses publication and verifies the diagnostic fields.
+Windows (229) and Linux (228) Rust tests pass, as do Windows lint, formatting and material
+checks. The verifier rejected an attempted selected thorough run before running any fixture;
+the corrected standalone test passed all seven checks with the pinned engine/helper and unchanged
+strict limits: 43200000 samples, zero accumulated QPC deviation, 23478272 bytes peak working set
+and no empty playback buffer. Both audio threads registered successfully. The maximum playback
+refill interval was 6.04 ms; these single diagnostic runs are not a causal or speed benchmark.
+The first push stopped on a material-policy conflict with concurrent distribution work on main;
+the resolution retains both the scoped release-file allowances and the exact root agent index
+allowance, covered by repository-boundary checks. Full generated progress remains dated 4 October.
+
+The first independent plugin trial connected its pinned engine, but model authentication expired
+before any inference/tool calls. The failed startup and unchanged source identities are recorded
+separately from the unmeasured workflow target in AGENT_COSTS.md. A fresh run awaits renewed
+client authentication. Added an original root `llms.txt` linking installation, recipes, limits
+and evidence; its links resolve, and the material policy grants only that exact text-file path.
+No comparative lead, milestone completion, release tag or additional editing points are claimed.
+
 ## 12 October 2026: recipe checkpoint shipped; sustained capture blocks the evidence refresh
 
 Commit 10367b9 reached main with the six skills/plugin. The sequential final regressions passed

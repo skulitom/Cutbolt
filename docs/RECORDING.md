@@ -40,11 +40,17 @@ Create the output directory first and use a new filename. The result contains th
 
 The output format is **48,000 Hz stereo PCM16**, from one sample to two hours. Duration must lie exactly on the 48,000 Hz sample grid. Endpoint capture explicitly requests shared-mode conversion to this format, including conversion from a different native rate or layout when Windows supports it. There is no claim that the file contains raw hardware samples before system processing. Input device processing, system mixing, conversion and dithering can affect the captured values. Windows refuses unsupported formats or unavailable devices; the command reports that failure. Process capture requests the same output format through the process loopback interface.
 
+The recording thread requests the Windows MMCSS `Audio` task while capture is active and
+reverts that registration when capture stops or fails. `device.thread_scheduling` reports
+whether registration succeeded; unavailable scheduling support falls back explicitly to the
+normal thread policy. This follows the public [MMCSS thread scheduling contract](https://learn.microsoft.com/en-us/windows/win32/procthread/multimedia-class-scheduler-service).
+It does not guarantee uninterrupted audio or relax any packet validation.
+
 Only requested samples are written. A final native packet can extend beyond that count; the receipt reports the discarded remainder. The first delivered sample defines file time zero. Buffer setup and command startup are not encoded as invented leading silence.
 
 ## Timing, latency and interruptions
 
-Receipts distinguish device sample positions from QPC timestamps in 100 ns units. For physical endpoints, packet device positions must remain continuous. The process loopback interface on the tested system returns no usable device position, so the receipt says so; sample counts and QPC are retained instead. A timestamp error, backward clock, discontinuity after the initial packet, or packet timestamp interval differing from its sample count by more than one millisecond rejects the recording. Initial discontinuity flags are retained explicitly. Accumulated QPC/sample-clock deviation is measured, not silently resampled away.
+Receipts distinguish device sample positions from QPC timestamps in 100 ns units. For physical endpoints, packet device positions must remain continuous. The process loopback interface on the tested system returns no usable device position, so the receipt says so; sample counts and QPC are retained instead. A timestamp error, backward clock, discontinuity after the initial packet, or packet timestamp interval differing from its sample count by more than one millisecond rejects the recording. Initial discontinuity flags are retained explicitly. Accumulated QPC/sample-clock deviation is measured, not silently resampled away. Receipts also report maximum intervals between capture polls, native reads and WAV writes. Packet-validation failures retain the last accepted timing, rejected packet fields and capture pacing in `error.detail`, so a clock gap can be investigated without publishing a damaged take.
 
 The reported stream-latency query can be unavailable, particularly for process loopback. It is diagnostic data, not a measurement of full acoustic input/output latency. No automatic physical calibration is claimed. Determine the needed correction from a known reference or calibration and supply it to placement as an exact signed shift.
 

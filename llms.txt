@@ -1,0 +1,31 @@
+# Cutbolt
+
+> An original local video editing engine for agents. Edit existing footage with exact rational timing, saved revisions, retries and undo, captions, audio processing and verified exports.
+
+Cutbolt is a Rust library and JSON CLI with optional MCP over stdio. It needs no hosted API, account or runtime network. Keep FFmpeg, fonts, models and original media external. Preserve inputs and use distinct output roots. Windows and Linux are verification platforms; native audio recording and hardware decoding currently require Windows.
+
+Qualifying H.264/HEVC 8-bit 4:2:0 originals work directly at the project's exact dimensions and frame rate. Other formats need explicit preparation within the documented matrix. Unsupported semantics fail explicitly. For new graphics-led animation, an HTML authoring tool can supply rendered graphics for Cutbolt to finish.
+
+## Start here
+
+- [Install and check setup](docs/INSTALLATION.md): source installation, doctor, local stdio MCP and the optional six-skill plugin.
+- [Agent interface](docs/AGENT_INTERFACE.md): compact default tools, workspace boundaries, saved sessions, jobs, revisions and retries.
+- [Router skill](skills/cutbolt/SKILL.md): choose the appropriate intent recipe and inspect its limits.
+- [Usage](docs/USAGE.md): implemented commands and request examples.
+
+## Footage workflows
+
+- [Talking-head recut](skills/recut-talking-head/SKILL.md): tighten pauses/fillers from a supplied transcript, caption and deliver.
+- [Screen tutorial](skills/screen-tutorial/SKILL.md): place a title, adjust loudness and export.
+- [Interview multicam](skills/interview-multicam/SKILL.md): edit already-synchronized camera sources with an explicit audio policy.
+- [Captions](skills/captions/SKILL.md): build captions from timed words and an external font.
+- [Deliver and review](skills/deliver-and-review/SKILL.md): export, inspect and optionally hand off with acknowledged losses.
+
+## Contracts and evidence
+
+- [Direct source limits](docs/DIRECT_SOURCES.md): accepted profiles, indexing, audio policy, source verification and measured performance.
+- [Explicit preparation](docs/CONFORM.md): supported conversion recipes and limits.
+- [Scenes](docs/SCENES.md): bounded graphics composition and compilation.
+- [Dependencies](docs/DEPENDENCIES.md): tested external versions and licenses.
+- [Agent costs](docs/AGENT_COSTS.md): measured scripted replays and separate fresh-model trials.
+- [Progress history](docs/PROGRESS_HISTORY.md): dated changes, targeted checks and remaining work. Roadmaps and plans describe future work unless an entry records verified implementation.

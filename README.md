@@ -86,7 +86,7 @@ Explicit timeline gaps produce black video and silence, including in previews an
 
 ## Run locally
 
-See [installation and setup checks](docs/INSTALLATION.md) for source installation and MCP setup.
+See [installation and setup checks](docs/INSTALLATION.md) for source installation and MCP setup. Agents can start with the concise [documentation index](llms.txt).
 
 Requires Rust/Cargo with a C build toolchain for SQLite, Python 3 with the development packages in [the dependency ledger](docs/DEPENDENCIES.md) for verification, and separately installed FFmpeg/ffprobe on PATH. The tested environment is recorded in [verification/latest.json](verification/latest.json); dependency details are in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 

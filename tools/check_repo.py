@@ -45,7 +45,9 @@ def inspect_file(name, content, patterns):
     issues = []
     path = Path(name)
     suffix = path.suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES and ALLOWED_IN_FOLDER.get(path.parent.as_posix()) != suffix:
+    if (suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES
+            and ALLOWED_IN_FOLDER.get(path.parent.as_posix()) != suffix
+            and path.as_posix() != "llms.txt"):
         issues.append(f"Unreviewed file type: {name}")
     if PRIVATE_PARTS & {p.lower() for p in path.parts}:
         issues.append(f"Excluded material directory: {name}")

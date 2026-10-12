@@ -80,6 +80,15 @@ class RepositoryBoundary(unittest.TestCase):
         for name in stray:
             self.assertIn(f"Unreviewed file type: {name}", issues)
 
+    def test_agent_index_only_at_repository_root(self):
+        self.write("llms.txt", "Original agent documentation index.\n")
+        self.assertEqual(self.issues(), [])
+        for name in ("nested/llms.txt", "unreviewed.txt"):
+            self.write(name, "x\n")
+        issues = self.issues()
+        for name in ("nested/llms.txt", "unreviewed.txt"):
+            self.assertIn(f"Unreviewed file type: {name}", issues)
+
     def test_required_policy_missing(self):
         (self.root / ".git/private-content-policy.json").unlink()
         with self.assertRaisesRegex(ValueError, "policy is missing"):

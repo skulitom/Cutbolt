@@ -239,7 +239,15 @@ fn record_packets(
     let mut written = 0u64;
     let start = Instant::now();
     let mut last_packet = Instant::now();
+    let mut last_poll = start;
+    let mut max_poll_interval = Duration::ZERO;
+    let mut max_native_read = Duration::ZERO;
+    let mut max_wave_write = Duration::ZERO;
     while written < frames {
+        let poll = Instant::now();
+        let poll_interval = poll.duration_since(last_poll);
+        max_poll_interval = max_poll_interval.max(poll_interval);
+        last_poll = poll;
         control.check()?;
         if start.elapsed() > Duration::from_secs(frames.div_ceil(48000) + 10)
             || last_packet.elapsed() > Duration::from_secs(5)
@@ -249,10 +257,29 @@ fn record_packets(
                 "Capture did not supply audio within its bounded deadline",
             ));
         }
-        if let Some(packet) = capture.next()? {
-            timing.accept(&packet, capture.device_clock())?;
+        let read_start = Instant::now();
+        let packet = capture.next()?;
+        max_native_read = max_native_read.max(read_start.elapsed());
+        if let Some(packet) = packet {
+            timing
+                .accept(&packet, capture.device_clock())
+                .map_err(|e| {
+                    e.with_detail(json!({
+                        "device": capture.description(),
+                        "accepted_timing": timing.report(),
+                        "rejected_packet": {"frames":packet.frames,"flags":packet.flags,
+                            "device_position":packet.device_position,"qpc_100ns":packet.qpc_100ns},
+                        "capture_pacing": {"elapsed_seconds":start.elapsed().as_secs_f64(),
+                            "last_poll_interval_seconds":poll_interval.as_secs_f64(),
+                            "maximum_poll_interval_seconds":max_poll_interval.as_secs_f64(),
+                            "maximum_native_read_seconds":max_native_read.as_secs_f64(),
+                            "maximum_wave_write_seconds":max_wave_write.as_secs_f64()}
+                    }))
+                })?;
             let take = (frames - written).min(packet.frames as u64) as usize;
+            let write_start = Instant::now();
             writer.push(&packet.pcm[..take * 4])?;
+            max_wave_write = max_wave_write.max(write_start.elapsed());
             written += take as u64;
             last_packet = Instant::now();
         } else {
@@ -264,6 +291,9 @@ fn record_packets(
     let mut report = timing.report();
     report["discarded_final_packet_frames"] = json!(timing.frames - frames);
     report["capture_wall_seconds"] = json!(start.elapsed().as_secs_f64());
+    report["maximum_poll_interval_seconds"] = json!(max_poll_interval.as_secs_f64());
+    report["maximum_native_read_seconds"] = json!(max_native_read.as_secs_f64());
+    report["maximum_wave_write_seconds"] = json!(max_wave_write.as_secs_f64());
     Ok((digest, report))
 }
 pub fn run(request: &Record) -> Result<Value> {
@@ -456,6 +486,25 @@ mod tests {
         let decoded = crate::pcm_wave::decode(&contents).unwrap();
         assert_eq!(decoded.data.len(), 962);
         assert_eq!(&decoded.data[958..], [32767, -32768, 0, 0]);
+        let mut gap_request = request.clone();
+        gap_request.output = root.join("timestamp-gap.wav");
+        let failure = capture_with(&gap_request, &media::Uncontrolled, |_| {
+            Ok(Box::new(Fake {
+                packets: VecDeque::from([
+                    Ok(packet(100, 1_000_000, 0)),
+                    Ok(packet(580, 1_900_000, 0)),
+                ]),
+            }))
+        })
+        .unwrap_err();
+        assert_eq!(failure.code, "CAPTURE_DISCONTINUITY");
+        let detail = failure.detail.unwrap();
+        assert_eq!(detail["accepted_timing"]["received_sample_frames"], 480);
+        assert_eq!(detail["accepted_timing"]["last_qpc_100ns"], 1_000_000);
+        assert_eq!(detail["rejected_packet"]["qpc_100ns"], 1_900_000);
+        assert_eq!(detail["rejected_packet"]["frames"], 480);
+        assert!(detail["capture_pacing"]["maximum_poll_interval_seconds"].is_number());
+        assert!(!gap_request.output.exists());
         assert_eq!(
             capture_with(&request, &media::Uncontrolled, |_| panic!(
                 "Must reject before opening input"

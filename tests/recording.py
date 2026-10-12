@@ -33,12 +33,18 @@ def source(seconds,mode='mute',rate=48000,offset=0):
 def stop(p):
     if p.poll() is None:p.stdin.write('\n');p.stdin.flush()
     p.wait(timeout=5);assert p.returncode==0,p.stderr.read()
+    return json.loads(p.stdout.read())
 
-def run(root,native_seconds):
+def run(root,native_seconds,helper=None):
+    global HELPER
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents;root.mkdir(parents=True,exist_ok=True)
     sources,out,store=[root/n for n in ('sources','output','store')]
     for p in (sources,out,store):p.mkdir()
-    subprocess.run(['cargo','build','--locked','--example','recording_fixture'],cwd=ROOT,check=True,capture_output=True)
+    if helper is None:
+        subprocess.run(['cargo','build','--locked','--example','recording_fixture'],cwd=ROOT,check=True,capture_output=True)
+    else:
+        HELPER=helper.resolve()
+        assert HELPER.is_file(),HELPER
     passed=[];cases=[];rejected=0;rendered_frames=0;sample_frames=0
     original_hashes={}
     def call(r,error=None,timeout=120):
@@ -201,7 +207,9 @@ def run(root,native_seconds):
             except AssertionError:
                 if recorder.poll() is None:raise
             clock.sleep(.1)
-        wall=clock.monotonic()-start;value=json.loads(recorder.stdout.read());assert recorder.returncode==0 and value['ok'],value
+        wall=clock.monotonic()-start;value=json.loads(recorder.stdout.read())
+        (root/'sustained-capture-result.json').write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
+        assert recorder.returncode==0 and value['ok'],value
         r=value['result'];assert r['samples']==native_seconds*48000 and peak<128*1024*1024;budgets.check(wall<native_seconds+30,wall)
         budgets.check(r['timing']['maximum_qpc_sample_clock_deviation_100ns']<=200000,r['timing'])
         digest=hashlib.sha256();peak_pcm=0;count=0
@@ -212,7 +220,11 @@ def run(root,native_seconds):
         assert count==native_seconds*48000 and peak_pcm<=2 and digest.hexdigest()==r['pcm_sha256']
         sustained={'seconds':native_seconds,'sample_frames':count,'peak_working_set_bytes':peak,'wall_seconds':wall,'maximum_silent_pcm':peak_pcm,'receipt':r,'source':ready,'long_gate_passed':native_seconds==900}
         original_hashes[out/'sustained.wav']=sha(out/'sustained.wav')
-    finally:stop(a)
+    finally:
+        playback=stop(a)
+        (root/'sustained-playback-result.json').write_text(json.dumps(playback,indent=2)+'\n',encoding='utf-8')
+        print('Sustained playback scheduling: '+json.dumps(playback),flush=True)
+    sustained['playback_scheduling']=playback
     if native_seconds==900:passed.append('recording.sustained_native_capture_clock_and_memory')
     for path,before in original_hashes.items():assert sha(path)==before,path
     report={'passed':passed,'native':native,'cases':cases,'sustained':sustained,'rendered_frames':rendered_frames,'sample_frames_compared':sample_frames,'rejected_cases':rejected,'source_preservation':True}
@@ -220,4 +232,5 @@ def run(root,native_seconds):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);parser.add_argument('--native-seconds',type=int,default=900,help='Use a shorter development run without earning the sustained-capture acceptance ID')
-    args=parser.parse_args();run(args.output,args.native_seconds)
+    parser.add_argument('--helper',type=Path,help='Use a pinned original playback helper instead of rebuilding it')
+    args=parser.parse_args();run(args.output,args.native_seconds,args.helper)

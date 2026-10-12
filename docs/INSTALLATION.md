@@ -87,6 +87,8 @@ Replace the checkout path with a Windows or Linux absolute path; quote paths con
 Restart an already-open client after installation. `claude mcp list` should show the plugin's
 Cutbolt connection as connected. A failed connection usually needs the executable's directory
 on PATH; `cutbolt --version` and `cutbolt doctor` in that terminal identify the selected build.
+The client needs its own working model authentication before an agent can execute a recipe;
+a connected MCP server alone does not establish model access.
 The marketplace entry uses local files. It is not a hosted registry or a published binary release.
 See the client's [plugin format](https://code.claude.com/docs/en/plugins-reference) and
 [marketplace installation](https://code.claude.com/docs/en/plugin-marketplaces) documentation.

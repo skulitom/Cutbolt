@@ -268,3 +268,17 @@ skill/manifest bytes match the tested source. No engine, fonts or models are bun
 [installation and tested client version](INSTALLATION.md#install-the-optional-agent-plugin).
 The fresh-model workflows 1, 3 and 5, actual token measurements and the approved talking-head
 target remain open. No comparative lead or editing points are claimed.
+
+## First fresh-plugin startup attempt, 12 October 2026
+
+The isolated talking-head trial used the installed six-skill plugin and a pinned 10367b9
+engine, original generated inputs, a supplied transcript and no existing session. The client
+connected to the workspace's MCP server. Its first model request then returned `Login expired`;
+the process exited with code 1 after 2.72 seconds. Provider-reported inference tokens and tool
+calls were both zero, and no delivery was created. Source identities were unchanged.
+
+This establishes a working plugin connection and an authentication prerequisite, not a model
+workflow result or a passing cost target. The complete raw startup/wire records and binary
+identities are retained outside Git. After sign-in is renewed, the measured workflow must start
+again with fresh inputs; the failed startup record remains separate. Workflows 1, 3 and 5 and
+the Cutbolt/plain-FFmpeg comparison still need actual independent model runs.

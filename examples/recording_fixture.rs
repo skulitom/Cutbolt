@@ -10,7 +10,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         time::{Duration, Instant},
     };
-    use windows::Win32::{Media::Audio::*, System::Com::*};
+    use windows::{
+        Win32::{
+            Foundation::HANDLE,
+            Media::Audio::*,
+            System::{Com::*, Threading::*},
+        },
+        core::w,
+    };
+    struct AudioTask(HANDLE);
+    impl Drop for AudioTask {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = AvRevertMmThreadCharacteristics(self.0);
+            }
+        }
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 5 {
         return Err("Expected: seconds mute|quiet sample_rate tone_offset_hz".into());
@@ -78,24 +93,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             writer.ReleaseBuffer(frames, 0)
         };
         fill(size)?;
+        let mut task_index = 0;
+        let (audio_task, scheduling) = match AvSetMmThreadCharacteristicsW(
+            w!("Audio"),
+            &mut task_index,
+        ) {
+            Ok(handle) => (
+                Some(AudioTask(handle)),
+                serde_json::json!({"task":"Audio","registered":true}),
+            ),
+            Err(e) => (
+                None,
+                serde_json::json!({"task":"Audio","registered":false,"error":format!("{:#010x}",e.code().0 as u32)}),
+            ),
+        };
         client.Start()?;
         println!(
             "{}",
-            serde_json::json!({"ready":true,"pid":std::process::id(),"rate":rate,"muted":muted,"session":format!("{guid:?}"),"frequencies":[310+offset,710+offset]})
+            serde_json::json!({"ready":true,"pid":std::process::id(),"rate":rate,"muted":muted,"session":format!("{guid:?}"),"frequencies":[310+offset,710+offset],"thread_scheduling":scheduling})
         );
         io::stdout().flush()?;
         let start = Instant::now();
+        let mut last_refill = start;
+        let mut max_refill_interval = Duration::ZERO;
+        let mut empty_buffer_observations = 0u64;
         while start.elapsed() < Duration::from_secs(seconds) && !stop.load(Ordering::Acquire) {
-            let available = size - client.GetCurrentPadding()?;
+            let now = Instant::now();
+            max_refill_interval = max_refill_interval.max(now.duration_since(last_refill));
+            last_refill = now;
+            let padding = client.GetCurrentPadding()?;
+            empty_buffer_observations += u64::from(padding == 0);
+            let available = size - padding;
             if available > 0 {
                 fill(available)?;
             }
             std::thread::sleep(Duration::from_millis(2));
         }
         client.Stop()?;
+        drop(audio_task);
         println!(
             "{}",
-            serde_json::json!({"stopped":true,"submitted_frames":position,"wall_seconds":start.elapsed().as_secs_f64()})
+            serde_json::json!({"stopped":true,"submitted_frames":position,"wall_seconds":start.elapsed().as_secs_f64(),
+                "buffer_frames":size,"maximum_refill_interval_seconds":max_refill_interval.as_secs_f64(),
+                "empty_buffer_observations":empty_buffer_observations})
         );
         drop(writer);
         drop(volume);

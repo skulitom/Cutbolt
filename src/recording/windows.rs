@@ -300,6 +300,32 @@ fn activate_process(pid: u32) -> Result<IAudioClient> {
             .map_err(failed)
     }
 }
+// Registration belongs to this COM-owning thread and is reverted when capture stops.
+// Audio task scheduling is best-effort: unavailable MMCSS is reported, never hidden.
+struct MultimediaTask(HANDLE);
+impl MultimediaTask {
+    fn enter() -> (Option<Self>, Value) {
+        let mut index = 0;
+        match unsafe { AvSetMmThreadCharacteristicsW(w!("Audio"), &mut index) } {
+            Ok(handle) => (
+                Some(Self(handle)),
+                json!({"policy":"windows_mmcss","task":"Audio","registered":true}),
+            ),
+            Err(e) => (
+                None,
+                json!({"policy":"windows_mmcss","task":"Audio","registered":false,
+                    "error":format!("{:#010x}",e.code().0 as u32),"fallback":"normal_thread_scheduling"}),
+            ),
+        }
+    }
+}
+impl Drop for MultimediaTask {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = AvRevertMmThreadCharacteristics(self.0);
+        }
+    }
+}
 struct Native {
     capture: IAudioCaptureClient,
     client: IAudioClient,
@@ -307,6 +333,7 @@ struct Native {
     process: Option<Handle>,
     report: Value,
     running: bool,
+    scheduling: Option<MultimediaTask>,
     _apartment: Apartment,
 }
 impl Capture for Native {
@@ -376,6 +403,7 @@ impl Capture for Native {
             }
             self.running = false;
         }
+        self.scheduling.take();
         Ok(())
     }
     fn device_clock(&self) -> bool {
@@ -436,6 +464,8 @@ pub(super) fn open(input: &Input) -> Result<Box<dyn Capture>> {
             Err(e) => json!({"unavailable":format!("{:#010x}",e.code().0 as u32)}),
         };
         report["requested_format"] = json!({"sample_rate":48000,"channels":2,"bits":16});
+        let (scheduling, scheduling_report) = MultimediaTask::enter();
+        report["thread_scheduling"] = scheduling_report;
         let mut native = Native {
             capture,
             client,
@@ -443,6 +473,7 @@ pub(super) fn open(input: &Input) -> Result<Box<dyn Capture>> {
             process,
             report,
             running: false,
+            scheduling,
             _apartment: apartment,
         };
         native.client.Start().map_err(failed)?;
