@@ -1,0 +1,66 @@
+{
+  "manifest_version": "0.3",
+  "name": "cutbolt",
+  "display_name": "Cutbolt",
+  "description": "Local video editing engine for agents: exact timelines, saved sessions, rendering and FFmpeg export.",
+  "long_description": "Edit local video with exact timelines, saved sessions, previews, captions and rendering. Runs locally over stdio with no network at runtime. This bundle is for Windows x64. Media inspection, rendering and export need FFmpeg and ffprobe installed separately on PATH, or selected with CUTBOLT_FFMPEG and CUTBOLT_FFPROBE. Choose an existing workspace folder for media, outputs and .cutbolt state.",
+  "author": { "name": "skulitom", "url": "https://github.com/skulitom" },
+  "repository": { "type": "git", "url": "https://github.com/skulitom/Cutbolt" },
+  "homepage": "https://github.com/skulitom/Cutbolt#readme",
+  "documentation": "https://github.com/skulitom/Cutbolt/blob/main/docs/AGENT_INTERFACE.md",
+  "support": "https://github.com/skulitom/Cutbolt/issues",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/cutbolt.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/cutbolt.exe",
+      "args": ["--workspace", "${user_config.workspace}", "mcp", "--tools", "core"]
+    }
+  },
+  "tools": [
+    { "name": "cutbolt_preview_sheet", "description": "Write a contact sheet of exact timeline frames and return it as an inline image." },
+    { "name": "cutbolt_preview_cuts", "description": "Review cuts as before-and-after frame sheets with clip and source times." },
+    { "name": "cutbolt_audio_normalize", "description": "Measure the mix and propose clip levels and limiting for a loudness target." },
+    { "name": "cutbolt_audio_tighten", "description": "Find speech pauses and propose checked ripple deletions across tracks." },
+    { "name": "cutbolt_audio_beats", "description": "Find music onsets, tempo alternatives and a beat grid at exact file times." },
+    { "name": "cutbolt_audio_duck", "description": "Analyze speech and propose gain curves that lower music beneath it." },
+    { "name": "cutbolt_media_sheet", "description": "Show source footage as an inline frame sheet without adding it to a project." },
+    { "name": "cutbolt_export_inspect", "description": "Inspect timeline timing, sources and policies for an export without writing it." },
+    { "name": "cutbolt_transcript_assemble", "description": "Turn transcript word selections into checked sequential clip append operations." },
+    { "name": "cutbolt_transcript_fillers", "description": "Find spoken filler words and propose checked timeline deletions." },
+    { "name": "cutbolt_captions_draft", "description": "Draft timed caption cues from transcripts of the timeline's sources." },
+    { "name": "cutbolt_scene_inspect", "description": "Validate a bounded scene and report its source, timing, color and audio policies." },
+    { "name": "cutbolt_scene_still", "description": "Render one scene frame to a new PNG and return it as an inline image." },
+    { "name": "cutbolt_preview_frame", "description": "Export one exact timeline frame to a new PNG and return it as an inline image." },
+    { "name": "cutbolt_capabilities", "description": "Discover implemented editing operations, render profiles, job limits and unsupported features." },
+    { "name": "cutbolt_schema", "description": "Read the JSON Schema for a command or shared type, with selectable details." },
+    { "name": "cutbolt_project_create", "description": "Create an empty versioned project snapshot with exact rational timing without saving it." },
+    { "name": "cutbolt_session_create", "description": "Start a saved project at revision zero with retry-safe request receipts." },
+    { "name": "cutbolt_session_get", "description": "Read the saved project head or a chosen immutable revision." },
+    { "name": "cutbolt_session_apply", "description": "Commit an atomic editing batch against an expected revision with a durable request ID." },
+    { "name": "cutbolt_session_undo", "description": "Undo the latest applied state as a new revision while preserving history." },
+    { "name": "cutbolt_session_preview", "description": "Inspect an edit's before-and-after placements, tracks, links and durations without saving." },
+    { "name": "cutbolt_session_history", "description": "Read paginated revision summaries in newest-first order." },
+    { "name": "cutbolt_job_status", "description": "Read saved job state, progress, attempt history and the completion or error receipt." },
+    { "name": "cutbolt_job_start", "description": "Queue a long-running command in the background and return a durable ticket." },
+    { "name": "cutbolt_job_wait", "description": "Wait for one or more jobs and return their status, progress and results." },
+    { "name": "cutbolt_timeline_meters", "description": "Measure timeline loudness, sample peaks and RMS without exporting." },
+    { "name": "cutbolt_timeline_check", "description": "Find likely timeline mistakes such as flash frames, sync problems and missing media without rendering." },
+    { "name": "cutbolt_timeline_outline", "description": "Read a compact timeline outline with clip spans, transitions and optional transcript words." },
+    { "name": "cutbolt_files_list", "description": "List workspace files and folders with sizes and relative paths, skipping engine state folders." },
+    { "name": "cutbolt_media_inspect", "description": "Probe a local source's identity, streams and timeline readiness or conversion needs." },
+    { "name": "cutbolt_run", "description": "Run another Cutbolt tool command by name with its usual arguments." }
+  ],
+  "compatibility": { "platforms": ["win32"] },
+  "user_config": {
+    "workspace": {
+      "type": "directory",
+      "title": "Workspace",
+      "description": "Choose an existing folder. Cutbolt reads media and writes outputs only inside this folder, and creates a .cutbolt folder here for sessions, jobs, cache and scratch state.",
+      "required": true,
+      "default": "${HOME}"
+    }
+  },
+  "keywords": ["video-editing", "ffmpeg", "timeline", "rendering", "captions", "mcp"],
+  "license": "MIT"
+}

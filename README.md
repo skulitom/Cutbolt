@@ -117,6 +117,26 @@ This creates original synthetic clips, edits them, renders a 30-second sequence,
 
 The current renderer accepts FFV1/bgr0 video with matching dimensions and 48 kHz stereo PCM audio, exporting Matroska. Sequential timelines support [eight exact native frame rates](docs/NATIVE_TIMING.md), including fractional clocks with sample-aligned cuts, for sequential timelines, placed tracks and H.264 delivery. Full verification passes native-rate, VFR conversion and complete 30-minute synchronization checks. The scene compiler accepts bounded PNG layers and separate WAV narration, with crop, integer scale, quarter-turn rotation and position/opacity keyframes. Curves support hold, linear and quadratic easing, with optional delay, speed adjustment and reversal for each property. Layers support normal/multiply/screen blending, explicit straight or stored premultiplied alpha, and static or keyframed rectangular masks with inversion. Its five-second reference fixture renders at 1080p. Arbitrary H.264 ingestion, general timeline effects and broader delivery/device profiles remain open. See [scene commands and the runnable example](docs/SCENES.md). See [command usage and limitations](docs/USAGE.md).
 
+## Use with Claude Code, Codex and Claude Desktop
+
+Download the Windows x64 archive from [Releases](https://github.com/skulitom/Cutbolt/releases), compare its SHA-256 (`Get-FileHash <archive> -Algorithm SHA256`) with `SHA256SUMS`, and extract it to `C:\Tools\Cutbolt`.
+Install FFmpeg and ffprobe separately from [ffmpeg.org](https://ffmpeg.org/download.html), add them to PATH, and restart the client so it sees PATH; or set `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` to their executable paths.
+Create a workspace folder such as `C:\Videos\Project`; Cutbolt reads media and writes outputs inside it, and creates `.cutbolt` there for state.
+
+Claude Code:
+```powershell
+claude mcp add cutbolt -- C:\Tools\Cutbolt\cutbolt.exe --workspace C:\Videos\Project mcp --tools core
+```
+Codex: add this to `~/.codex/config.toml`:
+```toml
+[mcp_servers.cutbolt]
+command = 'C:\Tools\Cutbolt\cutbolt.exe'
+args = ['--workspace', 'C:\Videos\Project', 'mcp', '--tools', 'core']
+```
+Claude Desktop: install `cutbolt-windows-x64.mcpb` from the release via **Settings > Extensions > Install from file**, then pick an existing workspace.
+
+Maintainers: see [Publishing](mcpb/PUBLISHING.md).
+
 ## Plan
 
 - [Draft 1.0 roadmap: release gates, comparative benchmark and proposed v2 criteria](docs/ROADMAP_1_0.md)
