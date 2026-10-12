@@ -1,5 +1,40 @@
 # Progress history
 
+## 12 October 2026: tested intent recipes and local plugin installation
+
+Added six original skills and a local marketplace/plugin registering the existing stdio MCP
+engine. All 26 fenced JSON requests are parsed and executed by a new `skills` fixture, which
+also checks repeated command argument keys, plugin metadata, source preservation and session
+integrity. Requests use observed asset IDs/revisions; multicam output is compared against the
+original source pictures and complete fixed-camera audio. Runtime platform limits are explicit.
+Skills and manifests are included in verification cache inputs and the shipping dirty-code guard.
+
+The four scripted recipes pass on Windows (36 seconds) and Linux (18 seconds): talking head
+with supplied transcript/captions/export/review takes 15 editing calls, tutorial 11, two-camera
+edit 8 and OTIO delivery 9, with zero schema lookups. These counts exclude skill loading and
+model interaction. Initial development failures exposed mistaken use of `save_as` as if it also
+returned the original job receipt, and a fixture omission of the declared-transfer OTIO loss.
+The recipes now return reviewable results directly and describe both handoff losses. All six
+skill format checks pass. The clean-profile documented plugin install discovers all six skills,
+matches their source bytes and connects through local stdio; the tested client build is in
+INSTALLATION.md. Its initial health check pointed PATH at a nonexistent build directory; using
+the actual executable fixed it without changing the plugin. Raw install records remain external.
+
+An overlapping four-lane regression run saturated the host during the full 4K oracle: the Linux
+skills run reported STORE_BUSY, and background media checks reported timeouts. The redundant
+Windows regression was stopped, new background scheduling was held for the full milestone, and
+the four related regressions are queued to run sequentially on each platform afterward. Their
+results, and failures from f79bcdf's unfinished background run, must be checked after this commit.
+No limits were relaxed or failed runs relabeled as passes. Earlier 206209d background verification
+finished with 21 passes; its remaining checks were superseded by f79bcdf's descendant run.
+
+The frozen 633fde0 full milestone has passed the complete 30-minute 4K check, direct sources,
+optional runtimes and the long graphics/agent-interface checks. Sustained capture and final
+latency acceptance are still running. Generated progress/evidence remain the 4 October baseline
+until that complete run succeeds. Fresh-model workflows 1/3/5, actual token use and the approved
+talking-head targets remain open, as do the later direct-footage stages. This is a stage-5
+installation/recipe checkpoint, not full-plan completion, a comparative lead or new editing points.
+
 ## 12 October 2026: explicit scene shorthand and agent-cost stage 4 acceptance
 
 Added an explicit `form:short` text/shape scene syntax, accepted by scene inspection, stills,

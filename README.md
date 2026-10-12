@@ -2,9 +2,9 @@
 
 An original, local video editing engine for agents. Edit recorded footage, add captions, mix audio and export through structured commands, with saved revisions, retries and undo.
 
-Qualifying [H.264 and HEVC originals](docs/DIRECT_SOURCES.md) now feed frame previews, track renders and exports directly. Other formats still need explicit conversion within the [supported matrix](docs/CONFORM.md). The compact MCP catalog and [20 original graphics templates](docs/TEMPLATES.md) reduce setup work; packaged installation and tested intent skills remain in development.
+Qualifying [H.264 and HEVC originals](docs/DIRECT_SOURCES.md) now feed frame previews, track renders and exports directly. Other formats still need explicit conversion within the [supported matrix](docs/CONFORM.md). The compact MCP catalog, [20 original graphics templates](docs/TEMPLATES.md) and [six tested skill recipes with a local plugin](docs/INSTALLATION.md#install-the-optional-agent-plugin) reduce setup work. Binary releases and fresh-model workflow measurements remain in development.
 
-**Development status: v0.4.0, 11 October 2026.** A Rust library and JSON command-line program create project snapshots, validate and edit timelines, inspect local media, plan renders and produce verified output. Local sessions persist revisions, reject conflicting edits, replay successful requests, preview edit diffs and support undo/restoration with history.
+**Development status: v0.4.0, 12 October 2026.** A Rust library and JSON command-line program create project snapshots, validate and edit timelines, inspect local media, plan renders and produce verified output. Local sessions persist revisions, reject conflicting edits, replay successful requests, preview edit diffs and support undo/restoration with history.
 
 The last full acceptance run, **4 October 2026**, passed 466 checks for the bounded v1 checklist (100/100 core, 108/108 total). This is dated checklist evidence, not a comparative claim or full verification of the newer work. See the [implementation tracker](docs/IMPLEMENTATION_PROGRESS.md), [full evidence](docs/PROGRESS.md) and [subsequent targeted checks and open work](docs/PROGRESS_HISTORY.md).
 

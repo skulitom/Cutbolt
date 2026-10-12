@@ -21,7 +21,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_NAME = "cutbolt.exe" if os.name == "nt" else "cutbolt"
-CODE = ["src", "tests", "tools", "examples", "Cargo.toml", "Cargo.lock", "build.rs", "docs/MCP_EVALUATION.md"]
+CODE = ["src", "tests", "tools", "examples", "skills", ".claude-plugin", "Cargo.toml", "Cargo.lock", "build.rs", "docs/MCP_EVALUATION.md"]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import impact  # noqa: E402
 

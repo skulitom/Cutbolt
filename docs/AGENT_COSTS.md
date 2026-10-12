@@ -238,3 +238,33 @@ and zero schema lookups. Received bytes are 209841/46918/53491/41111/185972 on W
 increase. The default workspace tool listing stays 21198 bytes, with 18 core / 86 full tools.
 No budget is relaxed. Together with two-call title placement, this satisfies stage 4's bounded
 scripted acceptance. Stage 5's tested skills/plugin and independent agent token trials remain.
+
+## Stage 5 recipe and installation checkpoint, 12 October 2026
+
+Six original skills now cover setup/routing, talking-head recuts, tutorials, synchronized
+camera edits, captions and delivery. The `skills` fixture parses and executes all 26 fenced
+JSON examples, compares repeated command argument keys and checks the local plugin manifests.
+The recipes take IDs and revisions from actual returned results. They include source inspection
+and preserve the originals. Saved results return file receipts rather than job status/proposals;
+the recipes return those results directly, with optional file handoff explained separately.
+
+| Scripted skill recipe | Editing calls | Output frames | Schema lookups |
+| --- | ---: | ---: | ---: |
+| Talking head, supplied transcript, captions, export and review | 15 | 124 | 0 |
+| Screen tutorial, title, loudness and export | 11 | 120 | 0 |
+| Synchronized two-camera cut and export | 8 | 150 | 0 |
+| Export, review and accepted-loss OTIO handoff | 9 | 150 | 0 |
+
+These pass on Windows and Linux with original six-second sources. The camera-switch output
+matches independently decoded source RGB and complete fixed-camera PCM; all recipes check
+output timing, required artifacts, source preservation and saved-session integrity. The handoff
+fixture explicitly accepts omission of edit links and the working transfer declaration. These
+counts exclude skill-loading calls and model interaction. They are not a fresh-agent success
+claim or token measurement, and do not replace the five existing SDK replay budgets.
+
+The optional local marketplace/plugin installs in an empty profile with the documented
+commands, discovers all six skills and connects to the workspace through stdio. The installed
+skill/manifest bytes match the tested source. No engine, fonts or models are bundled. See
+[installation and tested client version](INSTALLATION.md#install-the-optional-agent-plugin).
+The fresh-model workflows 1, 3 and 5, actual token measurements and the approved talking-head
+target remain open. No comparative lead or editing points are claimed.

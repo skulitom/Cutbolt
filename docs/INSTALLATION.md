@@ -2,7 +2,8 @@
 
 Cutbolt is a local executable and Rust library. An MCP client starts the executable over stdio;
 there is no server to deploy. Windows x86-64 and Linux x86-64 are the current verification
-platforms. Tagged binary releases and packaged agent skills are still in preparation.
+platforms. The source checkout includes an optional skills/MCP plugin; tagged binary releases
+are still in preparation.
 
 ## Build and install from source
 
@@ -63,3 +64,48 @@ On Windows, use an absolute path to `cutbolt.exe` and escape JSON backslashes, o
 slashes. The default catalog has 18 tools including `cutbolt_run`; `mcp --tools full` exposes
 all 86 direct tools. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md) for saved revisions, jobs and
 workspace boundaries, and [USAGE.md](USAGE.md) for editing commands.
+
+## Install the optional agent plugin
+
+Build/install the executable first and check `cutbolt doctor` from the same environment as
+Claude Code. The plugin uses `cutbolt` on PATH and does not install the engine, FFmpeg, fonts,
+models or other dependencies. It launches local stdio MCP in the directory where you start
+Claude Code. Start in the workspace containing your media and outputs, not the engine checkout.
+
+Register the local checkout, then install its plugin:
+
+```text
+claude plugin validate /absolute/path/to/Cutbolt/.claude-plugin/plugin.json --strict
+claude plugin validate /absolute/path/to/Cutbolt/.claude-plugin/marketplace.json --strict
+claude plugin marketplace add /absolute/path/to/Cutbolt
+claude plugin install cutbolt@cutbolt-local --scope user
+claude plugin list
+claude mcp list
+```
+
+Replace the checkout path with a Windows or Linux absolute path; quote paths containing spaces.
+Restart an already-open client after installation. `claude mcp list` should show the plugin's
+Cutbolt connection as connected. A failed connection usually needs the executable's directory
+on PATH; `cutbolt --version` and `cutbolt doctor` in that terminal identify the selected build.
+The marketplace entry uses local files. It is not a hosted registry or a published binary release.
+See the client's [plugin format](https://code.claude.com/docs/en/plugins-reference) and
+[marketplace installation](https://code.claude.com/docs/en/plugin-marketplaces) documentation.
+
+The six original skills are `cutbolt`, `recut-talking-head`, `screen-tutorial`,
+`interview-multicam`, `captions` and `deliver-and-review`. The client exposes names such as
+`/cutbolt:cutbolt` and `/cutbolt:recut-talking-head`. The router selects a recipe for existing
+footage; each recipe includes requests, expected results, revision handling and recovery.
+A new graphics-led video may start in an HTML authoring tool, with Cutbolt finishing its output.
+
+For a clean-profile installation check, set `CLAUDE_CONFIG_DIR` to a new, empty external
+folder in the testing shell before the commands above. Run from a separate media workspace
+without project configuration, and do not copy credentials or existing client settings into
+that profile. This environment override isolates settings, history and plugins as described
+in the client's [environment reference](https://code.claude.com/docs/en/env-vars). Normal
+installation does not need the override. The tested Windows client is Claude Code **2.1.280**;
+other client builds and Linux plugin installation have not yet been verified.
+
+`python -X utf8 tools/verify.py --only skills` executes every JSON request in the skills
+against original synthetic sources. It verifies the four complete recipes, outputs and source
+preservation on Windows and Linux. This is scripted documentation verification: fresh-model
+workflow success and model token usage are separately tracked in [AGENT_COSTS.md](AGENT_COSTS.md).

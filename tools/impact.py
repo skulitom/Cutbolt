@@ -91,6 +91,10 @@ def python_closure(stage):
         if f'"{other.name}"' in text:
             tools.add(f"tools/{other.name}")
     files |= tools
+    if stage == "skills":
+        # Recipes and manifests are executable fixture inputs, not incidental documentation.
+        files |= {p.relative_to(ROOT).as_posix() for p in (ROOT / "skills").glob("*/SKILL.md")}
+        files |= {".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"}
     for other in (ROOT / "examples").glob("*"):
         if other.is_file() and (other.stem in text or other.name in text):
             files.add(f"examples/{other.name}")
