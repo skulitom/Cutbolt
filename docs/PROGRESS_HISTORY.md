@@ -1,5 +1,35 @@
 # Progress history
 
+## 12 October 2026: actual fresh-agent results and smaller MCP startup
+
+The first three fresh plugin-only workflows pass independent output audits on pinned 6c3447a:
+talking head, tutorial and accepted-loss OTIO handoff. Claude Code 2.1.280 reports
+claude-opus-5-5[1m]. Actual all-tool counts are 21, 21 and 12, with 2, 3 and 1 failed MCP
+calls repaired and no schema lookup. Total provider input including cache reads/writes is
+1252335, 1690393 and 577819 tokens; output is 6094, 6173 and 2876. The talking-head result
+fails the approved 15-call/40000-token targets. Synthetic source/frame/sample/caption/title,
+loudness and handoff audits pass without repairing model outputs. No recognition, repeated-run,
+comparative lead or general editorial-quality claim follows. See AGENT_COSTS.md for full counts.
+
+Controlled no-edit probes isolate excessive startup context to MCP initialization guidance:
+changing only the 4845-character instructions to 118 characters takes initial input from
+56507 to 13637 tokens in this client, with unchanged tools/skills. Engine instructions are now
+brief in both catalogs, with exact-time and workspace guidance preserved. Recipes clarify
+local font objects and the requirement to finish export before starting review. The SDK
+initialization ceiling tightens from 6000 to 1600 bytes; measured Windows initialization is
+555 bytes and tools/list remains 21198 bytes. No existing workflow budget is loosened.
+
+Windows 232 Rust tests, lint/format and four affected fixtures pass; Linux's six MCP tests,
+agent costs and skills pass. Raw trials and controlled probes remain outside Git. New model
+runs use the same prompts/inputs and will be audited before claiming an efficiency improvement.
+Full generated evidence remains the separately verified 338e114 milestone, stale for these
+changes; no points are awarded and stage 5's efficiency exit remains open.
+
+The ddee127 alpha shipment passed its gate and reached main. Its background direct_sources
+fixture passes, following a 6c3447a background HEVC/Opus H.264 comparison failure. Twelve
+retained isolated export pairs also match, but do not explain the earlier mismatch. Further
+background results must be checked; the prior failure is retained rather than labeled fixed.
+
 ## 12 October 2026: explicit transparent ProRes and FFV1 normalization
 
 Explicit SDR conform now accepts native ProRes 4444/4444 XQ YUVA444 at 10 or 12 bits,

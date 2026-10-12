@@ -618,32 +618,19 @@ impl Server {
             }
         })
     }
-    /// Frame and contact-sheet previews also come back as a downscaled inline image, so a
-    /// multimodal client sees the edit without opening the file.
+    // Keep bootstrap guidance small: clients may amplify it in model context. Workflow
+    // recipes belong in the plugin; command contracts remain in the tools and schema.
     fn instructions(&self) -> String {
         let mut text = concat!(
-            "Cutbolt is a local video editing engine; no HTTP service is used. Edits are saved sessions with revisions, durable request IDs for safe retries, previews and undo. ",
-            "Typical cut: session.create with id, width, height and frame_rate (30 or 60 fps footage keeps every frame on a 30 or 60 fps project); ",
-            "media.inspect returns a timeline-ready asset for eligible originals; for files needing preparation, job.start run media.prepare with the path and project, then job.wait, returns an asset for media.add; session.apply with media.add, project.transfer once (bt709 suits most material), then clip.append, clip.insert or clip.trim; look with preview.sheet or preview.frame, ",
-            "which return images; deliver with job.start run export.run (H.264/AAC) or render.start (reference), then job.wait; check the delivered file with job.start run export.review. ",
-            "Independent jobs run side by side (jobs writing the same output keep their order), so start every scene render or prepare, then wait for all of them with one job.wait job_ids. ",
-            "Results are summaries: scene timing becomes one line per layer and long lists become counts, as a result's detail field says; any call takes detail \"full\" for everything. ",
-            "Titles: templates.list lists original designs; fonts.find finds local fonts. job.start run graphics.place with a template_id, values, project_id, expected_revision and stable inner request_id compiles and attaches a title in one saved edit; job.wait returns its revision. ",
-            "Custom text/shapes can use explicit form:short scenes (docs/SCENE_SHORTHAND.md); scene.inspect/still/render accept them and return the expanded recipe. Captions: captions.draft drafts cues from transcripts, or captions.import reads a file; job.start run captions.render burns a whole track into one overlay; then captions.scene onto a scene. ",
-            "Music and voice levels: put clips on audio tracks (tracks.edit place) and set gain_milli, gain_curve, fade_in and fade_out with tracks.edit clip_audio; audio.duck proposes curves that lower music under speech, audio.normalize proposes levels that bring the mix to a loudness target such as -14 LKFS, audio.tighten proposes jump cuts that shorten pauses in speech, and transcript.fillers removes um and uh (lift silences them on the voice track without moving anything); start and end limit both to a window. Recognition leaves many fillers out and splits names: give media.transcribe a vocabulary such as [\"um\", \"uh\", \"PixelForge\"], and check the uncovered sounds transcript.fillers lists. ",
-            "Picture-in-picture: place a clip on a video track with composite alpha_over and give it a transform (crop, divisor 1-8, opacity, position) with tracks.edit clip_transform. ",
-            "Review your work: timeline.check lists likely mistakes without rendering; timeline.outline reads the whole cut as text, one line per clip, with what is said in it when given transcripts; preview.cuts pages through every cut as before/after images; media.sheet and media.shots show and log source footage before it is added; timeline.meters with curve finds dead air, buried speech and clipping. ",
-            "A whole narrated pixel-art explainer (script, one visual beat per scene, palette, music) is one local command outside the engine: python tools/production.py build <manifest> --root <folder> in the Cutbolt repository drives PixelForge, the Qwen narration worker and these tools with resumable stage receipts; see docs/PRODUCTION.md. ",
-            "Wherever a tool takes a project, {\"project_id\":\"...\",\"revision\":N} loads that saved revision. File identities may be {\"path\":...} alone. ",
-            "Times may be 2.5, \"5/2\" or {num, den} exact nonnegative seconds on frame boundaries; outputs use {num, den}. Audio-bearing cuts also need whole 48 kHz samples. Tool listings abbreviate the project, operation, scene, template, audio_routing, transcript and captions schemas; ",
-            "cutbolt_schema returns them, outlined when large, and capabilities summarizes limits."
+            "Local Cutbolt editing. Use plugin recipes when installed; cutbolt_schema supplies contracts. Preserve sources. ",
+            "Times: exact nonnegative seconds (number, \"5/2\" or {num,den}), on frame boundaries and whole 48 kHz samples for audio."
         )
         .to_owned();
-        if self.core {
-            text.push_str(" This compact catalog is the default: shared workflow and recovery tools plus cutbolt_run for the remaining listed commands. Full schemas remain available through cutbolt_schema; launch with --tools full for every direct tool.");
-        }
         if let Some(workspace) = &self.workspace {
-            text.push_str(&format!(" Workspace: {}. Paths may be relative to it, omitted roots default inside it (sessions in .cutbolt/store, jobs in .cutbolt/jobs, cache in .cutbolt/cache), and explicit roots must stay inside it. Any argument may be given as {{\"file\": \"name.json\", \"select\": \"field\"}} to read it from a workspace file (select may be a dotted path such as result.operations), and save_as writes a large result to a new .json file instead of returning it. Proposals (audio.duck, audio.normalize, audio.tighten, transcript.fillers, transcript.assemble) take save_as; then pass session.apply operations as {{\"file\": that file, \"select\": \"operations\"}} instead of copying them.", workspace.root().display()));
+            text.push_str(&format!(
+                " Workspace: {}. Relative paths and omitted roots resolve here.",
+                workspace.root().display()
+            ));
         }
         text
     }
@@ -1009,6 +996,25 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_instructions_stay_small_in_both_catalogs() {
+        for core in [true, false] {
+            let text = Server {
+                core,
+                ..Server::default()
+            }
+            .instructions();
+            assert!(
+                text.len() <= 256,
+                "bootstrap expanded to {} bytes",
+                text.len()
+            );
+            assert!(text.contains("{num,den}"));
+            assert!(text.contains("48 kHz"));
+            assert!(text.contains("Preserve sources"));
+        }
+    }
+
+    #[test]
     fn workspace_servers_need_no_roots() {
         let temp =
             std::env::temp_dir().join(format!("cutbolt-mcp-workspace-{}", std::process::id()));
@@ -1033,6 +1039,16 @@ mod tests {
                 .unwrap()
                 .contains("Workspace: ")
         );
+        let instructions = init["result"]["instructions"].as_str().unwrap();
+        let root_bytes = server
+            .workspace
+            .as_ref()
+            .unwrap()
+            .root()
+            .display()
+            .to_string()
+            .len();
+        assert!(instructions.len() <= 320 + root_bytes);
         server.message(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
         let mut call = |id: i64, name: &str, arguments: Value| {
             server

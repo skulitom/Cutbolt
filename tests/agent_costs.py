@@ -390,7 +390,7 @@ def run(root, executable, fixtures_only=False):
     for name, result in results.items():
         calls, sent, received = BUDGETS[name]
         assert result['calls'] <= calls and result['sent_bytes'] <= sent and result['received_bytes'] <= received, (name, result)
-        assert result['initialize_bytes'] <= 6000 and result['tools_list_bytes'] <= LIST_BUDGET, (name, result)
+        assert result['initialize_bytes'] <= 1600 and result['tools_list_bytes'] <= LIST_BUDGET, (name, result)
         assert result['failed_calls'] == result['schema_lookups'] == result['capabilities_lookups'] == 0
 
 

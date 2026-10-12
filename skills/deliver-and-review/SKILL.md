@@ -27,6 +27,8 @@ another bounded wait; failed, interrupted or cancelled is not a successful deliv
 
 ## Review the actual delivered file
 
+Start review only after job.wait reports the export completed. Queuing export and review
+together does not create a dependency; a review can run before the file exists.
 The export receipt verifies the encoded file. Review adds contact sheets, timing checks
 and audio measurements. Set $REVIEW_OUTPUT to a new directory name, such as review.
 If the project has changed since export, use the exact exported revision in the project

@@ -1,8 +1,9 @@
 # Agent workflow cost measurements
 
-11 October 2026. Measurements through stage 2 of [the agent-cost plan](plans/AGENT_COST_PLAN.md).
-These are scripted recipes through official Python MCP SDK **1.12.3**, not independent model trials.
-They establish regression ceilings and an input corpus; they do not prove a model can discover the recipes.
+12 October 2026. Measurements for [the agent-cost plan](plans/AGENT_COST_PLAN.md).
+Scripted recipes through official Python MCP SDK **1.12.3** establish regression ceilings.
+The separate fresh-agent trials below establish bounded workflow completion, with the approved
+talking-head efficiency targets still unmet. Neither measurement establishes a comparative lead.
 
 ## Replay
 
@@ -149,7 +150,8 @@ cause was transient; the guidance distinguishes eligible queued attempts from a 
    unsupported steps as such. Summarize completion, tool calls, tokens and failures in this document.
 
 The user approved the final talking-head trial targets: at most **15 calls**, at most **40,000 received
-tokens**, and **no schema lookup** in a skill-driven run. There are no completed model trials yet.
+tokens**, and **no schema lookup** in a skill-driven run. The first completed trials below
+meet correctness checks but miss the talking-head call and token targets.
 
 ## Stage 4 font discovery
 
@@ -294,3 +296,66 @@ alpha verification so compilation cannot distort their elapsed-time records. Eac
 skill-loading calls as well as editing calls, actual provider input/cache/output usage, wire
 bytes, errors and source identities. Output correctness requires a separate audit. Workflows
 1, 3 and 5 and the Cutbolt/plain-FFmpeg comparison still have no passing model result.
+
+## First completed fresh-agent trials, 12 October 2026
+
+All three independent plugin workflows completed and passed a separate output audit on
+Windows, using engine `6c3447a`, Claude Code **2.1.280** and reported model
+**claude-opus-5-5[1m]**, with default model settings. Each began with a new isolated profile,
+the documented installed plugin, original input copies and no session. Only the plugin MCP
+and Skill tool were available. The supplied transcript excludes recognition from this result.
+Raw prompts, wire/model records, binary identities, outputs and audit records remain external
+under the retained `fresh-plugin-trials-02` run. The failed startup above is retained separately.
+
+| Workflow | All calls | Skill / MCP | Failed MCP calls | All input tokens | Input excluding cache reads | Output tokens | Seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Talking head | 21 | 4 / 17 | 2 | 1,252,335 | 79,939 | 6,094 | 61.265 |
+| Tutorial | 21 | 3 / 18 | 3 | 1,690,393 | 56,341 | 6,173 | 124.610 |
+| Handoff | 12 | 2 / 10 | 1 | 577,819 | 18,460 | 2,876 | 56.328 |
+
+All have zero schema lookups. All input tokens includes the provider's input, cache creation
+and cache reads across model requests, as declared before the run; repeated context therefore
+counts again. The other input column is reported separately and does not replace that budget.
+Provider cache reuse can cross fresh client profiles. Counts come from actual tool-use/wire
+records, including failed child jobs returned by a batch wait, rather than the model's summary.
+Reported list-price costs were USD 0.9957272, 0.9008384 and 0.3169998 respectively.
+The talking-head trial **fails both the 15-call and 40,000-token targets**. No target changed.
+
+Independent checks reconstruct the exact requested source-frame spans and edited PCM, verify
+saved snapshot integrity, source preservation, actual H.264/AAC dimensions/rate/duration and
+encoder-input hashes. Talking head retains 124 frames with the four A/B words and correctly
+timed caption coverage; tutorial retains 120 frames, a one-second transparent title and measured
+-18.0 LUFS narration (predeclared tolerance 0.2 LU); handoff retains 150 frames and exports only
+the two accepted OTIO losses, with bt709 in its final notes. The 19, 17 and 21 automated checks
+pass. The actual review sheets and a delivered second-caption frame were inspected visually;
+they show the original synthetic glyphs over footage. No delivered output was manually repaired.
+These six-second patterns and test glyphs do not establish human-speech or long-form editorial
+quality, comparative leadership, external-editor compatibility or repeated-run reliability.
+
+Observed repairs explain some avoidable calls: a missing export profile and a review started
+before export completed; treating a workspace font filename as an installed font name; and
+passing a file path to audio.inspect, which expects a mix. The font and delivery skills now
+explicitly distinguish local path objects and export/review dependencies. Larger call-count
+and response reductions remain necessary. The proposed plain-FFmpeg comparison, second model
+and repeated trials remain open.
+
+## Startup context experiment and compact bootstrap
+
+Tool-list bytes alone underestimated actual model context. In tool-free READY probes with
+the same pinned engine and client, the first request used 56,507 input tokens with the plugin,
+54,668 with a minimal custom system prompt, 5,717 with skills only, 53,352 with MCP only and
+2,172 with neither. A controlled relay changed **only** initialize.instructions from 4,845
+characters to 118; with the same default client, skills and 18 tools, input fell to **13,637**.
+Every probe exited successfully, made zero tool calls and edited no file. These are controlled
+startup observations, not a claim about the client's internal implementation or workflow cost.
+
+The engine now uses brief startup instructions in both catalogs, retaining exact-time guidance
+and the workspace root. Detailed workflows remain in the optional plugin and documentation;
+tool arrays and command schemas are unchanged. Rust checks cap base instructions at 256 bytes
+and the workspace suffix separately; the SDK replay initialization ceiling tightens from 6,000
+to 1,600 bytes. The measured Windows replay is **555 initialization bytes**, versus the earlier
+roughly five-kilobyte response, with the same **21,198-byte** tool list. No other budget increased.
+Windows: 232 Rust tests and integration, agent ergonomics, agent costs and skills pass (59 s).
+Linux: all six MCP tests plus agent costs and skills pass (13 s). Format/lint checks pass.
+Fresh workflow trials using the actual changed engine are recorded separately; the relay
+experiment is not substituted for them. Full milestone evidence remains pinned to 338e114.

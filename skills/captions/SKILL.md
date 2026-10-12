@@ -47,7 +47,8 @@ Keep the new revision. Export and inspect the actual captions at representative 
 including the first/last cues. A timing edit after this step needs regenerated captions.
 This recipe burns one transparent overlay; it does not claim editable generated clips.
 
-Missing or ambiguous fonts need a usable identity from fonts.find. For text overflow,
+For a supplied local font, use a path object; strings name installed font families.
+Missing or ambiguous installed fonts need a usable identity from fonts.find. For text overflow,
 adjust the box/font/cue layout and use a new output filename. For a stale revision,
 check whether timeline timing changed before attaching. Reuse an uncertain edit's request ID
 and inspect session.receipt; job.wait returning a ticket is not proof of a completed render.

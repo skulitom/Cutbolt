@@ -31,7 +31,9 @@ placements, supply the required split IDs too. Rejecting affected transitions ma
 unsupported transition change explicit.
 
 Add a title with a current revision and stable inner edit request ID. $FONT is an external
-font identity/name, $TITLE is the requested text, and $TITLE_DURATION must fit the timeline
+font identity/path object (for example {"path":"font.ttf"}) or an installed font name.
+A string names an installed family; it does not identify a workspace file. fonts.find
+searches OS fonts; media.inspect does not inspect font files. $TITLE is the requested text, and $TITLE_DURATION must fit the timeline
 and its native clock. A transparent title preserves the footage underneath.
 
 <!-- example: title -->
