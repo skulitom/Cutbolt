@@ -1,6 +1,6 @@
 # Local audio recording
 
-The complete acceptance suite verifies A06 basic and extended, including isolated native capture, exact saved-timeline placement, explicit timing correction, input loss and a sustained 15-minute run. The authoritative score is in [progress](PROGRESS.md).
+The 4 October complete acceptance run verified A06 basic and extended, including isolated native capture, exact saved-timeline placement, explicit timing correction, input loss and a sustained 15-minute run. The 12 October refresh failed sustained capture on an 80 ms packet timestamp gap after about 223 seconds; that failure remains under investigation and does not refresh the earlier evidence. The authoritative dated score is in [progress](PROGRESS.md).
 
 `audio.inputs` lists active local capture endpoints and their observed mix formats. `audio.record.inspect` validates an explicitly selected endpoint or process and exact duration without starting a stream. `audio.record` captures a new WAV through the local Windows audio engine. `audio.record.place` returns validated native audio-track placement operations for the existing saved-session workflow.
 

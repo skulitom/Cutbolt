@@ -17,7 +17,7 @@ Audit of the edit → build → test → verify loop, 4 October 2026. Every numb
   - Map, run records and timings are shared by all worktrees.
 - **Shipping takes about 100–130 s, measured over eight real ships** (pushed by `tools/ship.py`, including under heavy load). Lessons built into it:
   - The gate budget is a hard deadline. Predictions fail under contention: one early gate took six minutes.
-  - Background runs use four lanes, start nothing while a gate runs, and skip fixtures that a newer run of a descendant commit will verify.
+  - Background runs use four lanes, start nothing while a gate or thorough fixture run is active, and skip fixtures that a newer run of a descendant commit will verify. Already-running background fixtures finish; separate quick checks and builds still need coordination around a milestone's quiet phase.
   - Ships take a shared lock, then fetch, rebase, gate and push inside it. Concurrent sessions otherwise kept racing at the push.
   - `docs/PROGRESS_HISTORY.md` union-merges.
   - The real-time capture fixture may retry once outside thorough runs.

@@ -1,5 +1,31 @@
 # Progress history
 
+## 12 October 2026: recipe checkpoint shipped; sustained capture blocks the evidence refresh
+
+Commit 10367b9 reached main with the six skills/plugin. The sequential final regressions passed
+all four suites (skills, integration/MCP, agent ergonomics and agent costs) on Windows in 90
+seconds and Linux in 67 seconds. The shipping gate passed eight fixtures, reused twelve
+unchanged passes and deferred 45; its background results remain to be checked. No replay budget
+changed. The prior f79bcdf background run is now complete: 37 passed, five media-tool timeouts
+(unicode_text, direct_sources, delivery, overlays, luts_scopes), and eight superseded by the
+newer run. These failures were observed during the overloaded interval and require passing
+follow-up evidence; they are not silently discarded.
+
+The fixed 633fde0 thorough milestone completed 69 fixture stages: 68 passed and recording
+failed. Rust/format/lint and the final registry latency check passed. Sustained capture rejected
+a 90 ms packet interval where its sample count required 10 ms, after 10684800 received sample
+frames (about 223 seconds). This is a concrete CAPTURE_DISCONTINUITY, not proof of harmless
+test flakiness. The one-millisecond packet rule, sustained-duration gate and other acceptance
+limits remain intact. No generated progress files were refreshed and no release was tagged.
+The 4 October evidence remains authoritative until a complete new thorough run passes.
+
+Thorough fixture runs now register the same scheduling hold used by push gates, so background
+verification cannot start new fixtures beside their long/quiet phases. Already-running
+fixtures finish normally; ordinary quick checks and builds still require coordination.
+The next independent plugin trial has fresh inputs, a pinned engine, an isolated client
+profile and a transparent stdio wire recorder. It has no prebuilt session or replay code in
+the agent context. Actual model outcomes/tokens remain unclaimed while that trial runs.
+
 ## 12 October 2026: tested intent recipes and local plugin installation
 
 Added six original skills and a local marketplace/plugin registering the existing stdio MCP

@@ -328,7 +328,7 @@ GATES = impact.STATE / "gates"
 
 
 def gate_running():
-    """Whether any live gate is running; background verification starts nothing new meanwhile."""
+    """A live push gate or thorough run holds new background fixture scheduling."""
     for marker in GATES.glob("*.pid"):
         try:
             if psutil.pid_exists(int(marker.stem)):
@@ -366,7 +366,7 @@ if args.background:
     background_marker = BACKGROUND / f"{os.getpid()}.json"
     background_marker.write_text(json.dumps({"commit": args.commit, "started": background_started,
                                              "fixtures": [s["name"] for s in STAGES]}), encoding="utf-8")
-if args.gate:
+if args.gate or args.thorough:
     GATES.mkdir(parents=True, exist_ok=True)
     gate_marker = GATES / f"{os.getpid()}.pid"
     gate_marker.write_text(args.commit or "", encoding="utf-8")
@@ -488,7 +488,7 @@ run_phase([(lane("long"), 1, False), (lane("gated"), 1, False)])
 run_phase([(lane("quiet"), 1, False)])
 if rust_thread:
     rust_thread.join()
-if args.gate:
+if args.gate or args.thorough:
     gate_marker.unlink(missing_ok=True)
 if args.background:
     background_marker.unlink(missing_ok=True)
