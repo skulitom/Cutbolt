@@ -73,6 +73,8 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
           NODE
           if [[ "$DRY_RUN" != true ]]; then
+            # Provenance records this run's own ref and commit, so a manual run must start from the tag itself.
+            [[ "$GITHUB_REF" == "refs/tags/$INPUT_TAG" ]] || { echo "::error::Start this run from the tag: gh workflow run release.yml --ref $INPUT_TAG -f tag=$INPUT_TAG"; exit 1; }
             git show-ref --verify "refs/tags/$INPUT_TAG"
             test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$INPUT_TAG^{commit}")"
           fi
