@@ -2,8 +2,8 @@
 
 12 October 2026. Measurements for [the agent-cost plan](plans/AGENT_COST_PLAN.md).
 Scripted recipes through official Python MCP SDK **1.12.3** establish regression ceilings.
-The valid plugin-only trials below complete three bounded workflows; the talking-head call
-and cumulative-token targets remain unmet. Earlier trials with extra client tools are retained
+The valid plugin-only trials below complete three bounded workflows. The latest talking-head
+trial meets 15 total calls; the cumulative-token target remains open pending metric clarification. Earlier trials with extra client tools are retained
 but excluded from plugin-only acceptance. Neither measurement establishes a comparative lead.
 
 ## Replay
@@ -471,3 +471,30 @@ direct H.264/PCM input and modular caption reuse. Talking-head cases independent
 the requested source frames/samples and caption alpha composition and match both encoder-input
 hashes exactly. These tests validate the instructions, not autonomous model cost or recognition.
 No comparative benchmark, new points or full stage-5 completion is claimed.
+
+## Caption coverage in the initial review, 12 October 2026
+
+The standalone talking-head recipe starts with the engine's default 16-frame contact sheet
+and tells the agent to check its sampling against the first/last caption intervals. Targeted
+additional review remains necessary for cues a sheet misses; the call budget never excuses
+skipping a quality check. Windows and Linux examples pass, and checks against their actual
+review cells confirm both fixture cues have samples away from their boundaries for both
+native and directly decoded footage.
+
+Fresh trial `fresh-plugin-trials-07` keeps the original inputs, prompts and strict accounting.
+All three workflows pass isolation and independent output audits; no failed calls, schema
+lookups, manual repairs or source changes occur. The
+[machine-readable summary](../verification/agent-cost-trials-2026-10-12-sampling.json)
+records the frozen engine, tested skill patch and provider metrics.
+
+| Workflow | All calls | Skill / MCP | Total input with cache rereads | Peak request input | Output tokens | Seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| talking-head | 15 | 1 / 14 | 313,036 | 32,221 | 4,681 | 44.359 |
+| tutorial | 15 | 3 / 12 | 287,191 | 29,357 | 3,674 | 45.094 |
+| handoff | 10 | 2 / 8 | 134,028 | 23,856 | 2,554 | 28.188 |
+
+The talking-head result **meets the 15-call target**, counting skill loading. The
+cumulative-input target remains open pending the requested clarification of its metric;
+the peak-request value is reported separately. These are single observations from one model,
+not a repeatability bound or a comparison with another editing tool. Stage 5 is not marked
+complete, and no points or full milestone evidence are changed.

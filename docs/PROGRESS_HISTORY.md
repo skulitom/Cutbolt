@@ -1,5 +1,30 @@
 # Progress history
 
+## 12 October 2026: initial review coverage and measured talking-head call budget
+
+The standalone skill requests 16 delivered-file frames and checks cue coverage before review.
+Windows/Linux examples pass; both cues are covered away from boundaries for native and direct
+sources. The fixture now checks this explicitly. All 35 examples remain executable.
+
+Fresh trial 07 keeps the exact 19-tool/six-skill inventory and original prompts/inputs.
+Independent output checks and actual delivery sheets pass for all three workflows, with no
+failed calls, schema requests or manual repairs. Talking head uses 15 all-tool calls
+(1 skill / 14 MCP), which meets the approved 15-call target. Its cumulative
+input is 313,036, and peak request input is 32,221; token accounting has not
+been redefined while the clarification is pending. Detailed comparison and tested identities
+are in AGENT_COSTS and verification/agent-cost-trials-2026-10-12-sampling.json.
+
+Commit 7b66f2b was gated and pushed to main. Its background direct_sources and transcription
+fixtures pass in 769/776 seconds. A separately instrumented complete direct-source run also
+passes all nine checks (26 sources, 21 eligible timeline cases), with the suspect uninstrumented
+pair retained independently. Earlier 32 paired captured-YUV exports match. The earlier H.264
+difference remains an open investigation; repeated passing attempts do not clear that failure.
+Optional CUTBOLT_FAILURE_ARTIFACTS now retains bounded failed comparison media/receipts/snapshots
+outside verifier cleanup. A four-file retained-pair exercise verifies exact copies and rejects
+a destination inside the fixture; the original assertion remains unchanged. No new editing points,
+comparative lead or full stage-5 completion is claimed. Full milestone evidence stays at
+338e114. This commit's shipping gate and deferred background results must be checked.
+
 ## 12 October 2026: standalone talking-head skill and another isolated trial
 
 Setup now uses the existing validated initial snapshot with inspected source identity and

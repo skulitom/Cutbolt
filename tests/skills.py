@@ -203,6 +203,12 @@ def run(root):
             caption_skill = 'recut-talking-head' if case in ('talking-head','talking-head-direct') else 'captions'
             document = results[caption_skill + '/draft']['document']
             assert [cue['text'] for cue in document['cues']] == ['A B','A B']
+            if caption_skill == 'recut-talking-head':
+                cells = reviewed['picture']['sheet']['cells']
+                times = [Fraction(cell['time']['num'],cell['time']['den']) for cell in cells if cell['present']]
+                for cue in document['cues']:
+                    start,end = [Fraction(cue[k]['num'],cue[k]['den']) for k in ('start','end')]
+                    assert any(start + Fraction(1,25) <= t < end - Fraction(1,25) for t in times), (case,cue,times)
             # Independent assembly of requested source frames/samples and straight-alpha
             # captions: an initially populated session must preserve the former linked edit.
             spans = [(0,20),(25,74),(95,150)]

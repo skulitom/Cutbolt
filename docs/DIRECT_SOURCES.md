@@ -325,3 +325,34 @@ the saved original identity, index key and project dimensions/rate, and returns 
 reader alongside the source receipt. A compressed file without its `decode` binding cannot
 enter the reference profile. This keeps indexed conversion and exact audio policy coupled to
 the decoder that implements them.
+
+## Open H.264 delivery comparison, 12 October 2026
+
+Background verification at 6c3447a and f5fe95f intermittently failed the HEVC/Opus
+H.264-range comparison. The newer diagnostic records identical packed RGB before export
+color conversion and identical PCM, but different decoded H.264 pictures in both RGB and
+native YUV. It therefore localizes the difference to the conversion/encoding boundary;
+it does not establish a source decode error or identify which component is responsible.
+The strict equality assertion remains in force.
+
+Follow-up observations retain original media, encoded files, receipts and diagnostic records
+outside Git. Twelve initial paired exports pass. A further 32 pairs with captured post-conversion
+YUV pass; all 64 captured YUV sequences are identical. A newly generated HEVC/Opus source and
+its independently verified full conform also pass all eight timeline comparisons. The full
+captured fixture passes all nine checks across its 26-source corpus (21 eligible timeline
+sources). Ordinary background verification of 7b66f2b passes direct_sources in 769 seconds;
+its uninstrumented HEVC/Opus pair was separately retained and has the same decoded hashes.
+
+These passing attempts do not resolve the intermittent failure, and instrumentation can
+change scheduling. No encoder workaround, tolerance relaxation or performance claim follows.
+Further recurrence needs retained failing files and post-conversion samples before a causal
+fix can be claimed. The complete stage-1 milestone evidence remains pinned to 338e114;
+later commits do not inherit a newly refreshed full milestone result.
+
+For subsequent runs, `CUTBOLT_FAILURE_ARTIFACTS` can name an absolute external diagnostics
+directory. A failing direct-timeline comparison retains its two outputs, referenced fixture
+sources, receipts and snapshots there before normal verifier cleanup. Combined copied media
+is capped at 64 MiB per failure; a directory within the fixture or checkout is rejected, and
+retention errors do not replace the original comparison failure. Omission keeps ordinary
+cleanup behavior. A retained-pair exercise verifies exact copies and rejection of a cleanup
+directory. This diagnostic switch changes no engine or comparison semantics.

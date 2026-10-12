@@ -4,6 +4,7 @@ from fractions import Fraction as F
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -11,6 +12,39 @@ import tempfile
 from engine import ENGINE
 from footage_sources import identity
 from source_clocks import decoded, time
+
+
+def retain_failure(root, detail, outputs, receipts, snapshots):
+    """Opt-in bounded original-fixture diagnostics, outside the checkout and verifier cleanup."""
+    destination = os.environ.get('CUTBOLT_FAILURE_ARTIFACTS')
+    if not destination:
+        return
+    try:
+        folder = Path(destination).resolve()
+        checkout = Path(__file__).resolve().parents[1]
+        if folder == checkout or checkout in folder.parents or not Path(destination).is_absolute():
+            raise ValueError('CUTBOLT_FAILURE_ARTIFACTS must be an absolute external directory')
+        root = root.resolve()
+        if folder == root or root in folder.parents:
+            raise ValueError('Diagnostic directory must survive fixture cleanup')
+        paths = set(outputs)
+        for snapshot in snapshots:
+            paths.update(root / asset['path'] for asset in snapshot['assets'])
+        paths = sorted({path.resolve() for path in paths})
+        names = [path.relative_to(root) for path in paths]
+        if sum(path.stat().st_size for path in paths) > 64 * 1024 * 1024:
+            raise ValueError('Comparison artifacts exceed the 64 MiB diagnostic bound')
+        folder.mkdir(parents=True, exist_ok=True)
+        saved = Path(tempfile.mkdtemp(prefix='direct-timeline-',dir=folder))
+        detail['artifacts'] = str(saved)
+        for path, name in zip(paths,names):
+            target = saved/name
+            target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(path,target)
+        (saved/'comparison.json').write_text(json.dumps({'failure':detail,'receipts':receipts,
+            'snapshots':snapshots},indent=2),encoding='utf-8')
+    except (OSError,ValueError) as error:
+        detail['artifact_error'] = str(error)
 
 
 def verify(root, case, asset, client):
@@ -75,6 +109,7 @@ def verify(root, case, asset, client):
                           'verification':[r.get('verification') for r in receipts]}
                 if video:
                     detail['native_yuv420p_sha256'] = [hashlib.sha256(decoded(p,True,'yuv420p')).hexdigest() for p in outputs]
+                retain_failure(root,detail,outputs,receipts,[reference,snapshot])
                 raise AssertionError(json.dumps(detail, sort_keys=True))
             return actual
 

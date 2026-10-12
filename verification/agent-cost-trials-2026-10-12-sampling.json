@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-12",
+  "trial_id": "fresh-plugin-trials-07",
+  "kind": "independent_model_workflows",
+  "scope": "Original six-second 160x90 synthetic footage; supplied transcript, no recognition or comparative benchmark.",
+  "os": "Windows-10-10.0.26200-SP0",
+  "ffmpeg": "ffmpeg version 7.0-full_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "raw_records": "External retained trial directories; no raw model/wire transcripts or media in Git.",
+  "call_policy": "All agent tool_use calls including Skill loading; MCP calls separately reported.",
+  "token_policy": "Provider input plus cache creation plus cache reads summed over requests. Peak single-request input and input excluding cache reads are supplementary; no budget reinterpretation.",
+  "targets": {
+    "talking_head_all_calls_max": 15,
+    "talking_head_received_tokens_max": 40000,
+    "schema_lookups_max": 0
+  },
+  "excluded_trials": {
+    "fresh-plugin-trials-02": "58 unrelated connector tools were also exposed. Output audits pass; isolation fails.",
+    "fresh-plugin-trials-03": "58 unrelated connector tools were also exposed. Output audits pass; isolation fails.",
+    "fresh-plugin-trials-04": "A seventh built-in skill remained. Inventory assertion rejected the talking-head run and stopped the batch."
+  },
+  "workflows": {
+    "talking-head": {
+      "model": "claude-opus-5-5[1m]",
+      "client_version": "2.1.280",
+      "all_agent_tool_calls": 15,
+      "skill_calls": 1,
+      "mcp_calls": 14,
+      "mcp_failed_calls": 0,
+      "schema_lookups": 0,
+      "received_tokens_including_cache_reads_and_writes": 313036,
+      "input_tokens_excluding_cache_reads": 23070,
+      "first_assistant_request_input_total": 12037,
+      "reported_cost_usd": 0.3360692,
+      "source_files_preserved": true,
+      "output_tokens": 4681,
+      "peak_request_input_tokens": 32221,
+      "wall_seconds": 44.359,
+      "engine": "cutbolt 0.4.0 (commit 7b66f2b8e3b1934d8849517fe18994a548b363f6)",
+      "source_commit": "7b66f2b8e3b1934d8849517fe18994a548b363f6",
+      "engine_identity": {
+        "bytes": 43016704,
+        "sha256": "1cedb2cfcd30aa8c516ce6880f72dab7b176cf519952624a95e3beb25b8c962a"
+      },
+      "source_patch": {
+        "bytes": 2541,
+        "sha256": "54b7de481a6ee74fececfba81549406aa45bfddba414c28652702776318ec6a2"
+      },
+      "source_is_uncommitted": true,
+      "isolation": {
+        "unexpected_tools": [],
+        "visible_tool_count": 19,
+        "visible_skills": [
+          "cutbolt:captions",
+          "cutbolt:cutbolt",
+          "cutbolt:deliver-and-review",
+          "cutbolt:interview-multicam",
+          "cutbolt:recut-talking-head",
+          "cutbolt:screen-tutorial"
+        ],
+        "passed": true
+      },
+      "automated_output_checks": 19,
+      "output_audit_pass": true,
+      "visual_audit": "Actual delivery contact sheet inspected, including both talking-head cues in the initial review.",
+      "targets": {
+        "calls": true,
+        "total_provider_input": false,
+        "no_schema": true,
+        "output_correctness": true
+      }
+    },
+    "tutorial": {
+      "model": "claude-opus-5-5[1m]",
+      "client_version": "2.1.280",
+      "all_agent_tool_calls": 15,
+      "skill_calls": 3,
+      "mcp_calls": 12,
+      "mcp_failed_calls": 0,
+      "schema_lookups": 0,
+      "received_tokens_including_cache_reads_and_writes": 287191,
+      "input_tokens_excluding_cache_reads": 20206,
+      "first_assistant_request_input_total": 11997,
+      "reported_cost_usd": 0.288421,
+      "source_files_preserved": true,
+      "output_tokens": 3674,
+      "peak_request_input_tokens": 29357,
+      "wall_seconds": 45.094,
+      "engine": "cutbolt 0.4.0 (commit 7b66f2b8e3b1934d8849517fe18994a548b363f6)",
+      "source_commit": "7b66f2b8e3b1934d8849517fe18994a548b363f6",
+      "engine_identity": {
+        "bytes": 43016704,
+        "sha256": "1cedb2cfcd30aa8c516ce6880f72dab7b176cf519952624a95e3beb25b8c962a"
+      },
+      "source_patch": {
+        "bytes": 2541,
+        "sha256": "54b7de481a6ee74fececfba81549406aa45bfddba414c28652702776318ec6a2"
+      },
+      "source_is_uncommitted": true,
+      "isolation": {
+        "unexpected_tools": [],
+        "visible_tool_count": 19,
+        "visible_skills": [
+          "cutbolt:captions",
+          "cutbolt:cutbolt",
+          "cutbolt:deliver-and-review",
+          "cutbolt:interview-multicam",
+          "cutbolt:recut-talking-head",
+          "cutbolt:screen-tutorial"
+        ],
+        "passed": true
+      },
+      "automated_output_checks": 17,
+      "output_audit_pass": true,
+      "visual_audit": "Actual delivery contact sheet inspected, including both talking-head cues in the initial review.",
+      "targets": {
+        "calls": null,
+        "total_provider_input": null,
+        "no_schema": true,
+        "output_correctness": true
+      }
+    },
+    "handoff": {
+      "model": "claude-opus-5-5[1m]",
+      "client_version": "2.1.280",
+      "all_agent_tool_calls": 10,
+      "skill_calls": 2,
+      "mcp_calls": 8,
+      "mcp_failed_calls": 0,
+      "schema_lookups": 0,
+      "received_tokens_including_cache_reads_and_writes": 134028,
+      "input_tokens_excluding_cache_reads": 14693,
+      "first_assistant_request_input_total": 11979,
+      "reported_cost_usd": 0.19243500000000002,
+      "source_files_preserved": true,
+      "output_tokens": 2554,
+      "peak_request_input_tokens": 23856,
+      "wall_seconds": 28.188,
+      "engine": "cutbolt 0.4.0 (commit 7b66f2b8e3b1934d8849517fe18994a548b363f6)",
+      "source_commit": "7b66f2b8e3b1934d8849517fe18994a548b363f6",
+      "engine_identity": {
+        "bytes": 43016704,
+        "sha256": "1cedb2cfcd30aa8c516ce6880f72dab7b176cf519952624a95e3beb25b8c962a"
+      },
+      "source_patch": {
+        "bytes": 2541,
+        "sha256": "54b7de481a6ee74fececfba81549406aa45bfddba414c28652702776318ec6a2"
+      },
+      "source_is_uncommitted": true,
+      "isolation": {
+        "unexpected_tools": [],
+        "visible_tool_count": 19,
+        "visible_skills": [
+          "cutbolt:captions",
+          "cutbolt:cutbolt",
+          "cutbolt:deliver-and-review",
+          "cutbolt:interview-multicam",
+          "cutbolt:recut-talking-head",
+          "cutbolt:screen-tutorial"
+        ],
+        "passed": true
+      },
+      "automated_output_checks": 21,
+      "output_audit_pass": true,
+      "visual_audit": "Actual delivery contact sheet inspected, including both talking-head cues in the initial review.",
+      "targets": {
+        "calls": null,
+        "total_provider_input": null,
+        "no_schema": true,
+        "output_correctness": true
+      }
+    }
+  }
+}

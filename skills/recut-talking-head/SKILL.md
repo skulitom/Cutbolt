@@ -159,10 +159,14 @@ The export receipt verifies the encoded file. Review adds contact sheets, timing
 and audio measurements. Set $REVIEW_OUTPUT to a new directory name, such as review.
 If the project has changed since export, use the exact exported revision in the project
 reference rather than comparing the file with an unrelated new head.
+Choose the initial sheet to cover the caption cues. Start with 16 evenly spread frames
+(the engine default), and compare their times with the first/last cue intervals before
+requesting review. Increase frames within 1-64 if needed. Very short cues or long cuts may
+still need targeted delivered-file frames; inspect those rather than claiming full coverage.
 
 <!-- example: review -->
 ~~~json
-{"command":"job.start","request_id":"delivery-review","run":"export.review","arguments":{"path":"$OUTPUT","output":"$REVIEW_OUTPUT","project":{"project_id":"$PROJECT_ID"},"frames":4,"rendition_height":0}}
+{"command":"job.start","request_id":"delivery-review","run":"export.review","arguments":{"path":"$OUTPUT","output":"$REVIEW_OUTPUT","project":{"project_id":"$PROJECT_ID"},"frames":16,"rendition_height":0}}
 ~~~
 
 Use its new ticket as $JOB_ID.
