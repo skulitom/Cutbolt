@@ -1,6 +1,7 @@
 """Complete original-footage timelines against full conform, including audio and delivery."""
 from copy import deepcopy
 from fractions import Fraction as F
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -51,18 +52,35 @@ def verify(root, case, asset, client):
         reference['assets'] = [native]
         extension = '.mp4' if args.get('profile') == 'h264_aac' else '.wav' if args.get('streams') == 'audio' else '.mkv'
         outputs = []
+        receipts = []
         for kind, p in [('reference',reference), ('direct',snapshot)]:
             path = out/(case['name']+'-av-'+label+'-'+kind+extension)
             before = deepcopy(p)
             receipt = call(command, project=p, input_root=str(root), output_root=str(out), output=str(path), **args)
             assert p == before
             outputs.append(path)
+            receipts.append(receipt)
             if 'sources' in receipt:
                 assert any(s.get('sha256') == p['assets'][0]['identity']['sha256'] for s in receipt['sources']), receipt
+        def assert_identical(video):
+            expected, actual = [decoded(p,video) for p in outputs]
+            if expected != actual:
+                # Verification removes temporary media after a failure. Preserve enough exact
+                # observations in its log to distinguish timeline, encoder and decode differences.
+                detail = {'case':case['name'], 'comparison':label, 'stream':'video' if video else 'audio',
+                          'bytes':[len(expected),len(actual)],
+                          'sha256':[hashlib.sha256(v).hexdigest() for v in (expected,actual)],
+                          'first_difference':next((i for i,(a,b) in enumerate(zip(expected,actual)) if a!=b), min(len(expected),len(actual))),
+                          'differing_bytes':sum(a!=b for a,b in zip(expected,actual)) + abs(len(expected)-len(actual)),
+                          'verification':[r.get('verification') for r in receipts]}
+                if video:
+                    detail['native_yuv420p_sha256'] = [hashlib.sha256(decoded(p,True,'yuv420p')).hexdigest() for p in outputs]
+                raise AssertionError(json.dumps(detail, sort_keys=True))
+            return actual
+
         if args.get('streams') != 'audio':
-            assert decoded(outputs[0],True) == decoded(outputs[1],True), (case['name'],label,'video')
-        expected, actual = [decoded(p,False) for p in outputs]
-        assert expected == actual, (case['name'],label,'audio')
+            assert_identical(True)
+        actual = assert_identical(False)
         assert len(actual) > 0
         comparisons.append(dict(case=label, pcm_bytes=len(actual), identical=True))
 

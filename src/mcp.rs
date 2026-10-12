@@ -618,7 +618,7 @@ impl Server {
             }
         })
     }
-    // Keep bootstrap guidance small: clients may amplify it in model context. Workflow
+    // Keep bootstrap guidance small: clients include it in model context. Workflow
     // recipes belong in the plugin; command contracts remain in the tools and schema.
     fn instructions(&self) -> String {
         let mut text = concat!(

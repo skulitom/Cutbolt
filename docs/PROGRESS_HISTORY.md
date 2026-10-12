@@ -1,5 +1,52 @@
 # Progress history
 
+## 12 October 2026: valid isolated plugin workflows and strict comparison diagnostics
+
+Fresh trial 05 exposes exactly eighteen Cutbolt MCP tools, Skill and six plugin skills, with
+no unrelated invocation. All three workflows pass their independent 19/17/21 output checks
+and visual review without manual repair or source changes. Same prompts and original inputs;
+Claude Code 2.1.280, claude-opus-5-5[1m], frozen engine identifying d6f2367. Machine-readable
+results are in verification/agent-cost-trials-2026-10-12.json; raw media and traces stay external.
+
+Talking head / tutorial / handoff use 19/16/11 all-tool calls, including 4/3/2 skill loads,
+with zero failed calls and zero schema requests. Cumulative input including cache rereads is
+384627/307050/151321 tokens; peak request input is 34247/29561/23901. Bounded workflow
+completion passes, while the talking-head call and declared cumulative-token exits remain
+open. The user has been asked to clarify the token metric; neither it nor call counting has
+been changed. No comparative lead, long-form quality, recognition or new points are claimed.
+
+The detailed direct-source comparison passes all eight cases on the retained HEVC/Opus
+fixture with exact RGB/PCM equality and unchanged sources. Diagnostic-only changes preserve
+the failure condition while logging hashes and encoder receipts for any recurrence. Windows
+232 Rust tests and four affected agent fixtures, Linux six MCP tests and two agent fixtures,
+format/lint and repository material checks support this change. The shipping gate and remaining
+background fixtures must still be checked. Full generated milestone evidence stays at 338e114.
+
+## 12 October 2026: correction to fresh-client isolation and context attribution
+
+The initial fresh-workflow and context-probe reports missed 58 unrelated connected-app tools
+in the client's initialization inventory. Permission allow rules did not remove their schemas.
+No unrelated tool was invoked and the independent output audits remain valid, but trials 02
+and 03 do not satisfy the plugin-only exit. Their raw records and measured costs are retained
+with this exclusion. The earlier 56507-to-13637 startup reduction was confounded by different
+tool inventories; it cannot be attributed to shortening Cutbolt instructions. This corrects
+the interpretation recorded in d6f2367 before it is pushed to main.
+
+The compact bootstrap's measured wire reduction and Windows/Linux regression checks stand.
+An actual changed-engine workflow still began at roughly 56300 input tokens with extra tools;
+a subsequent 19-tool no-edit probe used 13746 tokens. The corrected trial configuration disables
+connected-app tools and bundled client skills locally, checks the entire visible inventory,
+and retains every invocation. A built-in doctor skill survived the first correction; the
+strict inventory check rejected that run. DISABLE_DOCTOR_COMMAND=1 removes it. The corrected
+19-tool/six-skill no-edit A/B measures 12178 input tokens for 6c3447a and 11646 for the changed
+bootstrap: 532 tokens (4.4%), not 42870. No target is relaxed; workflow acceptance remains open.
+
+The sporadic direct-source export comparison now logs byte counts, digests, first/differing
+byte positions, native-YUV digests and encoder verification receipts on a mismatch. Equality
+requirements are unchanged. The newest full fixture and twelve isolated pairs pass, but the
+earlier mismatch's cause remains unproven. Full milestone evidence still identifies 338e114;
+these diagnostics and the client-harness correction award no points.
+
 ## 12 October 2026: actual fresh-agent results and smaller MCP startup
 
 The first three fresh plugin-only workflows pass independent output audits on pinned 6c3447a:

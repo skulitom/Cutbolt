@@ -2,8 +2,9 @@
 
 12 October 2026. Measurements for [the agent-cost plan](plans/AGENT_COST_PLAN.md).
 Scripted recipes through official Python MCP SDK **1.12.3** establish regression ceilings.
-The separate fresh-agent trials below establish bounded workflow completion, with the approved
-talking-head efficiency targets still unmet. Neither measurement establishes a comparative lead.
+The valid plugin-only trials below complete three bounded workflows; the talking-head call
+and cumulative-token targets remain unmet. Earlier trials with extra client tools are retained
+but excluded from plugin-only acceptance. Neither measurement establishes a comparative lead.
 
 ## Replay
 
@@ -138,7 +139,14 @@ cause was transient; the guidance distinguishes eligible queued attempts from a 
    Each workflow gets new footage, an original test font, `assets.json`, `font.json`, `transcript.json`
    and the project-owned `title-template.json`, with no editing session or completed output.
 3. Start a fresh agent for each task, with only the workspace-bound MCP server. For the plugin gate,
-   expose only the tested plugin and its skills. Do not provide the replay implementation or a
+   expose only the tested plugin and its skills. Audit the client's complete initial tool/skill
+   inventory and every actual invocation; permission allow rules alone do not hide other tools.
+   For Claude Code 2.1.280, use an isolated profile, child-process
+   `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `DISABLE_DOCTOR_COMMAND=1` and settings `disableClaudeAiConnectors: true`,
+   `disableBundledSkills: true`; require exactly the 18 plugin MCP tools, Skill and six plugin
+   skills. These are [documented connector controls](https://code.claude.com/docs/en/env-vars)
+   and [skill controls](https://code.claude.com/docs/en/skills), not changes to the user's normal
+   profile. Fail the isolation check if unrelated tools/skills remain. Do not provide the replay implementation or a
    prebuilt session. Give it the matching workflow description above and the input filenames.
    Use the canned transcript on machines without speech recognition; disclose that in the result.
 4. Run the server through this same relay to record comparable wire messages:
@@ -297,13 +305,14 @@ skill-loading calls as well as editing calls, actual provider input/cache/output
 bytes, errors and source identities. Output correctness requires a separate audit. Workflows
 1, 3 and 5 and the Cutbolt/plain-FFmpeg comparison still have no passing model result.
 
-## First completed fresh-agent trials, 12 October 2026
+## Initial fresh-agent trials: output passes, isolation fails, 12 October 2026
 
-All three independent plugin workflows completed and passed a separate output audit on
+All three workflows completed and passed a separate output audit on
 Windows, using engine `6c3447a`, Claude Code **2.1.280** and reported model
 **claude-opus-5-5[1m]**, with default model settings. Each began with a new isolated profile,
-the documented installed plugin, original input copies and no session. Only the plugin MCP
-and Skill tool were available. The supplied transcript excludes recognition from this result.
+the documented installed plugin, original input copies and no session. The initial report incorrectly said only plugin tools were exposed: the full client inventory
+also contained **58 unrelated connected-app tools** (77 tools total). None was invoked, but
+their schemas contaminated context cost. These runs do **not** satisfy the plugin-only exit. The supplied transcript excludes recognition from this result.
 Raw prompts, wire/model records, binary identities, outputs and audit records remain external
 under the retained `fresh-plugin-trials-02` run. The failed startup above is retained separately.
 
@@ -339,15 +348,20 @@ explicitly distinguish local path objects and export/review dependencies. Larger
 and response reductions remain necessary. The proposed plain-FFmpeg comparison, second model
 and repeated trials remain open.
 
-## Startup context experiment and compact bootstrap
+## Startup probes: corrected interpretation and compact bootstrap
 
-Tool-list bytes alone underestimated actual model context. In tool-free READY probes with
-the same pinned engine and client, the first request used 56,507 input tokens with the plugin,
-54,668 with a minimal custom system prompt, 5,717 with skills only, 53,352 with MCP only and
-2,172 with neither. A controlled relay changed **only** initialize.instructions from 4,845
-characters to 118; with the same default client, skills and 18 tools, input fell to **13,637**.
-Every probe exited successfully, made zero tool calls and edited no file. These are controlled
-startup observations, not a claim about the client's internal implementation or workflow cost.
+Initial no-edit probes appeared to isolate initialization instructions: default client 56,507
+input tokens, minimal system prompt 54,668, skills only 5,717, MCP only 53,352, neither 2,172,
+and a shortened-instructions relay 13,637. **That causal interpretation was incorrect.**
+The first and MCP-only probes also exposed the 58 unrelated connector tools, while the short
+relay run did not. Tool inventories were not held constant; the 42,870-token difference cannot
+be attributed to Cutbolt instructions. Raw records remain retained with this correction.
+
+A follow-up with the changed engine and 19 visible tools used 13,746 tokens forwarding raw
+messages, 13,748 reserializing identical JSON values and 13,629 additionally using the short
+118-character text. Each replied READY with no tools or edits. These establish observed
+startup counts only. The corrected plugin-only workflow setup explicitly disables unrelated
+connectors and bundled skills and audits the full initial inventory before accepting a result.
 
 The engine now uses brief startup instructions in both catalogs, retaining exact-time guidance
 and the workspace root. Detailed workflows remain in the optional plugin and documentation;
@@ -357,5 +371,70 @@ to 1,600 bytes. The measured Windows replay is **555 initialization bytes**, ver
 roughly five-kilobyte response, with the same **21,198-byte** tool list. No other budget increased.
 Windows: 232 Rust tests and integration, agent ergonomics, agent costs and skills pass (59 s).
 Linux: all six MCP tests plus agent costs and skills pass (13 s). Format/lint checks pass.
-Fresh workflow trials using the actual changed engine are recorded separately; the relay
-experiment is not substituted for them. Full milestone evidence remains pinned to 338e114.
+Fresh workflow trials using the actual changed engine are recorded separately. Neither a
+confounded probe nor a run with extra tools substitutes for plugin-only acceptance. Full milestone evidence remains pinned to 338e114.
+
+## Second non-isolated run retained, 12 October 2026
+
+The actual changed engine and clarified skills completed the same three output audits again,
+with no failed MCP calls or schema lookups. The 58 extra tools still appeared in initialization
+and were never invoked. This run (`fresh-plugin-trials-03`) is also excluded from plugin-only
+cost acceptance; it helped discover the isolation defect and remains retained.
+
+| Workflow | All calls | Skill / MCP | All input tokens | Input excluding cache reads | Output tokens | Seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Talking head | 20 | 4 / 16 | 1,104,777 | 28,762 | 5,839 | 88.344 |
+| Tutorial | 15 | 3 / 12 | 920,669 | 22,748 | 3,631 | 45.016 |
+| Handoff | 11 | 2 / 9 | 504,318 | 17,518 | 2,510 | 30.875 |
+
+Initial input was still 56,334 / 56,295 / 56,275 tokens despite the smaller wire response.
+The independent 19 / 17 / 21 output checks and contact-sheet inspection pass; this does not
+repair the isolation failure or justify attributing single-run changes to one code change.
+All original sources remain unchanged. The talking-head targets remain unmet.
+
+## Corrected startup comparison with exact inventories
+
+The final no-edit A/B probe (`fresh-context-probe-05`) explicitly disables connectors, bundled
+skills and the separately controlled built-in doctor command. Both initial inventories contain
+exactly 18 Cutbolt MCP tools, Skill and the six plugin skills. Same client, prompt and installed
+skill bytes: old engine 6c3447a uses **12,178 input tokens**, changed bootstrap uses **11,646**,
+a reduction of **532 tokens (4.4%)**. Both reply READY with no tool calls. This is the supported
+bootstrap effect; the earlier 42,870-token attribution is withdrawn.
+
+The first isolation correction (`fresh-plugin-trials-04`) still exposed the built-in doctor
+skill. Its exact-inventory assertion rejected the talking-head run and stopped the batch.
+It is retained separately and does not count as a valid plugin-only workflow. The corrected
+six-skill trial uses the same prompts, original inputs and unchanged budget accounting.
+
+## Valid plugin-only workflows, 12 October 2026
+
+`fresh-plugin-trials-05` passes exact initialization checks: **18 Cutbolt MCP tools plus Skill,
+six Cutbolt skills**, no other tools/skills. All actual invocations use that plugin. Each task
+starts a new profile and saved project with the same original inputs and prompt as before.
+The frozen executable reports d6f2367; its identity and retained source patch are recorded in
+the [machine-readable summary](../verification/agent-cost-trials-2026-10-12.json). Claude Code
+2.1.280 reports claude-opus-5-5[1m]. No shell, schema lookup or manual output repair was used.
+
+| Workflow | All calls | Skill / MCP | Failed calls | Total input with cache rereads | Peak request input | Output tokens | Seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Talking head | 19 | 4 / 15 | 0 | 384,627 | 34,247 | 5,735 | 73.781 |
+| Tutorial | 16 | 3 / 13 | 0 | 307,050 | 29,561 | 3,859 | 74.828 |
+| Handoff | 11 | 2 / 9 | 0 | 151,321 | 23,901 | 2,678 | 30.594 |
+
+Input excluding cache reads is 25,102 / 20,412 / 14,740; these totals can benefit from prefix
+cache reuse across profiles, so they do not replace the declared total-input accounting.
+Reported list-price costs are USD 0.387293 / 0.2976916 / 0.1987322. Initial inputs are
+12,007 / 11,968 / 11,947 tokens. Time and cost are single observations, not repeated-run bounds.
+
+All **19 / 17 / 21 independent output checks pass**, including exact requested source spans,
+PCM and encoder-input composition, captions/title coverage, -18.0 LUFS tutorial narration,
+actual delivery timing, accepted OTIO losses and source preservation. Delivered review sheets
+and actual talking-head frame 100 show the original synthetic caption/title glyphs over the
+footage. The same original inputs remain intact, and no model output was repaired afterward.
+
+This satisfies bounded completion of workflows 1, 3 and 5. It **does not yet satisfy the full
+stage-5 exit**: talking head uses 19 total calls, and total processed input exceeds 40,000 under
+the declared cumulative accounting. The largest request is below 40,000, but the user has
+been asked to clarify which token metric the target means; no target is silently redefined.
+Call reduction remains necessary either way. Recognition, long-form quality, a second model,
+repeatability and comparison with plain FFmpeg remain separate unfinished measurements.

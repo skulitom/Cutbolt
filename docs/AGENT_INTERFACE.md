@@ -103,7 +103,7 @@ Launch `cutbolt.exe mcp`. The native adapter reads one JSON-RPC message per line
 Initialization carries only brief local-workspace and exact-time guidance. Detailed workflows
 live in the optional plugin recipes; command contracts remain available in tools and schema.
 The base instructions are capped at 256 bytes, with a short workspace suffix when configured.
-Actual client token cost must still be measured; wire bytes do not predict context expansion.
+Actual client token cost must still be measured; server wire bytes alone do not measure it.
 
 Clients load the whole tool catalog into model context. Bare `cutbolt mcp` now lists the compact catalog:
 
