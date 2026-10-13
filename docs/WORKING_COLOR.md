@@ -38,6 +38,29 @@ separate and keeps its byte-identity contract.
 
 ## Verification and remaining work
 
+The next component, `effects::working::Effects`, validates an ordered stack and
+loads its identity-bound LUTs under an explicit input root. Its sampled `Frame`
+processes working pixels directly. Grades and tone curves stay in floating-point
+linear light through the stack; the final store rounds to UNORM16 once. Hue and
+saturation, HSL qualifiers, LUTs and chroma-key distance use continuous encoded sRGB
+values. Key coverage, unmix and spill never require an intermediate byte. Correction
+masks keep their declared integer source-canvas coordinates and feather semantics.
+The existing byte processor retains its original qualifier and key-distance rules.
+
+`animation::Sampler` now exposes the validated curve evaluator to Rust callers.
+The original `sample` returns the same rounded integer. `sample_scaled` multiplies
+the exact eased rational value before rounding (scale 257 turns a 0..255 opacity
+curve into 0..65535 coverage). `sample_f64` supplies continuous effect controls.
+Key selection, easing and retiming still use exact rational time. No duration-sized
+frame table is allocated.
+
+`tests/working_effects.py` compares this component with independent Fraction clocks,
+f64 effect equations, Python HSL conversion and closed-form LUT references. It
+checks ordering, masks, animated controls, all LUT interpolation modes, source
+identities, neutral/transparent pixels, and coverage levels within a byte interval.
+These are component checks: project settings and renderer integration are still
+required before the feature is usable through scene or timeline commands.
+
 `tests/working_color.py` builds a bounded adapter to the actual library primitives
 and compares them with independent Python f64 equations. It covers all legal
 premultiplied byte-channel/alpha pairs for both transfers, transparent source-over,
@@ -46,8 +69,8 @@ is one UNORM16 code per working operation and exact encoded delivery. A 1,024-le
 ramp requires strictly increasing tile means and an error of at most 1/128 delivery
 code. This arithmetic fixture is registered in the ordinary verifier.
 
-Renderer integration remains open: saved project settings and history, effect
-chains, mask and spatial sampling, transitions, generated and nested pictures,
+Renderer integration remains open: saved project settings and history, wiring the
+precise effect chains and opacity into mask and spatial sampling, transitions, generated and nested pictures,
 memory accounting, previews, proxies and delivery. A final conversion must happen
 only at delivery; a child sequence or generated source cannot be rounded through
 the old compositor first. The source interpretation and all supported combinations

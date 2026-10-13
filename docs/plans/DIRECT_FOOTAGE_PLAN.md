@@ -344,6 +344,11 @@ transfer encoding and ordered dither isolated at delivery. Independent Python
 per-operation checks are registered in the verifier. Project settings, renderer
 integration and the grade/fade banding exit remain open; this does not enable a
 new rendering mode or close the stage.
+The effect component now also accepts working pixels directly: grades, continuous
+HSL selection, LUTs and key coverage retain precision through the stack. Exact
+rational property sampling can retain fractional controls and scale opacity before
+rounding. [Component references and nine default-path regressions](../../verification/working-effects-components-2026-10-13.json)
+pass on Windows and Linux; the scene and timeline integration exit remains unchanged.
 
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.

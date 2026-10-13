@@ -113,6 +113,17 @@ impl ChromaKey {
     }
 }
 impl Sampler {
+    pub(crate) fn sample_precise(&self, time: Time) -> Result<(f64, Option<[i32; 4]>)> {
+        Ok((
+            self.curve
+                .as_ref()
+                .map(|c| c.sample_f64(time))
+                .transpose()?
+                .unwrap_or(f64::from(self.strength))
+                / 1000.0,
+            self.mask.as_ref().map(|m| m.sample(time)).transpose()?,
+        ))
+    }
     pub(crate) fn sample(&self, time: Time) -> Result<Sample> {
         Ok(Sample::ChromaKey {
             strength_milli: self
@@ -137,6 +148,43 @@ impl Stage<'_> {
         color: [f64; 3],
         position: [i64; 2],
     ) -> Option<([f64; 3], f64, f64)> {
+        self.apply_matte(color, position, || {
+            self.effect
+                .retention(color.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8))
+        })
+    }
+
+    /// Measure continuous encoded opponent-channel distance, without the default byte round.
+    pub(crate) fn apply_precise(
+        &self,
+        color: [f64; 3],
+        position: [i64; 2],
+    ) -> Option<([f64; 3], f64, f64)> {
+        self.apply_matte(color, position, || {
+            let delta = std::array::from_fn::<_, 3, _>(|c| {
+                color[c] - f64::from(self.effect.key_rgb[c]) / 255.0
+            });
+            let distance = (delta.into_iter().fold(f64::NEG_INFINITY, f64::max)
+                - delta.into_iter().fold(f64::INFINITY, f64::min))
+                * 500.0;
+            let inner = f64::from(self.effect.inner_milli);
+            let outer = f64::from(self.effect.outer_milli);
+            if distance <= inner {
+                0.0
+            } else if distance >= outer {
+                1.0
+            } else {
+                (distance - inner) / (outer - inner)
+            }
+        })
+    }
+
+    fn apply_matte(
+        &self,
+        color: [f64; 3],
+        position: [i64; 2],
+        matte: impl FnOnce() -> f64,
+    ) -> Option<([f64; 3], f64, f64)> {
         let weight = self.strength
             * self
                 .effect
@@ -147,9 +195,7 @@ impl Stage<'_> {
         if weight <= 0.0 {
             return None;
         }
-        let matte = self
-            .effect
-            .retention(color.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8));
+        let matte = matte();
         let mut candidate = color;
         if matte < 1.0 && self.effect.unmix_milli > 0 {
             let mix = self.effect.unmix_milli as f64 / 1000.0;

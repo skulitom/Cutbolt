@@ -1,0 +1,245 @@
+{
+  "date": "2026-10-13",
+  "kind": "working_effects_and_fractional_property_components",
+  "parent_commit": "13727d17f9ca21f894078486909e96c200b1d488",
+  "source_sha256": {
+    "src/animation.rs": "942733f1fdf41e8a84483994b794ccaa82760dd0cccabb7e1d075bd7d67fbd6e",
+    "src/effects.rs": "404c33603ab6ee5f19a700707ace99e095bda29949479271f48d416eccda55e3",
+    "src/effects/working.rs": "41c8ad95ad992e2f0fbc601a059fd59323e3993bbfb762d0ed48528efe9ca494",
+    "src/keying.rs": "960805414e90d4276a152f251baecaa918d966c455149b449ba85ff7d5b79930",
+    "src/selection.rs": "37c3ced4fb4ed7bc3f7865b0a90681897e77df04b27631e472ed36b413ceb556",
+    "examples/working_effects_fixture.rs": "bf4beda039d62121208264be1f3cba64fc81107e359e8d6d2ba6194a50eb69e8",
+    "tests/working_effects.py": "80e9e3d6dad7a3425370936b253e069d5ea9a923519996fa8e09034985a4010c",
+    "tools/verify.py": "790f7890b405f737c81dc5fd5c468061cb0cdba712451e93fe76cd745f5e5458"
+  },
+  "linux_copied_source_hashes_match": true,
+  "linux_commit_note": "Linux retains its original Git identity; matching copied-source hashes identify the compiled sources.",
+  "checks": {
+    "windows": {
+      "rust_tests": 259,
+      "clippy_all_targets": true,
+      "strict_quick": [
+        "animation",
+        "clip_effects",
+        "easing",
+        "grading",
+        "keying",
+        "scene_luts",
+        "selection",
+        "working_color",
+        "working_effects"
+      ],
+      "wall_seconds": 169,
+      "report_sha256": "3b3cb6b8055b2681ccab84e08e409c970cd61bce2f62a5a4ab2768b93d0a40f0",
+      "log_sha256": "b9b88329a022b01f365e6a230be385b678a9027357b241cc8f076455ff358676",
+      "reported_checkout_commit": "13727d17f9ca21f894078486909e96c200b1d488"
+    },
+    "linux": {
+      "rust_tests": 258,
+      "clippy_all_targets": true,
+      "strict_quick": [
+        "animation",
+        "clip_effects",
+        "easing",
+        "grading",
+        "keying",
+        "scene_luts",
+        "selection",
+        "working_color",
+        "working_effects"
+      ],
+      "wall_seconds": 100,
+      "report_sha256": "d53afd01f7f893c14d3e198141b6612e89629edbe455fa81507eb3da619e052a",
+      "log_sha256": "24164d31551385ca867b2d3b0c817eb9b79558a84439b2480e2fd724db597f5f",
+      "reported_checkout_commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5"
+    }
+  },
+  "oracle": {
+    "passed": [
+      "working_effects.exact_clocks_continuous_controls_and_scaled_opacity",
+      "working_effects.primary_curves_and_hue_saturation",
+      "working_effects.continuous_selective_correction",
+      "working_effects.continuous_key_unmix_spill",
+      "working_effects.lut_modes_domains_clipping_and_order",
+      "working_effects.transparent_and_identity_preservation",
+      "working_effects.sub_byte_key_coverage",
+      "working_effects.validation_and_source_identity"
+    ],
+    "curve_samples": 6207,
+    "maximum_curve_float_error": 0.0,
+    "opacity_levels": {
+      "byte": 256,
+      "precise": 4096
+    },
+    "key_alpha_levels": 4096,
+    "cases": [
+      {
+        "name": "empty",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "identity",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "primary_and_curves",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "animated_hue_saturation",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "selective",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "inverted_selection",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "key",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "full_hard_key",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "ordered_grade_key_selective",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "eight_effect_chain",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "curve1_nearest",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "curve1_linear",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "identity3_nearest",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "identity3_trilinear",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "identity3_tetrahedral",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "cross3_nearest",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "cross3_trilinear",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "cross3_tetrahedral",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "grade_lut_key_selective",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "lut_repeated",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "lut_before_grade",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "clip3_nearest",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "clip3_trilinear",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      },
+      {
+        "name": "clip3_tetrahedral",
+        "pixels": 1638,
+        "maximum_unorm16_error": 0
+      }
+    ],
+    "pixel_samples": 43408,
+    "maximum_unorm16_error": 0,
+    "key_maximum_unorm16_error": 0,
+    "response_sha256": "07bc02c753a4ffef536183cc4ec52827072960dd00be0464f2e02a43e1cdfa18",
+    "numerical_response_sha256": "e6061d1e8617521e163952506ba537c35894315aa4bb93456837113753fa3f93",
+    "numerical_digest_scope": "Canonical successful result objects excluding file identities",
+    "source_sha256": {
+      "clip3.cube": "bcd9535b65daf55a71affdae84a287d743e2425616d9643f678541fe7b3fc27a",
+      "cross3.cube": "9f33fa3d1c65f73543ec16adee7be0520709fc114397e03ed4f81c1d1ca96674",
+      "curve1.cube": "78e28d63da3972d80f45c53982ceead586f1be5cd14c1ef3e294deb71ce32679",
+      "identity3.cube": "c761c48929c8c5734856cbda42b3df690d636b4b1b5b2736c20cf32a0aee71c7"
+    },
+    "rejected_cases": 5,
+    "reference": "Fraction clocks and scaled coverage; independent f64 grades/masks/keys, Python colorsys HSL, closed-form LUT products",
+    "tolerance": "Exact legacy/scaled curve integers; continuous controls within 1e-12 absolute/1e-14 relative; effect output at most one UNORM16 code",
+    "limits": "Library effects and opacity component only; no timeline/scene setting, spatial/nested integration, rendered grade/fade banding or stage-six exit"
+  },
+  "platform_results_identical": true,
+  "reporting_followup": {
+    "reason": "Include the soft-key ramp in maximum error; use LF for generated LUTs and add a canonical numerical response digest excluding file identities.",
+    "engine_unchanged": true,
+    "windows_report_sha256": "821fadc7ba31cff074be46201758ba28d7ee321c6394f65fa9e1285efb20f5b9",
+    "linux_report_sha256": "2ae2764664e93c42bbff502fdee26b609966c7928e50d490a5940745fa6c98ad"
+  },
+  "development_corrections": [
+    "The initial source-change rejection assertion expected SOURCE_CHANGED; the engine correctly returned its existing MEDIA_CHANGED code. The assertion was corrected.",
+    "Initial whole-response hashes differed because Windows generated CRLF LUT files and Linux generated LF; explicit LF makes both source identities and complete responses identical."
+  ],
+  "previous_shipment": {
+    "commit": "13727d17f9ca21f894078486909e96c200b1d488",
+    "pushed_to_main": true,
+    "gate_fixture_passes": 4,
+    "rust_passed": true,
+    "reused": 11,
+    "deferred": 64,
+    "gate_seconds": 197,
+    "log_sha256": "35015261a4bfc2ba91eb702b7d79163f7139dd0a6d0672aa4efc17b3fec8f3de"
+  },
+  "not_claimed": [
+    "working_space project or scene setting",
+    "renderer integration",
+    "rendered grade/fade banding gate",
+    "stage-six exit",
+    "stage-five full gate completion",
+    "speed",
+    "thorough milestone",
+    "points"
+  ]
+}

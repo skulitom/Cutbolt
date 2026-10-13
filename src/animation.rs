@@ -50,7 +50,8 @@ pub struct Retime {
     pub reverse: bool,
 }
 
-pub(crate) struct Sampler {
+/// Validated property keys and retiming, sampled on an exact rational clock.
+pub struct Sampler {
     keys: Vec<Keyframe>,
     retime: Option<Retime>,
 }
@@ -72,7 +73,8 @@ fn seconds(time: Time) -> String {
 }
 
 impl Curve {
-    pub(crate) fn prepare(&self, duration: Time, minimum: i32, maximum: i32) -> Result<Sampler> {
+    /// Validate and prepare up to 128 keys within the property's inclusive bounds.
+    pub fn prepare(&self, duration: Time, minimum: i32, maximum: i32) -> Result<Sampler> {
         self.prepare_keys(duration, minimum, maximum, 128)
     }
     /// `prepare` with a different key limit, for long gain automation.
@@ -215,25 +217,55 @@ fn ease(n: i128, d: i128, mode: Interpolation) -> Result<(i128, i128)> {
 }
 
 impl Sampler {
-    pub(crate) fn sample(&self, time: Time) -> Result<i32> {
+    /// Existing integer property sampling, with half ties away from zero.
+    pub fn sample(&self, time: Time) -> Result<i32> {
+        let (value, denominator) = self.ratio(time)?;
+        i32::try_from(round_ratio(value, denominator)?).map_err(|_| overflow())
+    }
+
+    /// Scale the exact interpolated value before its single rounding. A byte-opacity curve
+    /// sampled with scale 257 produces UNORM16 coverage without a preceding byte round.
+    pub fn sample_scaled(&self, time: Time, scale: u16) -> Result<i64> {
+        if scale == 0 {
+            return Err(invalid("Property sample scale must be nonzero"));
+        }
+        let (value, denominator) = self.ratio(time)?;
+        let value = value.checked_mul(i128::from(scale)).ok_or_else(overflow)?;
+        i64::try_from(round_ratio(value, denominator)?).map_err(|_| overflow())
+    }
+
+    /// Evaluate the exact eased rational ratio as f64, without integer property rounding.
+    /// This is for continuous effect controls; timing, retiming and key selection remain exact.
+    pub fn sample_f64(&self, time: Time) -> Result<f64> {
+        let (value, denominator) = self.ratio(time)?;
+        Ok(value as f64 / denominator as f64)
+    }
+
+    fn ratio(&self, time: Time) -> Result<(i128, i128)> {
         time.validate()?;
         let first = &self.keys[0];
         let last = &self.keys[self.keys.len() - 1];
         let time = if let Some(retime) = self.retime {
             if time.compare(retime.start)? != Ordering::Greater {
-                return Ok(if retime.reverse {
-                    last.value
-                } else {
-                    first.value
-                });
+                return Ok((
+                    i128::from(if retime.reverse {
+                        last.value
+                    } else {
+                        first.value
+                    }),
+                    1,
+                ));
             }
             let elapsed = scaled_time(time.minus(retime.start)?, retime.rate)?;
             if elapsed.compare(last.time.minus(first.time)?)? != Ordering::Less {
-                return Ok(if retime.reverse {
-                    first.value
-                } else {
-                    last.value
-                });
+                return Ok((
+                    i128::from(if retime.reverse {
+                        first.value
+                    } else {
+                        last.value
+                    }),
+                    1,
+                ));
             }
             if retime.reverse {
                 last.time.minus(elapsed)?
@@ -244,10 +276,10 @@ impl Sampler {
             time
         };
         if time.compare(first.time)? != Ordering::Greater {
-            return Ok(first.value);
+            return Ok((i128::from(first.value), 1));
         }
         if time.compare(last.time)? != Ordering::Less {
-            return Ok(last.value);
+            return Ok((i128::from(last.value), 1));
         }
         let right = self.keys.partition_point(|key| {
             key.time.compare(time).expect("validated sample time") != Ordering::Greater
@@ -255,7 +287,7 @@ impl Sampler {
         let a = &self.keys[right - 1];
         let b = &self.keys[right];
         if matches!(a.interpolation, Interpolation::Hold) {
-            return Ok(a.value);
+            return Ok((i128::from(a.value), 1));
         }
         let elapsed = time.minus(a.time)?;
         let span = b.time.minus(a.time)?;
@@ -271,20 +303,45 @@ impl Sampler {
                     .and_then(|right| left.checked_add(right))
             })
             .ok_or_else(overflow)?;
-        let rounded = weighted
-            .checked_abs()
-            .ok_or_else(overflow)?
-            .checked_add(denominator / 2)
-            .ok_or_else(overflow)?
-            / denominator
-            * weighted.signum();
-        i32::try_from(rounded).map_err(|_| overflow())
+        Ok((weighted, denominator))
     }
+}
+
+fn round_ratio(value: i128, denominator: i128) -> Result<i128> {
+    Ok(value
+        .checked_abs()
+        .ok_or_else(overflow)?
+        .checked_add(denominator / 2)
+        .ok_or_else(overflow)?
+        / denominator
+        * value.signum())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wide_opacity_samples_preserve_the_fraction_before_rounding() {
+        let curve = Curve {
+            keys: vec![
+                key(0, 1, 0, Interpolation::Linear),
+                key(12, 1, 255, Interpolation::Hold),
+            ],
+            retime: None,
+        }
+        .prepare(Time::new(12, 1).unwrap(), 0, 255)
+        .unwrap();
+        let at = Time::new(1, 1000).unwrap();
+        assert_eq!(curve.sample(at).unwrap(), 0);
+        assert_eq!(curve.sample_scaled(at, 257).unwrap(), 5);
+        assert_eq!(curve.sample_f64(at).unwrap(), 0.02125);
+        assert!(curve.sample_scaled(at, 0).is_err());
+        assert_eq!(
+            curve.sample_scaled(Time::new(12, 1).unwrap(), 257).unwrap(),
+            65535
+        );
+    }
 
     #[test]
     fn rejections_name_the_field_value_and_rule() {

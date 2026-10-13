@@ -47,6 +47,18 @@ impl Band {
             (1.0 - distance as f64 / self.feather as f64).max(0.0)
         }
     }
+    fn weight_precise(&self, value: f64) -> f64 {
+        let distance = (f64::from(self.low) - value)
+            .max(value - f64::from(self.high))
+            .max(0.0);
+        if distance == 0.0 {
+            1.0
+        } else if self.feather == 0 {
+            0.0
+        } else {
+            (1.0 - distance / f64::from(self.feather)).max(0.0)
+        }
+    }
 }
 /// HSL color selection measured on 8-bit encoded sRGB; weight is the product of present bands. Needs at least one band.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -66,6 +78,53 @@ pub struct Qualifier {
     pub inverted: bool,
 }
 impl Qualifier {
+    /// Continuous encoded-sRGB HSL for the precise working processor. Neither RGB nor the
+    /// measured HSL coordinates pass through byte or integer-control quantization.
+    pub(crate) fn weight_precise(&self, [r, g, b]: [f64; 3]) -> f64 {
+        let high = r.max(g).max(b);
+        let low = r.min(g).min(b);
+        let chroma = high - low;
+        let lightness = (high + low) * 500.0;
+        let saturation = if chroma == 0.0 {
+            0.0
+        } else {
+            chroma / (1.0 - (high + low - 1.0).abs()) * 1000.0
+        };
+        let hue = if chroma == 0.0 {
+            None
+        } else {
+            let turn = if high == r {
+                (g - b) / chroma
+            } else if high == g {
+                2.0 + (b - r) / chroma
+            } else {
+                4.0 + (r - g) / chroma
+            };
+            Some(turn.rem_euclid(6.0) * 60000.0)
+        };
+        let mut weight = 1.0;
+        if let Some(band) = &self.hue {
+            weight = hue.map_or(0.0, |hue| {
+                let direct = (hue - f64::from(band.center)).abs();
+                let distance = direct.min(360000.0 - direct);
+                if distance <= f64::from(band.inner) {
+                    1.0
+                } else if distance >= f64::from(band.outer) {
+                    0.0
+                } else {
+                    (f64::from(band.outer) - distance) / f64::from(band.outer - band.inner)
+                }
+            });
+        }
+        if let Some(band) = &self.saturation {
+            weight *= band.weight_precise(saturation);
+        }
+        if let Some(band) = &self.lightness {
+            weight *= band.weight_precise(lightness);
+        }
+        if self.inverted { 1.0 - weight } else { weight }
+    }
+
     pub(crate) fn validate(&self) -> Result<()> {
         if self.hue.is_none() && self.saturation.is_none() && self.lightness.is_none()
             || self

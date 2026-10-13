@@ -9,6 +9,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub mod working;
+
 /// Piecewise-linear tone curve on normalized linear light; output knots need not be monotonic.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

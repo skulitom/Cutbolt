@@ -1,5 +1,30 @@
 # Progress history
 
+## 13 October 2026: precise effect and property components
+
+Validated library effect stacks now retain floating-point linear RGB and coverage
+until their UNORM16 store. HSL selection, LUT sampling and keys use continuous
+encoded sRGB; animated controls keep their fractional values. Exact rational curve
+sampling can scale opacity before rounding. Existing byte processing keeps its
+original rules. Project and scene commands do not expose this precise path yet.
+
+Independent references cover 43,408 pixels across ordered effects and a soft-key
+ramp, plus 6,207 curve samples per platform. Observed channel and continuous-curve
+errors are zero. Both the opacity and key ramps retain 4,096 distinct coverage
+levels; this is component evidence, not the rendered grade/fade acceptance gate.
+Windows and Linux reports match, including numerical and complete response hashes.
+Rust tests pass (259/258), all-target lint and formatting pass, and nine relevant
+strict quick fixtures pass on each platform (169/100 seconds). A reporting-only
+follow-up also passes on both systems. [Evidence](../verification/working-effects-components-2026-10-13.json)
+records source hashes, oracle bounds and the corrected rejection assertion.
+
+The prior arithmetic checkpoint 13727d1 shipped to main: four gate fixtures plus
+Rust, 11 reused and 64 deferred in 197 seconds. Its background run waits for the
+frozen stage-five full quick gate, which is still active. These new changes need
+their own ship gate. Renderer integration, saved settings, the stage-six exit and
+final requirements/performance audit remain open. No new points, speed or thorough
+claim; PROGRESS.md retains the verified 338e114 milestone.
+
 ## 13 October 2026: linear working-color arithmetic foundation
 
 The library now stores straight linear SDR pixels as UNORM16. Transparent normal,
