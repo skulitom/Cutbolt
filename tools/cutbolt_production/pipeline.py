@@ -13,7 +13,7 @@ Order (independent branches run at the same time; each stage waits only for the 
     tts → timing and voice prepare (one job per take)
     voice prepare → align (one job on the voice assets; it waits for nothing else)
     timing, voice prepare, music → audio timeline → mix (meters, duck, normalize, AAC trial)
-    align, art → scenes (lanes); audio timeline, align → captions → caption overlay (one transparent render)
+    align, art → scene recipes (lanes); audio timeline, align → captions → generated caption windows
     mix, scenes, caption overlay → cut → export → review, beside the speech check (an audio-only render of the same revision)
 
 What the checks find (a speech check that failed, a delivered peak over its target, a music bed that ends early)
@@ -232,8 +232,8 @@ class Production:
             mix_future = pool.submit(self.stage_mix, audio)
             aligned = align_future.result()
             captions = self.stage_captions(audio, aligned)
-            # Burned-in captions are one transparent overlay over the whole film, on a track above the scenes, so they
-            # suit every kind of scene (3D scenes bind every layer to a plane) and render while the scenes do.
+            # Caption windows are separate generated clips above the picture, so they suit every kind of scene
+            # (3D scenes bind every layer to a plane). Their proposals prepare beside the picture recipes.
             burn = self.m["delivery"]["captions"]["burn_in"] and captions["result"]["cues"]
             overlay_future = pool.submit(self.stage_caption_overlay, captions, audio, inputs) if burn else None
             art = art_future.result()
@@ -817,7 +817,7 @@ class Production:
     # ------------------------------------------------------------------ scenes
     def transitions(self, timing):
         """Each scene's transition into the next, as {scene: (transition, next scene)}, checked against the timing plan.
-        The effect covers the first `frames` of the next scene, read from a handle rendered past this scene's end, so
+        The effect covers the first `frames` of the next scene, read from a source handle past this scene's end, so
         neither scene moves and the incoming one needs no handle of its own."""
         rows = {r["id"]: r for r in timing["result"]["scenes"]}
         out = {}
@@ -836,8 +836,8 @@ class Production:
         return out
 
     def stage_scenes(self, timing, aligned, art, inputs):
-        """Every scene's recipe, from the template or a hand-written override, rendered one per lane. Captions are not part
-        of a scene: they are one overlay over the film (stage_caption_overlay)."""
+        """Validate and retain editable scene recipes, one per lane. Caption windows are separate generated clips above
+        the picture (stage_caption_overlay); no scene movie is compiled."""
         timer = Timer()
         rows = {r["id"]: r for r in timing["result"]["scenes"]}
         transitions = self.transitions(timing)
@@ -861,7 +861,7 @@ class Production:
             number, scene = item
             row = rows[scene["id"]]
             duration = F(row["duration"])
-            # A transition into the next scene reads this scene past its end: render it that much longer.
+            # A transition into the next scene reads this scene past its end: extend the source recipe by that amount.
             tail = F(transitions[scene["id"]][0]["frames"], FPS) if scene["id"] in transitions else F(0)
             override = self.m["overrides"]["scenes"].get(scene["id"])
             resolved = None
@@ -875,7 +875,7 @@ class Production:
             base_path = self.save_base(scene["id"], base)
             # The key is the recipe's content alone: a neighbour's retiming or a caption change leaves it alone.
             # An override's key also names its source file, every cue time it resolved and every input identity it used.
-            request = {"recipe": digest(base)}
+            request = {"recipe": digest(base), "representation": "generated-scene-v1"}
             if resolved:
                 request["override"] = resolved
             if tail:
@@ -883,53 +883,66 @@ class Production:
             key = self.key(f"scene:{scene['id']}", request, {"engine": self.engine_identity})
 
             def run(attempt):
-                out = f"renders/{scene['id']}-{key[:12]}-{attempt}.mkv"
-                result = self.engine.job("scene.render", {"scene": {"file": base_path}, "output": out}, request_id=f"scene-{scene['id']}-{key[:16]}-{attempt}",
-                                         lane=f"lane-{number % self.lanes}", label=f"scene:{scene['id']}")
-                # Asset IDs name content, so a revised scene enters the saved project beside the old one, never as it.
-                asset = dict(result["asset"], id=f"{scene['id']}-{key[:12]}")
-                return [self.ident(asset["path"])], {"asset": asset, "recipe": base_path, "layers": len(base["layers"]), "handle": fstr(tail)}
+                self.engine.call("scene.inspect", {"scene": {"file": base_path}}, label=f"scene:{scene['id']}")
+                return [self.ident(base_path)], {"scene": {"file": base_path}, "recipe": base_path,
+                                                "layers": len(base["layers"]), "handle": fstr(tail), "compiled": False}
             receipt = self.stage(f"scene:{scene['id']}", key, request, run, {"engine": self.engine_identity})
-            return scene["id"], receipt["result"]["asset"]
+            return scene["id"], receipt["result"]["scene"]
 
         with ThreadPoolExecutor(max_workers=self.lanes) as pool:
             rendered = dict(pool.map(build_one, enumerate(self.m["scenes"])))
         built = sum(1 for s in self.m["scenes"] if self.outcomes.get(f"scene:{s['id']}") == "built")
-        self.log(f"scenes: {built} rendered, {len(rendered) - built} reused ({timer.seconds():.1f}s)")
+        self.log(f"scenes: {built} validated, {len(rendered) - built} reused; generated clips ({timer.seconds():.1f}s)")
         return rendered
 
     def stage_caption_overlay(self, captions, audio, inputs):
-        """Burned-in captions: the whole caption draft rendered as one transparent overlay (captions.render) for the cut's
-        `captions` track. It needs no scene layers and suits every kind of scene; a caption change renders it again and
-        leaves every scene alone."""
+        """Prepare generated caption-window edits for the cut's separate `captions` track. A caption change prepares a
+        fresh proposal and leaves picture scenes alone. The audio snapshot supplies the exact duration and clock."""
         timer = Timer()
         fonts = {k: inputs[v] for k, v in self.m["fonts"].items()}
         layouts = pixel_stage.caption_layouts(fonts, self.m["colors"])
         # The captions key covers the draft and the audio timeline (the film's length); the layouts name the font copies by content.
-        request = {"captions": captions["key"], "project": audio["key"], "layouts": layouts}
+        request = {"captions": captions["key"], "project": audio["key"], "layouts": layouts, "representation": "generated-captions-v1"}
         key = self.key("caption-overlay", request, {"engine": self.engine_identity})
 
         def run(attempt):
-            out = f"renders/captions-{key[:12]}-{attempt}.mkv"
+            self.mkdir("generated/captions")
+            out = f"generated/captions/edits-{key[:12]}-{attempt}.json"
             result = self.engine.job("captions.render", {"document": {"file": captions["result"]["draft"], "select": "document"},
                                                          "layouts": layouts, "project": {"file": audio["result"]["snapshot"]}, "output": out,
-                                                         "asset_id": f"captions-{key[:12]}"},
+                                                         "asset_id": "c-captions", "track_id": "captions", "mode": "generated"},
                                      request_id=f"captions-{key[:20]}-{attempt}", lane="captions", label="captions")
-            asset = dict(result["asset"], path=self.rel_any(result["asset"]["path"]))
-            return [self.ident(asset["path"])], {"asset": asset, "windows": result.get("windows"), "covers": result.get("covers"),
-                                                 "cues": result.get("cues")}
+            return [self.ident(out)], {"operations": {"file": out, "select": "operations"}, "windows": result["windows"],
+                                      "covers": result["covers"], "cues": result["cues"], "compiled": False}
         receipt = self.stage("caption-overlay", key, request, run, {"engine": self.engine_identity})
         if self.outcomes.get("caption-overlay") == "built":
-            self.log(f"captions: {captions['result']['cues']} cue(s) rendered as one overlay, {receipt['result']['asset']['path']} "
-                     f"({timer.seconds():.1f}s)")
-        return receipt["result"]["asset"]
+            self.log(f"captions: {captions['result']['cues']} cue(s) prepared as {receipt['result']['windows']} generated window(s), "
+                     f"{receipt['result']['operations']['file']} ({timer.seconds():.1f}s)")
+        return receipt["result"]["operations"]
 
     def save_base(self, scene_id, base):
         """Write a scene's base recipe (before captions) under scenes/, named by its content; returns its path."""
         base_path = f"scenes/{scene_id}-base-{digest(base)[:12]}.json"
         if not (self.root / base_path).exists():
             write_new(self.root / base_path, base)
+        elif json.loads((self.root / base_path).read_text(encoding="utf-8")) != base:
+            raise ToolError("production", "SOURCE_CHANGED", f"immutable scene recipe changed: {base_path}")
         return base_path
+
+    def save_operations(self, operations):
+        """Keep scene-rich batches out of the bounded CLI request. The loader reads this one complete document; scene
+        recipes inside it are inline, so no recursively loaded file references are required."""
+        return self.save_cut_document("operations", operations)
+
+    def save_cut_document(self, kind, value):
+        """Immutable snapshots and batches share the engine's workspace document bounds."""
+        self.mkdir("generated/timeline")
+        path = f"generated/timeline/{kind}-{digest(value)}.json"
+        if not (self.root / path).exists():
+            write_new(self.root / path, value)
+        elif json.loads((self.root / path).read_text(encoding="utf-8")) != value:
+            raise ToolError("production", "SOURCE_CHANGED", f"immutable cut document changed: {path}")
+        return {"file": path}
 
     def resolve_override(self, scene, override, duration, inputs, at):
         """A hand-written recipe with its cue times, input identities and scene length filled in (see override.py).
@@ -1012,14 +1025,16 @@ class Production:
         timer = Timer()
         rows = {r["id"]: r for r in timing["result"]["scenes"]}
         snapshot = json.loads((self.root / mixed["result"]["snapshot"]).read_text(encoding="utf-8"))
-        ops = [{"op": "media.add", "asset": rendered[s["id"]]} for s in self.m["scenes"]]
-        # Burned-in captions: an alpha_over track above the picture, empty when captions are not burned in.
-        ops.append({"op": "tracks.edit", "edit": {"op": "add", "track": {"id": "captions", "kind": "video", "locked": False, "enabled": True,
-                                                                         "clips": [], "composite": "alpha_over"}}})
+        ops = []
+        # Generated caption proposals create this track themselves. Without burned-in captions, keep it empty.
+        if not overlay:
+            ops.append({"op": "tracks.edit", "edit": {"op": "add", "track": {"id": "captions", "kind": "video", "locked": False, "enabled": True,
+                                                                             "clips": [], "composite": "alpha_over"}}})
         for s in self.m["scenes"]:
             row = rows[s["id"]]
             ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "picture", "collision": "reject", "clip": {
-                "id": f"v-{s['id']}", "asset_id": rendered[s["id"]]["id"], "start": rt(F(row["start"])), "source_in": rt(0),
+                "id": f"v-{s['id']}", "scene": json.loads((self.root / self.rel_any(rendered[s["id"]]["file"])).read_text(encoding="utf-8")),
+                "start": rt(F(row["start"])), "source_in": rt(0),
                 "duration": rt(F(row["duration"]))}}})
         # Each transition starts on the cut and reads the outgoing scene's handle: `before` is zero, `after` its frames.
         for scene_id, (transition, following) in self.transitions(timing).items():
@@ -1027,10 +1042,14 @@ class Production:
                 "id": f"x-{scene_id}", "left_id": f"v-{scene_id}", "right_id": f"v-{following}", "before": rt(0),
                 "after": rt(F(transition["frames"], FPS)), "kind": transition["kind"]}}})
         if overlay:
-            ops.append({"op": "media.add", "asset": overlay})
-            ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": "captions", "collision": "reject", "clip": {
-                "id": "c-captions", "asset_id": overlay["id"], "start": rt(0), "source_in": rt(0), "duration": rt(F(timing["result"]["total"]))}}})
-        desired = self.engine.call("timeline.apply", {"project": snapshot, "expected_revision": snapshot["revision"], "operations": ops})
+            proposal = json.loads((self.root / self.rel_any(overlay["file"])).read_text(encoding="utf-8"))
+            if proposal.get("kind") != "generated_caption_operations" or proposal.get("project_id") != snapshot["id"]:
+                raise ToolError("production", "INVALID_CAPTIONS", "caption proposal does not describe this production")
+            # These operations were checked against the audio snapshot. Validate the complete desired cut here,
+            # then reconcile it against the current saved head; never use that proposal revision as the saved head.
+            ops.extend(proposal["operations"])
+        desired = self.engine.call("timeline.apply", {"project": {"file": mixed["result"]["snapshot"]},
+                                                       "expected_revision": snapshot["revision"], "operations": self.save_operations(ops)})
         request = {"desired": digest(strip_revision(desired))}
         key = self.key("cut", request, {"engine": self.engine_identity})
         project_id = self.m["production_id"]
@@ -1046,20 +1065,22 @@ class Production:
         def run(attempt):
             current = head()
             if current is None:
-                receipt = self.engine.call("session.create", {"project": desired, "request_id": f"create-{key[:24]}"})
+                receipt = self.engine.call("session.create", {"project": self.save_cut_document("snapshot", desired),
+                                                               "request_id": f"create-{key[:24]}"})
                 return [], {"revision": receipt["revision"], "action": "created", "operations": len(ops)}
             current = current.get("project", current)
             diff = reconcile(current, desired)
             if not diff:
                 return [], {"revision": current["revision"], "action": "unchanged", "operations": 0}
             # Prove the operations reach the target on a pure copy before saving anything.
-            trial = self.engine.call("timeline.apply", {"project": current, "expected_revision": current["revision"], "operations": diff})
+            trial = self.engine.call("timeline.apply", {"project": self.save_cut_document("snapshot", current),
+                                                        "expected_revision": current["revision"], "operations": self.save_operations(diff)})
             differences = arrangement_differences(trial, desired)
             if differences:
                 raise ToolError("production", "RECONCILE_INCOMPLETE", f"the saved project would differ from the target in {differences}; "
                                 f"nothing was saved. Rebuild into a new --root, or report the difference")
             receipt = self.engine.call("session.apply", {"project_id": project_id, "request_id": f"build-r{current['revision']}-{key[:20]}",
-                                                         "expected_revision": current["revision"], "operations": diff})
+                                                         "expected_revision": current["revision"], "operations": self.save_operations(diff)})
             changes = receipt.get("changes", {})
             return [], {"revision": receipt["revision"], "action": "applied", "operations": len(diff),
                         "changed_clips": sorted({c.get("id") or c.get("clip_id") for c in changes.get("clips", []) if isinstance(c, dict)} - {None})}
@@ -1405,7 +1426,7 @@ def arrangement_differences(a, b):
     return out
 
 
-CLIP_PLACEMENT = ("asset_id", "start", "source_in", "duration")
+CLIP_PLACEMENT = ("asset_id", "sequence_id", "scene", "start", "source_in", "duration")
 ZERO = {"num": 0, "den": 1}
 
 
@@ -1469,7 +1490,7 @@ def reconcile(head, desired):
         ops.append({"op": "tracks.edit", "edit": {"op": "duration", "duration": desired["tracks"]["duration"]}})
     for track, clip in place:
         ops.append({"op": "tracks.edit", "edit": {"op": "place", "track_id": track, "collision": "reject", "clip": {
-            k: clip[k] for k in ("id", "asset_id", "start", "source_in", "duration")}}})
+            k: clip[k] for k in ("id", *CLIP_PLACEMENT) if k in clip}}})
     # Transitions: removing a clip removes the transitions at its ends, so those are set again with every one that changed.
     def transitions(snapshot):
         return {x["id"]: (track["id"], x) for track in (snapshot.get("tracks") or {}).get("tracks", []) for x in track.get("transitions", [])}

@@ -322,8 +322,11 @@ covers Windows/Linux pixels, exact PCM and publication/session boundaries. Defau
 caption/talking-head skills now use generated scene operations; the schema-validated
 Windows/Linux examples and a fresh 15-call, 33,441-peak-token trial pass
 ([workflow evidence](../../verification/generated-caption-skills-2026-10-13.json)).
-Production-title/caption migration and the complete stage-5 quick gate remain open.
-These checkpoints do not close the stage.
+Production titles and captions now use generated sources. Windows/Linux fixture
+checks and actual older-coordinator/engine migrations pass: 357 frames and 685,440
+stereo sample frames match per platform, with stage reuse and saved history intact.
+See [production evidence](../../verification/generated-production-2026-10-13.json).
+The complete stage-5 quick gate remains open; these checkpoints do not close the stage.
 
 Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame inside the timeline pass with no `scene.render` step.
 

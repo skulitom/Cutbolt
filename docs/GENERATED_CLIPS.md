@@ -72,8 +72,11 @@ now saves a generated clip in one edit, with no movie; actual older compiled
 receipts retain their replay behavior. `captions.render` with `mode: "generated"`
 writes revision-checked scene operations to a JSON file, using the same bounded
 caption windows and trimming the final placed clip to exact coverage; see
-[CAPTIONS](CAPTIONS.md#generated-captions-without-a-compiled-movie). Production-title
-migration and the complete stage-5 quick gate remain open. The caption and talking-head
+[CAPTIONS](CAPTIONS.md#generated-captions-without-a-compiled-movie). Production titles
+and captions now use generated sources too, with Windows/Linux fixture checks and
+actual older-cut migration, exact output, reuse and history checks; see
+[production evidence](../verification/generated-production-2026-10-13.json).
+The complete stage-5 quick gate remains open. The caption and talking-head
 skills now use generated scene operations, with Windows/Linux schema-validated examples
 and a fresh-model rerun meeting 15 calls and 33,441 peak input tokens; see
 [workflow evidence](../verification/generated-caption-skills-2026-10-13.json).

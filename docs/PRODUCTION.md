@@ -9,10 +9,10 @@ One command runs every stage as a durable, resumable job with stage receipts:
 1. PixelForge art;
 2. Qwen narration;
 3. alignment;
-4. scenes with word-cued layers;
+4. editable scenes with word-cued layers;
 5. `media.prepare`;
 6. assembly;
-7. captions, burned in as one overlay;
+7. captions, saved as generated scene windows on their own track;
 8. ducking and loudness;
 9. export;
 10. review.
@@ -28,7 +28,7 @@ The production step is a **local coordinator tool that drives the engine**, not 
 1. **The documented architecture puts it there.** [YOUTUBE_PIPELINE.md](YOUTUBE_PIPELINE.md) draws the coordinator beside Cutbolt, PixelForge and Qwen, owning scene dependencies, stage receipts, reviews and resumption through a local file/state contract. The [contract](pipeline/CONTRACT.md) has it "translate between public interfaces". An engine command would make Cutbolt own companion formats: PixelForge recipes, the Qwen request and the WSL environment.
 2. **No orchestration fields leak into other documents.** The coordinator's state lives in its own `state/` folder. PixelForge recipes and Cutbolt snapshots stay exactly what those tools define. The engine sees ordinary requests.
 3. **Companions stay external and replaceable.** PixelForge runs as its CLI and Qwen as a separate worker process in its own environment. A supplied WAV or scene recipe enters through the same stages ([overrides](#overriding-a-stage)). None of this needs a new engine dependency or engine-side process launching of third-party tools.
-4. **The engine's durability is reused, not duplicated.** Long engine work (alignment, preparation, scene renders, export, review) runs through the engine's own job queue. Request IDs derive from each stage's key, so a coordinator that dies leaves its jobs running, and the next run collects them by request ID instead of starting them again. Timeline changes go through `session.create`/`session.apply` with deterministic request IDs and revision checks.
+4. **The engine's durability is reused, not duplicated.** Long engine work (alignment, preparation, caption proposals, export, review) runs through the engine's own job queue. Request IDs derive from each stage's key, so a coordinator that dies leaves its jobs running, and the next run collects them by request ID instead of starting them again. Timeline changes go through `session.create`/`session.apply` with deterministic request IDs and revision checks.
 5. **It keeps the shared engine surface small.** The MCP catalog is close to its size budget, and `commands.rs`, `jobs.rs` and `mcp.rs` are edited by several sessions. The only engine change is one sentence in the MCP instructions pointing agents here.
 6. **The template is code.** Turning the demo's art generator and scene builder into a reusable template is design work: clouds that drift, cards that land on words, a highlight that follows a film strip. That is easier to evolve as original Python, beside the existing `tools/pixelforge_handoff.py`, than as Rust in the engine.
 
@@ -58,7 +58,7 @@ Costs of this choice, recorded as open gaps:
 
    - `speech_runtime` is the engine's [transcription runtime](TRANSCRIPTS.md); alignment and the speech check use it.
    - `tts.model` is the pinned CustomVoice snapshot from [YOUTUBE_PIPELINE.md](YOUTUBE_PIPELINE.md#preset-speaker-model-customvoice). A copy on the WSL distribution's own disk loads in about 12-17 s instead of 34-44 s from `/mnt/c`.
-   - `lanes` is how many engine job queues run at once (scene renders, voice preparation).
+   - `lanes` bounds concurrent scene validation and engine jobs such as voice preparation.
    - `cache` is an optional kit cache: a music bed that had to be resampled is kept once per music file and engine build, so later productions in the same style copy it instead of converting it again. A 48 kHz stereo bed is used as it is and never cached.
 2. **A manifest.** For example, [example.production.json](pipeline/example.production.json) is the six-scene pilot with every beat type. Inputs (music, fonts, supplied takes) are absolute local paths. The coordinator copies each one, by content, into the production's `sources/`.
 3. **Check, then build:**
@@ -140,10 +140,10 @@ Scenes are cut together unless a scene has a `transition` into the next one, for
 
 The effect starts on the cut and covers the first `frames` of the next scene: its `before` is zero and its `after` is `frames`. Neither scene moves and the timing plan does not change, so the narration stays where it was. The next scene's narration starts its `lead` after the cut, inside a longer effect.
 
-A track transition reads the outgoing scene past its end, so the coordinator renders that scene `frames` longer as a tail handle. The clip on the timeline keeps the scene's length; only the rendered asset is longer.
+A track transition reads the outgoing scene past its end, so the coordinator extends that scene recipe by `frames` as a tail handle. The placed clip keeps the scene's length; its generated source is longer.
 - **Template scenes.** Every layer that lasts until the scene's end plays on through the handle: Pip keeps moving (after a `travel` beat's last hop, Pip idles), and the clouds keep drifting. The beat's timing still follows the scene's length, so up to its end the scene is exactly what it would be without a handle.
 - **Hand-written recipes.** Every layer whose start plus duration reaches the scene's end, from `{"until": "end"}` or otherwise, lasts `frames` longer and plays on by its own frames, keys and `end` policy. Nothing before the end changes. An `audio_mix`, whose length must be the scene's, is padded with silence.
-- **Captions.** Burned-in captions are not in the handle: they are [one overlay](#burned-in-captions) above the picture track, so each caption stays steady through the effect, at its own time.
+- **Captions.** Burned-in captions are not in the handle: they are [separate generated windows](#burned-in-captions) above the picture track, so each caption stays steady through the effect, at its own time.
 
 `check` and `build` refuse:
 - an unknown kind or field;
@@ -153,11 +153,22 @@ A track transition reads the outgoing scene past its end, so the coordinator ren
 
 `check` lists each scene's transition. A build also refuses a handle that would make a scene longer than 120 s (`SCENE_TOO_LONG`).
 
-Each transition is set on the `picture` track as `x-<scene>`, between `v-<scene>` and the next scene's clip. Changing a transition's `kind` changes only the cut. Changing its length, or adding or removing one, also re-renders the outgoing scene, whose recipe changed; see [invalidation](#stages-keys-and-receipts). `show scene:<id>` lists the handle as `request.handle`.
+Each transition is set on the `picture` track as `x-<scene>`, between `v-<scene>` and the next scene's clip. Changing a transition's `kind` changes only the cut. Changing its length, or adding or removing one, also prepares a new outgoing scene recipe; see [invalidation](#stages-keys-and-receipts). `show scene:<id>` lists the handle as `request.handle`.
 
-Transitions slow the export, because each frame inside one is an FFmpeg blend on one filter thread. In the fixture's 21 s film, one 8-frame wipe took the export from 13.7-14.3 s to 26.3 s (6 October 2026, under other sessions' load).
+Historical measurement: the former FFmpeg transition path took a 21 s fixture export from 13.7–14.3 s to 26.3 s with one 8-frame wipe (6 October 2026, under other sessions' load). The current native compositor needs its own performance comparison.
 
 ## Stages, keys and receipts
+
+Since 13 October 2026, picture scenes and captions use [generated clip sources](GENERATED_CLIPS.md).
+Scene stages validate immutable recipes, and caption stages prepare bounded edit documents.
+Their keys explicitly name the generated representation, so old compiled receipts cannot be
+mistaken for new scene proposals. The cut combines those proposals with the mixed audio
+snapshot, validates the whole target, and reconciles it against the current saved head in
+one revision. Caption preparation's audio-snapshot revision is never substituted for that head.
+Large operation batches travel in workspace JSON documents. Saved recipes pin their media;
+export checks those dependencies before publication. Scene caps and the shared prepared-scene
+memory bound still apply. Existing compiled files and saved history remain intact.
+
 
 ```mermaid
 flowchart LR
@@ -173,8 +184,8 @@ flowchart LR
     V --> L[align-batch: one engine job on the voice assets]
     L --> C[captions: draft and sidecars]
     AU --> C
-    C --> CO[caption overlay: one transparent render]
-    L --> S[scenes: one render per lane]
+    C --> CO[captions: generated scene windows]
+    L --> S[scenes: validate recipes per lane]
     A --> S
     S --> CUT[cut: one session revision]
     CO --> CUT
@@ -211,9 +222,9 @@ The `timing` receipt lists every scene whose start or length changed, with old a
 The timeline is one saved session whose ID is `production_id`. It has a `picture` track, a `voice` track, a `music` track and, above the picture, a `captions` track that composites `alpha_over` ([burned-in captions](#burned-in-captions)).
 - **First build.** The coordinator assembles the target arrangement as a pure snapshot and creates the session from it.
 - **Later builds.** It computes the operations that turn the saved head into the new target and applies them as one revision. The target is assembled with `project.create` and `timeline.apply`, and mixed with `timeline.meters`, `audio.duck` and `audio.normalize`.
-  - The operations add new assets and missing tracks, remove and re-place only clips whose placement changed, set the end, set [transitions](#transitions), set levels and fades, and put the tracks in the target's order.
+  - The operations add new assets and missing tracks, remove and re-place only clips whose source or placement changed, set the end, set [transitions](#transitions), set levels and fades, and put the tracks in the target's order.
   - Unchanged clips and transitions get no operation, so `session.history` and receipts show what each build changed. Removing a clip removes the transitions at its ends, so those are set again after it is placed. A transition the target no longer has is removed before any is set.
-  - Asset IDs name content: scenes are `<scene>-<key>`, takes are `<scene>-<key>` from the file name. A revised scene therefore enters beside the old one rather than replacing it under the same name.
+  - Takes retain content-based asset IDs. Picture and caption clips save pinned scene recipes; a changed recipe replaces only its clip in the new revision. Historical compiled assets and older revisions remain available.
 - **Checked before saving.** The operations are first applied to a pure copy of the head with `timeline.apply`. The result must play exactly as the target: the same settings, referenced assets, clips and transitions by ID with every field, track settings and order, end, links and limiters. Otherwise nothing is saved, and the build fails with `RECONCILE_INCOMPLETE`, naming each differing track, clip and field. Assets no clip uses, and the order of clips inside a track, do not count.
 - **Request IDs** are derived from the parent revision and the target's digest, so a lost response repeats safely.
 - **Reuse.** The `cut` receipt is reused only when the session head is still the revision it recorded. Otherwise the stage runs again, even for an unchanged manifest, and reconciles the head to the target. Before 6 October 2026 it reused the receipt anyway: the edit stayed in the head, and the export rendered the recorded revision.
@@ -221,12 +232,12 @@ The timeline is one saved session whose ID is `production_id`. It has a `picture
 
 ### Burned-in captions
 
-With `delivery.captions.burn_in` (the default), the caption draft is rendered once, over the whole film, as one transparent overlay with [`captions.render`](CAPTIONS.md#rendering-a-whole-caption-track). It is placed as clip `c-captions` on the `captions` track, from the start to the film's end. Scenes carry no caption layers, so:
+With `delivery.captions.burn_in` (the default), [`captions.render` in generated mode](CAPTIONS.md#generated-captions-without-a-compiled-movie) prepares a JSON edit document. Its bounded scene windows use the `c-captions` clip prefix on the `captions` track and cover the film exactly. Export renders them directly, without a caption movie. Picture scenes carry no caption layers, so:
 - **Every kind of scene takes captions.** A scene with `geometry` binds every layer to a plane, so caption text layers appended to it (`captions.scene`, which builds did until 6 October 2026) were refused with `INVALID_GEOMETRY`, and the effects reel had to turn `burn_in` off.
 - **Captions use none of a scene's 64 layers.**
-- **The overlay renders while the scenes do**, on its own job lane. A caption change renders it again and leaves every scene alone.
+- **Caption proposals prepare beside picture scenes**, on their own job lane. A caption change prepares fresh windows and leaves every picture scene alone.
 
-The layout is the template's: bold text in a dark box near the bottom of the frame. Without `burn_in` the track stays empty. A project saved before the track existed gets it on its next build: reconciliation adds it, empty and on top, before placing the overlay. The SRT and WebVTT sidecars are unchanged, and so are the reviews: the delivered file is reviewed with the captions in its picture.
+The layout is the template's: bold text in a dark box near the bottom of the frame. Without `burn_in` the track stays empty. A project saved before the track existed gets it on its next build: reconciliation adds it, empty and on top, before placing the windows. The SRT and WebVTT sidecars are unchanged, and so are the reviews: the delivered file is reviewed with the captions in its picture.
 
 ### Interruption and resumption
 
@@ -237,14 +248,14 @@ The coordinator takes a lock (`state/coordinator.lock`, with its PID). A second 
 ### Overriding a stage
 
 - `--rebuild STAGE` reruns a stage even when its receipt matches. It takes a stage (`tts:s2`, `scene:s4`), a kind (`scene`, `export`) or a batch (`tts`).
-- `--until scenes|cut` stops before the export: after the scene renders, or after the saved cut, for example to look at stills or `preview.frame` first.
+- `--until scenes|cut` stops before the export: after scene validation, or after the saved cut, for example to look at stills or `preview.frame` first.
 - `overrides.narration` substitutes a supplied WAV for synthesis, which still gets aligned.
 - `overrides.scenes` substitutes a whole [hand-written scene recipe](#hand-written-scenes) for the template's.
 - Every intermediate is an ordinary file in the production folder, so an agent can open any of them with the engine's own tools:
   - the PixelForge recipe under `generated/art/`;
   - the scene recipes under `scenes/`;
   - the target snapshots under `generated/timeline/`;
-  - the caption draft under `generated/captions/`, and its overlay under `renders/`.
+  - the caption draft and generated edit document under `generated/captions/`.
 
 ### Hand-written scenes
 
@@ -334,9 +345,9 @@ python tools/production.py resolve my-film.production.json gallery --root C:\DEV
 | `generated/art/` | PixelForge recipes and rendered bundles, one folder per recipe key |
 | `generated/tts/` | Takes and the worker's receipt, one folder per batch attempt |
 | `generated/align/` | Aligned transcripts, one per voice asset |
-| `generated/timeline/`, `generated/captions/` | Target snapshots, the combined transcripts and the caption draft |
+| `generated/timeline/`, `generated/captions/` | Target snapshots, operation documents, combined transcripts, caption drafts and generated caption proposals |
 | `media/` | Prepared voice and music assets |
-| `scenes/`, `renders/` | Scene recipes, compiled scene assets and the caption overlay |
+| `scenes/`, `renders/` | Immutable scene recipes; `renders/` retains compiled assets from older builds |
 | `previews/` | Stills from `resolve --still` |
 | `exports/` | The MP4 and the SRT/WebVTT sidecars |
 | `reviews/` | The review (sheet, `review.json`), the speech check (the audio-only mix, transcripts, `review.json`) and the mix's AAC trials (`aac-*.m4a` with their `review.json`) |
@@ -405,7 +416,7 @@ With `"loop": "bars"`, the bed repeats from its start every whole number of 4/4 
 
 ## Speed
 
-What the coordinator does about the 75 minutes and the compute:
+The measurements below describe earlier compiled-scene builds. The 13 October generated-source migration has correctness and reuse evidence; no new full-production speed claim is made.
 - **Authoring.** The demo's art generator and scene builder are now the template, so a new video in this style needs only a manifest.
 - **Narration.** All lines are synthesized in one model load, in batches: 43 s of speech in 30 s of generation on the RTX 4090, against 67 s one line at a time.
   - The talker's cost follows the total audio, not the longest line. Splitting into sentences (`voice.split`) changes delivery, not speed.
@@ -450,4 +461,4 @@ Not implemented:
 - **Transitions** start on the cut and read only the outgoing scene's handle, so they cover the start of the next scene. A transition centred on the cut, which would need a head handle on the incoming scene and move its cues, is not offered.
 - **Gates** are recorded but do not block a build.
 - **MCP-only hosts** cannot start a production without a shell (see the decision above).
-- **Measured on one Windows machine** with an RTX 4090, the pinned Qwen snapshot and the recorded PixelForge commit. Nothing else has been tested.
+- **Companion performance was measured on one Windows machine** with an RTX 4090, the pinned Qwen snapshot and recorded PixelForge commit. The generated scene/caption stages and old-cut migration also have bounded Windows/Linux checks; these do not establish general companion performance on Linux.

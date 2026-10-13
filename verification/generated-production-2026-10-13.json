@@ -1,0 +1,241 @@
+{
+  "date": "2026-10-13",
+  "kind": "production_generated_source_migration",
+  "parent_commit": "918ad9b03ac3a544daca4ed7363967ae56246cd5",
+  "source_sha256": {
+    "tools/cutbolt_production/pipeline.py": "2b1466dbb0525ff52c634e0ba045605a2eb4688e1b6b38a75dcb6f872fbff49c",
+    "tests/production.py": "5afefbb3040429394aeefd5fefcc0d35ffd8015cdee48021bf001905f802a1ec"
+  },
+  "linux_source_hashes_match": true,
+  "checks": {
+    "windows": {
+      "fixture": "production",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "wall_seconds": 51,
+      "report_sha256": "b4730f7095d6d58915ebda56ee3dc4ff88377561f435d2ff039da5e9d904d084",
+      "fixture_log_sha256": "541f6c336d47063bd35a47e672bf9ea771a90baef2d63692a1b3b48075d31a1d",
+      "old_coordinator_and_engine": {
+        "engine_sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f",
+        "legacy_coordinator_sha256": "fc83fc797363c57b391322da38e65457c41e9a2bec30a2bcb2e0fc4721637170",
+        "cases": [
+          {
+            "root": "override-film",
+            "frames": 132,
+            "video_sha256": "b598169186abe4e27493d265422467c1bebaa805c73c02a20e1afa3f16abd114",
+            "pcm_sha256": "9912f329c39531953d6e3144649c9f142feb73ce8cc32895353b3c03957cf285"
+          },
+          {
+            "root": "transition-film",
+            "frames": 225,
+            "video_sha256": "5068e7572632b2605a6487240351b36de933d1fff8aaca89b03a7304f3913cd9",
+            "pcm_sha256": "75c4124e7b4e22b53b59f9208d359b0cc16157ae1e4beba52159c5a6b801dd2b"
+          }
+        ],
+        "fixture_checks": [
+          "production.override_manifest_checks (28 rejections)",
+          "production.override_cues_land_on_words (zooms 21, gold 49/51, lands 72, gold 81)",
+          "production.override_keys_follow_cues_and_inputs",
+          "production.override_build_refusals",
+          "production.override_scene_clock_and_holds (camera 21-29, lamp 51-65, dimmed from 81, footage frame 2 held 18-73)",
+          "production.override_sequence_frames_rekey",
+          "production.override_scene_clock_refusals",
+          "production.resolve_previews_override (stills at frames 15 and 75 equal the rendered frames)",
+          "production.captions_over_3d_scene (one overlay on an alpha_over track, 3900 pixels of caption over the gallery; captions.scene refuses it with INVALID_GEOMETRY)",
+          "production.transition_cut (handles 6 and 4 frames; kind change 1 operation; length change re-renders one scene; hand edit undone)"
+        ]
+      },
+      "migration": {
+        "engine_sha256": "d12ebfefce4040082ff51f9774138ed1b63f88508462169719b554fbd0cc95a8",
+        "coordinator_sha256": "2b1466dbb0525ff52c634e0ba045605a2eb4688e1b6b38a75dcb6f872fbff49c",
+        "cases": [
+          {
+            "root": "override-film",
+            "frames": 132,
+            "stereo_sample_frames": 253440,
+            "initial_outcomes": {
+              "scene:gallery": "built",
+              "caption-overlay": "built",
+              "cut": "built"
+            },
+            "repeat_outcomes": {
+              "scene:gallery": "reused",
+              "caption-overlay": "reused",
+              "cut": "reused"
+            },
+            "no_duplicate_revision_after_lost_receipt": true,
+            "old_revisions_and_files_preserved": true,
+            "no_new_intermediate_movies": true,
+            "pixels_and_pcm_equal_actual_old_engine": true
+          },
+          {
+            "root": "transition-film",
+            "frames": 225,
+            "stereo_sample_frames": 432000,
+            "initial_outcomes": {
+              "scene:a": "built",
+              "scene:b": "built",
+              "scene:c": "built",
+              "cut": "built"
+            },
+            "repeat_outcomes": {
+              "scene:a": "reused",
+              "scene:b": "reused",
+              "scene:c": "reused",
+              "cut": "reused"
+            },
+            "no_duplicate_revision_after_lost_receipt": true,
+            "old_revisions_and_files_preserved": true,
+            "no_new_intermediate_movies": true,
+            "pixels_and_pcm_equal_actual_old_engine": true
+          }
+        ]
+      },
+      "migration_log_sha256": "fa3b5f22cfa99a3d8c9c7784233d9b3d0e4926989f81859c39af08c4d3919b65"
+    },
+    "linux": {
+      "fixture": "production",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "wall_seconds": 38,
+      "report_sha256": "7d9ff5bfc6edc0a14e88ffb099eb78c1c101a050ea58a35ccbe1e07e6b4a8841",
+      "fixture_log_sha256": "33047a45d2cbddfcb1201a74aebb711f8ef60303d45a3e64df46fc31c178c9cf",
+      "old_coordinator_and_engine": {
+        "engine_sha256": "bc196069fe100410e4ccc62c8aa202952a6df3f92e2fdf64dbb9a7b790779a53",
+        "legacy_coordinator_sha256": "fc83fc797363c57b391322da38e65457c41e9a2bec30a2bcb2e0fc4721637170",
+        "cases": [
+          {
+            "root": "override-film",
+            "frames": 132,
+            "video_sha256": "b598169186abe4e27493d265422467c1bebaa805c73c02a20e1afa3f16abd114",
+            "pcm_sha256": "9912f329c39531953d6e3144649c9f142feb73ce8cc32895353b3c03957cf285"
+          },
+          {
+            "root": "transition-film",
+            "frames": 225,
+            "video_sha256": "5068e7572632b2605a6487240351b36de933d1fff8aaca89b03a7304f3913cd9",
+            "pcm_sha256": "75c4124e7b4e22b53b59f9208d359b0cc16157ae1e4beba52159c5a6b801dd2b"
+          }
+        ],
+        "fixture_checks": [
+          "production.override_manifest_checks (28 rejections)",
+          "production.override_cues_land_on_words (zooms 21, gold 49/51, lands 72, gold 81)",
+          "production.override_keys_follow_cues_and_inputs",
+          "production.override_build_refusals",
+          "production.override_scene_clock_and_holds (camera 21-29, lamp 51-65, dimmed from 81, footage frame 2 held 18-73)",
+          "production.override_sequence_frames_rekey",
+          "production.override_scene_clock_refusals",
+          "production.resolve_previews_override (stills at frames 15 and 75 equal the rendered frames)",
+          "production.captions_over_3d_scene (one overlay on an alpha_over track, 3900 pixels of caption over the gallery; captions.scene refuses it with INVALID_GEOMETRY)",
+          "production.transition_cut (handles 6 and 4 frames; kind change 1 operation; length change re-renders one scene; hand edit undone)"
+        ]
+      },
+      "migration": {
+        "engine_sha256": "c293ab5986eb4f162ac2e99ad856c6a96e32e3e42cde608a5e110345328e0a2f",
+        "coordinator_sha256": "2b1466dbb0525ff52c634e0ba045605a2eb4688e1b6b38a75dcb6f872fbff49c",
+        "cases": [
+          {
+            "root": "override-film",
+            "frames": 132,
+            "stereo_sample_frames": 253440,
+            "initial_outcomes": {
+              "scene:gallery": "built",
+              "caption-overlay": "built",
+              "cut": "built"
+            },
+            "repeat_outcomes": {
+              "scene:gallery": "reused",
+              "caption-overlay": "reused",
+              "cut": "reused"
+            },
+            "no_duplicate_revision_after_lost_receipt": true,
+            "old_revisions_and_files_preserved": true,
+            "no_new_intermediate_movies": true,
+            "pixels_and_pcm_equal_actual_old_engine": true
+          },
+          {
+            "root": "transition-film",
+            "frames": 225,
+            "stereo_sample_frames": 432000,
+            "initial_outcomes": {
+              "scene:a": "built",
+              "scene:b": "built",
+              "scene:c": "built",
+              "cut": "built"
+            },
+            "repeat_outcomes": {
+              "scene:a": "reused",
+              "scene:b": "reused",
+              "scene:c": "reused",
+              "cut": "reused"
+            },
+            "no_duplicate_revision_after_lost_receipt": true,
+            "old_revisions_and_files_preserved": true,
+            "no_new_intermediate_movies": true,
+            "pixels_and_pcm_equal_actual_old_engine": true
+          }
+        ]
+      },
+      "migration_log_sha256": "5280d0f768b28f96b400c5352080bd6c101df819f0161b877e2af8b753994481"
+    }
+  },
+  "changes": [
+    "Picture stages validate and retain original scene recipes instead of compiling movies.",
+    "Caption stages prepare generated window-operation files, independently of picture scenes.",
+    "Representation-specific stage keys invalidate old compiled receipts; original source copies, compiled files and saved revisions survive.",
+    "Reconciliation compares scene and sequence sources along with asset sources and placement; new recipes replace affected clips in one saved revision.",
+    "Scene-rich operation batches and project snapshots use immutable workspace JSON documents rather than the coordinator CLI request body.",
+    "Caption operations are validated with the complete desired cut, then reconciled against the actual saved head; no stale audio-snapshot revision is applied to the head."
+  ],
+  "oracle_archive": {
+    "commit": "2ae9be28997314b8575912593ea1121903f79554",
+    "archive": "production-legacy-coordinator-2ae9be2.zip",
+    "archive_sha256": "1dcfa2141c72ed9de37a0015fe4f6c6ce7d29f4842b5e68d500fe75c93e977e3",
+    "files": {
+      "tests/production.py": "33166664f11d5589df84c80e5e95f9cf39e0964f1783ddfa3a5e7b27fb04146d",
+      "tools/cutbolt_production/__init__.py": "a97c45920cf2c6a219a430a59eae89358feda0f20bb602370b8abbcfe96e8261",
+      "tools/cutbolt_production/cli.py": "01def7a7ddb494734ab640aad5ca466ed2221e1e18de3eed8fa19665f055c8af",
+      "tools/cutbolt_production/engine.py": "9c15e75950b14785f55b3513febf469e491bbeddaabbcd0a50943e5e501fd494",
+      "tools/cutbolt_production/manifest.py": "97515d1d4ea26bfdcb6ff8a94f6a438cb5120ff4c1f4e6159094103387759ace",
+      "tools/cutbolt_production/override.py": "631729f85a7da379eb6d3ad99d337c1bf213d3b8024495d3f3ccfa287c25c861",
+      "tools/cutbolt_production/pipeline.py": "fc83fc797363c57b391322da38e65457c41e9a2bec30a2bcb2e0fc4721637170",
+      "tools/cutbolt_production/pixel_stage.py": "8dc39ccd142a71b14a80f2794599c78e835a454ac91b50088663446848f6cb9a",
+      "tools/cutbolt_production/quality.py": "00cc1516bf8f62b312a07db3742c705898f56c2f342862e1440ccd0d1ab9858b",
+      "tools/cutbolt_production/state.py": "7264e941fbcc60a358d3c58e33fab6588fa572dc08496ef98a25d60f195dd5d2",
+      "tools/production.py": "c04d9a3688e9cedb10d69a6918d4ea57565b4621cab0ca61d23780d8fa357665"
+    },
+    "scope": "Project-owned coordinator and original production fixture only; no third-party source, binary, media or credentials. Identical to the coordinator/fixture at the retained 4bf1191 engine reference."
+  },
+  "harness_sha256": "002ee5a94995c15bf37179a66ba142baa2dd47d03c1de8c93f005a4462ff4cc9",
+  "harness_corrections": [
+    "Initial old-engine export omitted its required streams field; no product change was needed.",
+    "The migration auditor initially expected unused historical scene receipts to migrate. It now checks only active stage names; unrelated receipts stay historical.",
+    "The Windows retained-movie comparison initially mixed backslashes with slash prefixes. Paths now normalize with as_posix.",
+    "Clean final Windows/Linux runs each produce actual older compiled cuts, migrate them, compare all output, verify reuse and recover a lost stage receipt. Earlier attempts remain external."
+  ],
+  "prior_ship": {
+    "commit": "918ad9b03ac3a544daca4ed7363967ae56246cd5",
+    "pushed_main_confirmed": true,
+    "passed": 9,
+    "reused": 1,
+    "deferred": 68,
+    "seconds": 197,
+    "background": "pending"
+  },
+  "prior_background": {
+    "commit": "0d953da37911378b5c47c4258827a0e4b3951d16",
+    "passed": 5,
+    "failed": 0,
+    "superseded_skips": 57,
+    "not_started": 0,
+    "seconds": 1647
+  },
+  "scope": [
+    "The production fixture covers original template/override/cue clocks, source changes, selective scene reuse, transition handles, caption placement, compiled-reference pixels/PCM, migration and receipt recovery.",
+    "Actual older-engine comparisons use a 132-frame captioned 3D scene and a 225-frame cut with transitions; their PCM is silent. Existing production AAC/mix checks remain, and nonzero generated-scene PCM is covered separately by core evidence.",
+    "Companion inference, human review, full long-production export and throughput were not rerun. No new points or thorough evidence claim.",
+    "The complete stage-five quick gate, stage six and final requirement/performance audit remain open."
+  ]
+}

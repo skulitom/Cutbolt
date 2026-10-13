@@ -1,5 +1,29 @@
 # Progress history
 
+## 13 October 2026: production titles and captions use generated scenes
+
+Production picture stages now validate and retain editable recipes. Caption stages
+prepare generated window edits. The cut combines these with its mixed audio snapshot
+and reconciles source or placement changes in one saved revision. Representation keys
+distinguish old compiled receipts; old assets and history survive. Immutable workspace
+documents carry scene-rich snapshots and operation batches through the existing limits.
+
+Windows/Linux production fixtures pass (51/38 seconds), retaining template, cue-clock,
+source-change, selective reuse, transition and mix checks. Both also migrate actual
+cuts and receipts made by the older project-owned coordinator and 4bf1191 engine:
+357 frames and 685,440 stereo sample frames match per platform. These two comparisons
+use silent PCM; existing mix tests and separate generated-source audio evidence retain
+nonzero coverage. Repeat builds reuse every active stage; a lost cut receipt adds no
+revision, and old files/revisions survive. [Production evidence](../verification/generated-production-2026-10-13.json)
+records identities, clean final runs and three external harness corrections.
+
+The 918ad9b checkpoint shipped to main: nine gate fixture passes plus Rust, one reuse,
+68 deferred in 197 seconds; remote main was independently confirmed. Its background
+is pending. The 0d953da background completed: five passes, zero failures, 57 superseded
+skips, zero unstarted in 1,647 seconds. Stage-five full quick, stage six and the final
+requirement/performance audit remain open. No companion-inference, human-review,
+long-export, speed, points or thorough milestone claim; PROGRESS.md retains 338e114.
+
 ## 13 October 2026: generated caption skills and client schema repair
 
 The caption and talking-head recipes now attach editable scene operations from a

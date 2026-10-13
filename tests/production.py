@@ -5,9 +5,9 @@ their invalidation by palette and label changes; every beat type compiled agains
 engine's scene.inspect, with cue layers starting on the exact frame of their word; the timing plan against hand-computed
 boundaries; reconcile() checked by applying its operations with the engine and comparing the result with the target;
 the TTS worker refusing a missing model before loading anything; the build's order, with stubbed stages, starting
-alignment on the voice assets while the music is still being prepared, and the caption overlay while the scenes render;
+alignment on the voice assets while the music is still being prepared, and caption proposals while the scenes are prepared;
 a hand-written scene override with word cues and input references, checked against its script, resolved from a
-stand-in alignment, rendered by the coordinator's scene stage and re-keyed when a cue time or an input changes, with a
+stand-in alignment, retained by the coordinator's scene stage and re-keyed when a cue time or an input changes, with a
 build log that names each distinct cue once; burned-in captions as one transparent overlay over a 3D scene, added on
 top of a project saved without the captions track; delivery warnings from speech checks and reviews (an engine-shaped
 recognition failure, words heard where no narration plays, a delivered peak over its target, a short music bed at check
@@ -498,8 +498,14 @@ def stand_in_words(script, moved=None):
     return words
 
 
+def compiled_reference(root, recipe, name):
+    """Only the independent test oracle compiles scenes; coordinator scene stages must create no movie."""
+    (root / "reference").mkdir(exist_ok=True)
+    return engine("scene.render", root, scene={"file": recipe}, output=f"reference/{name}.mkv")["asset"]
+
+
 class DirectEngine(Engine):
-    """Runs queued commands directly: the job queue's workers need Windows, and these checks are about the coordinator."""
+    """Runs queued commands directly for these coordinator checks; persisted job semantics have separate coverage."""
 
     def job(self, command, args, request_id, lane, label=None, wait_seconds=30):
         return self.call(command, args, label=label)
@@ -830,8 +836,10 @@ def check_overrides(out, inputs, font, passed):
                          {}, built)
     rendered = builder.state.receipt("scene:gallery")["result"]
     assert builder.outcomes["input:track"] == "reused" and rendered["recipe"] == preview["recipe"], (builder.outcomes, rendered, preview["recipe"])
+    assert rendered["compiled"] is False and "asset" not in rendered and not list((preview_root / "renders").glob("*.mkv"))
+    reference = compiled_reference(preview_root, rendered["recipe"], "preview-gallery")
     for still in preview["stills"]:
-        decoded = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(preview_root / rendered["asset"]["path"]), "-vf",
+        decoded = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(preview_root / reference["path"]), "-vf",
                                   f"select=eq(n\\,{still['frame']})", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                                  capture_output=True, check=True).stdout
         assert decoded == Image.open(preview_root / still["path"]).convert("RGB").tobytes(), still
@@ -847,14 +855,15 @@ def check_overrides(out, inputs, font, passed):
 
 
 def check_captions_over_3d(out, production, render, copies, gallery, passed):
-    """Burned-in captions over a 3D scene (VFX demo finding 28). A geometry scene binds every layer to a plane, so captions
-    appended to it as text layers (captions.scene) fail. The coordinator renders the caption document as one transparent
-    overlay (captions.render) on a `captions` track above the picture: the cut shows the gallery with the caption over it,
-    and a project saved before that track gets it added on top."""
+    """Separate generated caption windows over a 3D scene. Text appended to the geometry scene still fails; the native
+    caption track shows above it. Existing compiled picture/caption sources migrate without changing output or history."""
     root = production.root
     render(copies)
-    gallery_asset = production.state.receipt("scene:gallery")["result"]["asset"]
-    base = json.loads((root / production.state.receipt("scene:gallery")["result"]["recipe"]).read_text(encoding="utf-8"))
+    scene_result = production.state.receipt("scene:gallery")["result"]
+    assert scene_result["compiled"] is False and "asset" not in scene_result
+    assert not list((root / "renders").glob("*.mkv"))
+    gallery_asset = compiled_reference(root, scene_result["recipe"], "gallery")
+    base = json.loads((root / scene_result["recipe"]).read_text(encoding="utf-8"))
     assert base.get("geometry"), "the gallery is a 3D scene"
     document = {"schema_version": 1, "id": "captions", "revision": 0, "overlap": "reject", "styles": {"default": {"color": [255, 255, 255]}},
                 "cues": [{"id": "c1", "start": {"num": 1, "den": 2}, "end": {"num": 3, "den": 1}, "text": "THE CAMERA DRIFTS",
@@ -889,7 +898,9 @@ def check_captions_over_3d(out, production, render, copies, gallery, passed):
         overlay = production.stage_caption_overlay(captions, audio, copies)
     finally:
         pixel_stage.caption_layouts = template_layouts
-    assert production.outcomes["caption-overlay"] == "built" and overlay["id"] == f"captions-{production.state.receipt('caption-overlay')['key'][:12]}"
+    assert production.outcomes["caption-overlay"] == "built" and overlay["select"] == "operations"
+    assert production.state.receipt("caption-overlay")["result"]["compiled"] is False
+    assert not list((root / "renders").glob("*.mkv"))
     # A project saved before the captions track: the picture alone.
     old = engine("timeline.apply", root, project=snapshot, expected_revision=snapshot["revision"], operations=[
         {"op": "media.add", "asset": gallery_asset},
@@ -897,14 +908,45 @@ def check_captions_over_3d(out, production, render, copies, gallery, passed):
             "id": "v-gallery", "asset_id": gallery_asset["id"], "start": {"num": 0, "den": 1}, "source_in": {"num": 0, "den": 1},
             "duration": {"num": 132, "den": 25}}}}])
     engine("session.create", root, project=old, request_id="old-3d")
-    cut = production.stage_cut({"result": {"snapshot": audio["result"]["snapshot"]}}, {"gallery": gallery_asset}, timing, overlay)
+    cut = production.stage_cut({"result": {"snapshot": audio["result"]["snapshot"]}}, {"gallery": scene_result["scene"]}, timing, overlay)
     assert cut["result"]["action"] == "applied", cut["result"]
     head = engine("session.get", root, project_id="fixture-film")
     head = head.get("project", head)
     assert [(t["id"], t.get("composite")) for t in head["tracks"]["tracks"]] == [
         ("picture", None), ("voice", None), ("music", None), ("captions", "alpha_over")], head["tracks"]["tracks"]
+    assert head["schema_version"] == 2
+    generated = [c for t in head["tracks"]["tracks"] if t["kind"] == "video" for c in t["clips"]]
+    assert len(generated) == 2 and all(c.get("scene") and not c.get("asset_id") for c in generated)
+    assert any(a["id"] == gallery_asset["id"] for a in head["assets"]), "old assets remain available to saved history"
     (root / "exports").mkdir(exist_ok=True)
     engine("export.run", root, project={"project_id": "fixture-film"}, output="exports/captions-3d.mkv", profile="reference", streams="audio_video")
+    # Reconstruct the former compiled-picture/compiled-caption path independently. Compare
+    # every frame/sample, retaining the localized caption checks below as a second oracle.
+    caption_asset = engine("captions.render", root, project=snapshot, document=document, layouts=small,
+                           mode="compiled", output="reference/captions.mkv", asset_id="reference-captions")["asset"]
+    oracle = engine("timeline.apply", root, project=old, expected_revision=old["revision"], operations=[
+        {"op":"media.add","asset":caption_asset},
+        {"op":"tracks.edit","edit":{"op":"add","track":{"id":"captions","kind":"video","clips":[],"enabled":True,"locked":False,"composite":"alpha_over"}}},
+        {"op":"tracks.edit","edit":{"op":"place","track_id":"captions","collision":"reject","clip":{
+            "id":"legacy-caption","asset_id":caption_asset["id"],"start":0,"source_in":0,"duration":{"num":132,"den":25}}}}])
+    engine("export.run", root, project=oracle, output="reference/compiled-cut.mkv", profile="reference", streams="audio_video")
+    for stream in (['-map','0:v:0','-pix_fmt','rgb24','-f','rawvideo'], ['-map','0:a:0','-f','s16le']):
+        decoded = [subprocess.check_output(['ffmpeg','-v','error','-i',str(root/p),*stream,'-'],timeout=120)
+                   for p in ('exports/captions-3d.mkv','reference/compiled-cut.mkv')]
+        assert decoded[0] == decoded[1], stream
+    # A lost coordinator receipt after the saved edit must reconcile without another revision.
+    cached = production.state.receipt("cut")
+    production.state.save({**cached,"state":"interrupted","pid":0})
+    recovered = production.stage_cut({"result":{"snapshot":audio["result"]["snapshot"]}}, {"gallery":scene_result["scene"]}, timing, overlay)
+    assert recovered["result"]["action"] == "unchanged" and recovered["result"]["revision"] == head["revision"]
+    assert recovered["result"]["operations"] == 0
+    # Existing compiled captions are replaced on a full old-style cut, retaining that old revision.
+    engine("session.apply", root, project_id="fixture-film", expected_revision=head["revision"], request_id="simulate-old-cut",
+           operations=reconcile(head, oracle))
+    migrated = production.stage_cut({"result":{"snapshot":audio["result"]["snapshot"]}}, {"gallery":scene_result["scene"]}, timing, overlay)
+    now = engine("session.get", root, project_id="fixture-film")
+    assert migrated["result"]["action"] == "applied" and not arrangement_differences(now, head)
+    passed.append("production.generated_scene_and_caption_migration (132 frames and 253440 stereo samples match compiled path; partial/full old cut and lost receipt)")
 
     def frame(path, n):
         return np.frombuffer(subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(root / path), "-vf", f"select=eq(n\\,{n})",
@@ -1080,14 +1122,16 @@ def check_transition_cut(out, font, passed):
     assert clips == placed and transitions == {}, (clips, transitions)
     plain = json.loads((root / production.state.receipt("scene:a")["result"]["recipe"]).read_text(encoding="utf-8"))
 
-    # Adding transitions renders the two outgoing scenes with handles; the clips keep their places.
+    # Adding transitions prepares two outgoing recipes with handles; the clips keep their places.
     outcomes, cut, (_, clips, transitions) = build({"a": {"kind": "dissolve", "frames": 6}, "b": {"kind": "wipe_left", "frames": 4}})
-    assert outcomes == {"scene:a": "built", "scene:b": "built", "scene:c": "reused", "cut": "built"} and cut["operations"] == 7, (outcomes, cut)
+    assert outcomes == {"scene:a": "built", "scene:b": "built", "scene:c": "reused", "cut": "built"} and cut["operations"] == 5, (outcomes, cut)
     assert clips == placed, clips
     assert transitions == {"x-a": ("dissolve", "v-a", "v-b", 0, F(6, 25)), "x-b": ("wipe_left", "v-b", "v-c", 0, F(4, 25))}, transitions
     scenes = {sid: production.state.receipt(f"scene:{sid}") for sid in ("a", "b", "c")}
     assert [scenes[s]["request"].get("handle") for s in "abc"] == ["6/25", "4/25", None], [scenes[s]["request"] for s in "abc"]
-    assert [fr(scenes[s]["result"]["asset"]["duration"]) for s in "abc"] == [F(131, 25), F(54, 25), F(2)], [scenes[s]["result"]["asset"] for s in "abc"]
+    assert all(scenes[s]["result"]["compiled"] is False for s in "abc")
+    assert [fr(json.loads((root / scenes[s]["result"]["recipe"]).read_text(encoding="utf-8"))["duration"]) for s in "abc"] == [F(131, 25), F(54, 25), F(2)]
+    assert not list((root / "renders").glob("*.mkv"))
     # The recipe's layers that last until the end play on through the handle; the zoom label, which ends on "gold", does not.
     handle = json.loads((root / scenes["a"]["result"]["recipe"]).read_text(encoding="utf-8"))
     lengths = {x["id"]: (fr(x["duration"]), fr(y["duration"])) for x, y in zip(plain["layers"], handle["layers"])}
@@ -1105,13 +1149,13 @@ def check_transition_cut(out, font, passed):
     p = F(5, 12)
     assert pixel == tuple(int((1 - p) * a + p * b + F(1, 2)) for a, b in zip(colors["stage"], colors["stage_b"])), pixel
 
-    # A new kind is only the cut: one operation. A new length re-renders the outgoing scene, whose clip is placed again,
+    # A new kind is only the cut: one operation. A new length revises the outgoing scene, whose clip is placed again,
     # and both transitions at its ends are set again.
     outcomes, cut, (_, clips, transitions) = build({"a": {"kind": "dip_black", "frames": 6}, "b": {"kind": "wipe_left", "frames": 4}})
     assert outcomes == {"scene:a": "reused", "scene:b": "reused", "scene:c": "reused", "cut": "built"} and cut["operations"] == 1, (outcomes, cut)
     assert transitions["x-a"][0] == "dip_black" and clips == placed, transitions
     outcomes, cut, (project, clips, transitions) = build({"a": {"kind": "dip_black", "frames": 6}, "b": {"kind": "wipe_left", "frames": 8}})
-    assert outcomes == {"scene:a": "reused", "scene:b": "built", "scene:c": "reused", "cut": "built"} and cut["operations"] == 5, (outcomes, cut)
+    assert outcomes == {"scene:a": "reused", "scene:b": "built", "scene:c": "reused", "cut": "built"} and cut["operations"] == 4, (outcomes, cut)
     assert clips == placed and transitions == {"x-a": ("dip_black", "v-a", "v-b", 0, F(6, 25)), "x-b": ("wipe_left", "v-b", "v-c", 0, F(8, 25))}, transitions
 
     # A transition changed by hand in the saved project is put back by the next build: the hand-made one is removed
