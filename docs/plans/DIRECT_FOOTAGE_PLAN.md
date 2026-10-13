@@ -231,7 +231,11 @@ Implementation note, 13 October 2026: the stage-3 pixel contract and targeted Wi
 acceptance are recorded in [CLIP_EFFECTS.md](../CLIP_EFFECTS.md) and
 [the evidence](../../verification/clip-effects-2026-10-13.json). Key coverage is flattened
 onto black in this stage, as required by the unchanged-visibility rule below. Stage 4
-retains transparency and changes the layering rule. The original requirements follow.
+retains transparency and changes the layering rule. The complete frozen f13453d
+strict quick gate passed all 76 stages on 13 October, with no failures, skips or
+reused results; together with the targeted Windows/Linux acceptance, this verifies
+the stage-3 exit. See [full-gate evidence](../../verification/stage3-full-quick-2026-10-13.json).
+The original requirements follow.
 
 Goal: grade, selective grade, LUT and chroma key are properties of any video clip on a native track, rendered in the same pass.
 

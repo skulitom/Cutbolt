@@ -1,5 +1,23 @@
 # Progress history
 
+## 13 October 2026: complete the frozen stage-3 verification gate
+
+The clean f13453d verification checkout finished all 76 stages of its complete
+strict quick run: no failures, skips, reused passes or unstarted fixtures, in
+2,905 seconds. Recording passed in 44 seconds. Together with the previously
+recorded Windows/Linux pixel-effect fixtures, Rust and lint checks, this satisfies
+the stage-3 exit. [Full-gate evidence](../verification/stage3-full-quick-2026-10-13.json)
+identifies the exact frozen commit and retained report/log hashes. The run's
+agent-cost section remains a scripted replay, not a fresh-agent result.
+
+Both verification processes finished and the clean managed checkout is archived;
+the original evidence and isolated build are retained externally. The
+338e114 thorough milestone evidence remains unchanged. No points or stage-4
+completion are claimed. The later ef5c98b render-invariant fixes are pushed to main
+after a gate with seven passes, five reused checks and 65 deferred fixtures. Those
+background results must still be audited independently, as must this evidence-only
+commit's shipment results.
+
 ## 13 October 2026: whole-export LUT bound and transition recipe consistency
 
 Long native renders now share one retained LUT pool across all render chunks,
