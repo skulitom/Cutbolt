@@ -570,12 +570,12 @@ impl Project {
         Ok(())
     }
     pub(crate) fn has_clip_effects(&self) -> bool {
-        self.tracks.as_ref().is_some_and(|a| {
-            a.tracks
-                .iter()
-                .flat_map(|t| &t.clips)
-                .any(|c| !c.effects.is_empty())
-        })
+        self.tracks
+            .iter()
+            .chain(self.sequences.iter().map(|s| &s.arrangement))
+            .flat_map(|a| &a.tracks)
+            .flat_map(|t| &t.clips)
+            .any(|c| !c.effects.is_empty())
     }
     /// Atomic snapshot transform: caller's project remains unchanged on success or failure.
     /// Explicit media input roots may read originals and populate derived source caches.

@@ -37,7 +37,7 @@ pub struct Placement {
     /// Picture-in-picture transform of an alpha_over clip, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<crate::tracks::OverlayTransform>,
-    /// Ordered pixel effects saved on an asset video clip; empty for legacy placements.
+    /// Ordered pixel effects saved on a video clip; empty for legacy placements.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<crate::tracks::ClipEffect>,
 }
@@ -1060,7 +1060,7 @@ mod tests {
     }
 
     #[test]
-    fn clip_effects_reject_audio_locked_nested_and_oversized_stacks_atomically() {
+    fn clip_effects_reject_audio_locked_and_oversized_stacks_atomically() {
         let mut before = sample();
         crate::tracks::edit(
             &mut before,
@@ -1103,9 +1103,110 @@ mod tests {
             arrangement: nested.tracks.take().unwrap(),
             multicam: None,
         });
-        let failure = nested.validate().unwrap_err();
-        assert_eq!(failure.code, "UNSUPPORTED_TIMELINE");
-        assert!(failure.message.contains("c") && failure.message.contains("effects"));
+        nested.validate().unwrap();
+        nested.schema_version = 1;
+        assert_eq!(nested.validate().unwrap_err().code, "UNSUPPORTED_SCHEMA");
+    }
+
+    #[test]
+    fn nested_effect_edits_preserve_schema_history_and_parent_locks() {
+        let root = Temp::new();
+        let mut before = sample();
+        crate::tracks::edit(
+            &mut before,
+            crate::tracks::Edit::Promote {
+                video_track_id: "v".into(),
+                audio_track_id: "a".into(),
+            },
+        )
+        .unwrap();
+        before.sequences.push(crate::sequences::Sequence {
+            id: "child".into(),
+            arrangement: before.tracks.clone().unwrap(),
+            multicam: None,
+        });
+        let parent = &mut before.tracks.as_mut().unwrap().tracks[0].clips[0];
+        parent.asset_id.clear();
+        parent.sequence_id = Some("child".into());
+        before.validate().unwrap();
+        create(&root.0, before.clone(), "create").unwrap();
+        let grade = json!({"kind":"grade", "exposure_milli":1000, "contrast_milli":1000,
+            "white_balance_milli":[1000,1000,1000]});
+        let op: Operation = serde_json::from_value(json!({"op":"sequence.edit","id":"child",
+            "edit":{"op":"clip_effects","clip_id":"c","effects":[grade]}}))
+        .unwrap();
+        let mutation = || Mutation::Apply {
+            operations: vec![op.clone()],
+        };
+        let mut locked = before.clone();
+        locked.tracks.as_mut().unwrap().tracks[0].locked = true;
+        assert_eq!(
+            locked.apply(0, vec![op.clone()]).unwrap_err().code,
+            "TRACK_LOCKED"
+        );
+        locked = before.clone();
+        locked.sequences[0].arrangement.tracks[0].locked = true;
+        assert_eq!(
+            locked.apply(0, vec![op.clone()]).unwrap_err().code,
+            "TRACK_LOCKED"
+        );
+        let receipt = mutate(&root.0, "test", "nested-effect", 0, mutation()).unwrap();
+        assert_eq!(
+            receipt.changes.schema_version,
+            Some(SchemaChange {
+                before: 1,
+                after: 2
+            })
+        );
+        assert_eq!(receipt.changes.sequences.len(), 1);
+        assert_eq!(
+            receipt.changes.sequences[0]
+                .after
+                .as_ref()
+                .unwrap()
+                .arrangement
+                .tracks[0]
+                .clips[0]
+                .effects
+                .len(),
+            1
+        );
+        let effected = get(&root.0, "test", None).unwrap();
+        assert_eq!(effected.schema_version, 2);
+        assert!(!before.has_clip_effects());
+        assert!(effected.has_clip_effects());
+        let mut mislabeled = effected.clone();
+        mislabeled.schema_version = 1;
+        assert_eq!(
+            mislabeled.validate().unwrap_err().code,
+            "UNSUPPORTED_SCHEMA"
+        );
+        assert_eq!(get(&root.0, "test", Some(0)).unwrap(), before);
+        mutate(&root.0, "test", "undo", 1, Mutation::Undo).unwrap();
+        let undone = get(&root.0, "test", None).unwrap();
+        assert_eq!(undone.schema_version, 1);
+        assert_eq!(undone.sequences, before.sequences);
+        assert_eq!(
+            mutate(&root.0, "test", "nested-effect", 0, mutation()).unwrap(),
+            receipt
+        );
+        mutate(
+            &root.0,
+            "test",
+            "restore",
+            2,
+            Mutation::Restore { target_revision: 1 },
+        )
+        .unwrap();
+        assert_eq!(
+            get(&root.0, "test", None).unwrap().sequences,
+            effected.sequences
+        );
+        // Instance effects operate on child output and use its clock/duration.
+        let instance: Operation = serde_json::from_value(json!({"op":"tracks.edit",
+            "edit":{"op":"clip_effects","clip_id":"c","effects":[grade]}}))
+        .unwrap();
+        assert_eq!(before.apply(0, vec![instance]).unwrap().schema_version, 2);
     }
 
     fn trim(duration: u64) -> Mutation {

@@ -263,9 +263,11 @@ Goal: grade, selective grade, LUT and chroma key are properties of any video cli
 **Partial implementation, 13 October:** the ordered native frame stack retains key
 alpha over lower tracks, skips provably hidden render windows and recursively renders
 child pictures, including direct sources. The new multi-layer scene/integer fixture
-passes on Windows and Linux. Saved spatial/opacity/mask/blend properties, overlay
-sugar and nested effect editing remain open; the old nested graphs remain as A/B
-oracles. See [checkpoint evidence](../../verification/native-layers-2026-10-13.json).
+passes on Windows and Linux. Nested pixel effects now support child definitions and
+sequence instances, with source-clock, saved-history and LUT dependency checks.
+Saved spatial/opacity/mask/blend properties and overlay sugar remain open; the old
+nested graphs remain as A/B oracles. See [layer evidence](../../verification/native-layers-2026-10-13.json)
+and [nested-effect evidence](../../verification/nested-effects-2026-10-13.json).
 This is not the stage exit.
 
 Goal: transform, opacity, mask, blend mode and chroma key transparency are clip properties. A clip that becomes partly transparent shows the tracks below it.

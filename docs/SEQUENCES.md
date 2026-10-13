@@ -66,6 +66,14 @@ This subsequent operation advances the shared source content by one frame, chang
 
 ## Rendering, previews and preservation
 
+Video clips inside definitions and video sequence instances accept saved
+[`clip_effects`](CLIP_EFFECTS.md). `sequence.edit` applies the same edit inside a
+definition and respects all transitive parent locks. Child clips sample their own
+source clocks; instance effects process the child's composited RGB8 frame on the
+child-sequence clock. Black child gaps remain part of that frame before instance
+effects. The first effect anywhere in the catalog upgrades the new snapshot to
+schema 2, with definition diffs and normal retry/undo/restore behavior.
+
 Frame/range previews, reference exports, delivery range exports and queued full-quality output evaluate the same nested graph. A root containing nested references uses graph-based frame previews; receipts report `source: null`, inspected `sources`, and the visible root `track_id`, `sequence_id` and `transition_id` when present. Scope inspection can use the listed physical source interpretations. Proxy selection follows enabled references of the appropriate video/audio kind through the catalog and requires the existing bound proxy for each used source. Final renders ignore preview proxy selection.
 
 Every enabled clip used by the requested window is inspected, including covered video. Inspection follows referenced child windows and checks entire selected clip bodies plus intersecting transition handles against decoded physical media. Source identities are checked before encoding and again before publication. Missing/changed sources, invalid decoded ranges, existing destinations and expansion limits fail without publishing partial output. Original sources remain unchanged.

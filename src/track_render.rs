@@ -2043,6 +2043,23 @@ fn compile<'a>(
                 stack: Some(stack),
             });
         }
+        if project.sequences.iter().any(|s| {
+            s.arrangement
+                .tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .any(|c| !c.effects.is_empty())
+        }) || a
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .any(|c| c.sequence_id.is_some() && !c.effects.is_empty())
+        {
+            return Err(error(
+                "UNSUPPORTED_TIMELINE",
+                "The legacy A/B compositor does not support nested effects; use the default native compositor",
+            ));
+        }
         let video_tracks = || (a.tracks.iter()).filter(|t| t.kind == Kind::Video && t.enabled);
         let overlays = video_tracks()
             .filter(|t| !t.composite.is_opaque())

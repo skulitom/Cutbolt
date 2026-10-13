@@ -74,17 +74,6 @@ pub(crate) fn validate(project: &Project) -> Result<()> {
         }
     }
     for s in &project.sequences {
-        for clip in s.arrangement.tracks.iter().flat_map(|t| &t.clips) {
-            if !clip.effects.is_empty() {
-                return Err(error(
-                    "UNSUPPORTED_TIMELINE",
-                    format!(
-                        "sequence {:?} clip {:?}.effects: nested clip effects are unsupported",
-                        s.id, clip.id
-                    ),
-                ));
-            }
-        }
         s.arrangement.validate(project)?;
         if s.arrangement.master.is_some()
             || s.arrangement.tracks.iter().any(|t| t.dynamics.is_some())

@@ -1,6 +1,6 @@
 # Cutbolt local engine
 
-Native video clips accept [saved pixel effects](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Keys retain alpha and reveal lower video tracks. Saved spatial clip properties remain in progress.
+Native video clips accept [saved pixel effects](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Keys retain alpha and reveal lower video tracks. The same edit works inside `sequence.edit` for child definitions and on video sequence instances. Saved spatial clip properties remain in progress.
 
 For original video that needs normalization, `media.add` with `input_root` saves a conversion recipe. Queued exports prepare it automatically; see [saved source preparation](AUTOMATIC_PREPARATION.md).
 

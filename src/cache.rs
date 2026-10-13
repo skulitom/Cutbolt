@@ -194,22 +194,34 @@ fn project_sources(p: &Project, root: &Path, proxy_only: Option<&str>) -> Result
     }
     // An unchanged snapshot alone is insufficient for a cache hit: bound effect files
     // must still match, including when the cache would otherwise skip rendering entirely.
-    if proxy_only.is_none()
-        && let Some(arrangement) = &p.tracks
-    {
-        for track in &arrangement.tracks {
-            for clip in &track.clips {
-                for (index, effect) in clip.effects.iter().enumerate() {
-                    if let crate::effects::Effect::Lut(lut) = effect {
-                        let (path, _) = crate::scene::identity_bytes(&lut.file, root)?;
-                        output.push(Source {
-                            id: format!("clip_effect_lut:{}:{}:{index}", track.id, clip.id),
-                            path,
-                            identity: Identity {
-                                bytes: lut.file.bytes,
-                                sha256: lut.file.sha256.clone(),
-                            },
-                        });
+    if proxy_only.is_none() {
+        // Include definition recipes, even if currently unused, like the complete saved
+        // recipe in the cache key. Scope IDs keep repeated child/root clip IDs distinct.
+        for (scope, arrangement) in p.tracks.iter().map(|a| (None, a)).chain(
+            p.sequences
+                .iter()
+                .map(|s| (Some(s.id.as_str()), &s.arrangement)),
+        ) {
+            for track in &arrangement.tracks {
+                for clip in &track.clips {
+                    for (index, effect) in clip.effects.iter().enumerate() {
+                        if let crate::effects::Effect::Lut(lut) = effect {
+                            let (path, _) = crate::scene::identity_bytes(&lut.file, root)?;
+                            output.push(Source {
+                                id: serde_json::to_string(&(
+                                    "clip_effect_lut",
+                                    scope,
+                                    &track.id,
+                                    &clip.id,
+                                    index,
+                                ))?,
+                                path,
+                                identity: Identity {
+                                    bytes: lut.file.bytes,
+                                    sha256: lut.file.sha256.clone(),
+                                },
+                            });
+                        }
                     }
                 }
             }

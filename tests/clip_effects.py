@@ -15,6 +15,7 @@ from grading import changed
 from keying import key
 from scenes import identity
 from tracks import time, edit, placement, track
+from sequences import nested, seqedit
 
 ROOT = Path(__file__).resolve().parents[1]
 W, H, N = 32, 24, 12
@@ -251,6 +252,48 @@ def run(root):
     render(selected,'proxy-selected-final',references['ffv1','selective'][3*STRIDE:9*STRIDE])
     passed.append('clip_effects.proxy_preview_coordinates_and_original_quality_final')
 
+    # Child effects and effects on child instances each run on their own source clock.
+    # Compile each reference boundary independently to preserve its RGB8 rounding.
+    nested_projects = {}
+    for codec in ('ffv1', 'phone'):
+        p = project(codec)
+        ops = [edit('remove',clip_ids=['c'],links='include'),
+               {'op':'sequence.create','id':'child','duration':time(N,25)},
+               seqedit('child',edit('add',track=track('v','video'))),
+               seqedit('child',edit('place',track_id='v',clip=placement('c','source',0,N),collision='reject')),
+               seqedit('child',edit('clip_effects',clip_id='c',effects=[animated])),
+               {'op':'sequence.create','id':'middle','duration':time(N,25)},
+               seqedit('middle',edit('add',track=track('v','video'))),
+               seqedit('middle',edit('place',track_id='v',clip=nested('c','child',0,N),collision='reject')),
+               seqedit('middle',edit('clip_effects',clip_id='c',effects=[lut])),
+               edit('place',track_id='v',clip=nested('c','middle',0,6,3),collision='reject'),
+               edit('clip_effects',clip_id='c',effects=[selective])]
+        p = apply(p, ops)
+        assert p['schema_version'] == 2
+        def images(name, rgb):
+            result = []
+            for n in range(N):
+                path = sources/f'{name}-{n}.png'
+                Image.frombytes('RGB',(W,H),rgb[n*STRIDE:(n+1)*STRIDE]).save(path)
+                result.append({'image':identity(path,sources),'hold':time(1,25),'offset':[0,0],'anchor':[0,0]})
+            return result
+        middle = scene_render(codec+'-nested-middle',[lut],images=images(codec+'-child',references[codec,'animated']))
+        wanted = scene_render(codec+'-nested-root',[selective],images=images(codec+'-middle',middle))[3*STRIDE:9*STRIDE]
+        receipt = render(p, codec+'-nested-effects', wanted)
+        assert any(s['sha256']==lut['file']['sha256'] and s['frames']==s['samples']==0 for s in receipt['sources'])
+        preview = outputs/(codec+'-nested-preview.png')
+        call('preview.frame',project=p,input_root=str(sources),output_root=str(outputs),output=str(preview),time=time(2,25))
+        assert Image.open(preview).convert('RGB').tobytes() == wanted[2*STRIDE:3*STRIDE]
+        interval = outputs/(codec+'-nested-range.mkv')
+        call('preview.range',project=p,input_root=str(sources),output_root=str(outputs),output=str(interval),start=time(1,25),duration=time(3,25))
+        assert decoded(interval) == wanted[STRIDE:4*STRIDE]
+        # The same source clocks survive splitting the parent instance and child clip.
+        split = apply(p,[edit('split',clip_ids=['c'],at=time(3,25),right_clip_ids=[{'id':'c','new_id':'right'}],right_link_ids=[],links='include'),
+                         seqedit('child',edit('split',clip_ids=['c'],at=time(6,25),right_clip_ids=[{'id':'c','new_id':'right'}],right_link_ids=[],links='include'))])
+        render(split,codec+'-nested-split',wanted)
+        nested_projects[codec] = (p,wanted)
+    passed.append('clip_effects.nested_source_clocks_luts_previews_ranges_and_splits')
+
     # Cached previews must hash LUT dependencies before accepting a hit as well as before publication.
     p = snapshots['phone','grade-lut']
     cache = root/'cache'; cache.mkdir()
@@ -260,6 +303,12 @@ def run(root):
         cached = call('cache.run',cache_root=str(cache),policy=policy,task={**task,'output':str(outputs/f'cached-{n}.png')})
         assert cached['cache']['hit'] == (n==1)
         assert Image.open(outputs/f'cached-{n}.png').convert('RGB').tobytes() == references['phone','grade-lut'][5*STRIDE:6*STRIDE]
+    nested_p, nested_wanted = nested_projects['phone']
+    nested_task = {**task, 'project':nested_p}
+    for n in range(2):
+        cached = call('cache.run',cache_root=str(cache),policy=policy,task={**nested_task,'output':str(outputs/f'nested-cached-{n}.png')})
+        assert cached['cache']['hit'] == (n==1)
+        assert Image.open(outputs/f'nested-cached-{n}.png').convert('RGB').tobytes() == nested_wanted[2*STRIDE:3*STRIDE]
     # A same-length mutation is rejected even when an otherwise valid cached result exists.
     original = table.read_bytes()
     table.write_bytes(original.replace(b'0.8',b'0.7'))
@@ -269,8 +318,13 @@ def run(root):
     denied_cache = outputs/'changed-lut-cached.png'
     call('cache.run',error='MEDIA_CHANGED',cache_root=str(cache),policy=policy,task={**task,'output':str(denied_cache)})
     assert not denied_cache.exists()
+    denied_nested = outputs/'changed-nested-lut.mkv'
+    call('render.run',error='MEDIA_CHANGED',project=nested_p,input_root=str(sources),output_root=str(outputs),output=str(denied_nested))
+    denied_nested_cache = outputs/'changed-nested-lut-cached.png'
+    call('cache.run',error='MEDIA_CHANGED',cache_root=str(cache),policy=policy,task={**nested_task,'output':str(denied_nested_cache)})
+    assert not denied_nested.exists() and not denied_nested_cache.exists()
     table.write_bytes(original)
-    passed.append('clip_effects.cache_hits_verify_lut_content')
+    passed.append('clip_effects.cache_hits_verify_root_and_nested_lut_content')
     assert all(hashlib.sha256(p.read_bytes()).hexdigest()==value for p,value in source_hashes.items())
     passed.append('clip_effects.original_sources_preserved')
     report = {'passed':passed,'cases':cases,'rgb_tolerance':0,'oracle':'Existing scene processor on explicit-conform source frames; independent integer transition mix',

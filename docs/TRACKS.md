@@ -2,7 +2,7 @@
 
 The `native-tracks-v1` model stores explicitly placed clips in the existing project snapshot and local session history. It supports opaque and straight-alpha overlay video tracks, stereo audio tracks, linked selections, track targeting, locks, enabled state and explicit collision policies. Use the existing `timeline.apply` or `session.preview`/`session.apply` commands with `tracks.edit` operations. The MCP tools expose the same schema; no separate service or database is introduced.
 
-Asset video clips also support [saved pixel effects](CLIP_EFFECTS.md): grade, selective grade, LUT and chroma key, with source-clock curves and schema-2 saved history.
+Video clips and child-sequence instances also support [saved pixel effects](CLIP_EFFECTS.md): grade, selective grade, LUT and chroma key, with source-clock curves and schema-2 saved history.
 
 ## Model and clocks
 
@@ -95,7 +95,7 @@ A clip on an `alpha_over` track may carry a `transform`, also accepted in a `pla
 
 Everywhere else the canvas is transparent. The overlay is then composited with the same exact straight-alpha over as a full-frame overlay. For example, a 1920x1080 camera on an `alpha_over` track with `{"divisor": 4, "position": [1424, 48]}` becomes a 480x270 inset in the top-right corner.
 
-Transforms are rejected on other tracks. Session diffs list a clip's `transform`, and interchange export reports it as a critical loss. FFmpeg's `crop` filter selects the region; the engine computes the block means, opacity, placement and blend in integers. Inside nested sequences the steps map to the pinned FFmpeg build's `crop`, block-average `pixelize` with neighbor decimation, `lutrgb` and transparent `pad` filters. The overlays fixture compares every rendered frame, previews and a range export against an independent implementation of these equations, with zero tolerance.
+Transforms are rejected on other tracks. Session diffs list a clip's `transform`, and interchange export reports it as a critical loss. The ordered native compositor computes crop, block means, opacity, placement and blending in integers for both root and child-sequence pictures. The former nested FFmpeg graphs remain only as an internal A/B reference during stage-4 acceptance. The overlays fixture compares every rendered frame, previews and a range export against an independent implementation of these equations, with zero tolerance.
 
 ## Clip gain and fades
 

@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-13",
+  "kind": "stage_4_nested_pixel_effects_checkpoint",
+  "base_commit": "295ee839b201444e755282d584a3402d108852f2",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/cache.rs": {
+      "bytes": 25374,
+      "sha256": "246337ce41d131c0b3c76560aa7fc83a2350b7a3c4ec437186eef2b1a474ffed"
+    },
+    "src/mcp.rs": {
+      "bytes": 66248,
+      "sha256": "641c513e0ed29d9a463b0929554ade4fe8782e6895d6ccdceda61da264327bca"
+    },
+    "src/model.rs": {
+      "bytes": 47050,
+      "sha256": "ecbcaecc7bce02b231c0df1a5f27b430565f052ffa9b5a9bcbc95df2692877d5"
+    },
+    "src/sequences.rs": {
+      "bytes": 10309,
+      "sha256": "7773028fcec23daaddc68f623424d4cadfcdba15d08f3c9f3c8ec44b48442b71"
+    },
+    "src/store.rs": {
+      "bytes": 53931,
+      "sha256": "6e53ef0357f5f8418960012fe7c5cc37a408988f7800cc60ca755948bae1850e"
+    },
+    "src/track_render.rs": {
+      "bytes": 96057,
+      "sha256": "5ddd6a737c8992668ff01b2b53f5da71681c15870ea67135442b3c747e21b525"
+    },
+    "src/tracks.rs": {
+      "bytes": 65286,
+      "sha256": "06426213d75e3bdc6bb0b8b74fd0d8d410454e66827ffe94ba991952a61ce0ee"
+    },
+    "tests/clip_effects.py": {
+      "bytes": 22252,
+      "sha256": "f337cf68866c06724a1c23eff097fbd87b1289503fd858b7ff0cb31c9ca0b00d"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 259,
+    "manifest_sha256": "7c65592018dff81ef1c01fb6f152ac394910d2ef37db570baaf58786769efd95",
+    "manifest_format": "sorted git-tracked src, tests, Cargo.toml, Cargo.lock, build.rs, tools/verify.py; each UTF-8 path + NUL + lowercase content SHA-256 + LF",
+    "linux_checkout_commit_is_not_the_implementation_identity": true
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 252,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "rust_log_sha256": "fd5b9ff7d2682ee4262957bf3b69570284204dcd2667d94c56917b938ad2faaf",
+      "targeted_quick": {
+        "stages": [
+          "cache_previews",
+          "clip_effects",
+          "multicam",
+          "native_layers",
+          "sequences"
+        ],
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 291,
+        "report_sha256": "8114f9b029a4486063a77044b80b4415fa0fc55efa3b64ff3de3249a1fad9254",
+        "log_sha256": "1fb572c49de7b01f7dd3ce1665f333ba8e643d5466807c094c40b108b9026b46"
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 251,
+      "clippy_all_targets_warnings_denied": "passed",
+      "combined_build_test_log_sha256": "8399aa35f603b1ed6043f7811eb102dffe1dafab27be113a5c2b9711408af170",
+      "targeted_quick": {
+        "stages": [
+          "cache_previews",
+          "clip_effects",
+          "multicam",
+          "native_layers",
+          "sequences"
+        ],
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 129,
+        "report_sha256": "f552bc9eaeac72384a4a8ae0810c9f7df02df34a930149a332e88c089acebf78",
+        "log_sha256": "8399aa35f603b1ed6043f7811eb102dffe1dafab27be113a5c2b9711408af170"
+      }
+    }
+  },
+  "new_checks": [
+    "Child-definition effects upgrade the new revision to schema 2; a mislabeled schema-1 catalog is rejected",
+    "Definition diffs, retry after undo, restore, child locks and transitive parent-reference locks",
+    "Effects on nested instances process child RGB8 output with their own exact source clocks",
+    "Four additional rendered comparisons, 24 frames, across FFV1/direct H.264 and parent/child splits, with zero RGB tolerance",
+    "Separate scene renders at child, middle and root boundaries preserve independent RGB8 rounding in the oracle",
+    "Nested frame/range previews and cache miss/hit pixel equality",
+    "Used nested LUT identities appear in publication sources; same-length changed LUTs reject render and cached preview before output appears"
+  ],
+  "limits": [
+    "Partial stage 4: saved spatial/opacity/mask/blend properties and exact legacy overlay sugar remain open",
+    "Legacy A/B compositor explicitly rejects nested effect recipes it cannot render",
+    "Nested sequence output remains opaque RGB8 before instance effects; this does not introduce an alpha sequence output format",
+    "Cache dependency validation includes unused definitions in the saved catalog",
+    "Targeted quick checks do not replace the separately running frozen f13453d full quick run or milestone thorough evidence",
+    "No speed, new progress-point or stage-4 completion claim"
+  ]
+}

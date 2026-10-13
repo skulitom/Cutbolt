@@ -184,7 +184,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Validate a supplied snapshot and return its revision and exact duration. No state changes."
         }
         "timeline.apply" => {
-            "Transform a caller-owned snapshot with one atomic batch; returns a new snapshot. tracks.edit supports placed video/audio tracks, links, locks and explicit collisions. clip_effects saves source-clock pixel effects on asset video in schema 2; keys reveal lower tracks. For saved edits and safe retries use session.apply instead."
+            "Transform a caller-owned snapshot with one atomic batch; returns a new snapshot. tracks.edit supports placed video/audio tracks, links, locks and explicit collisions. clip_effects saves source-clock video effects in schema 2, including nested clips; keys reveal lower tracks. For saved edits and safe retries use session.apply instead."
         }
         "session.create" => {
             "Start a saved project at revision 0, from id/width/height/frame_rate or from a full snapshot. store_root must be an existing absolute local directory. Retry with the same request_id and arguments to retrieve the original receipt."

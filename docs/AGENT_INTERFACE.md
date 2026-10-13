@@ -1,6 +1,6 @@
 # Cutbolt agent interface (v0.4)
 
-For a grade or LUT on footage, use `tracks.edit` with `{"op":"clip_effects","clip_id":"...","effects":[...]}` inside the existing apply command. This saves an ordered source-clock stack and requires no scene compilation. The first nonempty stack upgrades the new snapshot to schema 2. See [clip effects](CLIP_EFFECTS.md) for recipes and bounds. A keyed clip reveals lower video tracks; no intermediate movie is required.
+For a grade or LUT on footage, use `tracks.edit` with `{"op":"clip_effects","clip_id":"...","effects":[...]}` inside the existing apply command. This saves an ordered source-clock stack and requires no scene compilation. The first nonempty stack upgrades the new snapshot to schema 2. See [clip effects](CLIP_EFFECTS.md) for recipes and bounds. A keyed clip reveals lower video tracks; no intermediate movie is required. Apply the same edit through `sequence.edit` inside a child definition; video sequence instances accept their own source-clock stacks.
 
 Optional [foreground masks](SEGMENTATION.md) use a separate local CLI producer. Its scene results, including per-frame matte identities, are accepted by typed `scene.inspect`; no network service or additional MCP tool is introduced.
 

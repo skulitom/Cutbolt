@@ -1,5 +1,30 @@
 # Progress history
 
+## 13 October 2026: nested clip effects with complete saved-catalog checks
+
+Video clips inside child definitions and video sequence instances now accept the
+shared pixel-effect stack. Child clips and instances retain their own source clocks;
+each instance processes the child's composited RGB8 frame. The first effect anywhere
+in the saved sequence catalog upgrades the new revision to schema 2. Definition
+diffs, retry/undo/restore and direct/transitive parent locks keep their existing
+semantics. Cache dependency checks now include LUTs throughout the saved catalog,
+including unused definitions; used child LUTs also remain publication sources.
+
+[Targeted evidence](../verification/nested-effects-2026-10-13.json): all 252 Windows
+and 251 Linux Rust tests and warnings-denied lint pass. Five suites pass on each
+platform: clip effects, native layers, sequences, multicamera and cached previews.
+All 259 compared source, fixture, build-input and verifier files are byte-identical.
+The clip-effect fixture adds four zero-tolerance renders (24 frames), using separate
+scene references at each nested boundary, plus nested frame/range previews, split
+clocks, cache miss/hit equality and changed-LUT rejection before publication.
+
+This remains partial stage 4: spatial/opacity/mask/blend properties and exact legacy
+overlay sugar are open, as are stages 5-6. Child gaps remain opaque black before
+instance effects. No speed claim, points or full-thorough evidence change. The
+295ee83 layer checkpoint is pushed after a passing gate; its 69 deferred checks and
+the separate frozen f13453d full quick run remain active. This checkpoint's shipment
+gate and deferred checks must also be audited and failures fixed forward.
+
 ## 13 October 2026: ordered native layers and retained key transparency
 
 Native track pictures now use an ordered Rust frame stream, including recursively
