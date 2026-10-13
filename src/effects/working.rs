@@ -138,10 +138,18 @@ impl Frame<'_> {
     /// HSL qualifiers, hue/saturation, LUTs and keys operate on continuous encoded sRGB;
     /// alpha stays linear coverage. `position` is the original source-canvas pixel coordinate.
     pub fn pixel(&self, input: Pixel, position: [i64; 2]) -> Result<Pixel> {
+        self.pixel_in(crate::color::working::Context::LINEAR16, input, position)
+    }
+    pub(crate) fn pixel_in(
+        &self,
+        context: crate::color::working::Context,
+        input: Pixel,
+        position: [i64; 2],
+    ) -> Result<Pixel> {
         if input.0[3] == 0 {
             return Ok(input);
         }
-        let [r, g, b, mut coverage] = input.linear();
+        let [r, g, b, mut coverage] = context.linear(input);
         let mut color = [r, g, b];
         let mut encoded_lut = None;
         let mut changed = false;
@@ -198,7 +206,7 @@ impl Frame<'_> {
             }
         }
         if changed {
-            Pixel::from_linear([color[0], color[1], color[2], coverage])
+            context.from_linear([color[0], color[1], color[2], coverage])
         } else {
             Ok(input)
         }

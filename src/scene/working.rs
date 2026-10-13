@@ -5,7 +5,7 @@ use crate::{
     Result,
     color::{
         Transfer,
-        working::{Pixel, layer::Image},
+        working::{Context, Pixel, layer::Image},
     },
     composite::AlphaMode,
     effects, error,
@@ -53,6 +53,7 @@ impl Plane {
 /// Prepared original scene sources, ready for generated frames without a movie or byte compositor.
 /// Frame values are linear SDR. Encoding/dither and publication belong to the caller.
 pub struct Source {
+    context: Context,
     scene: Scene,
     prepared: Prepared,
     images: HashMap<Key, Picture>,
@@ -72,7 +73,7 @@ fn key(frame: &Frame, alpha: AlphaMode) -> Key {
         alpha.is_straight(),
     )
 }
-fn decode(p: &super::Pixels, alpha: AlphaMode) -> Result<Picture> {
+fn decode(p: &super::Pixels, alpha: AlphaMode, context: Context) -> Result<Picture> {
     Ok(Picture {
         size: [p.width, p.height],
         pixels: p
@@ -80,7 +81,7 @@ fn decode(p: &super::Pixels, alpha: AlphaMode) -> Result<Picture> {
             .as_chunks::<4>()
             .0
             .iter()
-            .map(|p| Pixel::from_encoded8(*p, Transfer::Srgb, alpha))
+            .map(|p| context.decode8(*p, Transfer::Srgb, alpha))
             .collect::<Result<_>>()?,
     })
 }
@@ -136,7 +137,27 @@ pub(super) fn sample_opacity(
 
 impl Source {
     pub fn new(scene: &Scene, root: &Path) -> Result<Self> {
+        Self::new_in(scene, root, Context::LINEAR16)
+    }
+    /// Prepare a non-default working representation. Default8/encoded keeps the established
+    /// FrameSource; this source never silently substitutes its equations for that default.
+    pub fn new_in(scene: &Scene, root: &Path, context: Context) -> Result<Self> {
+        if context.space.is_legacy() {
+            return Err(error(
+                "INVALID_COLOR",
+                "Use the existing scene source for default 8-bit encoded rendering",
+            ));
+        }
         let mut prepared = super::prepare_with_precision(scene, root, true)?;
+        for layer in prepared
+            .working_opacity
+            .as_mut()
+            .expect("precise preparation")
+        {
+            for opacity in layer {
+                *opacity = context.quantum(*opacity);
+            }
+        }
         let audio_samples = prepared.pcm.len() as u64 / 2;
         let silent = prepared.pcm.iter().all(|v| *v == 0);
         if silent {
@@ -194,7 +215,7 @@ impl Source {
                         retained + raw_bytes,
                         "Precise scene source conversion exceeds the 1 GiB preparation-payload bound",
                     )?;
-                    entry.insert(decode(picture, layer.alpha_mode)?);
+                    entry.insert(decode(picture, layer.alpha_mode, context)?);
                 }
             }
         }
@@ -205,7 +226,10 @@ impl Source {
                 retained + raw_bytes,
                 "Precise scene graphics exceed the 1 GiB preparation-payload bound",
             )?;
-            graphics.insert(id.clone(), (decode(picture, AlphaMode::Straight)?, *offset));
+            graphics.insert(
+                id.clone(),
+                (decode(picture, AlphaMode::Straight, context)?, *offset),
+            );
         }
         // These byte buffers held original inputs, not intermediate effects. Every interpretation
         // is now retained in the wide caches; binary mattes were exact zero/keep operations.
@@ -220,7 +244,7 @@ impl Source {
         let backdrop = if scene.transparent {
             Pixel::TRANSPARENT
         } else {
-            Pixel::from_encoded8(
+            context.decode8(
                 [
                     scene.background[0],
                     scene.background[1],
@@ -232,6 +256,7 @@ impl Source {
             )?
         };
         let mut source = Self {
+            context,
             scene: scene.clone(),
             prepared,
             images,
@@ -268,10 +293,15 @@ impl Source {
         }
         source.prepared.report["profile"] = serde_json::json!("linear-unorm16-scene-source");
         source.prepared.report["color"] = serde_json::json!("straight-linear-srgb-unorm16");
-        source.prepared.report["working_processing"] = serde_json::json!({"opacity":"exact source curves and expression bindings to UNORM16","temporal":"associated linear mean","delivery":"caller encodes and dithers once","retained_payload_bytes":source.retained,"frame_buffer_bytes":source.frame_buffer_bytes(),"cached_layers":count});
+        source.prepared.report["working_context"] = serde_json::json!(context);
+        if context.space != Context::LINEAR16.space {
+            source.prepared.report["profile"] = serde_json::json!("working-scene-source");
+            source.prepared.report["color"] = serde_json::json!({"depth":context.space.bits,"light":context.space.light,"transfer":context.transfer,"alpha":"linear_coverage"});
+        }
+        source.prepared.report["working_processing"] = serde_json::json!({"opacity":"exact source curves and expression bindings to declared working depth","temporal":"associated mean in declared working light","delivery":"caller encodes and dithers once","retained_payload_bytes":source.retained,"frame_buffer_bytes":source.frame_buffer_bytes(),"cached_layers":count});
         if let Some(temporal) = source.prepared.report.get_mut("temporal") {
             temporal["integration"] = serde_json::json!(
-                "associated_linear_unorm16_nearest_rounding_after_complete_compositing"
+                "associated_mean_in_declared_working_light_and_depth_after_complete_compositing"
             );
         }
         for (i, layer) in source.prepared.report["timing"]
@@ -288,11 +318,12 @@ impl Source {
                     .expect("precise preparation")[i],
             );
             layer["sampled_parameters_note"] = serde_json::json!(
-                "geometry and legacy byte controls; working_opacity supplies actual UNORM16 coverage"
+                "geometry and legacy byte controls; working_opacity supplies actual coverage in a 16-bit carrier"
             );
             if layer.get("effect_processing").is_some() {
-                layer["effect_processing"] =
-                    serde_json::json!("linear_srgb_f64_to_unorm16_once_per_effect_stack");
+                layer["effect_processing"] = serde_json::json!(
+                    "linear_srgb_f64_to_declared_working_light_and_depth_once_per_effect_stack"
+                );
             }
         }
         let report_bytes = serde_json::to_vec(&source.prepared.report)?.len() as u64;
@@ -309,6 +340,9 @@ impl Source {
 
     pub fn report(&self) -> &serde_json::Value {
         &self.prepared.report
+    }
+    pub fn context(&self) -> Context {
+        self.context
     }
     pub fn retained_bytes(&self) -> u64 {
         self.retained
@@ -441,7 +475,8 @@ impl Source {
                 .as_ref()
                 .expect("wide opacity")[i][sample];
             let processor = self.effects(i, sample)?;
-            crate::color::working::layer::draw(
+            crate::color::working::layer::draw_in(
+                self.context,
                 layer.recipe(),
                 parameters,
                 opacity,
@@ -470,59 +505,72 @@ impl Source {
                     .transpose()
             })
             .collect::<Result<Vec<_>>>()?;
-        crate::geometry::compose_working(&self.scene, state, self.backdrop, |i, sx, sy| {
-            let layer = &self.scene.layers[i];
-            let Some(index) = self.prepared.selected[i][sample] else {
-                return Ok(None);
-            };
-            let p = self.prepared.parameters[i][sample]
-                .as_ref()
-                .expect("selected parameters");
-            let opacity = self
-                .prepared
-                .working_opacity
-                .as_ref()
-                .expect("wide opacity")[i][sample];
-            let [x, y, w, h] = layer.transform.crop;
-            if sx < x || sy < y || sx >= x + w || sy >= y + h || opacity == 0 {
-                return Ok(None);
-            }
-            let coverage = layer
-                .mask
-                .as_ref()
-                .zip(p.mask_rect)
-                .map_or(crate::composite::MASK_WEIGHT, |(m, r)| {
-                    m.coverage(r, i64::from(sx), i64::from(sy))
-                });
-            if coverage == 0 {
-                return Ok(None);
-            }
-            let (image, offset) = if layer.graphics.is_some() {
-                let (image, offset) = &self.graphics[&layer.id];
-                (image, *offset)
-            } else {
-                let frame = &layer.frames[index];
-                (self.picture(frame, layer), frame.offset)
-            };
-            let (ix, iy) = (
-                i64::from(sx) - i64::from(offset[0]),
-                i64::from(sy) - i64::from(offset[1]),
-            );
-            if ix < 0 || iy < 0 || ix >= i64::from(image.size[0]) || iy >= i64::from(image.size[1])
-            {
-                return Ok(None);
-            }
-            let pixel = processors[i].as_ref().expect("selected processor").pixel(
-                image.pixels[(iy * i64::from(image.size[0]) + ix) as usize],
-                [i64::from(sx), i64::from(sy)],
-            )?;
-            Ok((pixel.0[3] > 0).then_some(crate::geometry::WorkingTexel {
-                pixel,
-                opacity,
-                coverage,
-                blend: layer.blend_mode,
-            }))
-        })
+        crate::geometry::compose_working(
+            &self.scene,
+            state,
+            self.backdrop,
+            self.context,
+            |i, sx, sy| {
+                let layer = &self.scene.layers[i];
+                let Some(index) = self.prepared.selected[i][sample] else {
+                    return Ok(None);
+                };
+                let p = self.prepared.parameters[i][sample]
+                    .as_ref()
+                    .expect("selected parameters");
+                let opacity = self
+                    .prepared
+                    .working_opacity
+                    .as_ref()
+                    .expect("wide opacity")[i][sample];
+                let [x, y, w, h] = layer.transform.crop;
+                if sx < x || sy < y || sx >= x + w || sy >= y + h || opacity == 0 {
+                    return Ok(None);
+                }
+                let coverage = layer
+                    .mask
+                    .as_ref()
+                    .zip(p.mask_rect)
+                    .map_or(crate::composite::MASK_WEIGHT, |(m, r)| {
+                        m.coverage(r, i64::from(sx), i64::from(sy))
+                    });
+                if coverage == 0 {
+                    return Ok(None);
+                }
+                let (image, offset) = if layer.graphics.is_some() {
+                    let (image, offset) = &self.graphics[&layer.id];
+                    (image, *offset)
+                } else {
+                    let frame = &layer.frames[index];
+                    (self.picture(frame, layer), frame.offset)
+                };
+                let (ix, iy) = (
+                    i64::from(sx) - i64::from(offset[0]),
+                    i64::from(sy) - i64::from(offset[1]),
+                );
+                if ix < 0
+                    || iy < 0
+                    || ix >= i64::from(image.size[0])
+                    || iy >= i64::from(image.size[1])
+                {
+                    return Ok(None);
+                }
+                let pixel = processors[i]
+                    .as_ref()
+                    .expect("selected processor")
+                    .pixel_in(
+                        self.context,
+                        image.pixels[(iy * i64::from(image.size[0]) + ix) as usize],
+                        [i64::from(sx), i64::from(sy)],
+                    )?;
+                Ok((pixel.0[3] > 0).then_some(crate::geometry::WorkingTexel {
+                    pixel,
+                    opacity,
+                    coverage,
+                    blend: layer.blend_mode,
+                }))
+            },
+        )
     }
     fn sample(&self, sample: usize) -> Result<Vec<Pixel>> {
         let count = (self.scene.width * self.scene.height) as usize;
@@ -565,7 +613,7 @@ impl Source {
                 }
             }
             for (p, sum) in pixels.iter_mut().zip(totals) {
-                *p = mean(sum, count as u64);
+                *p = self.context.quantize(mean(sum, count as u64));
             }
         }
         let (width, height) = (
@@ -597,7 +645,7 @@ impl Source {
                         accumulate(&mut sum, pixels[(sy * s.width + sx) as usize]);
                     }
                 }
-                output.push(mean(sum, u64::from(divisor).pow(2)));
+                output.push(self.context.quantize(mean(sum, u64::from(divisor).pow(2))));
             }
         }
         Ok(output)

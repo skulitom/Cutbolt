@@ -222,7 +222,7 @@ STAGES = [
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
     fixture("audio_processing"), fixture("conform"), fixture("conform_cache"), fixture("automatic_prepare"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
     fixture("templates"), fixture("builtin_templates"), fixture("fonts"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
-    fixture("color"), fixture("working_color"), fixture("working_effects"), fixture("working_layers"), fixture("working_scenes"), fixture("luts_scopes"), fixture("scene_luts"), fixture("clip_effects"), fixture("native_layers"), fixture("generated_clips"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
+    fixture("color"), fixture("working_color"), fixture("working_effects"), fixture("working_layers"), fixture("working_scenes"), fixture("working_timelines"), fixture("working_banding"), fixture("luts_scopes"), fixture("scene_luts"), fixture("clip_effects"), fixture("native_layers"), fixture("generated_clips"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
     fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech", "voices"]), fixture("remapping"),
@@ -669,6 +669,10 @@ report["passed"] += working_effects["passed"]
 report["working_effects_evidence"] = working_effects
 report["passed"] += working_layers["passed"]
 report["working_layers_evidence"] = working_layers
+report["passed"] += working_banding["passed"]
+report["working_banding_evidence"] = working_banding
+report["passed"] += working_timelines["passed"]
+report["working_timelines_evidence"] = working_timelines
 report["passed"] += working_scenes["passed"]
 report["working_scenes_evidence"] = working_scenes
 report["passed"] += luts_scopes["passed"]

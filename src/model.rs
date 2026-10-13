@@ -142,6 +142,10 @@ pub struct Project {
     /// Declared transfer of the timeline's encoded RGB values, set by project.transfer; exports and scopes that omit `input_transfer` use it. Omitted when undeclared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transfer: Option<crate::color::Transfer>,
+    /// Optional working precision. Omitted or 8-bit encoded preserves the existing renderer;
+    /// other combinations retain the selected depth/light through layers and nested sequences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_space: Option<crate::color::working::Space>,
     /// Internal proxy mapping only; never persisted or accepted from project JSON.
     #[serde(skip)]
     #[schemars(skip)]
@@ -249,6 +253,12 @@ pub enum Operation {
     ProjectTransfer {
         /// `bt709` keeps encoded values for H.264 and suits camera and most screen-designed material; `srgb` converts from the sRGB curve first, darkening shadows in typical players. Null clears the declaration.
         transfer: Option<crate::color::Transfer>,
+    },
+    /// Select working depth/light; null restores the existing 8-bit encoded default.
+    #[serde(rename = "project.working_space")]
+    ProjectWorkingSpace {
+        /// RGB/coverage bits 8 or 16 and blending light encoded or linear. Delivery is still SDR8.
+        working_space: Option<crate::color::working::Space>,
     },
     /// Declare an external source; rendering verifies its actual contents.
     #[serde(rename = "media.add")]
@@ -411,6 +421,7 @@ impl Project {
             sequences: vec![],
             preview_scale: None,
             transfer: None,
+            working_space: None,
             effect_coordinate_scale: None,
         };
         project.validate()?;
@@ -424,6 +435,14 @@ impl Project {
             .iter()
             .try_fold(Time::ZERO, |sum, c| sum.plus(c.duration))
     }
+    pub(crate) fn working_context(&self) -> Option<crate::color::working::Context> {
+        self.working_space
+            .filter(|s| !s.is_legacy())
+            .map(|space| crate::color::working::Context {
+                space,
+                transfer: self.transfer.unwrap_or(crate::color::Transfer::Bt709),
+            })
+    }
     pub fn validate(&self) -> Result<()> {
         if !matches!(self.schema_version, 1 | 2) {
             return Err(error(
@@ -431,10 +450,10 @@ impl Project {
                 "Only snapshot schema versions 1 and 2 are supported",
             ));
         }
-        if self.schema_version == 1 && self.has_clip_effects() {
+        if self.schema_version == 1 && (self.has_clip_effects() || self.working_space.is_some()) {
             return Err(error(
                 "UNSUPPORTED_SCHEMA",
-                "Native clip effects and generated scenes require snapshot schema 2; use tracks.edit to upgrade a version-1 snapshot",
+                "Native clip effects, generated scenes and working precision require snapshot schema 2; use editing operations to upgrade a version-1 snapshot",
             ));
         }
         valid_id(&self.id)?;
@@ -673,6 +692,9 @@ impl Project {
                 }
                 Operation::PreviewProxy { scale } => next.preview_scale = scale,
                 Operation::ProjectTransfer { transfer } => next.transfer = transfer,
+                Operation::ProjectWorkingSpace { working_space } => {
+                    next.working_space = working_space
+                }
                 Operation::AddMedia {
                     mut asset,
                     input_root,
@@ -849,7 +871,8 @@ impl Project {
                     next.clips.insert(to_index, clip);
                 }
             }
-            if next.schema_version == 1 && next.has_clip_effects() {
+            if next.schema_version == 1 && (next.has_clip_effects() || next.working_space.is_some())
+            {
                 next.schema_version = 2;
             }
             next.validate()?;

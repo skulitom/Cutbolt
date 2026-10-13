@@ -57,6 +57,11 @@ fn read_frame_with_publication(
     media::input_root(input_root)?;
     let preview_scale = project.preview_scale;
     let mapped = crate::proxy::preview_project(project, input_root)?;
+    let mapped = if mapped.working_context().is_some() {
+        render::direct_tracks(&mapped)?.unwrap_or(mapped)
+    } else {
+        mapped
+    };
     let project = &mapped;
     let total = validate(project)?;
     let selected = time.units(project.frame_rate).at(|| "time".into())?;
@@ -77,10 +82,11 @@ fn read_frame_with_publication(
         ));
     }
     if let Some(a) = &project.tracks {
-        if a.tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .any(|c| c.sequence_id.is_some() || c.scene.is_some() || !c.effects.is_empty())
+        if project.working_context().is_some()
+            || a.tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .any(|c| c.sequence_id.is_some() || c.scene.is_some() || !c.effects.is_empty())
         {
             let (pixels, sources) = crate::track_render::read_frame(project, input_root, time)?;
             let visible = a.visible(time)?;
@@ -322,6 +328,10 @@ pub fn frame(
     time: Time,
 ) -> Result<Value> {
     let (pixels, mut receipt) = read_frame_with_publication(project, input_root, time, true)?;
+    if let Some(context) = project.working_context() {
+        receipt["working_context"] = json!(context);
+        receipt["delivery_dither"] = json!("ordered_8x8");
+    }
     let output = render::destination_extension(output, output_root, "png")?;
     let scratch = scene::Scratch::new(output.parent().expect("validated parent"))?;
     let temp = scratch.0.join("frame.png");

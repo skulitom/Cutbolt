@@ -1,5 +1,7 @@
 # Validated media import and retiming
 
+The saved [working-space selection](WORKING_COLOR.md) changes timeline processing after source normalization. It does not change the source recipe or recover precision already rounded into native RGB8. Original sources remain preserved.
+
 [Native clip pixel effects](CLIP_EFFECTS.md) run after direct or prepared source decoding. Applying a grade or LUT does not require another conform or scene compilation step.
 
 `media.conform.inspect` validates a source and reports the exact source frames selected by a recipe. `media.conform` writes a new lossless editing asset using that recipe. Both use explicit local roots and require the original source's SHA-256 and byte count. Sources are never rewritten. The output can enter ordinary saved sessions through `media.add` and can then be trimmed, assembled, previewed or queued for reference export.

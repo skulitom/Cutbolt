@@ -83,7 +83,7 @@ pub fn inspect(request: &Inspect) -> Result<Value> {
     let transfer = color::Transfer::declared(
         "INVALID_SCOPE",
         request.input_transfer,
-        request.project.transfer,
+        request.project.transfer.or(request.project.working_context().map(|c| c.transfer)),
     )?
     .ok_or_else(|| error("INVALID_SCOPE", "Scopes need the timeline's transfer: declare it once with the project.transfer operation, or pass input_transfer. bt709 keeps encoded values and suits most material; srgb converts from the sRGB curve first, darkening shadows in typical players"))?;
     let mut project = request.project.clone();

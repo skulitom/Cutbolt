@@ -1,5 +1,7 @@
 # Native video and audio tracks
 
+Optional [working color](WORKING_COLOR.md) retains the selected 8/16-bit encoded/linear storage through layers, transitions and nested sequences. The existing 8-bit encoded path remains the default; final delivery uses ordered dither only for nondefault modes.
+
 The `native-tracks-v1` model stores explicitly placed clips in the existing project snapshot and local session history. It supports opaque and straight-alpha overlay video tracks, stereo audio tracks, linked selections, track targeting, locks, enabled state and explicit collision policies. Use the existing `timeline.apply` or `session.preview`/`session.apply` commands with `tracks.edit` operations. The MCP tools expose the same schema; no separate service or database is introduced.
 
 Video clips and child-sequence instances also support [saved effects and properties](CLIP_EFFECTS.md): grade, selective grade, LUT, chroma key, transform, opacity, mask and blend mode, with source-clock curves and schema-2 saved history.

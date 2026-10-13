@@ -1,5 +1,41 @@
 # Progress history
 
+## 13 October 2026: saved working precision and banding references
+
+Projects now opt into 8/16-bit encoded/linear working storage through
+`project.working_space`. Omission, null or explicit 8-bit encoded keeps the existing
+byte renderer. Other modes retain working pixels through generated sources,
+recursive sequences, saved effects, layers and transitions. Sequential timelines
+use a transient arrangement without changing saved clips. Preview and render
+delivery use ordered dither; H.264 converts directly to BT.709 at the final store.
+Shared scene caches include the context, and active buffer estimates charge wide
+frames and recursive children under the unchanged 1 GiB payload bound.
+
+Independent f64 references pass all 27 saved-timeline cases (324 frames), including
+all nondefault modes, four transitions, grades/opacity, generated/nested pictures,
+frame/range previews, actual H.264 encoder input and PNG delivery. Both platforms
+report zero observed channel differences. The registered banding fixture adds a
+1,024-frame temporal ramp and 33 frames of a 256-level spatial gradient through
+a grade and saved opacity fade. Linear16 retains 1,024 distinct temporal tile means
+and every spatial level in every tested frame, with no added plateau and exact
+reference bytes. Encoded and linear brightness differ by design; this is bounded
+precision evidence, not a subjective quality or source-detail claim.
+
+Windows/Linux reports agree exactly. Fifteen strict quick suites pass in
+360/235 seconds, followed by the separately registered banding check on both.
+Rust tests (261/260), all-target lint and formatting pass. Saved-history tests
+cover schema promotion, semantic receipts, retry, undo, restore and clearing.
+[Evidence](../verification/working-timelines-2026-10-13.json) records inputs and bounds.
+
+The previous `63eb1c7` checkpoint shipped: its gate passed 22 fixtures plus Rust,
+reused 13 unchanged passes and deferred 47 in 186 seconds without failures/skips.
+Its background run has passed direct sources, transcription, color and
+acceleration; the remaining work is still running and must be checked forward.
+This checkpoint needs its own ship gate. Broader precise-mode direct/structural/
+proxy/queue coverage, the complete default-path quick gate, final placed-track
+performance comparison and whole-goal requirement audit remain open. No new
+thorough milestone, stage-six completion, throughput or points claim.
+
 ## 13 October 2026: precise prepared scene frames
 
 The library now prepares complete scene frames in straight-linear UNORM16,

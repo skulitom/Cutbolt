@@ -59,6 +59,8 @@ cleaned up with other generated audio.
 No generated video file is written.
 
 Every external scene dependency is fully hashed before publication. `timeline.check`
+
+Generated sources inherit the saved [project working space](WORKING_COLOR.md). Nondefault modes pass working pixels into parent tracks and recursive sequences; the shared source-pool key includes the context, and final transfer/dither belongs to delivery.
 also reports changed or missing scene inputs when an input root is supplied. Cache hits
 also check dependencies throughout the saved sequence catalog, including unused
 definitions. A changed source cannot silently reuse a cached frame.

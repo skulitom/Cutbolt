@@ -83,7 +83,7 @@ pub(crate) enum Generated {
     },
     SceneAudio {
         path: PathBuf,
-        scene: std::sync::Arc<crate::scene::FrameSource>,
+        scene: std::sync::Arc<crate::generated::Source>,
         first: u64,
         samples: u64,
     },
@@ -177,6 +177,18 @@ pub(crate) fn write_generated(
 }
 
 impl Plan {
+    /// Change only final delivery stores, including chunk roots. Nested sequences continue
+    /// returning working pixels in their parent's context.
+    pub(crate) fn delivery_transfer(&mut self, transfer: Option<crate::color::Transfer>) {
+        if let Some(compositor) = &mut self.compositor
+            && compositor.stack.working.is_some()
+        {
+            compositor.stack.delivery_transfer = transfer;
+        }
+        for chunk in &mut self.chunks {
+            chunk.delivery_transfer(transfer);
+        }
+    }
     /// Gain reduction of the limiters this plan ran, once it has run; None without dynamics.
     pub(crate) fn dynamics(&self) -> Option<Value> {
         fn collect(plan: &Plan, report: &mut Option<crate::dynamics::Report>) {
@@ -1055,16 +1067,18 @@ pub fn plan(
     )
 }
 
-/// Reuse the placed-track streaming pipeline for sequential originals without editing the snapshot.
-fn direct_tracks(project: &Project) -> Result<Option<Project>> {
+/// Reuse the placed-track pipeline for original/working sequential pictures without editing
+/// the saved snapshot. Explicit legacy working settings retain the original byte path.
+pub(crate) fn direct_tracks(project: &Project) -> Result<Option<Project>> {
     if project.tracks.is_some()
-        || !project.assets.iter().any(|asset| {
-            asset.decode.is_some()
-                && project
-                    .clips
-                    .iter()
-                    .any(|c| c.asset_id.as_ref() == Some(&asset.id))
-        })
+        || (project.working_context().is_none()
+            && !project.assets.iter().any(|asset| {
+                asset.decode.is_some()
+                    && project
+                        .clips
+                        .iter()
+                        .any(|c| c.asset_id.as_ref() == Some(&asset.id))
+            }))
     {
         return Ok(None);
     }
@@ -1418,6 +1432,18 @@ fn plan_range_controlled(
     effect_resources: &crate::clip_effects::Resources,
 ) -> Result<Plan> {
     project.validate()?;
+    if let Some(mapped) = direct_tracks(project)? {
+        return plan_range_controlled(
+            &mapped,
+            input_root,
+            output_root,
+            output,
+            start,
+            duration,
+            control,
+            effect_resources,
+        );
+    }
     start.units(project.frame_rate)?;
     if duration.units(project.frame_rate)? == 0
         || start.plus(duration)?.compare(project.duration()?)?.is_gt()
@@ -1706,6 +1732,7 @@ pub(crate) fn run_range(
 /// `run_range` for an export's lossless intermediate. Its output is checked from packets rather
 /// than by decoding every picture: the export decodes it in full anyway, and then decodes and
 /// verifies the delivered file frame by frame.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_intermediate_range(
     project: &Project,
     input_root: &Path,
@@ -1713,8 +1740,10 @@ pub(crate) fn run_intermediate_range(
     output: &Path,
     start: Time,
     duration: Time,
+    delivery_transfer: Option<crate::color::Transfer>,
 ) -> Result<Value> {
-    let plan = plan_range(project, input_root, output_root, output, start, duration)?;
+    let mut plan = plan_range(project, input_root, output_root, output, start, duration)?;
+    plan.delivery_transfer(delivery_transfer);
     execute(project, plan, None, Timing::Packets, &media::Uncontrolled)
 }
 fn execute(
@@ -1778,6 +1807,10 @@ fn execute(
     let mut receipt = json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,"samples":plan.samples,
         "project_revision":plan.project_revision,"frame_rate":project.frame_rate,"sha256":rendered.sha256,"sources":plan.sources,
         "ffmpeg":ffmpeg_version,"ffprobe":ffprobe_version});
+    if let Some(context) = project.working_context() {
+        receipt["working_context"] = json!(context);
+        receipt["delivery_dither"] = json!("ordered_8x8");
+    }
     if let Some(dynamics) = plan.dynamics() {
         receipt["dynamics"] = dynamics;
     }

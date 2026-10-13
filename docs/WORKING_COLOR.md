@@ -1,7 +1,45 @@
-# Working color: precise rendering components
+# Working color
 
-Stage six is in development. Agent commands, saved projects, previews and exports
-still use their existing rendering path. There is no `working_space` setting yet.
+Stage six is in development. Saved projects can now explicitly select working
+precision with `project.working_space`. The default remains the existing 8-bit
+encoded renderer. The bounded banding references pass; the complete stage gate
+is still open.
+
+## Saved selection
+
+Apply `{"op":"project.working_space","working_space":{"bits":16,"light":"linear"}}`
+through `timeline.apply` or `session.apply`. Bits may be 8 or 16; light may be
+`encoded` or `linear`. All four combinations are accepted. Null removes the setting;
+an omitted setting or explicit 8-bit encoded selection retains the existing renderer.
+Setting the field upgrades only the new snapshot to schema 2. Receipts describe
+the change; retries, undo and restore preserve the recorded older snapshots.
+
+Nondefault modes store straight RGB and coverage at the selected depth. Eight-bit
+values use multiples of 257 in a 16-bit carrier. Every working store rounds to the
+declared depth. Blending, interpolation, transition means and shutter samples use
+the chosen light. Pixel effects retain their continuous linear equations, with
+continuous encoded sRGB for HSL, LUTs and keys, then store in the selected context.
+
+`project.transfer` interprets native footage RGB and the encoded working space;
+its nondefault-mode fallback is BT.709. Scene image and graphics inputs remain
+sRGB and convert into that context. Set the project transfer to sRGB explicitly
+when native reference footage uses sRGB. H.264/PNG export and scopes use the same
+fallback; an export `input_transfer` that contradicts it is rejected.
+
+Sequential edits use an ephemeral track arrangement during rendering without
+rewriting saved clips. Generated sources and recursive sequence frames retain
+working pixels until final delivery. Their shared caches include the working
+context. Source identities, clocks, audio windows and publication checks keep
+their existing contracts. The active frame-buffer estimate remains bounded to
+1 GiB, including recursive children, wide frames and proxy property canvases.
+
+Frame/range previews, reference renders and PNG delivery encode the project
+transfer at the final byte store. H.264 encodes directly to BT.709 there, including
+joined render chunks, avoiding a prior 8-bit sRGB store. Final RGB8 delivery uses
+the ordered 8 by 8 dither below. Child scenes/sequences never use delivery dither.
+Explicit `box_floor` sampling still floors block means at the declared working
+depth; explicitly authored `byte_alpha` still rounds effective alpha to 8 bits.
+Ordinary `coverage` opacity retains the selected working depth.
 
 The Rust library's `color::working::Pixel` stores straight linear SDR RGB and alpha
 as four unsigned 16-bit values. This is the foundation for retaining precision
@@ -58,8 +96,7 @@ frame table is allocated.
 f64 effect equations, Python HSL conversion and closed-form LUT references. It
 checks ordering, masks, animated controls, all LUT interpolation modes, source
 identities, neutral/transparent pixels, and coverage levels within a byte interval.
-These are component checks: project settings and renderer integration are still
-required before the feature is usable through scene or timeline commands.
+These are component checks; saved-timeline checks are described separately below.
 
 `color::working::layer::Layer` now validates the same source-canvas transform,
 animation and mask contract as native clip properties. A prepared layer draws
@@ -129,12 +166,24 @@ is one UNORM16 code per working operation and exact encoded delivery. A 1,024-le
 ramp requires strictly increasing tile means and an error of at most 1/128 delivery
 code. This arithmetic fixture is registered in the ordinary verifier.
 
-Renderer integration remains open: saved project settings and history, wiring
-prepared scene and footage frames into tracks, transitions, generated and nested
-pictures, full-plan memory accounting, preview commands and delivery. A final conversion must happen
-only at delivery; a child sequence or generated source cannot be rounded through
-the old compositor first. The source interpretation and all supported combinations
-of depth and light must be explicit. The plan's gradient-through-grade-and-opacity
-test, default-path equivalence, complete quick gate, and final performance audit
-remain required. This checkpoint makes no stage-six, banding, HDR, speed or points
-claim.
+`working_timelines` compares saved sequential edits, grades, opacity, generated
+clips, recursive sequences and all four transitions with independent f64 equations
+for every nondefault mode. Frame and range previews must match render windows
+exactly. The fixture checks H.264's actual encoder-input digest against a direct
+BT.709 conversion and PNG against the reference frames. Declared tolerance is one
+delivered RGB8 code; observed errors are recorded rather than inferred from the
+component tests. Explicit default and cleared settings must remain byte-identical.
+
+`working_banding` checks a 1,024-frame temporal ramp and 33 frames of a slow
+256-level spatial gradient through a grade and saved opacity fade. Linear16
+matches the independent reference bytes exactly on Windows and Linux: all 1,024
+temporal tile means and all 256 spatial levels remain distinct, with no added
+plateau. This is a bounded precision result; encoded and linear light intentionally
+differ in brightness. [Recorded evidence](../verification/working-timelines-2026-10-13.json)
+includes numerical reports and source hashes.
+
+Broader precise-mode direct-source, structural-effect, proxy and queue cases,
+the complete default-path quick gate, and final performance audit remain required
+before closing stage six. This checkpoint makes no HDR, speed or points claim. Source normalization
+still supplies the supported native RGB8 inputs; wider working storage does not
+recover source detail already quantized during normalization.

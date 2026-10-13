@@ -135,7 +135,10 @@ struct Outputs<'a> {
 fn arguments(request: &Export, c: &Checked, o: Outputs) -> Vec<String> {
     let rate = c.project.frame_rate;
     let audio = request.streams.audio() && o.pass != Some(1);
-    let conversion = request.transfer().expect("validated transfer").conversion();
+    let conversion = request
+        .encoder_transfer()
+        .expect("validated transfer")
+        .conversion();
     let mut graph = format!(
         "{};{}format=rgb24,split=2[export_rgb][export_yuv];[export_yuv]{conversion}[export_video]",
         o.graph, o.picture
@@ -304,6 +307,7 @@ mod tests {
             sequences: Vec::new(),
             preview_scale: None,
             transfer: Some(Transfer::Bt709),
+            working_space: None,
             effect_coordinate_scale: None,
         };
         Checked {
@@ -364,6 +368,8 @@ mod tests {
         assert!(layout(&composited).is_none());
         composited.compositor = Some(crate::track_composite::Compositor {
             stack: crate::track_stack::Plan {
+                working: None,
+                delivery_transfer: None,
                 width: 64,
                 height: 36,
                 frames: 50,

@@ -86,6 +86,35 @@ impl Stack {
     }
 }
 impl Prepared {
+    pub(crate) fn apply_working(
+        &self,
+        stack: &Stack,
+        resources: &Resources,
+        frame: u64,
+        dimensions: [u32; 2],
+        pixels: &mut [crate::color::working::Pixel],
+        context: crate::color::working::Context,
+    ) -> Result<()> {
+        let [width, height] = dimensions;
+        if pixels.len() != width as usize * height as usize {
+            return Err(error(
+                "RENDER_VALIDATION_FAILED",
+                "Working effect frame size differs",
+            ));
+        }
+        let pool = resources.lock()?;
+        let processor =
+            effects::working::frame(&stack.effects, &self.samplers, &pool, stack.time(frame)?)?;
+        let scale = i64::from(stack.coordinate_scale);
+        for (i, pixel) in pixels.iter_mut().enumerate() {
+            let position = [
+                (i as i64 % i64::from(width) + i64::from(stack.origin[0])) * scale + scale / 2,
+                (i as i64 / i64::from(width) + i64::from(stack.origin[1])) * scale + scale / 2,
+            ];
+            *pixel = processor.pixel_in(context, *pixel, position)?;
+        }
+        Ok(())
+    }
     /// Keep the processor's straight alpha for the ordered native layer stack.
     pub(crate) fn apply_rgba(
         &self,

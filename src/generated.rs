@@ -201,8 +201,102 @@ pub(crate) fn prepare(
 
 #[derive(Default)]
 struct Inner {
-    scenes: BTreeMap<String, Arc<crate::scene::FrameSource>>,
+    scenes: BTreeMap<String, Arc<Source>>,
     bytes: u64,
+}
+/// Typed generated data: parents must not encode a working child before blending it.
+pub(crate) enum Source {
+    Legacy(crate::scene::FrameSource),
+    Working(crate::scene::working::Source),
+}
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeneratedSource")
+            .field("retained_bytes", &self.retained_bytes())
+            .finish_non_exhaustive()
+    }
+}
+impl Source {
+    fn new(
+        scene: &Scene,
+        root: &Path,
+        context: Option<crate::color::working::Context>,
+    ) -> Result<Self> {
+        match context {
+            None => crate::scene::FrameSource::new(scene, root).map(Self::Legacy),
+            Some(c) => crate::scene::working::Source::new_in(scene, root, c).map(Self::Working),
+        }
+    }
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        match self {
+            Self::Legacy(s) => s.retained_bytes(),
+            Self::Working(s) => s.retained_bytes(),
+        }
+    }
+    pub(crate) fn frame_buffer_bytes(&self) -> u64 {
+        match self {
+            Self::Legacy(s) => s.frame_buffer_bytes(),
+            Self::Working(s) => s.frame_buffer_bytes(),
+        }
+    }
+    pub(crate) fn sources(&self) -> Vec<crate::render::Source> {
+        match self {
+            Self::Legacy(s) => s.sources(),
+            Self::Working(s) => s.sources(),
+        }
+    }
+    pub(crate) fn write_audio(
+        &self,
+        first: u64,
+        count: u64,
+        control: &dyn media::Control,
+        wave: &mut crate::pcm_stream::Writer<std::fs::File>,
+    ) -> Result<()> {
+        match self {
+            Self::Legacy(s) => s.write_audio(first, count, control, wave),
+            Self::Working(s) => {
+                let end = first
+                    .checked_add(count)
+                    .filter(|n| *n <= s.audio_samples())
+                    .ok_or_else(|| {
+                        error("INVALID_RANGE", "Generated scene audio exceeds its source")
+                    })?;
+                let mut at = first;
+                while at < end {
+                    control.check()?;
+                    let count = (end - at).min(4096);
+                    let pcm = s.pcm(at, count)?;
+                    let bytes = pcm.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>();
+                    wave.push(&bytes)?;
+                    at += count;
+                }
+                Ok(())
+            }
+        }
+    }
+    pub(crate) fn frame(&self, n: u64, divisor: u32) -> Result<Vec<u8>> {
+        match self {
+            Self::Legacy(s) => s.frame(n, divisor),
+            Self::Working(_) => Err(error(
+                "INVALID_COLOR",
+                "Working scene pixels cannot pass through a byte child source",
+            )),
+        }
+    }
+    pub(crate) fn working_frame(
+        &self,
+        n: u64,
+        divisor: u32,
+        context: crate::color::working::Context,
+    ) -> Result<Vec<crate::color::working::Pixel>> {
+        match self {
+            Self::Working(s) if s.context() == context => s.frame(n, divisor),
+            _ => Err(error(
+                "INVALID_COLOR",
+                "Generated source and parent working contexts differ",
+            )),
+        }
+    }
 }
 /// One pool per complete render, including child sequences, audio branches and chunks.
 #[derive(Clone, Default)]
@@ -221,9 +315,10 @@ impl Pool {
         source: &SceneRef,
         root: &Path,
         control: &dyn media::Control,
-    ) -> Result<Arc<crate::scene::FrameSource>> {
+        context: Option<crate::color::working::Context>,
+    ) -> Result<Arc<Source>> {
         control.check()?;
-        let key = source.key()?;
+        let key = format!("{}:{}", source.key()?, serde_json::to_string(&context)?);
         let mut pool = self
             .0
             .lock()
@@ -231,7 +326,7 @@ impl Pool {
         if let Some(prepared) = pool.scenes.get(&key) {
             return Ok(prepared.clone());
         }
-        let prepared = crate::scene::FrameSource::new(&source.0, root)?;
+        let prepared = Source::new(&source.0, root, context)?;
         let bytes = prepared.retained_bytes();
         let total = pool.bytes.checked_add(bytes).filter(|&n| n <= 1024 * 1024 * 1024)
             .ok_or_else(|| error("LIMIT_EXCEEDED", "Prepared generated-scene payload exceeds the 1 GiB whole-render bound; shorten scenes or reuse recipes"))?;

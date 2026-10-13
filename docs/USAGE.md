@@ -1,5 +1,10 @@
 # Cutbolt local engine
 
+For opt-in working precision, apply `{"op":"project.working_space","working_space":{"bits":16,"light":"linear"}}`.
+All 8/16-bit and encoded/linear combinations are accepted; null restores the existing
+8-bit encoded default. See [working color](WORKING_COLOR.md) for source transfer,
+saved-history, output conversion and the remaining stage-six verification gate.
+
 [Generated scene clips](GENERATED_CLIPS.md) place scene recipes directly on native video or audio tracks. Workspace document references resolve before saving; rendering uses the saved content without an intermediate movie.
 
 Native video clips accept [saved effects and properties](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key, plus transform, opacity, mask and blend mode. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Transparency reveals lower video tracks. The same edit works inside `sequence.edit` for child definitions and on video sequence instances.

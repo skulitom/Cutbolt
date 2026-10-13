@@ -366,6 +366,20 @@ remain open; ordinary commands still use the existing path.
 36 cases and 214 complete frames per platform with zero observed differences,
 plus nine strict quick regressions on Windows and Linux.
 
+The saved-setting checkpoint now connects all four depth/light choices to
+sequential and placed timelines, generated clips, recursive sequences, previews
+and delivery. History/receipt tests retain older snapshots, and explicit default
+selection retains the old byte path. Independent references pass 27 timeline
+cases and 324 frames with zero observed differences on Windows/Linux, including
+H.264's actual encoder input. The registered grade/fade banding fixture also
+passes: 1,024 distinct temporal means and every level of a 256-level spatial
+gradient throughout its 33-frame fade, with exact reference bytes. Fifteen
+strict quick regressions and the separate banding gate pass on both systems.
+[Saved-mode evidence](../../verification/working-timelines-2026-10-13.json)
+records the bounded coverage. Broader precise direct/structural/proxy/queue cases,
+the complete default-path quick gate and final placed-track speed audit still
+remain; this checkpoint does not close stage six or award points.
+
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.
   - 16-bit linear composites in u16 linear light and converts once at output, with an explicit ordered dither for 8-bit delivery.

@@ -727,26 +727,30 @@ pub(crate) fn compose_working(
     scene: &Scene,
     state: &State,
     backdrop: crate::color::working::Pixel,
+    context: crate::color::working::Context,
     texture: impl FnMut(usize, u32, u32) -> Result<Option<WorkingTexel>>,
 ) -> Result<Vec<crate::color::working::Pixel>> {
-    use crate::color::{Transfer, working::Pixel};
+    use crate::color::Transfer;
     let mut pixels = vec![backdrop; (scene.width * scene.height) as usize];
     visit(scene, state, texture, |x, y, mut texel, gain| {
         if let Some(gain) = gain.filter(|_| texel.pixel.0[3] > 0) {
             // Preserve the existing material's encoded-color Lambert response continuously.
             // Lighting is not another source decode and must not quantize through RGBA8.
-            let mut value = texel.pixel.linear();
+            let mut value = context.linear(texel.pixel);
             for (channel, gain) in gain.into_iter().enumerate() {
                 value[channel] = Transfer::Srgb
                     .decode((Transfer::Srgb.encode(value[channel]) * gain).clamp(0.0, 1.0));
             }
-            texel.pixel = Pixel::from_linear(value)?;
+            texel.pixel = context.from_linear(value)?;
         }
         let position = (y * scene.width + x) as usize;
-        pixels[position] =
-            texel
-                .pixel
-                .over(pixels[position], texel.opacity, texel.coverage, texel.blend)?;
+        pixels[position] = context.over(
+            texel.pixel,
+            pixels[position],
+            texel.opacity,
+            texel.coverage,
+            texel.blend,
+        )?;
         Ok(())
     })?;
     Ok(pixels)

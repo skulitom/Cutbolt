@@ -2322,6 +2322,11 @@ fn all_capabilities() -> Value {
     "export":crate::delivery::capabilities(),
     "hdr":crate::hdr::capabilities(),"luts":crate::lut::capabilities(),"scopes":crate::scopes::capabilities(),"proxies":proxy::capabilities(),"audio":audio::capabilities(),"conform":conform::capabilities(),
     "not_implemented":["timeline_and_delivery_surround","general_video_effects","delivery_device_matrix"]});
+    result["operations"]
+        .as_array_mut()
+        .expect("operations")
+        .push(json!("project.working_space"));
+    result["renderer"]["working_space"] = json!({"operation":"project.working_space","bits":[8,16],"light":["encoded","linear"],"default":{"bits":8,"light":"encoded"},"schema_version":2,"transfer":"project.transfer_or_bt709; scene_inputs_srgb","storage":"straight_unorm_at_declared_depth","alpha":"coverage","blend_and_resample":"declared_light","effects":"continuous_linear_with_encoded_srgb_HSL_LUT_key","generated_and_nested":"working_pixels_without_byte_delivery","delivery":"SDR8_ordered_8x8; H264_direct_to_bt709","maximum_active_frame_buffer_bytes":1073741824u64,"guide":"docs/WORKING_COLOR.md"});
     result["scenes"]["shorthand"] = json!({"form":"short","content":["text","rectangle","ellipse"],"project_size":true,"expanded_recipe":true,"guide":"docs/SCENE_SHORTHAND.md"});
     result["build"] = json!(
         crate::BUILD_COMMIT

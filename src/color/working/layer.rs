@@ -1,6 +1,6 @@
 //! Frame compositing in the precise working representation. Scene and native-track
 //! integration share these layer properties; this does not select a project render mode.
-use super::Pixel;
+use super::{Context, Pixel};
 use crate::{
     Result, clip_properties, composite, effects, error, layer_composite,
     scene::{Animation, Transform},
@@ -173,6 +173,31 @@ pub(crate) fn draw(
     destination: &mut [Pixel],
     processor: Option<&effects::working::Frame<'_>>,
 ) -> Result<()> {
+    draw_in(
+        Context::LINEAR16,
+        recipe,
+        sample,
+        opacity,
+        image,
+        anchor,
+        dimensions,
+        destination,
+        processor,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_in(
+    context: Context,
+    recipe: layer_composite::Recipe<'_>,
+    sample: &layer_composite::Sample,
+    opacity: u16,
+    image: &Image<'_>,
+    anchor: [i32; 2],
+    dimensions: [u32; 2],
+    destination: &mut [Pixel],
+    processor: Option<&effects::working::Frame<'_>>,
+) -> Result<()> {
+    let opacity = context.quantum(opacity);
     if opacity == 0 {
         return Ok(());
     }
@@ -198,7 +223,7 @@ pub(crate) fn draw(
             return Ok(None);
         }
         let pixel = image.pixels[(y * i64::from(image.size[0]) + x) as usize];
-        let pixel = processor.map_or(Ok(pixel), |p| p.pixel(pixel, [sx, sy]))?;
+        let pixel = processor.map_or(Ok(pixel), |p| p.pixel_in(context, pixel, [sx, sy]))?;
         Ok(Some((pixel, coverage)))
     };
     if let (Some(spec), Some(mapping)) = (&recipe.transform.spatial, &sample.spatial) {
@@ -221,7 +246,8 @@ pub(crate) fn draw(
                     }
                 }
                 let index = (y * i64::from(dimensions[0]) + x) as usize;
-                destination[index] = total.over(destination[index], opacity, recipe.blend_mode)?;
+                destination[index] =
+                    total.over(context, destination[index], opacity, recipe.blend_mode)?;
             }
         }
         return Ok(());
@@ -253,8 +279,13 @@ pub(crate) fn draw(
             };
             if let Some((pixel, coverage)) = fetch(sx + cx, sy + cy)? {
                 let index = (y * i64::from(dimensions[0]) + x) as usize;
-                destination[index] =
-                    pixel.over(destination[index], opacity, coverage, recipe.blend_mode)?;
+                destination[index] = context.over(
+                    pixel,
+                    destination[index],
+                    opacity,
+                    coverage,
+                    recipe.blend_mode,
+                )?;
             }
         }
     }
@@ -276,7 +307,13 @@ impl Total {
             *sum += u128::from(value) * alpha;
         }
     }
-    fn over(&self, backdrop: Pixel, opacity: u16, mode: composite::BlendMode) -> Result<Pixel> {
+    fn over(
+        &self,
+        context: Context,
+        backdrop: Pixel,
+        opacity: u16,
+        mode: composite::BlendMode,
+    ) -> Result<Pixel> {
         if self.alpha == 0 || opacity == 0 {
             return Ok(backdrop);
         }
@@ -298,6 +335,6 @@ impl Total {
                 / alpha;
         }
         out[3] = alpha;
-        Pixel::from_linear(out)
+        context.from_components(out)
     }
 }

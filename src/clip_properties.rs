@@ -8,6 +8,7 @@ use crate::{
     tracks::OverlayTransform,
 };
 use serde::{Deserialize, Serialize};
+mod working;
 
 /// Source sampling for a clip transform. `scene` uses the shared integer/spatial mapping.
 /// `box_floor` preserves legacy crop/box-shrink placement and averages associated color.

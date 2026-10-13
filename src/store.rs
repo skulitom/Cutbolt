@@ -96,6 +96,8 @@ pub struct Changes {
     pub track_layout: Option<TrackLayoutChange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transfer: Option<TransferChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_space: Option<WorkingSpaceChange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -165,6 +167,12 @@ pub struct PreviewChange {
 pub struct TransferChange {
     pub before: Option<crate::color::Transfer>,
     pub after: Option<crate::color::Transfer>,
+}
+/// Saved precision selection; absent fields preserve older receipt bytes and replay.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkingSpaceChange {
+    pub before: Option<crate::color::working::Space>,
+    pub after: Option<crate::color::working::Space>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -574,6 +582,12 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
             before: before.transfer,
             after: after.transfer,
         }),
+        working_space: (before.working_space != after.working_space).then_some(
+            WorkingSpaceChange {
+                before: before.working_space,
+                after: after.working_space,
+            },
+        ),
         duration_before: before.duration()?,
         duration_after: after.duration()?,
         clips,
@@ -1068,6 +1082,88 @@ mod tests {
         )
         .unwrap();
         assert_eq!(get(&root.0, "test", None).unwrap().tracks, effected.tracks);
+    }
+
+    #[test]
+    fn working_space_history_receipts_and_schema_are_transactional() {
+        let root = Temp::new();
+        let before = sample();
+        let old = serde_json::to_vec(&before).unwrap();
+        assert!(!String::from_utf8_lossy(&old).contains("working_space"));
+        create(&root.0, before.clone(), "create").unwrap();
+        let space = crate::color::working::Context::LINEAR16.space;
+        let mutation = || Mutation::Apply {
+            operations: vec![Operation::ProjectWorkingSpace {
+                working_space: Some(space),
+            }],
+        };
+        let receipt = mutate(&root.0, "test", "working", 0, mutation()).unwrap();
+        assert_eq!(
+            receipt.changes.working_space,
+            Some(WorkingSpaceChange {
+                before: None,
+                after: Some(space)
+            })
+        );
+        assert_eq!(
+            receipt.changes.schema_version,
+            Some(SchemaChange {
+                before: 1,
+                after: 2
+            })
+        );
+        let precise = get(&root.0, "test", None).unwrap();
+        assert_eq!(precise.working_space, Some(space));
+        assert_eq!(
+            serde_json::to_vec(&get(&root.0, "test", Some(0)).unwrap()).unwrap(),
+            old
+        );
+        assert_eq!(
+            mutate(&root.0, "test", "working", 0, mutation()).unwrap(),
+            receipt
+        );
+        let undone = mutate(&root.0, "test", "undo-working", 1, Mutation::Undo).unwrap();
+        assert_eq!(
+            undone.changes.working_space,
+            Some(WorkingSpaceChange {
+                before: Some(space),
+                after: None
+            })
+        );
+        assert_eq!(get(&root.0, "test", None).unwrap().schema_version, 1);
+        mutate(
+            &root.0,
+            "test",
+            "restore-working",
+            2,
+            Mutation::Restore { target_revision: 1 },
+        )
+        .unwrap();
+        let restored = get(&root.0, "test", None).unwrap();
+        assert_eq!(restored.working_space, Some(space));
+        assert_eq!(restored.clips, before.clips);
+        let cleared = restored
+            .apply(
+                restored.revision,
+                vec![Operation::ProjectWorkingSpace {
+                    working_space: None,
+                }],
+            )
+            .unwrap();
+        assert_eq!(cleared.schema_version, 2);
+        assert!(cleared.working_space.is_none());
+        assert!(
+            serde_json::from_value::<Operation>(
+                json!({"op":"project.working_space","working_space":{"bits":12,"light":"linear"}})
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<Operation>(
+                json!({"op":"project.working_space","working_space":{"bits":16,"light":"hdr"}})
+            )
+            .is_err()
+        );
     }
 
     #[test]

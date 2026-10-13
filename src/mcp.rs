@@ -193,7 +193,7 @@ pub(crate) fn description(command: &str) -> &'static str {
             "Read the saved head or a chosen immutable revision. Returns the full project. Get the head before editing; use a receipt revision for rendering."
         }
         "session.apply" => {
-            "Commit an atomic editing batch against expected_revision. Reuse request_id only with identical arguments after a lost response. On REVISION_CONFLICT read and reconsider; returns a receipt with semantic changes. A placed clip scene is a saved generated source, also accepted as a workspace file reference."
+            "Commit atomic edits against expected_revision. Retry request_id only with identical arguments. On REVISION_CONFLICT read and reconsider. Returns semantic changes. A clip scene saves a generated source or workspace recipe. project.working_space selects bits 8/16 and light encoded/linear; null restores the default."
         }
         "session.preview" => {
             "Inspect exact before/after clip placements, track layout, links and affected durations without saving. This is an edit diff, not a video image. Apply against the same revision or handle a conflict."

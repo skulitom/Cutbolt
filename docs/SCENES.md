@@ -1,5 +1,7 @@
 # Pixel scenes and timeline previews (v0.4)
 
+Generated clips inherit their project's optional [working-space selection](WORKING_COLOR.md), retaining working pixels through parent timelines. Standalone scene inspection/rendering retains its existing contract; the precise library source accepts an explicit context.
+
 A scene can also be a [generated timeline clip](GENERATED_CLIPS.md), composed per frame without compiling a movie. Workspace scene files resolve into pinned saved recipes. The standalone scene commands below remain available.
 
 The same pixel recipes, 2D transforms, opacity, rectangle masks and blend modes also work as [native clip effects and properties](CLIP_EFFECTS.md) on footage. Scene curves remain layer-local; native clip curves use source time. Both paths share the layer equations; scene renders provide the comparison oracle.

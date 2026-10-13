@@ -1,5 +1,11 @@
 # Cutbolt agent interface (v0.4)
 
+`project.working_space` is a saved operation with `working_space: {bits: 8|16,
+light: "encoded"|"linear"}` or null. Nondefault modes retain precision through
+generated clips and nested edits; delivery is still SDR8. Set `project.transfer`
+for the footage interpretation (precise-mode fallback: BT.709). See
+[working color](WORKING_COLOR.md) for the contract and outstanding stage-six gate.
+
 A native clip may use `scene` as its exclusive source. It accepts an inline scene or a workspace document reference resolved before the edit; see [generated clips](GENERATED_CLIPS.md). The snapshot pins the recipe and its media inputs.
 
 For a grade or LUT on footage, use `tracks.edit` with `{"op":"clip_effects","clip_id":"...","effects":[...]}` inside the existing apply command. This saves source-clock pixel effects and unique transform, opacity, mask and blend properties, with no scene compilation. The first nonempty stack upgrades the new snapshot to schema 2. See [clip effects](CLIP_EFFECTS.md) for recipes and bounds. A keyed clip reveals lower video tracks; no intermediate movie is required. Apply the same edit through `sequence.edit` inside a child definition; video sequence instances accept their own source-clock stacks.

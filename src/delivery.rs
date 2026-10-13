@@ -168,7 +168,22 @@ impl Export {
     fn transfer(&self) -> Option<Transfer> {
         self.input_transfer
             .or(self.project.transfer)
+            .or(self.project.working_context().map(|c| c.transfer))
             .filter(|_| self.color_needed())
+    }
+    /// Working H.264 frames are encoded directly to BT.709 at their one final byte store.
+    /// Legacy frames keep the existing byte transfer conversion in the encoder filter.
+    fn working_delivery_transfer(&self) -> Option<Transfer> {
+        self.project.working_context().map(|context| {
+            if self.profile == Profile::H264Aac {
+                Transfer::Bt709
+            } else {
+                context.transfer
+            }
+        })
+    }
+    fn encoder_transfer(&self) -> Option<Transfer> {
+        self.working_delivery_transfer().or_else(|| self.transfer())
     }
     fn extension(&self) -> &'static str {
         match (self.profile, self.streams) {
@@ -236,8 +251,14 @@ impl Export {
             ));
         }
         if self.color_needed()
-            && Transfer::declared("INVALID_EXPORT", self.input_transfer, self.project.transfer)?
-                .is_none()
+            && Transfer::declared(
+                "INVALID_EXPORT",
+                self.input_transfer,
+                self.project
+                    .transfer
+                    .or(self.project.working_context().map(|c| c.transfer)),
+            )?
+            .is_none()
         {
             return Err(invalid(
                 "H.264 and PNG video need the timeline's transfer: declare it once with the project.transfer operation, or pass input_transfer. bt709 keeps encoded values and suits most material; srgb converts from the sRGB curve first, darkening shadows in typical players",
@@ -285,7 +306,7 @@ impl Export {
         } else {
             render::plan_range
         };
-        let reference = plan(
+        let mut reference = plan(
             &project,
             &self.input_root,
             parent,
@@ -293,6 +314,7 @@ impl Export {
             range.start,
             range.duration,
         )?;
+        reference.delivery_transfer(self.working_delivery_transfer());
         Ok(Checked {
             project,
             range,
@@ -302,13 +324,23 @@ impl Export {
     }
 }
 fn report(request: &Export, c: &Checked) -> Value {
-    json!({"profile":request.profile,"profile_version":if request.profile==Profile::Gif{1}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
+    let mut report = json!({"profile":request.profile,"profile_version":if request.profile==Profile::Gif{1}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
         "timeline_frames":c.reference.frames,"video_frames":if request.streams.video(){c.reference.frames}else{0},"audio_samples":if request.streams.audio(){c.reference.samples}else{0},
         "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.transfer(),"sources":c.reference.sources,
         "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Gif{request.gif.unwrap_or_default().report(c.project.frame_rate,c.reference.frames)}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report(c.project.width,c.project.height,c.project.frame_rate)},
         "audio":if !request.streams.audio(){Value::Null}else if request.profile!=Profile::H264Aac{json!({"codec":"pcm_s16le","sample_rate":48000,"channels":2,"decoded_tail_padding":0})}else{json!({"codec":"aac","profile":"LC","bitrate":request.aac_bitrate.unwrap_or(320000),"coder":"twoloop","noise_substitution":false,"cutoff_hz":aac_cutoff(request.aac_bitrate.unwrap_or(320000)),"sample_rate":48000,"channels":2,"presentation_samples":c.reference.samples,"decoder_tail_padding":"reported_separately_0_to_1023_samples"})},
         "encoder_passes":if request.profile==Profile::Reference{0}else if request.streams.video() && request.h264.unwrap_or_default().rate_control.two_pass(){2}else{1},
-        "container":match request.profile { Profile::H264Aac=>"mp4",Profile::PngMov=>"mov",Profile::PngSequence=>"numbered_png_and_manifest",Profile::Gif=>"gif",Profile::Reference=>if request.streams==Streams::Audio{"wav"}else{"matroska"}},"sequence_first":if request.profile==Profile::PngSequence{Some(request.sequence_first.unwrap_or(0))}else{None}})
+        "container":match request.profile { Profile::H264Aac=>"mp4",Profile::PngMov=>"mov",Profile::PngSequence=>"numbered_png_and_manifest",Profile::Gif=>"gif",Profile::Reference=>if request.streams==Streams::Audio{"wav"}else{"matroska"}},"sequence_first":if request.profile==Profile::PngSequence{Some(request.sequence_first.unwrap_or(0))}else{None}});
+    if let Some(context) = c
+        .project
+        .working_context()
+        .filter(|_| request.streams.video())
+    {
+        report["working_context"] = json!(context);
+        report["delivery_transfer"] = json!(request.working_delivery_transfer());
+        report["delivery_dither"] = json!("ordered_8x8");
+    }
+    report
 }
 pub fn inspect(request: &Export) -> Result<Value> {
     let c = request.check()?;
@@ -442,7 +474,10 @@ fn arguments(
         if request.streams.video() {
             args.extend([
                 "-vf".into(),
-                request.transfer().expect("validated transfer").filter(),
+                request
+                    .encoder_transfer()
+                    .expect("validated transfer")
+                    .filter(),
             ]);
         }
         args.extend(h264_options(request, pass, scratch, output));
@@ -957,19 +992,26 @@ pub fn run(request: &Export) -> Result<Value> {
     let streamed = stream::encode(request, &c, &scratch.0, &encoded, &control)?;
     let mut measured = None;
     if streamed.is_none() {
-        let render = if audio_only {
-            render::run_audio_range
+        if audio_only {
+            render::run_audio_range(
+                &c.project,
+                &request.input_root,
+                &scratch.0,
+                &reference,
+                c.range.start,
+                c.range.duration,
+            )?;
         } else {
-            render::run_intermediate_range
-        };
-        render(
-            &c.project,
-            &request.input_root,
-            &scratch.0,
-            &reference,
-            c.range.start,
-            c.range.duration,
-        )?;
+            render::run_intermediate_range(
+                &c.project,
+                &request.input_root,
+                &scratch.0,
+                &reference,
+                c.range.start,
+                c.range.duration,
+                request.working_delivery_transfer(),
+            )?;
+        }
         if request.profile == Profile::PngSequence {
             return sequence::run(request, &c, &reference, &scratch.0);
         }

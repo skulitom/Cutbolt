@@ -1,0 +1,383 @@
+{
+  "date": "2026-10-13",
+  "kind": "saved_working_space_timeline_and_banding",
+  "parent_commit": "63eb1c7c461baacbdc2d87090767db4b8e292b9e",
+  "source_sha256": {
+    "src/clip_effects.rs": "3bc6eca2e3afa3c9d04fe69d71b1b0c44569a03fc694cc0f6568c583a71f4d71",
+    "src/clip_properties.rs": "2abebca06d3a57d7a08c412a2d712cb3d7ac4aa621c81b57be2cc5bee6f1650a",
+    "src/clip_properties/working.rs": "b858dde679d151975f87463589181003fc2718a4cc4c998c711460801ce48134",
+    "src/color/working.rs": "b7c259a3f26271d0fd55e295317d949540ad252be34b7b30b7d67f7aa3c87e70",
+    "src/color/working/context.rs": "ccf37549ecea5fa9020d141f999ceb99d45f67e7306b2e30baf3fe18e43906af",
+    "src/color/working/layer.rs": "8e4f67227abbddf5d2ea804566e92874e4a507823b5225c181d257fc1494bf7b",
+    "src/commands.rs": "d56b40f2cb0a805687f48e938d337f705fe88de4cf996ec318bfcc5e54a722f5",
+    "src/delivery.rs": "20750324ab0a9c43d300f2878ea59447c3344191c6d6e0d632cf4acae5818ba9",
+    "src/delivery/stream.rs": "f47cf09de483447866de19193ef44cef49a044110f24d20186825bd5014b5a5b",
+    "src/effects/working.rs": "0bcf1a43c94728773b91de427b13c5d2f51cac27832d73fd3c31f704e7f8ce90",
+    "src/generated.rs": "539fcb26acdf03c4e4a739cd20fb0ad9a6eacf34128094f7fdd5496e840ccce2",
+    "src/geometry.rs": "b1b8351dbe33bf6c04485938de26d31f878267cfb8082adeea0d7f339a6380cf",
+    "src/interchange/import.rs": "6606eb350dc674efe43b7f4b23cb668657be578ced67de95fc515b23b2888f61",
+    "src/mcp.rs": "a3506e89cec1890f302ccb5c245da0ce287adf0077b3b9ce8dffab741b2350b9",
+    "src/model.rs": "7549f0aa901faab1f51ac03276df3b073011169e1ef2fa975c4ad343cab708fd",
+    "src/preview.rs": "02638a217acbc3c53a6319b087a550c5186f039818659d2a720d0fcf0b300370",
+    "src/render.rs": "1cb7dbe510f268bad28065a981b388018defae7aeacf8be97f1010249fc9fdf7",
+    "src/scene/working.rs": "4a55debc91f7933ed0ea5705c460aadfaf93ff4d0b0c57c1e011f29bb0458023",
+    "src/scopes.rs": "55ea6079f9a004b34af7efc8785a62df5cfa9007111c208918d4923137c6948f",
+    "src/store.rs": "d060f335f743bb1947e456ce4b6278dcc50ee25fac6a7cf68bdc667e64430a0f",
+    "src/track_render.rs": "1d51feff03d3d6d11bc99a00330f1b71a0b6ad24e00b36421a9403b1e30ef89b",
+    "src/track_stack.rs": "d87bf86004ac1f25bfa4bed7fb878e7e3b9ba0dc4ee6e0a674103ba04dd5ee43",
+    "src/track_stack/working.rs": "44be647829737c7c24bfef1d76633bc0b1944a8ba2a94db6c906a7644d48c82a",
+    "tests/working_banding.py": "9c84ec2932a4739edd02cd72b0d900e367c8eac8e6e79e844a1458e185649994",
+    "tests/working_timelines.py": "4aa8aa18402d998b8b736c79df505c375c0de93c6de510f219d550edff55fd54",
+    "tools/verify.py": "102233a5dc6d52eb43e3a0bba073e8f08e0f46fcf784c907a3abc1427c149df3"
+  },
+  "linux_copied_source_hashes_match": true,
+  "source_note": "Compiled modified sources identified by these hashes. Windows reports the parent commit; Linux retains its older checkout Git identity. Initial fixture selection used the unregistered name agents and was corrected to integration; Rust/lint passed and both corrected strict quick runs completed.",
+  "checks": {
+    "windows": {
+      "rust_tests": 261,
+      "all_targets_clippy": true,
+      "strict_quick": [
+        "agent_costs",
+        "agent_ergonomics",
+        "clip_effects",
+        "delivery",
+        "export_formats",
+        "generated_clips",
+        "integration",
+        "native_layers",
+        "proxies",
+        "sequences",
+        "transitions",
+        "working_effects",
+        "working_layers",
+        "working_scenes",
+        "working_timelines"
+      ],
+      "wall_seconds": 360,
+      "banding_registered_quick": true,
+      "report_sha256": "c6b3d42c5c5f903d4e33f6a198aa915c0c61a388723a9d9561d47d9628dd4242",
+      "log_sha256": "a6f6d18020f2c61708a003a7ecf6c13a601d2923c4a74d4d7b76cd5f3b402967",
+      "rust_lint_log_sha256": "93afa3660b636400ed93b642e18c4923644a3afa76e23ffd501daf6c9ee2ae21",
+      "banding_report_sha256": "aa6e2b11bff72570e3adfdd91e072d0b467b8ed6489c51c6f06da18a26f01c88",
+      "reported_checkout_commit": "63eb1c7c461baacbdc2d87090767db4b8e292b9e"
+    },
+    "linux": {
+      "rust_tests": 260,
+      "all_targets_clippy": true,
+      "strict_quick": [
+        "agent_costs",
+        "agent_ergonomics",
+        "clip_effects",
+        "delivery",
+        "export_formats",
+        "generated_clips",
+        "integration",
+        "native_layers",
+        "proxies",
+        "sequences",
+        "transitions",
+        "working_effects",
+        "working_layers",
+        "working_scenes",
+        "working_timelines"
+      ],
+      "wall_seconds": 235,
+      "banding_registered_quick": true,
+      "report_sha256": "c43ce3a41770e046fc7a51f6a238c7153767d7a40c1b7e1d72998b6a1cd6abaa",
+      "log_sha256": "69ac623f2f826549eedfa51e50f96960acb674abeb1efcd136624fb55688c974",
+      "rust_lint_log_sha256": "06cc47a4a97ffd0061418cc069260db5ce59e364d998342267ddd5010a3df1e8",
+      "banding_report_sha256": "fdfb4f5259d5bf0c037f7286d3a31c312a164e12c750f3bde1d27a0a8c9d7a88",
+      "reported_checkout_commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5"
+    }
+  },
+  "oracles": {
+    "working_timelines": {
+      "report": {
+        "passed": [
+          "working_timelines.saved_modes_and_default_identity",
+          "working_timelines.sequential_preview_and_range",
+          "working_timelines.grade_opacity_generated_and_nested",
+          "working_timelines.exact_transition_clocks",
+          "working_timelines.h264_single_transfer_and_lossless_png"
+        ],
+        "cases": [
+          {
+            "name": "legacy",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "8af539770a197f846418ada95e285d218d69bbfdfe75f1b9937fa571dac98142"
+          },
+          {
+            "name": "explicit-default",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "8af539770a197f846418ada95e285d218d69bbfdfe75f1b9937fa571dac98142"
+          },
+          {
+            "name": "cleared-default",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "8af539770a197f846418ada95e285d218d69bbfdfe75f1b9937fa571dac98142"
+          },
+          {
+            "name": "8-linear-sequential",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "33fc8b04786c8e37e45118f0c5dcca294fc2a8d5f2d13eac53fffbf29670cdc9"
+          },
+          {
+            "name": "8-linear-grade-opacity",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "3089e503032c04e2eee7e7943e1ede571f5bd1da258761f6a7343acfcbdbd7d7"
+          },
+          {
+            "name": "8-linear-generated",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "b3e7c281cd389cec7d0fc988772e48bb7780ab56aad9f750c921d803a7757035"
+          },
+          {
+            "name": "8-linear-nested",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "b3e7c281cd389cec7d0fc988772e48bb7780ab56aad9f750c921d803a7757035"
+          },
+          {
+            "name": "8-linear-dissolve",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "fd01ba365f3ea4207062777baa951fb5e61c97baf1f78532d9d3d9ed8b0bae46"
+          },
+          {
+            "name": "8-linear-dip_black",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "c12fddf7882fc432bb155ea5acc836e1556d3b9e66a358072aefc0dcb6372ceb"
+          },
+          {
+            "name": "8-linear-wipe_left",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "033592bb795bac14d05b17cf1e139337c75ae8ed6ad5b94c906d62aedb599a93"
+          },
+          {
+            "name": "8-linear-wipe_right",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "aa2e0c222f8bc08c30d14c4a54c76a20f1c45efd1389e6f6741ee181acc6848e"
+          },
+          {
+            "name": "16-encoded-sequential",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "8af539770a197f846418ada95e285d218d69bbfdfe75f1b9937fa571dac98142"
+          },
+          {
+            "name": "16-encoded-grade-opacity",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "17b16195627eb9d2f9bd5880b50763ae53b33519d51bef79a43748d8f9f7e78f"
+          },
+          {
+            "name": "16-encoded-generated",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "afb179416ed95a11661cb1975e73d62e1d6f2b37b5798a202b2484910fbfd08c"
+          },
+          {
+            "name": "16-encoded-nested",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "afb179416ed95a11661cb1975e73d62e1d6f2b37b5798a202b2484910fbfd08c"
+          },
+          {
+            "name": "16-encoded-dissolve",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "dcb30c4abb1a47e5c57a12ec7c6964d2cb8d4ff531a1da7fb74c2dd0acec98ba"
+          },
+          {
+            "name": "16-encoded-dip_black",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "f5d1ea70b229120169bc9cb0dc4f58e5ff969a771ccaae7a81599541f31566ca"
+          },
+          {
+            "name": "16-encoded-wipe_left",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "5ca14d3536d54ed50d9888953a5432f77826c298d791b16883c024ab724f4937"
+          },
+          {
+            "name": "16-encoded-wipe_right",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "fbd558063fcdb157dd4064a1312df7c36ea8d645f643bc0c2d370a4206747e1a"
+          },
+          {
+            "name": "16-linear-sequential",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "000b1975017a20c597ed59d3ed7bafcec5413bb1e906877aec9e110c875f87ef"
+          },
+          {
+            "name": "16-linear-grade-opacity",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "6960affc9be2c8b81d049bb77f5b4bfcaba993016332b9fa49e454f6aa7e5452"
+          },
+          {
+            "name": "16-linear-generated",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "900c400dc7dd865e61da05c649cb82db8aadd2be72217e00445160166dd3ae71"
+          },
+          {
+            "name": "16-linear-nested",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "900c400dc7dd865e61da05c649cb82db8aadd2be72217e00445160166dd3ae71"
+          },
+          {
+            "name": "16-linear-dissolve",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "1faa8dc7369c8fcf249596411f7767b380f14df5ac032a119338f14a3d97db94"
+          },
+          {
+            "name": "16-linear-dip_black",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "b1787132c8d676dde671b3c52395c322298ad59f275052a8cd17d86f75e276c2"
+          },
+          {
+            "name": "16-linear-wipe_left",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "bc9580a04c1d8374be5131e7719a023968dc296ead2349c1e9941f62d2d30896"
+          },
+          {
+            "name": "16-linear-wipe_right",
+            "frames": 12,
+            "maximum_delivery_error": 0,
+            "sha256": "ba4474f600fbaec6838363a428e2d8db23fd56d821927f433aede44461c5b39e"
+          }
+        ],
+        "frames": 324,
+        "maximum_delivery_error": 0,
+        "reference": "Independent f64 source transfer, declared-depth stores, exposure, coverage, frame-center transitions and Bayer delivery; tolerance one delivered RGB8 code",
+        "limits": "Synthetic SDR8 inputs at 25 fps. Broad direct/proxy/queue/session, structural effects and final banding gates remain separate requirements."
+      },
+      "windows_sha256": "2ebaf00252e2c2294e819ab46b84dffb028099aeee35e5d5c50d3aac7ac65980",
+      "linux_sha256": "2d996be25bb9c7f2d3d5ed1529b10b04fa532d5561c2ca4bab4f37a5c625ca2d",
+      "platform_reports_identical": true
+    },
+    "working_banding": {
+      "report": {
+        "passed": [
+          "working_banding.saved_grade_opacity_fade_and_spatial_gradient"
+        ],
+        "cases": [
+          {
+            "name": "temporal_ramp",
+            "width": 32,
+            "height": 24,
+            "frames": 1024,
+            "modes": {
+              "legacy": {
+                "sha256": "3043e83d5af043269bcc2b075c5f56f5ada50ee03898c232f80f64bf14c415a8",
+                "distinct_temporal_means": 113,
+                "minimum_distinct_spatial_means": 1,
+                "maximum_distinct_spatial_means": 1
+              },
+              "linear16": {
+                "sha256": "11149d85d764323ee4102c14d6d56d33ba92224e138c7dcb3865a0632a5654ca",
+                "distinct_temporal_means": 1024,
+                "minimum_distinct_spatial_means": 1,
+                "maximum_distinct_spatial_means": 1,
+                "maximum_delivery_error": 0,
+                "reference_sha256": "11149d85d764323ee4102c14d6d56d33ba92224e138c7dcb3865a0632a5654ca",
+                "tile_means_exact": true,
+                "added_plateaus": 0
+              }
+            }
+          },
+          {
+            "name": "spatial_gradient",
+            "width": 2048,
+            "height": 16,
+            "frames": 33,
+            "modes": {
+              "legacy": {
+                "sha256": "cd8d6834f75bfb172bc62a1ed13a9bd8765f9f1662081b9cd7a1adb0acf5024f",
+                "distinct_temporal_means": null,
+                "minimum_distinct_spatial_means": 59,
+                "maximum_distinct_spatial_means": 233
+              },
+              "linear16": {
+                "sha256": "6dc6c039ae2ea10f5fbd722f0570042ecc5b1996ac6570d991a99b07b16def4e",
+                "distinct_temporal_means": null,
+                "minimum_distinct_spatial_means": 256,
+                "maximum_distinct_spatial_means": 256,
+                "maximum_delivery_error": 0,
+                "reference_sha256": "6dc6c039ae2ea10f5fbd722f0570042ecc5b1996ac6570d991a99b07b16def4e",
+                "tile_means_exact": true,
+                "added_plateaus": 0
+              }
+            }
+          }
+        ],
+        "reference": "Independent f64 transfer/exposure/coverage with declared UNORM16 stores and recursive Bayer thresholds; <=1 RGB8 code, exact 8x8 means, strictly increasing ramp means",
+        "limits": "Synthetic SDR sRGB grayscale under one -0.315-stop grade, generated source ramp and saved opacity. Encoded and linear paths intentionally differ in brightness; this is a precision gate, not a subjective quality, HDR or performance claim."
+      },
+      "windows_sha256": "2bbd7ac393c2f34c7969d13127181240afc05f158bc92db373bca61fa2a226bc",
+      "linux_sha256": "7a6140b473d33ceab164735d7e3faddeac3464bcaf54653c83c2cc78c9ffd7a8",
+      "platform_reports_identical": true
+    }
+  },
+  "formatting": true,
+  "mode_contract": {
+    "default": "8-bit encoded retains original renderer",
+    "supported": [
+      {
+        "bits": 8,
+        "light": "encoded"
+      },
+      {
+        "bits": 8,
+        "light": "linear"
+      },
+      {
+        "bits": 16,
+        "light": "encoded"
+      },
+      {
+        "bits": 16,
+        "light": "linear"
+      }
+    ],
+    "sources": "native RGB8 uses project.transfer or bt709; generated scene inputs are sRGB",
+    "children": "working pixels across generated and recursive sequence boundaries",
+    "delivery": "ordered8x8 SDR8 at final store; H264 directly to bt709",
+    "schema": "new setting upgrades new snapshot to version2; older snapshots and receipts preserved",
+    "memory": "1GiB conservative active payload estimate including recursive buffers, not RSS guarantee"
+  },
+  "verified_scope": [
+    "saved field, validation, receipts, retry, undo and restore",
+    "sequential/placed timeline frames, four transitions, grades/opacity",
+    "generated scenes and nested sequence precision",
+    "preview frame/range equality",
+    "actual H264 encoder input and lossless PNG",
+    "independent spatial-gradient and slow-opacity banding exit for linear16"
+  ],
+  "not_claimed": [
+    "complete stage-six exit",
+    "complete default v1 fixture equivalence at this checkpoint",
+    "broad precise direct-source, structural, proxy and queue acceptance",
+    "HDR or wider source normalization",
+    "final placed-track performance A/B",
+    "whole-goal requirement audit",
+    "new thorough milestone or points"
+  ]
+}

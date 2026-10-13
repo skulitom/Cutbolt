@@ -682,13 +682,15 @@ impl<'a> Graph<'a> {
         }
         Ok(format!("n{}", self.serial))
     }
-    fn scene(&mut self, clip: &TrackClip) -> Result<std::sync::Arc<crate::scene::FrameSource>> {
+    fn scene(&mut self, clip: &TrackClip) -> Result<std::sync::Arc<crate::generated::Source>> {
         let scene = clip.scene.as_ref().expect("generated clip");
         scene.validate(self.project)?;
-        let prepared = self
-            .effect_resources
-            .scenes
-            .get(scene, self.root, self.control)?;
+        let prepared = self.effect_resources.scenes.get(
+            scene,
+            self.root,
+            self.control,
+            self.project.working_context(),
+        )?;
         for source in prepared.sources() {
             if self
                 .effect_sources
@@ -1272,6 +1274,8 @@ impl<'a> Graph<'a> {
             });
         }
         let mut plan = Plan {
+            working: self.project.working_context(),
+            delivery_transfer: None,
             width: self.project.width,
             height: self.project.height,
             frames,

@@ -4,17 +4,20 @@
 //! linear-light UNORM16; alpha is linear coverage. Every compositing operation rounds once
 //! to this representation. Encoded delivery and its spatially fixed dither are separate.
 use super::Transfer;
+pub mod context;
 pub mod layer;
 use crate::{
     Result,
     composite::{AlphaMode, BlendMode},
     error,
 };
+pub use context::{Context, Depth, Light, Space};
 
 const Q: u128 = u16::MAX as u128;
 const MASK: u128 = crate::composite::MASK_WEIGHT as u128;
 
-/// Straight linear-light RGB and coverage, each in 0..65535. Hidden RGB is allowed.
+/// Straight working RGB and coverage in 0..65535. Context-free methods use linear light;
+/// frames with an explicit Context use its declared light and depth. Hidden RGB is allowed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pixel(pub [u16; 4]);
 

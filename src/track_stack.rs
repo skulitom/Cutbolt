@@ -7,6 +7,7 @@ use crate::{
     tracks::{OverlayTransform, TransitionKind},
 };
 use serde::Serialize;
+mod working;
 use std::{
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
@@ -26,7 +27,7 @@ pub(crate) enum Input {
         first: u64,
         divisor: u32,
         #[serde(skip)]
-        source: Arc<crate::scene::FrameSource>,
+        source: Arc<crate::generated::Source>,
     },
     Sequence {
         sequence_id: String,
@@ -69,6 +70,11 @@ pub(crate) struct Segment {
 }
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Plan {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working: Option<crate::color::working::Context>,
+    /// Final byte output only. Recursive children return working pixels without encoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_transfer: Option<crate::color::Transfer>,
     pub width: u32,
     pub height: u32,
     pub frames: u64,
@@ -83,7 +89,7 @@ impl Plan {
     pub(crate) fn check_memory(&mut self) -> Result<()> {
         let plane = u64::from(self.width) * u64::from(self.height);
         // RGB backdrop, two transition views, output planes and one temporary RGBA image.
-        let canvas = plane * 16;
+        let canvas = plane * if self.working.is_some() { 48 } else { 16 };
         let mut peak = 0;
         for segment in &self.segments {
             let mut active = 0;
@@ -98,11 +104,18 @@ impl Plan {
                     && stack.properties.is_some()
                     && stack.coordinate_scale > 1
                 {
-                    proxy_canvas =
-                        proxy_canvas.max(plane * u64::from(stack.coordinate_scale).pow(2) * 7);
+                    proxy_canvas = proxy_canvas.max(
+                        plane
+                            * u64::from(stack.coordinate_scale).pow(2)
+                            * if self.working.is_some() { 16 } else { 7 },
+                    );
                 }
                 active += match &clip.input {
-                    Input::Media { .. } => plane * if clip.alpha { 16 } else { 12 },
+                    Input::Media { .. } => {
+                        plane
+                            * (if clip.alpha { 16 } else { 12 }
+                                + if self.working.is_some() { 8 } else { 0 })
+                    }
                     Input::Sequence { plan, .. } => plan.frame_buffer_bytes,
                     Input::Generated { source, .. } => source.frame_buffer_bytes(),
                 };
@@ -126,7 +139,7 @@ enum PreparedInput<'a> {
     Media(Box<PreparedReader>),
     Sequence(Box<Frames<'a>>),
     Generated {
-        source: Arc<crate::scene::FrameSource>,
+        source: Arc<crate::generated::Source>,
         first: u64,
         divisor: u32,
     },
@@ -135,7 +148,7 @@ enum ActiveInput<'a> {
     Media(Ahead),
     Sequence(Box<Frames<'a>>),
     Generated {
-        source: Arc<crate::scene::FrameSource>,
+        source: Arc<crate::generated::Source>,
         first: u64,
         divisor: u32,
     },
@@ -213,7 +226,7 @@ impl<'a> Frames<'a> {
             segment: 0,
         })
     }
-    fn read(&mut self, index: usize, n: u64) -> Result<Vec<u8>> {
+    fn start(&mut self, index: usize, n: u64) -> Result<()> {
         let clip = &self.plan.clips[index];
         if self.active[index].is_none() {
             if n != clip.first {
@@ -258,6 +271,11 @@ impl<'a> Frames<'a> {
                 },
             );
         }
+        Ok(())
+    }
+    fn read(&mut self, index: usize, n: u64) -> Result<Vec<u8>> {
+        self.start(index, n)?;
+        let clip = &self.plan.clips[index];
         match self.active[index].as_mut().expect("started source") {
             ActiveInput::Media(reader) => reader.next(),
             ActiveInput::Sequence(frames) => frames.next(n - clip.first),
@@ -369,6 +387,23 @@ impl<'a> Frames<'a> {
         self.recycle(index, n, planar)
     }
     pub(crate) fn next(&mut self, n: u64) -> Result<Vec<u8>> {
+        if let Some(context) = self.plan.working {
+            let pixels = self.next_working(n)?;
+            let plane = pixels.len();
+            let mut planar = vec![0; plane * 3];
+            for (i, pixel) in pixels.into_iter().enumerate() {
+                let rgba = context.encoded8_as(
+                    pixel,
+                    self.plan.delivery_transfer.unwrap_or(context.transfer),
+                    [i as u32 % self.plan.width, i as u32 / self.plan.width],
+                    crate::color::working::Dither::Ordered8x8,
+                );
+                planar[i] = rgba[1];
+                planar[plane + i] = rgba[2];
+                planar[2 * plane + i] = rgba[0];
+            }
+            return Ok(planar);
+        }
         if n != self.cursor || n >= self.plan.frames {
             return Err(error(
                 "RENDER_VALIDATION_FAILED",
