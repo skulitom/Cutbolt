@@ -70,3 +70,7 @@ The automated recipe fixture uses a bounded six-second original, not a twenty-mi
 On conflicts, refresh the head and reconsider timing. graphics.place failures include an
 inner session-receipt lookup; use tutorial-title-edit to recover a possibly committed title.
 For locked tracks or overlaps, change the intended edit rather than unlocking unrelated work.
+
+This workflow runs on Windows and Linux with external FFmpeg/ffprobe. Speech recognition,
+when needed, requires a separately configured local runtime and model. Recording and hardware
+decode have no Linux backend. The plugin bundles no engine, fonts, models or media tools.

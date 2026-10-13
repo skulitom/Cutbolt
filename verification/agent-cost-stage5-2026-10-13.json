@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "stage": "AGENT_COST_PLAN stage 5",
+  "status": "acceptance_satisfied",
+  "requirements": [
+    {
+      "requirement": "Six original intent skills below about 300 lines, sequences/results/recovery and platform limits",
+      "evidence": "skills/*/SKILL.md; catalog and executable recipe audit",
+      "lines": {
+        "captions": 58,
+        "cutbolt": 89,
+        "deliver-and-review": 85,
+        "interview-multicam": 70,
+        "recut-talking-head": 200,
+        "screen-tutorial": 76
+      }
+    },
+    {
+      "requirement": "Parse/run all fenced JSON; compare repeated command argument keys",
+      "evidence": "tests/skills.py; 35 examples, 15 consistent command shapes; six scenarios pass Windows/Linux. Final handoff prose changes no executable request."
+    },
+    {
+      "requirement": "Local Claude Code plugin/marketplace, stdio and documented clean install",
+      "evidence": ".claude-plugin/*.json; docs/INSTALLATION.md; fresh Windows profiles connect with exactly 18 MCP tools plus Skill and six skills; client 2.1.280"
+    },
+    {
+      "requirement": "Honest footage/captions/loudness/delivery router and HTML authoring boundary",
+      "evidence": "skills/cutbolt/SKILL.md description and opening guidance"
+    },
+    {
+      "requirement": "Fresh workflows 1/3/5; actual calls/tokens/failures compared with stage 0",
+      "evidence": "agent-cost-trials-2026-10-13.json; agent-cost-handoff-2026-10-13.json; docs/AGENT_COSTS.md; independent 19/17/21 checks and actual delivery sheets"
+    },
+    {
+      "requirement": "Talking head <=15 all-tool calls, <=40000 maximum input context, zero schema lookups",
+      "actual": {
+        "calls": 15,
+        "peak_input": 32180,
+        "schema_lookups": 0
+      },
+      "evidence": "Fresh trial 08 under the user-approved metric"
+    },
+    {
+      "requirement": "Windows/Linux replay and skill fixture, no unsupported Linux promises",
+      "evidence": "verification/conform-budget-2026-10-13.json and explicit platform limits in all six skills"
+    }
+  ],
+  "limits": [
+    "Six-second 160x90 synthetic footage, supplied transcript; no recognition or long-form quality claim.",
+    "Single-model observations, not comparative superiority or repeatability bounds.",
+    "Clean plugin installation tested on Windows; Linux recipe execution tested.",
+    "Distribution release binaries and comparative benchmark remain separate; direct-footage stages 2-6 remain open.",
+    "No editing points or generated milestone evidence changes."
+  ]
+}

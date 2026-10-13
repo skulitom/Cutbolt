@@ -52,3 +52,7 @@ Missing or ambiguous installed fonts need a usable identity from fonts.find. For
 adjust the box/font/cue layout and use a new output filename. For a stale revision,
 check whether timeline timing changed before attaching. Reuse an uncertain edit's request ID
 and inspect session.receipt; job.wait returning a ticket is not proof of a completed render.
+
+This workflow runs on Windows and Linux with external FFmpeg/ffprobe. Speech recognition,
+when needed, requires a separately configured local runtime and model. Recording and hardware
+decode have no Linux backend. The plugin bundles no engine, fonts, models or media tools.

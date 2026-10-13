@@ -1,6 +1,6 @@
 ---
 name: cutbolt
-description: "Set up, revise and recover general Cutbolt timelines, and route specialized edits to their workflow skills. For a complete talking-head cut with captions and delivery, use recut-talking-head directly."
+description: "Edit existing footage with captions, loudness adjustment and delivery in saved Cutbolt timelines; route specialized edits to their workflow skills. For a complete talking-head cut with captions and delivery, use recut-talking-head directly."
 ---
 
 # Edit existing footage

@@ -1,5 +1,33 @@
 # Progress history
 
+## 13 October 2026: agent-cost stage 5 acceptance under the approved token metric
+
+The user clarified the 40,000-token target as maximum context per request. Cumulative provider
+input remains visible; historical measurements and excluded trials are unchanged. Trial 07
+thus meets the approved 15-call/32,221-peak-token/no-schema exit. The requirement audit tightened
+standalone platform boundaries and the router's footage/captions/loudness/delivery wording.
+All 35 executable examples remain unchanged and pass on Windows and Linux.
+
+Fresh trial 08 confirms talking head/tutorial with exact 19-tool/six-skill isolation and zero
+failed calls or schema lookups. Talking head uses 15 total calls and 32,180 peak input tokens;
+cumulative input is 331,682. Handoff recovers five setup errors and finishes using a sequential
+timeline. Its original auditor stopped at a tracks-only assumption; a bounded independent
+sequential oracle passes the same 21 content/timing/OTIO/source checks without output changes.
+The five failed calls and original audit are retained, not excluded from the record.
+
+The delivery skill now routes missing-project setup explicitly. Fresh handoff trial 09 uses
+ten calls, two skill loads and no failed calls/schema requests; 21 independent checks and the
+actual delivered sheet pass. Talking head/tutorial pass 19/17 checks and visual inspection.
+Claude Code 2.1.280/claude-opus-5-5[1m] is recorded with exact source/skill/binary identities.
+An initial expired-credential preflight and separate normal-client renewal probe are disclosed
+outside workflow measurements. Raw traces/media stay external. No inputs/model outputs were repaired.
+
+Stage 5's listed acceptance is satisfied; verification/agent-cost-stage5-2026-10-13.json maps
+requirements to evidence and AGENT_COSTS compares stage-0 counts. This remains bounded
+single-model evidence, not a comparative lead or recognition/reliability claim. Direct stages
+2-6 and distribution releases remain open. Full milestone evidence stays at 338e114; no editing
+points are awarded. These commits require the ship gate and deferred checks afterward.
+
 ## 13 October 2026: bounded encoded output for conversion-cache preparation
 
 Explicit media.conform accepts an optional positive max_output_bytes ceiling, also forwarded

@@ -64,3 +64,7 @@ On stale revisions, refresh before replacing clips. A collision or locked select
 reconsidering that edit. A mismatched rate/size needs explicit preparation, not metadata edits.
 The fixture proves two bounded synchronized reference sources, not automatic alignment of
 arbitrary camera recordings or every compressed profile inside nested sequences.
+
+This workflow runs on Windows and Linux with external FFmpeg/ffprobe. Speech recognition,
+when needed, requires a separately configured local runtime and model. Recording and hardware
+decode have no Linux backend. The plugin bundles no engine, fonts, models or media tools.

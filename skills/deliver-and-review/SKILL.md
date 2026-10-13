@@ -10,6 +10,10 @@ and an $INPUT_TRANSFER matching the project's working RGB declaration. Do not gu
 different transfer to make an export pass. Use listed cutbolt_* tools or cutbolt_run.
 Examples are engine requests with placeholders replaced by actual values.
 
+If the saved project does not exist yet, load the cutbolt setup skill first and use its
+source inspection and initial linked snapshot. Do not guess setup operations from delivery
+examples. Return here with the created project ID and revision.
+
 ## Export and wait
 
 <!-- example: export -->
@@ -75,3 +79,7 @@ Return the actual output paths and material limitations. Do not claim portable b
 another editor/build without a tested transfer. Preserve the source assets required by a handoff.
 For OUTPUT_EXISTS choose a new path. For source changes, revalidate/rebind the intended media;
 never bypass a content-identity mismatch. For job failure, follow retry/path/hint before retrying.
+
+This workflow runs on Windows and Linux with external FFmpeg/ffprobe. Speech recognition,
+when needed, requires a separately configured local runtime and model. Recording and hardware
+decode have no Linux backend. The plugin bundles no engine, fonts, models or media tools.

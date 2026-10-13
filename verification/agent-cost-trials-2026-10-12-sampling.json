@@ -8,11 +8,12 @@
   "ffmpeg": "ffmpeg version 7.0-full_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
   "raw_records": "External retained trial directories; no raw model/wire transcripts or media in Git.",
   "call_policy": "All agent tool_use calls including Skill loading; MCP calls separately reported.",
-  "token_policy": "Provider input plus cache creation plus cache reads summed over requests. Peak single-request input and input excluding cache reads are supplementary; no budget reinterpretation.",
+  "token_policy": "Provider input plus cache creation plus cache reads retained per request and summed over requests. User clarification on 2026-10-13 makes maximum per-request input context the 40,000-token acceptance metric; cumulative input remains supplementary provider usage.",
   "targets": {
     "talking_head_all_calls_max": 15,
     "talking_head_received_tokens_max": 40000,
-    "schema_lookups_max": 0
+    "schema_lookups_max": 0,
+    "token_metric": "peak_request_input_tokens"
   },
   "excluded_trials": {
     "fresh-plugin-trials-02": "58 unrelated connector tools were also exposed. Output audits pass; isolation fails.",
@@ -65,9 +66,12 @@
       "visual_audit": "Actual delivery contact sheet inspected, including both talking-head cues in the initial review.",
       "targets": {
         "calls": true,
-        "total_provider_input": false,
         "no_schema": true,
-        "output_correctness": true
+        "output_correctness": true,
+        "peak_request_input": true
+      },
+      "supplementary_usage": {
+        "cumulative_input_exceeds_40000": true
       }
     },
     "tutorial": {
@@ -115,9 +119,12 @@
       "visual_audit": "Actual delivery contact sheet inspected, including both talking-head cues in the initial review.",
       "targets": {
         "calls": null,
-        "total_provider_input": null,
         "no_schema": true,
-        "output_correctness": true
+        "output_correctness": true,
+        "peak_request_input": null
+      },
+      "supplementary_usage": {
+        "cumulative_input_exceeds_40000": true
       }
     },
     "handoff": {
@@ -165,10 +172,19 @@
       "visual_audit": "Actual delivery contact sheet inspected, including both talking-head cues in the initial review.",
       "targets": {
         "calls": null,
-        "total_provider_input": null,
         "no_schema": true,
-        "output_correctness": true
+        "output_correctness": true,
+        "peak_request_input": null
+      },
+      "supplementary_usage": {
+        "cumulative_input_exceeds_40000": true
       }
     }
+  },
+  "acceptance_update": {
+    "date": "2026-10-13",
+    "basis": "Explicit user clarification: maximum context per request",
+    "new_model_run": false,
+    "original_measurements_changed": false
   }
 }

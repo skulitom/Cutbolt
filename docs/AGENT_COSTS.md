@@ -3,7 +3,7 @@
 12 October 2026. Measurements for [the agent-cost plan](plans/AGENT_COST_PLAN.md).
 Scripted recipes through official Python MCP SDK **1.12.3** establish regression ceilings.
 The valid plugin-only trials below complete three bounded workflows. The latest talking-head
-trial meets 15 total calls; the cumulative-token target remains open pending metric clarification. Earlier trials with extra client tools are retained
+trial meets 15 total calls and the user-approved 40,000-token maximum request context. Earlier trials with extra client tools are retained
 but excluded from plugin-only acceptance. Neither measurement establishes a comparative lead.
 
 ## Replay
@@ -157,9 +157,10 @@ cause was transient; the guidance distinguishes eligible queued attempts from a 
    reviewed output, undo/range behavior or OTIO handoff as appropriate. Record incomplete tasks and
    unsupported steps as such. Summarize completion, tool calls, tokens and failures in this document.
 
-The user approved the final talking-head trial targets: at most **15 calls**, at most **40,000 received
-tokens**, and **no schema lookup** in a skill-driven run. The first completed trials below
-meet correctness checks but miss the talking-head call and token targets.
+The user approved the final talking-head trial targets: at most **15 calls**, at most **40,000 tokens
+of maximum input context per request**, and **no schema lookup** in a skill-driven run. The token
+metric was clarified on 13 October 2026. Historical entries below retain their original cumulative
+accounting; the dated acceptance update applies the approved metric without changing measurements.
 
 ## Stage 4 font discovery
 
@@ -498,3 +499,73 @@ cumulative-input target remains open pending the requested clarification of its 
 the peak-request value is reported separately. These are single observations from one model,
 not a repeatability bound or a comparison with another editing tool. Stage 5 is not marked
 complete, and no points or full milestone evidence are changed.
+
+## Approved token metric, 13 October 2026
+
+The user clarified that the 40,000-token limit applies to **maximum context per request**.
+Evaluate the recorded provider input, cache-write input and cache-read input for each request,
+then take the maximum; do not sum repeated context for this target. Cumulative input remains
+reported for actual provider usage. Historical trials and excluded tool inventories are unchanged.
+This is an acceptance interpretation of retained trial 07, not a new model run.
+
+Trial 07 meets the talking-head targets: **15 total tool calls**, **32,221 peak input tokens**,
+and **zero schema lookups**. Its 313,036 cumulative input tokens and 4,681 output tokens remain
+visible. Tutorial and handoff also finish independently with no schema calls or errors, using
+15 and 10 total calls. Their output audits pass 17 and 21 checks; talking head passes 19.
+All three used only the six-skill plugin with the 18-tool MCP catalog and the client's Skill tool.
+
+Against the stage-0 scripted baseline, talking head is 15 vs 15 calls, tutorial 15 vs 12,
+and handoff 10 vs 8. The fresh counts include skill loads and the agent's choices; stage 0
+counted MCP calls only and has byte measurements, not provider tokens. No token improvement
+over that baseline can therefore be claimed. The fresh trial proves bounded single-run
+completion on one model, not comparative superiority, recognition accuracy or repeatability.
+
+The stage-5 audit confirms six small original skills, executable JSON with cross-skill key
+checks, a local plugin/marketplace and a documented clean Windows install, plus Windows/Linux
+recipe execution. The audit found and corrected two documentation details: all standalone skills now
+state platform boundaries, and the router discovery description explicitly names captions,
+loudness and delivery. Trial 07 used the earlier wording; its executable requests are unchanged.
+The updated wording and examples pass Windows/Linux checks, and fresh trials 08/09 below
+complete final acceptance. The handoff-only setup clarification changes no executable example. Release binaries and the
+comparative benchmark stay separate; no editing points or generated milestone evidence change.
+
+## Stage 5 acceptance, 13 October 2026
+
+Fresh trial 08 uses the clarified platform/router wording and unchanged executable examples.
+The client is Claude Code 2.1.280, model claude-opus-5-5[1m]. Each fresh Windows profile
+installs the plugin and exposes exactly 18 MCP tools, Skill and six plugin skills. Talking
+head and tutorial pass their 19/17 independent checks without failed calls or schema lookup.
+
+The handoff agent initially guessed setup operations and recovered five failed calls. Its
+valid sequential timeline exposed an auditor assumption: the auditor expected separate tracks.
+The original incomplete audit is retained. An independent bounded sequential-clip interpretation
+now checks the same expected picture/PCM hashes, timing, OTIO references/intervals, accepted
+losses and source preservation; all 21 checks pass without changing the model's outputs.
+Sequential clips inherently share picture/sound intervals, satisfying the requested linked edit.
+
+The delivery skill now explicitly routes a missing saved project through the cutbolt setup
+skill. Fresh trial 09 reruns only handoff with the same prompt and originals: ten calls,
+two skill loads, no failed calls or schema lookup, and all 21 checks pass. Actual delivered
+sheets for both trials were inspected, including the talking-head cues and tutorial title.
+
+| Workflow / trial | All calls | Skill / MCP | Failed calls | Total input with cache rereads | Peak request input | Output tokens | Seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| talking-head (08) | 15 | 1 / 14 | 0 | 331,682 | 32,180 | 5,320 | 55.578 |
+| tutorial (08) | 15 | 3 / 12 | 0 | 306,422 | 29,677 | 3,754 | 49.797 |
+| handoff (08) | 17 | 1 / 16 | 5 | 274,751 | 24,408 | 4,262 | 55.14 |
+| handoff (09) | 10 | 2 / 8 | 0 | 151,589 | 24,022 | 2,598 | 32.25 |
+
+Talking head meets **15 total calls**, **32,180 peak input tokens**
+and **zero schema lookups**. Final fresh call counts are 15/15/10 versus stage-0 scripted
+15/12/8; fresh counts include skill loading and autonomous choices. Stage 0 measured bytes,
+so it cannot establish a provider-token baseline. Current five-workflow regression budgets pass.
+
+Stage 5's specified bounded acceptance is satisfied. See the [requirement audit](../verification/agent-cost-stage5-2026-10-13.json),
+[trial 08](../verification/agent-cost-trials-2026-10-13.json) and [handoff follow-up](../verification/agent-cost-handoff-2026-10-13.json)
+for identities, cumulative usage and scope. The initial attempt stopped at credential-expiry
+preflight; a separate normal-client probe renewed login before measurement. Neither it nor
+the auditor correction is counted as an agent workflow. No raw media/transcripts enter Git.
+
+These observations do not establish repeatability, speech accuracy or a comparative lead.
+Release binaries and the two-model comparative benchmark remain separate work; direct-footage
+stages 2-6 remain unfinished. No editing points or generated milestone evidence change.

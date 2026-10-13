@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "trial_id": "fresh-plugin-trials-09",
+  "kind": "independent_model_workflows",
+  "scope": "Fresh handoff-only trial after explicit setup-skill routing; original prompt/inputs unchanged. Talking head and tutorial were not rerun.",
+  "os": "Windows-10-10.0.26200-SP0",
+  "ffmpeg": "ffmpeg version 7.0-full_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+  "raw_records": "External retained trial directories; no raw model/wire transcripts or media in Git.",
+  "call_policy": "All agent tool_use calls including Skill loading; MCP calls separately reported.",
+  "token_policy": "Acceptance uses maximum per-request input plus cache creation plus cache reads, explicitly clarified by the user on 2026-10-13. Cumulative provider input remains reported separately.",
+  "targets": {
+    "talking_head_all_calls_max": 15,
+    "talking_head_received_tokens_max": 40000,
+    "schema_lookups_max": 0,
+    "token_metric": "peak_request_input_tokens"
+  },
+  "excluded_trials": {
+    "fresh-plugin-trials-02": "58 unrelated connector tools were also exposed. Output audits pass; isolation fails.",
+    "fresh-plugin-trials-03": "58 unrelated connector tools were also exposed. Output audits pass; isolation fails.",
+    "fresh-plugin-trials-04": "A seventh built-in skill remained. Inventory assertion rejected the talking-head run and stopped the batch."
+  },
+  "workflows": {
+    "handoff": {
+      "model": "claude-opus-5-5[1m]",
+      "client_version": "2.1.280",
+      "all_agent_tool_calls": 10,
+      "skill_calls": 2,
+      "mcp_calls": 8,
+      "mcp_failed_calls": 0,
+      "schema_lookups": 0,
+      "received_tokens_including_cache_reads_and_writes": 151589,
+      "input_tokens_excluding_cache_reads": 14861,
+      "first_assistant_request_input_total": 11991,
+      "reported_cost_usd": 0.19812960000000002,
+      "source_files_preserved": true,
+      "output_tokens": 2598,
+      "peak_request_input_tokens": 24022,
+      "wall_seconds": 32.25,
+      "engine": "cutbolt 0.4.0 (commit e668c16a668f34a10c96b4b30c627b44235087d1, sources modified)",
+      "source_commit": "4c0e751eebbbc8eab2e41f60abe4b6b8566a3029",
+      "engine_identity": {
+        "bytes": 43237376,
+        "sha256": "cf736671d5cada97ef644dcdb80af9d1b0ef3245af81e5332c89d79f73d1c356"
+      },
+      "source_patch": {
+        "bytes": 13377,
+        "sha256": "de0f3eb37477e6886dc8a724ccae0a0aa0d75d62fb83af51c6df85b0fb951bee"
+      },
+      "source_is_uncommitted": true,
+      "isolation": {
+        "unexpected_tools": [],
+        "visible_tool_count": 19,
+        "visible_skills": [
+          "cutbolt:captions",
+          "cutbolt:cutbolt",
+          "cutbolt:deliver-and-review",
+          "cutbolt:interview-multicam",
+          "cutbolt:recut-talking-head",
+          "cutbolt:screen-tutorial"
+        ],
+        "passed": true
+      },
+      "automated_output_checks": 21,
+      "output_audit_pass": true,
+      "visual_audit": "Actual delivered contact sheet visually inspected; caption cues/title checked for relevant workflows.",
+      "targets": {
+        "calls": null,
+        "no_schema": true,
+        "output_correctness": true,
+        "peak_request_input": null
+      },
+      "skill_identities": {
+        "captions": {
+          "bytes": 3567,
+          "sha256": "55ec0d0ea02d22ce10334aad8729280def7893d0f3ef0a80962104802f326987"
+        },
+        "cutbolt": {
+          "bytes": 5688,
+          "sha256": "dbf1f02d78cf8ab6f1043ed4da1b8d24e35f746ab0a0690f1da253f89d8090e2"
+        },
+        "deliver-and-review": {
+          "bytes": 3991,
+          "sha256": "5e01ec80c64d903fd457c88427378f5b07891aeecc8302796580fada33bf4651"
+        },
+        "interview-multicam": {
+          "bytes": 5166,
+          "sha256": "03e34d296041cdcc0ff5f489b0e820a397d6a8eeb44af0dfd12892d91b5a03ac"
+        },
+        "recut-talking-head": {
+          "bytes": 11136,
+          "sha256": "812037f418b2c6437a29daf432ba3f40934b0ca6cb99b7791ccad471e265064e"
+        },
+        "screen-tutorial": {
+          "bytes": 4490,
+          "sha256": "a8ce58d5a35ac53bc8a6c155e3895a70c6bb7f17fb200b666fbfc46213407eb5"
+        }
+      }
+    }
+  }
+}

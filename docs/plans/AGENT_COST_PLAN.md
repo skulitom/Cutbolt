@@ -210,6 +210,12 @@ Prefer an explicit marker such as `"form": "short"` over guessing.
 
 ## Stage 5: intent-level skills and a plugin
 
+Acceptance satisfied, 13 October 2026: six tested skills, clean Windows plugin installation,
+Windows/Linux recipe checks, and fresh workflows 1/3/5 with the approved peak-context metric.
+See the [requirement audit](../../verification/agent-cost-stage5-2026-10-13.json) and
+[measured limits](../AGENT_COSTS.md#stage-5-acceptance-13-october-2026). This does not claim a
+comparative benchmark, recognition accuracy or distribution-release completion.
+
 1. Add original skills under `skills/`, each a `SKILL.md` under about 300 lines:
    - a `cutbolt` router for editing existing footage, using the draft description in `HYPERFRAMES_STRATEGY.md`, section P0, once tested;
    - `recut-talking-head`, `screen-tutorial`, `interview-multicam`, `captions`, `deliver-and-review`.
@@ -228,7 +234,7 @@ Prefer an explicit marker such as `"form": "short"` over guessing.
 
 **Exit:**
 - A fresh agent with only the plugin completes workflows 1, 3 and 5 from the stage 0 list. Record calls, tokens and failures against the stage 0 baseline, and add them to progress history.
-- Targets to confirm with the user: at most 15 calls and 40k received tokens for a talking-head tighten with captions and export, and no `cutbolt_schema` lookup in any skill-driven run.
+- Approved targets: at most 15 calls (including skill loads) and 40,000 tokens of maximum input context per request for a talking-head tighten with captions and export, and no `cutbolt_schema` lookup in any skill-driven run. The user clarified the token metric on 13 October 2026; keep cumulative provider input, including repeated cached context, separately reported. Trial 07 meets these measured targets; see [the acceptance update](../AGENT_COSTS.md#approved-token-metric-13-october-2026).
 
 ## Verification and shipping, every stage
 
