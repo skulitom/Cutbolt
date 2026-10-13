@@ -45,7 +45,7 @@ impl Streams {
 }
 /// x264 slice threads (each frame is coded as up to this many slices) and scaler threads for
 /// H.264 video. The count is fixed rather than taken from the host, so the encoded stream is the
-/// same on every machine; the scaler's threads split rows without changing any value. x264's
+/// stable with CPU-independent rate-control arithmetic; the scaler splits rows unchanged. x264's
 /// frame threads would be faster, but with the VBV cap their rate control depends on when frames
 /// arrive, and repeated exports of one timeline then differ.
 const ENCODER_THREADS: u32 = 8;
@@ -324,7 +324,7 @@ impl Export {
     }
 }
 fn report(request: &Export, c: &Checked) -> Value {
-    let mut report = json!({"profile":request.profile,"profile_version":if request.profile==Profile::Gif{1}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
+    let mut report = json!({"profile":request.profile,"profile_version":if request.profile==Profile::H264Aac && request.streams.video(){4}else if request.profile==Profile::Gif{1}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence) || c.project.frame_rate != FPS{3}else if request.h264.is_some() || request.aac_bitrate.is_some(){2}else{1},"streams":request.streams,"output":c.output,"range":c.range,"project_revision":c.project.revision,"source_quality":"original",
         "timeline_frames":c.reference.frames,"video_frames":if request.streams.video(){c.reference.frames}else{0},"audio_samples":if request.streams.audio(){c.reference.samples}else{0},
         "width":c.project.width,"height":c.project.height,"frame_rate":c.project.frame_rate,"input_transfer":request.transfer(),"sources":c.reference.sources,
         "video":if !request.streams.video(){Value::Null}else if request.profile==Profile::Gif{request.gif.unwrap_or_default().report(c.project.frame_rate,c.reference.frames)}else if request.profile==Profile::Reference{json!({"codec":"ffv1","pixel_format":"bgr0","color":"encoded_values_preserved"})}else if matches!(request.profile,Profile::PngMov|Profile::PngSequence){json!({"codec":"png","pixel_format":"rgb24","alpha":"opaque","color":"encoded_values_preserved","transfer":request.input_transfer})}else{request.h264.unwrap_or_default().video_report(c.project.width,c.project.height,c.project.frame_rate)},
@@ -519,6 +519,8 @@ fn h264_options(request: &Export, pass: Option<u8>, scratch: &Path, output: &Pat
                 &ENCODER_THREADS.to_string(),
                 "-thread_type",
                 "slice",
+                "-x264-params",
+                "cpu-independent=1",
             ]
             .map(str::to_owned),
         );
@@ -1076,7 +1078,7 @@ pub fn run(request: &Export) -> Result<Value> {
     Ok(result)
 }
 pub fn capabilities() -> Value {
-    json!({"profiles":["reference","h264_aac","png_mov","png_sequence","gif"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_encoder":"native_lc_twoloop_without_noise_substitution","aac_cutoff_hz":{"192000":null,"256000":null,"320000":AAC_CUTOFF_HZ},"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},
+    json!({"profiles":["reference","h264_aac","png_mov","png_sequence","gif"],"streams":["audio_video","video","audio"],"range":"exact_native_frame_and_sample_boundaries; native_rate_for_every_profile_and_placed_tracks","maximum_frames":180000,"source_quality":"original","h264_maximum_dimensions":[1920,1080],"h264_even_dimensions":true,"h264_input_transfer_required":["srgb","bt709"],"input_transfer_default":"project.transfer","h264_compatibility_profiles":["baseline720p","main_hd","high_hd"],"h264_rate_control":["quality","two_pass"],"h264_slice_threads":ENCODER_THREADS,"h264_cpu_independent":true,"h264_video_encoder_input":"streamed_from_the_timeline_with_rgb24_and_pcm_digests","aac_bitrates":[192000,256000,320000],"aac_encoder":"native_lc_twoloop_without_noise_substitution","aac_cutoff_hz":{"192000":null,"256000":null,"320000":AAC_CUTOFF_HZ},"aac_presentation":"exact_track_duration_with_reported_decoder_tail_padding","runtime_dependencies":"external_ffmpeg_libx264_aac_lutrgb_scale_and_ffprobe","png":{"maximum_dimension":4096,"maximum_pixels":8847360,"pixel_format":"rgb24","alpha":"opaque","input_transfer_required":["srgb","bt709"],"sequence":{"platform":"windows","extension":"frames","number_digits":6,"first_number_default":0,"manifest":"complete_ordered_file_identities_and_exact_clock","publication":"complete_directory_without_replacement"}},
         "gif":{"streams":"video","maximum_dimension":4096,"maximum_pixels":8847360,"palette":"exact_local_table_per_frame","maximum_colors_per_frame":256,"more_colors":"refused_never_quantized","input_transfer":"none_values_preserved","plays_default":"endless","plays":[1,65536],"timing":{"exact":["25","50"],"nearest_centisecond":["24","24000/1001","30","30000/1001"],"refused":["60","60000/1001"]}},
         "queued":false})
 }

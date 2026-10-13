@@ -1,0 +1,298 @@
+{
+  "date": "2026-10-14",
+  "base_commit": "26cb066a8ef9de11188ccf9e0471b175ee436ef5",
+  "change": "H.264 video profile 4 uses fixed slice threads and cpu-independent=1; timeline/reference pixels and PCM are unchanged.",
+  "discovery": "Repeated exports had identical RGB/PCM input digests but differing decoded H.264 pictures. A standalone invocation over the same original frame bytes reproduced this.",
+  "standalone_windows": {
+    "encoder-repeat-01": {
+      "default": {
+        "runs": 8,
+        "unique_decoded_results": 3
+      },
+      "sync0": {
+        "runs": 8,
+        "unique_decoded_results": 2
+      },
+      "lookahead1": {
+        "runs": 8,
+        "unique_decoded_results": 2
+      },
+      "one": {
+        "runs": 8,
+        "unique_decoded_results": 1
+      }
+    },
+    "encoder-repeat-02": {
+      "frame8": {
+        "runs": 16,
+        "unique_decoded_results": 3
+      },
+      "slice2": {
+        "runs": 16,
+        "unique_decoded_results": 2
+      },
+      "slice4": {
+        "runs": 16,
+        "unique_decoded_results": 2
+      },
+      "no-mbtree": {
+        "runs": 16,
+        "unique_decoded_results": 1
+      },
+      "no-vbv": {
+        "runs": 16,
+        "unique_decoded_results": 4
+      }
+    },
+    "encoder-repeat-03": {
+      "cpu-independent": {
+        "runs": 24,
+        "unique_decoded_results": 1
+      },
+      "asm0": {
+        "runs": 24,
+        "unique_decoded_results": 1
+      },
+      "both-lookahead": {
+        "runs": 24,
+        "unique_decoded_results": 4
+      },
+      "one": {
+        "runs": 24,
+        "unique_decoded_results": 1
+      }
+    }
+  },
+  "acceptance": {
+    "windows": {
+      "exports": 48,
+      "frames": 1440,
+      "profiles": {
+        "default": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "fe04db82b9356fca083d923ab1d7e2918f24777aa9233f912573264dda8b1488",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        },
+        "main": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "4b75bbf61de032ab22aeec991da9118910c71f6ef6c9c38c453cc83fb77a3dc9",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        },
+        "baseline": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "1a00849317ce8dc5536a7959b09e9e6fc684152c4a7d3102f1e19f5abafadb68",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        },
+        "two-pass": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "1a4feba592bffdc303f058b77c91827212118f73709a67c0882c2f0412e58e0d",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        }
+      },
+      "sources_preserved": true,
+      "engine": "cutbolt 0.4.0 (commit 26cb066a8ef9de11188ccf9e0471b175ee436ef5, sources modified)",
+      "raw_report": "export-repeatability-windows-gate-03.json",
+      "raw_report_sha256": "e4c28749285110911e3eb485c4a90b608ebd3ea2a53837c540e952b72c7b13fe"
+    },
+    "linux": {
+      "exports": 48,
+      "frames": 1440,
+      "profiles": {
+        "default": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "fe04db82b9356fca083d923ab1d7e2918f24777aa9233f912573264dda8b1488",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        },
+        "main": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "4b75bbf61de032ab22aeec991da9118910c71f6ef6c9c38c453cc83fb77a3dc9",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        },
+        "baseline": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "1a00849317ce8dc5536a7959b09e9e6fc684152c4a7d3102f1e19f5abafadb68",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        },
+        "two-pass": {
+          "exports": 12,
+          "decoded": {
+            "video": {
+              "sha256": "1a4feba592bffdc303f058b77c91827212118f73709a67c0882c2f0412e58e0d",
+              "bytes": 1296000
+            },
+            "audio": {
+              "sha256": "9179c0883f24fa0a1e1cd8a382ee83a7feb8dac714d708069f677b2964abecaf",
+              "bytes": 192512
+            }
+          },
+          "encoder_input": {
+            "video": "280e2c5fbb2447a8a0cd333d112baec326b012654aecb76e754e0ab9d9390445",
+            "audio": "ba0c764a380ff42ccc11b2ced3da7b21bba2871c5e26e149f88eec62185d12ea"
+          }
+        }
+      },
+      "sources_preserved": true,
+      "engine": "cutbolt 0.4.0 (commit c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5, sources modified)",
+      "raw_report": "export-repeatability-linux-gate-02.json",
+      "raw_report_sha256": "c3443fcd52c7de9bc9e53938539edfab2a5234fd0cab67f8637c4db6d0b3e547"
+    }
+  },
+  "regressions": {
+    "windows": {
+      "ran": [
+        "agent_costs",
+        "agent_ergonomics",
+        "delivery",
+        "delivery_profiles",
+        "export_formats",
+        "export_repeatability",
+        "integration"
+      ],
+      "failed": [],
+      "skipped": {},
+      "reused": []
+    },
+    "linux": {
+      "ran": [
+        "agent_costs",
+        "agent_ergonomics",
+        "delivery",
+        "export_formats",
+        "export_repeatability",
+        "integration"
+      ],
+      "failed": [],
+      "skipped": {},
+      "reused": []
+    }
+  },
+  "rust_tests": {
+    "windows": 261,
+    "linux": 260
+  },
+  "all_target_lint": true,
+  "formatting": true,
+  "retained_profile3_replay": [
+    {
+      "request_id": "plain",
+      "job_id": "a116c9ed46d6207734a43317d30fd88f52ac8634c37d904bbf4e41d865f90475",
+      "profile_version": 3,
+      "output": {
+        "bytes": 58136,
+        "sha256": "c44e6eba9a43810838266af018cd680a0e61650b268cb645f9463324bb9ff3e8"
+      },
+      "result_unchanged": true
+    },
+    {
+      "request_id": "neutral_grade",
+      "job_id": "2332865bcf0db291612b701e4c9a5eb3327c42deae7b9073a6bc161dbb759eaf",
+      "profile_version": 3,
+      "output": {
+        "bytes": 58136,
+        "sha256": "c44e6eba9a43810838266af018cd680a0e61650b268cb645f9463324bb9ff3e8"
+      },
+      "result_unchanged": true
+    }
+  ],
+  "benchmark": {
+    "driver": "tests/placed_long.py",
+    "smoke": "Four placed late lossless exports and last-frame previews agree across f13453d and the corrected engine; final-build H.264 equals explicit conform for plain and neutral-grade clips.",
+    "timing": "Not run. Policy now measures lossless export under the same encoder settings across builds; H.264 equality is a separate untimed final-build check.",
+    "known_harness_corrections": [
+      "Use rational time helper with one argument; include required empty links.",
+      "Do not pass input_transfer to a reference export.",
+      "Write each counted tool launch in one append to avoid interleaved JSON."
+    ]
+  },
+  "limits": [
+    "One original 160x90 30fps motion source; no cross-build binary identity claim.",
+    "Linux checkout uses retained base Git metadata with copied, hashed current sources; version text does not identify the tested overlay.",
+    "Final unit-test line-ending normalization followed these checks; final milestone will verify the committed source fingerprint.",
+    "Full 26cb066 regression is still running; it predates this encoder fix. Final long-source timing, completion audit and thorough evidence remain open."
+  ],
+  "points_awarded": 0
+}

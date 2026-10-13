@@ -448,7 +448,11 @@ mod tests {
         assert_eq!(args.last().unwrap(), "scratch/timeline.pcm");
         let threads = args.iter().rposition(|a| a == "-threads").unwrap();
         assert!(threads < delivery);
-        // Slice threads keep the output repeatable under the VBV cap.
+        // Fixed slice threads and CPU-independent arithmetic keep the encoding policy explicit.
+        assert!(
+            args.windows(2)
+                .any(|a| a == ["-x264-params", "cpu-independent=1"])
+        );
         assert_eq!(
             args[threads + 1..threads + 4],
             [

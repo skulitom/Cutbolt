@@ -1,5 +1,36 @@
 # Progress history
 
+## 14 October 2026: repeatable H.264 delivery and placed-comparison preparation
+
+The new long placed-footage driver's short smoke check found different H.264
+outputs for identical timeline RGB/PCM digests. A standalone encoder reproducer
+confirmed it on Windows FFmpeg 7.0: eight default runs produced three decoded
+results. Fixed slice threads and separately constrained lookahead did not remove
+the variation. `cpu-independent=1` produced one result across 24 runs while
+retaining macroblock-tree rate control. H.264 video now reports profile version 4
+and the explicit CPU-independent setting; pictures can differ from older lossy
+profiles. Two actual profile-3 completed jobs replay their saved receipts and
+unchanged output hashes through the corrected engine.
+
+The registered repeatability fixture passes on Windows and Linux: 48 exports and
+1,440 frames per platform across default/Main/Baseline/two-pass settings, original
+direct versus explicit conform, and plain versus neutral-grade clips. Every
+repetition has identical encoder inputs, decoded RGB and decoded PCM including
+AAC padding. Seven Windows and six Linux targeted suites pass, including export
+quality, integration and agent cost; Rust 261/260, all-target lint and formatting
+pass. [Evidence](../verification/export-repeatability-2026-10-14.json) retains
+the measured scope, prior standalone losses and original-source checks.
+
+`tests/placed_long.py` now defines five interleaved measurements per build for
+late previews and lossless exports from the original twenty-minute source,
+under a predeclared load gate. Lossless delivery uses the same encoding policy
+in both builds; final-build H.264 equality is checked separately. A corrected
+short smoke passes both paths, including source seek/launch checks. Counter logs
+now append complete records to prevent concurrent entries from interleaving.
+No long timings have been taken or claimed. The full stage-six quick run on
+26cb066 is still running and predates this fix. Final comparison, complete audit
+and thorough milestone remain open. PROGRESS evidence is stale; no points awarded.
+
 ## 14 October 2026: precise footage, proxies and publication checks
 
 The new registered `working_footage` fixture checks all three nondefault working

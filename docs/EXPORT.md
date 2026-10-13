@@ -46,7 +46,7 @@ The selected range is limited to 180,000 frames. Ranges with more than 64 inters
 
 ## Fixed delivery preset
 
-The version-1 `h264_aac` profile selects the existing external FFmpeg build's `libx264` encoder and native AAC encoder. It remains the default fixed preset. Optional [explicit quality, two-pass bitrate, compatibility and audio settings](DELIVERY_CONTROLS.md) produce version-2 receipts and have separate acceptance evidence.
+The default `h264_aac` settings, introduced in profile version 1, select the existing external FFmpeg build's `libx264` encoder and native AAC encoder. It remains the default fixed preset. Optional [explicit quality, two-pass bitrate, compatibility and audio settings](DELIVERY_CONTROLS.md) produce version-2 receipts and have separate acceptance evidence.
 
 | Setting | Value |
 | --- | --- |
@@ -59,7 +59,22 @@ The version-1 `h264_aac` profile selects the existing external FFmpeg build's `l
 | AAC | LC, 48 kHz stereo, target 320,000 bits/s, native two-loop coder without perceptual noise substitution, band cut at 20 kHz |
 | MP4 | Faststart index, edit lists, 48,000-unit movie clock and 12,800-unit video clock |
 
-x264 runs eight slice threads, coding each frame as up to eight slices, and the RGB-to-YUV scaler runs eight threads. Both counts are fixed rather than taken from the host, so the encoded stream is the same on every machine with the recorded build; the scaler's threads only divide rows and change no value. x264's frame threads would be slightly faster, but under the VBV cap their rate control depends on when frames arrive, and repeated exports of one timeline differed. Slices cost about 4 % more bytes at the same CRF. Exports made before 5 October 2026 used one thread and one slice, so their pictures can differ slightly from a new export of the same timeline; with one thread the new path decodes bit-identically to the old one, and audio is identical. The report's `video.slice_threads` records the count. Source chapters and copied metadata are removed; output encoder/container metadata is still generated. Binary files are not promised to be identical across tool builds. Decoded repeatability is tested on the recorded build. The optional controls have a bounded software/CUDA compatibility matrix; broader browser/device playback remains unverified.
+x264 runs eight slice threads, coding each frame as up to eight slices, with `cpu-independent=1`; the RGB-to-YUV scaler runs eight threads. The fixed count and CPU-independent arithmetic define the encoding policy. The scaler's threads only divide rows and change no value. x264's frame threads would be slightly faster, but under the VBV cap their rate control depends on when frames arrive, and repeated exports of one timeline differed. Slices cost about 4 % more bytes at the same CRF. Exports made before 5 October 2026 used one thread and one slice, so their pictures can differ slightly from a new export of the same timeline; at that checkpoint, selecting one thread reproduced the old decoded pictures and audio. The report's `video.slice_threads` records the count. Source chapters and copied metadata are removed; output encoder/container metadata is still generated. Binary files are not promised to be identical across tool builds. Decoded repeatability is tested on the recorded build. The optional controls have a bounded software/CUDA compatibility matrix; broader browser/device playback remains unverified.
+
+H.264 video receipts now report `profile_version: 4` and `video.cpu_independent: true`.
+On 14 October, the placed-footage comparison exposed different decoded exports
+from identical RGB input digests on the recorded Windows FFmpeg 7.0 build. The
+same original 160x90 motion sample reproduced the variation in a standalone
+encoder invocation. Fixed slice threads alone did not prevent it.
+
+The CPU-independent option retains macroblock-tree rate control while selecting
+its portable arithmetic; x264's [own development note](https://mailman.videolan.org/pipermail/x264-devel/2013-April/010044.html)
+describes the associated rounding differences. Encoded pictures can differ from
+earlier profile versions. Existing completed job receipts retain their saved
+results. `tests/export_repeatability.py` compares repeated direct and explicitly
+converted footage, plain and neutral-grade clips, and default, Main, Baseline and
+two-pass deliveries. It requires exact encoder inputs, decoded frames and PCM.
+Cross-build binary identity remains outside this contract.
 
 ### Explicit color interpretation
 

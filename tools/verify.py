@@ -204,6 +204,7 @@ STAGES = [
      "commands": [[sys.executable, "tests/integration.py", "--output", "{dir}"], [sys.executable, "tests/agents.py", "--fixture", "{dir}"]],
      "results": {"integration": "verification.json", "agents": "agents/verification.json"}},
     fixture("direct_sources"),
+    fixture("export_repeatability"),
     fixture("agent_costs"),
     fixture("doctor"),
     fixture("graphics_place"),
@@ -519,7 +520,8 @@ if args.report:
     args.report.write_text(json.dumps({"ok": not failures and not not_run, "run": RUN, "commit": commit,
                                        "ran": sorted(outcomes), "failed": sorted(failures), "deferred": deferred, "reused": reused,
                                        "not_impacted": not_impacted, "skipped": skipped, "agent_costs": cost_measurements,
-                                       "working_footage": outcomes.get("working_footage", {}).get("values", {}).get("working_footage")}, indent=1), encoding="utf-8")
+                                       "working_footage": outcomes.get("working_footage", {}).get("values", {}).get("working_footage"),
+                                       "export_repeatability": outcomes.get("export_repeatability", {}).get("values", {}).get("export_repeatability")}, indent=1), encoding="utf-8")
 if args.cleanup_worktree:
     common = Path(subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
     main_checkout = (ROOT / common).resolve().parent
@@ -650,6 +652,8 @@ report["passed"] += native_projects["passed"]
 report["passed"] += portable_projects["passed"]
 report["passed"] += render_failures["passed"]
 report["passed"] += delivery_profiles["passed"]
+report["passed"] += export_repeatability["passed"]
+report["export_repeatability_evidence"] = export_repeatability
 report["passed"] += native_timing["passed"]
 report["passed"] += export_formats["passed"]
 report["passed"] += gif["passed"]

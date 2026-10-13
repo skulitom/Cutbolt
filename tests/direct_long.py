@@ -74,7 +74,8 @@ fn main(){
  let probe=env::current_exe().unwrap().file_stem().unwrap().to_string_lossy().contains("probe");
  let args:Vec<String>=env::args().skip(1).collect();
  let mut log=OpenOptions::new().create(true).append(true).open(env::var("COUNTED_LOG").unwrap()).unwrap();
- writeln!(log,"{{\"tool\":\"{}\",\"args\":{:?}}}",if probe {"ffprobe"} else {"ffmpeg"},args).unwrap();
+ let line=format!("{{\"tool\":\"{}\",\"args\":{:?}}}\n",if probe {"ffprobe"} else {"ffmpeg"},args);
+ log.write_all(line.as_bytes()).unwrap();
  let real=env::var(if probe {"COUNTED_FFPROBE"} else {"COUNTED_FFMPEG"}).unwrap();
  exit(Command::new(real).args(args).status().unwrap().code().unwrap_or(1));
 }

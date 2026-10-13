@@ -78,7 +78,7 @@ def run(root,device):
 
     def verify(r,result):
         path=Path(r['output']);settings=r['h264'];profile=settings['compatibility'];rate=settings['rate_control']
-        assert result['profile_version']==2 and result['video']['rate_control']==rate and result['audio']['bitrate']==r['aac_bitrate']
+        assert result['profile_version']==4 and result['video']['rate_control']==rate and result['audio']['bitrate']==r['aac_bitrate']
         assert result['encoder_passes']==(2 if rate['mode']=='two_pass' else 1)
         assert sha(path)==result['sha256']
         probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_packets','-of','json',str(path)]))
@@ -208,7 +208,7 @@ fn main(){let args:Vec<String>=env::args().skip(1).collect();
         client.initialize();catalog=client.rpc('tools/list')['result']['tools']
         schema=next(t['inputSchema'] for t in catalog if t['name']=='cutbolt_export_inspect')
         Draft202012Validator(schema).validate({k:v for k,v in r.items() if k!='command'})
-        assert client.call('export.inspect',**{k:v for k,v in r.items() if k!='command'})['profile_version']==2
+        assert client.call('export.inspect',**{k:v for k,v in r.items() if k!='command'})['profile_version']==4
     finally:client.close()
     assert not Path(r['output']).exists() and not list(output.glob('.cutbolt-*'))
     assert originals=={p.name:sha(p) for p in sources.iterdir()}
