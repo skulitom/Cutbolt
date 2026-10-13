@@ -338,6 +338,13 @@ Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame 
 
 ## Stage 6: working precision (C06)
 
+Arithmetic foundation, 13 October: [working pixels](../WORKING_COLOR.md) now retain
+linear UNORM16 through transparent source-over and associated interpolation, with
+transfer encoding and ordered dither isolated at delivery. Independent Python
+per-operation checks are registered in the verifier. Project settings, renderer
+integration and the grade/fade banding exit remain open; this does not enable a
+new rendering mode or close the stage.
+
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.
   - 16-bit linear composites in u16 linear light and converts once at output, with an explicit ordered dither for 8-bit delivery.

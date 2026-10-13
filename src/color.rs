@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 mod lookup;
 pub use lookup::Yuv420Converter;
+pub mod working;
 
 /// SDR transfer function of encoded RGB or YUV values: `srgb` (sRGB piecewise curve) or `bt709` (BT.709 OETF).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

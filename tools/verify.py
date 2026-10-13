@@ -222,7 +222,7 @@ STAGES = [
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
     fixture("audio_processing"), fixture("conform"), fixture("conform_cache"), fixture("automatic_prepare"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
     fixture("templates"), fixture("builtin_templates"), fixture("fonts"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
-    fixture("color"), fixture("luts_scopes"), fixture("scene_luts"), fixture("clip_effects"), fixture("native_layers"), fixture("generated_clips"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
+    fixture("color"), fixture("working_color"), fixture("luts_scopes"), fixture("scene_luts"), fixture("clip_effects"), fixture("native_layers"), fixture("generated_clips"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
     fixture("stabilization"), fixture("overlays", result="run/verification.json"), fixture("large_imports", result="run/verification.json"),
     fixture("transcripts"), fixture("transcription", "--runtime", speech_runtime or "", needs=["speech", "voices"]), fixture("remapping"),
@@ -663,6 +663,8 @@ report["passed"] += native_layers["passed"]
 report["native_layers_evidence"] = native_layers
 report["passed"] += generated_clips["passed"]
 report["generated_clips_evidence"] = generated_clips
+report["passed"] += working_color["passed"]
+report["working_color_evidence"] = working_color
 report["passed"] += luts_scopes["passed"]
 report["passed"] += transcripts["passed"]
 report["passed"] += transcription["passed"]

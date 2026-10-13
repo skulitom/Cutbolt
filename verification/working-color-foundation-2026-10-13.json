@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-13",
+  "kind": "working_color_arithmetic_foundation",
+  "parent_commit": "1b7f2698c53d1bcaae8764171f2b1e7eee291bc1",
+  "source_sha256": {
+    "src/color.rs": "73140f472bc303790cfdf05b595544ca1d2c14ba9780bd88559c330731610237",
+    "src/color/working.rs": "135771c3da2d7f78437a592d57397f0a1b9221cb04b3c0baa0854277428cf135",
+    "examples/working_color_fixture.rs": "d4b02a811c786b8f40a196bc4a07cb1e709728d7df5247a6f302cd0e251091bd",
+    "tests/working_color.py": "b2e064e6e2b6800568009c7d7a755dd149fc0f4e57f1f9d3e77e3dc25dfbf607",
+    "tools/verify.py": "afdde2152c04db4e24f2309f5acc4f8d30e3cb2f60d9aabf431a2c673816bb30"
+  },
+  "linux_copied_source_hashes_match": true,
+  "linux_commit_note": "The Linux checkout keeps its original Git identity; the copied and compiled sources are identified by the matching input hashes.",
+  "checks": {
+    "windows": {
+      "rust_tests": 258,
+      "clippy_all_targets": true,
+      "strict_quick": [
+        "color",
+        "working_color"
+      ],
+      "wall_seconds": 259,
+      "report_sha256": "03a5fb6c43274b83bcf31dcaeba0079e6a0e7ebe284c84b3966b4a6799c8351c",
+      "log_sha256": "339022d52a2fd75bb1fb3da29a3679364eab0a528e782761909b4acff55fa5f8",
+      "reported_checkout_commit": "1b7f2698c53d1bcaae8764171f2b1e7eee291bc1"
+    },
+    "linux": {
+      "rust_tests": 257,
+      "clippy_all_targets": true,
+      "strict_quick": [
+        "color",
+        "working_color"
+      ],
+      "wall_seconds": 140,
+      "report_sha256": "b69a781a2e033cf86856bd01693e0b1cdea72fc8ac7157a178ef0ae6cad2046a",
+      "log_sha256": "fc3f12583b357fa595f16febf27c6d5a299b2a05aafa93d6a3f686f2aea12cbc",
+      "reported_checkout_commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5"
+    }
+  },
+  "oracle": {
+    "passed": [
+      "working_color.transfer_and_premultiplication",
+      "working_color.finite_linear_store",
+      "working_color.transparent_source_over",
+      "working_color.premultiplied_interpolation",
+      "working_color.delivery_and_spatial_dither",
+      "working_color.monotonic_tile_mean_ramp"
+    ],
+    "operation_counts": {
+      "decode": 66304,
+      "store": 4000,
+      "over": 18000,
+      "mix": 6000,
+      "deliver": 16000
+    },
+    "maximum_code_error": {
+      "decode": 0,
+      "store": 0,
+      "over": 0,
+      "mix": 1,
+      "deliver": 0
+    },
+    "reference": "Independent normalized Python f64 equations; recursive Bayer construction",
+    "tolerance": "At most 1 UNORM16 code per working operation; exact 8-bit delivery; tile means within 1/128 delivery code",
+    "ramps": {
+      "srgb": {
+        "input_levels": 1024,
+        "distinct_tile_means": 1024,
+        "maximum_tile_mean_error_in_delivery_codes": 0.0078107145653802945
+      },
+      "bt709": {
+        "input_levels": 1024,
+        "distinct_tile_means": 1024,
+        "maximum_tile_mean_error_in_delivery_codes": 0.007803268850395284
+      }
+    },
+    "response_sha256": "6d9e1a1bab1a6ee77afc70ac9660ad30891f623f45b6a52eebf428d8d75b482a",
+    "limits": "Library arithmetic only. No project mode, renderer integration, generated/nested frames, effects/grade-fade banding, higher-depth source import or speed claim."
+  },
+  "platform_results_identical": true,
+  "development_corrections": [
+    "The first adapter build used a standard Error return type, which the engine error type does not implement; it now returns the engine Result.",
+    "One new unit assertion expected a half-byte tie to survive UNORM16 quantization. The observed code was 127 rather than 128. The alpha test now uses a non-tie sample; the independent oracle retains all premultiplied values, including this case."
+  ],
+  "previous_shipment": {
+    "commit": "1b7f2698c53d1bcaae8764171f2b1e7eee291bc1",
+    "pushed_to_main": true,
+    "gate_fixture_passes": 21,
+    "rust_passed": true,
+    "reused": 5,
+    "deferred": 52,
+    "gate_seconds": 182,
+    "log_sha256": "3565e029a3ccf3be4cd9e3890be6e0053186b99336d65c9b8b273a7d9ae4df79"
+  },
+  "not_claimed": [
+    "working_space project setting",
+    "precision renderer integration",
+    "generated or nested precision",
+    "grade/fade banding acceptance",
+    "stage-six exit",
+    "stage-five full gate completion",
+    "speed",
+    "thorough milestone",
+    "points"
+  ]
+}

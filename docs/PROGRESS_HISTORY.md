@@ -1,5 +1,31 @@
 # Progress history
 
+## 13 October 2026: linear working-color arithmetic foundation
+
+The library now stores straight linear SDR pixels as UNORM16. Transparent normal,
+multiply and screen source-over retain alpha/opacity/mask products until the final
+store. Associated interpolation excludes hidden color. Transfer encoding and a
+canvas-fixed 8 by 8 ordered dither are separate delivery operations. Project and
+scene rendering still follow the existing default path; working_space is not exposed.
+
+An independent Python f64 fixture compares 110,304 operation cases per platform,
+including every legal premultiplied byte-channel/alpha pair under sRGB and BT.709.
+Another 131,072 delivery samples retain all 1,024 distinct ramp tile means per transfer,
+within 1/128 delivery code of the quantized linear input. Working-operation errors
+are zero except interpolation half ties (at most one UNORM16 code); delivery is exact.
+Windows/Linux responses are identical. Rust tests pass (258/257), formatting and
+all-target lint pass, and strict quick color plus working_color pass on both systems.
+[Evidence](../verification/working-color-foundation-2026-10-13.json) records the initial
+adapter-build and unit-expectation corrections. [The contract](WORKING_COLOR.md)
+distinguishes this arithmetic ramp from the required timeline grade/fade banding gate.
+
+The prior production checkpoint 1b7f269 shipped to main: 21 gate fixture passes plus
+Rust, five reused and 52 deferred in 182 seconds. Its full stage-five quick run is
+active in a frozen checkout. This foundation's commit still needs its own ship gate.
+Renderer integration, saved settings, precise generated/nested pictures, the stage-six
+exit and final requirements/performance audit remain open. No points, HDR, speed,
+new rendering-mode or thorough claim; PROGRESS.md keeps the verified 338e114 milestone.
+
 ## 13 October 2026: production titles and captions use generated scenes
 
 Production picture stages now validate and retain editable recipes. Caption stages
