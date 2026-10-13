@@ -1,5 +1,33 @@
 # Progress history
 
+## 13 October 2026: generated scene sources in the native timeline
+
+Track clips now save a scene as their third exclusive source. Workspace document
+references resolve to a pinned recipe before saving; later authoring-file edits do
+not change old revisions. The native compositor samples scene pictures directly,
+including transparency, source trims, child sequences, saved clip properties and
+proxy previews. Scene audio uses exact PCM windows on audio tracks. Identical
+recipes share bounded prepared resources across the whole export and its chunks.
+
+Windows passed 254 Rust tests and Linux 253, with formatting and warnings-denied
+lint. Thirteen targeted suites passed on each platform (350
+and 186 seconds). Review then corrected empty media-ID
+handling in static checks and text edits. Four final suites, including generated
+sources, transcripts, the integration/MCP checks and agent ergonomics, passed on
+both systems (59 and 38 seconds).
+The fixture compares exact pictures and PCM with independently compiled scenes,
+including multiple render chunks, cache invalidation, queued export and undo.
+The document fixture also caught and fixed response metadata that broke the next
+strict project input. [Evidence](../verification/generated-clips-core-2026-10-13.json)
+records source identities, the exact test scopes and development failures.
+
+The 1486cd7 background finished with 16 passes, zero failures and 51 explicit
+superseded skips. The 73e2b2a shipment pushed successfully; its background and the
+frozen complete stage-4 quick gate still require their terminal audit. This commit's
+shipment/background must also be checked. Caption, graphics-placement and
+production-title migration remain next within stage 5. No points, stage exit or
+new thorough claim; PROGRESS.md retains the 338e114 milestone evidence.
+
 ## 13 October 2026: remove the former timeline video graphs
 
 The root and nested timeline paths now always use the ordered native frame stack.

@@ -381,6 +381,7 @@ mod tests {
             frames: 50,
             effect_resources: Default::default(),
             effect_report: None,
+            scene_resources: None,
         });
         assert_eq!(layout(&composited).unwrap().2, "[0:v:0]");
         // Joined chunks and unknown layouts keep the lossless intermediate.

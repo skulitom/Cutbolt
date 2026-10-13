@@ -20,6 +20,14 @@ pub(crate) enum Input {
         #[serde(skip_serializing_if = "Option::is_none")]
         direct: Option<crate::direct::Picture>,
     },
+    Generated {
+        scene_id: String,
+        recipe_sha256: String,
+        first: u64,
+        divisor: u32,
+        #[serde(skip)]
+        source: Arc<crate::scene::FrameSource>,
+    },
     Sequence {
         sequence_id: String,
         plan: Box<Plan>,
@@ -96,6 +104,7 @@ impl Plan {
                 active += match &clip.input {
                     Input::Media { .. } => plane * if clip.alpha { 16 } else { 12 },
                     Input::Sequence { plan, .. } => plan.frame_buffer_bytes,
+                    Input::Generated { source, .. } => source.frame_buffer_bytes(),
                 };
             }
             peak = peak.max(canvas + active + proxy_canvas);
@@ -116,10 +125,20 @@ impl Plan {
 enum PreparedInput<'a> {
     Media(Box<PreparedReader>),
     Sequence(Box<Frames<'a>>),
+    Generated {
+        source: Arc<crate::scene::FrameSource>,
+        first: u64,
+        divisor: u32,
+    },
 }
 enum ActiveInput<'a> {
     Media(Ahead),
     Sequence(Box<Frames<'a>>),
+    Generated {
+        source: Arc<crate::scene::FrameSource>,
+        first: u64,
+        divisor: u32,
+    },
 }
 pub(crate) struct Frames<'a> {
     plan: &'a Plan,
@@ -150,6 +169,16 @@ impl<'a> Frames<'a> {
                     Input::Media { arguments, direct } => PreparedInput::Media(Box::new(
                         PreparedReader::prepare(arguments, direct.as_ref(), &program, control)?,
                     )),
+                    Input::Generated {
+                        source,
+                        first,
+                        divisor,
+                        ..
+                    } => PreparedInput::Generated {
+                        source: source.clone(),
+                        first: *first,
+                        divisor: *divisor,
+                    },
                     Input::Sequence { plan, .. } => PreparedInput::Sequence(Box::new(
                         Self::prepare(plan, timeout, control, abort)?,
                     )),
@@ -217,12 +246,26 @@ impl<'a> Frames<'a> {
                         ))
                     }
                     PreparedInput::Sequence(frames) => ActiveInput::Sequence(frames),
+                    PreparedInput::Generated {
+                        source,
+                        first,
+                        divisor,
+                    } => ActiveInput::Generated {
+                        source,
+                        first,
+                        divisor,
+                    },
                 },
             );
         }
         match self.active[index].as_mut().expect("started source") {
             ActiveInput::Media(reader) => reader.next(),
             ActiveInput::Sequence(frames) => frames.next(n - clip.first),
+            ActiveInput::Generated {
+                source,
+                first,
+                divisor,
+            } => source.frame(*first + n - clip.first, *divisor),
         }
     }
     fn recycle(&mut self, index: usize, n: u64, bytes: Vec<u8>) -> Result<()> {
@@ -230,6 +273,7 @@ impl<'a> Frames<'a> {
             match self.active[index].take().expect("active source") {
                 ActiveInput::Media(reader) => reader.finish(),
                 ActiveInput::Sequence(frames) => frames.finish(),
+                ActiveInput::Generated { .. } => Ok(()),
             }
         } else {
             if !bytes.is_empty()

@@ -166,6 +166,7 @@ fn operations(request: &Place, project: &Project, asset: Asset) -> Result<Vec<Op
             id: request.instance_id.clone(),
             asset_id: asset.id,
             sequence_id: None,
+            scene: None,
             start: request.start,
             source_in: Time::ZERO,
             duration: asset.duration,

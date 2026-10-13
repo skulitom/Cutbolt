@@ -1980,6 +1980,161 @@ fn compose_plane(scene: &Scene, prepared: &Prepared, frame: u64, matte: bool) ->
     Ok(rgb)
 }
 
+/// A prepared scene sampled directly by timeline clips. No intermediate video is produced.
+pub(crate) struct FrameSource {
+    scene: Scene,
+    prepared: Prepared,
+    retained: u64,
+}
+impl std::fmt::Debug for FrameSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeneratedScene")
+            .field("id", &self.scene.id)
+            .field("retained_bytes", &self.retained)
+            .finish_non_exhaustive()
+    }
+}
+impl FrameSource {
+    pub(crate) fn new(scene: &Scene, root: &Path) -> Result<Self> {
+        let mut prepared = prepare(scene, root)?;
+        prepared.threads = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .clamp(1, 16);
+        prepared.base = static_base(scene, &prepared)?;
+        approved_base(scene, &prepared)?;
+        // Keep generated clips' retained payload bounded; per-frame effects reuse these inputs.
+        // Constant processed copies are an optional standalone-render optimization, not needed
+        // for exact pixels and deliberately omitted from this shared pool.
+        let image_bytes: usize = prepared
+            .images
+            .values()
+            .chain(prepared.matted.values())
+            .map(|p| p.rgba.len())
+            .sum::<usize>()
+            + prepared
+                .graphics
+                .values()
+                .map(|(p, _)| p.rgba.len())
+                .sum::<usize>();
+        let base_bytes = prepared
+            .base
+            .as_ref()
+            .map_or(0, |b| b.color.len() + b.matte.as_ref().map_or(0, Vec::len));
+        let tables = prepared
+            .effect_resources
+            .report()
+            .and_then(|v| v["allocated_table_bytes"].as_u64())
+            .unwrap_or(0);
+        // Charge serialized sample/report payload conservatively as well as pixel, PCM and LUT
+        // buffers. Frame work buffers are separately charged by the ordered compositor.
+        let sampled = serde_json::to_vec(&prepared.parameters)?.len()
+            + serde_json::to_vec(&prepared.report)?.len()
+            + serde_json::to_vec(&prepared.selected)?.len()
+            + serde_json::to_vec(&prepared.tiles)?.len()
+            + serde_json::to_vec(scene)?.len();
+        let retained =
+            (image_bytes + base_bytes + prepared.pcm.len() * 2 + sampled * 8) as u64 + tables;
+        Ok(Self {
+            scene: scene.clone(),
+            prepared,
+            retained,
+        })
+    }
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        self.retained
+    }
+    pub(crate) fn frame_buffer_bytes(&self) -> u64 {
+        u64::from(self.scene.width)
+            * u64::from(self.scene.height)
+            * u64::from(self.scene.output_scale).pow(2)
+            * 48
+    }
+    pub(crate) fn sources(&self) -> Vec<render::Source> {
+        self.prepared
+            .sources
+            .iter()
+            .map(|(path, identity)| render::Source {
+                path: path.clone(),
+                sha256: identity.sha256.clone(),
+                frames: 0,
+                samples: 0,
+                conversion: None,
+            })
+            .collect()
+    }
+    /// Exact scene frame, enlarged then optionally block-reduced for a proxy preview, in G,B,R[,A].
+    pub(crate) fn frame(&self, n: u64, divisor: u32) -> Result<Vec<u8>> {
+        if n >= self.scene.duration.units(self.scene.clock()?)? || !matches!(divisor, 1 | 2 | 4 | 8)
+        {
+            return Err(error(
+                "INVALID_RANGE",
+                "Generated scene frame or preview scale is outside its bounds",
+            ));
+        }
+        let s = &self.scene;
+        let pixels = compose(s, &self.prepared, n)?;
+        let (width, height) = (
+            s.width * s.output_scale / divisor,
+            s.height * s.output_scale / divisor,
+        );
+        let plane = width as usize * height as usize;
+        let channels = if s.transparent { 4 } else { 3 };
+        let mut result = vec![0u8; plane * channels];
+        for y in 0..height {
+            for x in 0..width {
+                let mut sum = [0u64; 4];
+                for dy in 0..divisor {
+                    for dx in 0..divisor {
+                        let sx = (x * divisor + dx) / s.output_scale;
+                        let sy = (y * divisor + dy) / s.output_scale;
+                        let at = (sy * s.width + sx) as usize * channels;
+                        let alpha = if s.transparent {
+                            u64::from(pixels[at + 3])
+                        } else {
+                            255
+                        };
+                        for c in 0..3 {
+                            sum[c] += u64::from(pixels[at + c]) * alpha;
+                        }
+                        sum[3] += alpha;
+                    }
+                }
+                let at = (y * width + x) as usize;
+                for (p, c) in [1, 2, 0].into_iter().enumerate() {
+                    result[p * plane + at] = sum[c].checked_div(sum[3]).unwrap_or(0) as u8;
+                }
+                if s.transparent {
+                    result[3 * plane + at] = (sum[3] / u64::from(divisor).pow(2)) as u8;
+                }
+            }
+        }
+        Ok(result)
+    }
+    pub(crate) fn write_audio(
+        &self,
+        first: u64,
+        samples: u64,
+        control: &dyn media::Control,
+        wave: &mut crate::pcm_stream::Writer<std::fs::File>,
+    ) -> Result<()> {
+        let first = usize::try_from(first).ok().and_then(|n| n.checked_mul(2));
+        let end = usize::try_from(samples)
+            .ok()
+            .and_then(|n| n.checked_mul(2))
+            .and_then(|n| first?.checked_add(n));
+        let values = first
+            .zip(end)
+            .and_then(|(a, b)| self.prepared.pcm.get(a..b))
+            .ok_or_else(|| error("INVALID_RANGE", "Generated scene audio exceeds its source"))?;
+        for chunk in values.chunks(8192) {
+            control.check()?;
+            let bytes: Vec<_> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
+            wave.push(&bytes)?;
+        }
+        Ok(())
+    }
+}
+
 /// Owned scratch directory. Cleanup only the known files we created, never recursive traversal.
 pub(crate) struct Scratch(pub PathBuf);
 impl Scratch {

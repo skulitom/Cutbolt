@@ -1,5 +1,7 @@
 # Cutbolt agent interface (v0.4)
 
+A native clip may use `scene` as its exclusive source. It accepts an inline scene or a workspace document reference resolved before the edit; see [generated clips](GENERATED_CLIPS.md). The snapshot pins the recipe and its media inputs.
+
 For a grade or LUT on footage, use `tracks.edit` with `{"op":"clip_effects","clip_id":"...","effects":[...]}` inside the existing apply command. This saves source-clock pixel effects and unique transform, opacity, mask and blend properties, with no scene compilation. The first nonempty stack upgrades the new snapshot to schema 2. See [clip effects](CLIP_EFFECTS.md) for recipes and bounds. A keyed clip reveals lower video tracks; no intermediate movie is required. Apply the same edit through `sequence.edit` inside a child definition; video sequence instances accept their own source-clock stacks.
 
 Optional [foreground masks](SEGMENTATION.md) use a separate local CLI producer. Its scene results, including per-frame matte identities, are accepted by typed `scene.inspect`; no network service or additional MCP tool is introduced.

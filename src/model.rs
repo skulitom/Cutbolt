@@ -114,7 +114,7 @@ impl Clip {
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
-    /// Snapshot schema version: 1 for legacy projects, 2 for native clip effects. A first nonempty clip-effect edit upgrades only the new revision; old snapshots are preserved.
+    /// Snapshot schema version: 1 for legacy projects, 2 for native clip effects or generated scenes. The first such edit upgrades only the new revision; old snapshots are preserved.
     pub schema_version: u32,
     /// Project ID, 1-128 bytes.
     pub id: String,
@@ -434,7 +434,7 @@ impl Project {
         if self.schema_version == 1 && self.has_clip_effects() {
             return Err(error(
                 "UNSUPPORTED_SCHEMA",
-                "Native clip effects require snapshot schema 2; use tracks.edit clip_effects to upgrade a version-1 snapshot",
+                "Native clip effects and generated scenes require snapshot schema 2; use tracks.edit to upgrade a version-1 snapshot",
             ));
         }
         valid_id(&self.id)?;
@@ -575,7 +575,7 @@ impl Project {
             .chain(self.sequences.iter().map(|s| &s.arrangement))
             .flat_map(|a| &a.tracks)
             .flat_map(|t| &t.clips)
-            .any(|c| !c.effects.is_empty())
+            .any(|c| !c.effects.is_empty() || c.scene.is_some())
     }
     /// Atomic snapshot transform: caller's project remains unchanged on success or failure.
     /// Explicit media input roots may read originals and populate derived source caches.

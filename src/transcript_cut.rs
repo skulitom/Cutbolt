@@ -155,10 +155,10 @@ fn build(project: &Project, document: &Document, spec: &Spec) -> Result<Built> {
         ));
     }
     let clip = &arrangement.tracks[binding_track].clips[binding_clip];
-    if clip.sequence_id.is_some() {
+    if clip.sequence_id.is_some() || clip.scene.is_some() {
         return Err(error(
             "UNSUPPORTED_TRANSCRIPT_BINDING",
-            "Bind a concrete media clip, not a nested sequence",
+            "Text cuts require a concrete media clip with a bound transcript",
         ));
     }
     let asset = project.asset(&clip.asset_id)?;

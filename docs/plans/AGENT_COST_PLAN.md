@@ -239,7 +239,7 @@ comparative benchmark, recognition accuracy or distribution-release completion.
 ## Verification and shipping, every stage
 
 - Work in your own worktree on a `claude/<name>` branch.
-- While working, run `cargo test` and `python -X utf8 tools/verify.py --only agents,agent_ergonomics,agent_costs,<touched>`. Commit, then run `python -X utf8 tools/ship.py --to main`, and fix forward anything `tools/verify.py --status` reports.
+- While working, run `cargo test` and `python -X utf8 tools/verify.py --only integration,agent_ergonomics,agent_costs,<touched>`. Commit, then run `python -X utf8 tools/ship.py --to main`, and fix forward anything `tools/verify.py --status` reports.
 - The Linux port of jobs and speech landed on `main` as `1ea6447`, so start from it. MCP-only agents on Linux can now queue jobs, so run the stage 0 harness and the skills fixture on Linux as well as Windows. Skills must not promise audio recording or hardware decode on Linux; neither has a Linux backend yet.
 - Line endings: `src/main.rs`, `src/commands.rs`, `tests/agents.py`, `tools/verify.py` and `docs/AGENT_INTERFACE.md` are CRLF.
   - Edit with byte-preserving scripts or the Edit tool.

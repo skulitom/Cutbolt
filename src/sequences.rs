@@ -256,7 +256,7 @@ pub(crate) fn used_assets(project: &Project) -> Result<BTreeSet<String>> {
                     if seen.insert((id.clone(), kind == Kind::Video)) {
                         visit(project, &get(project, id)?.arrangement, kind, seen, result)?;
                     }
-                } else {
+                } else if c.scene.is_none() {
                     result.insert(c.asset_id.clone());
                 }
             }

@@ -94,7 +94,7 @@ pub fn check(request: &Request) -> Result<Value> {
                     .iter()
                     .map(|c| Placed {
                         id: &c.id,
-                        asset: c.sequence_id.is_none().then_some(c.asset_id.as_str()),
+                        asset: (!c.asset_id.is_empty()).then_some(c.asset_id.as_str()),
                         start: c.start,
                         source_in: c.source_in,
                         duration: c.duration,
@@ -257,6 +257,33 @@ pub fn check(request: &Request) -> Result<Value> {
     }
     // Media present and unchanged.
     if let Some(root) = request.input_root {
+        for (scope, arrangement) in project
+            .tracks
+            .as_ref()
+            .map(|a| ("root", a))
+            .into_iter()
+            .chain(
+                project
+                    .sequences
+                    .iter()
+                    .map(|s| (s.id.as_str(), &s.arrangement)),
+            )
+        {
+            for track in &arrangement.tracks {
+                for clip in &track.clips {
+                    if let Some(scene) = &clip.scene
+                        && let Err(e) = crate::generated::dependencies(scene, root)
+                    {
+                        find(
+                            "error",
+                            "generated_source",
+                            e.message,
+                            json!({"sequence_id":scope,"track_id":track.id,"clip_id":clip.id,"error_code":e.code}),
+                        );
+                    }
+                }
+            }
+        }
         for asset in &project.assets {
             let path = if Path::new(&asset.path).is_absolute() {
                 std::path::PathBuf::from(&asset.path)

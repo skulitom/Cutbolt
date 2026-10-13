@@ -8,7 +8,10 @@ use std::{
 
 /// One bounded table pool shared by every decoder branch in a timeline render.
 #[derive(Clone, Default)]
-pub(crate) struct Resources(Arc<Mutex<effects::Resources>>);
+pub(crate) struct Resources {
+    effects: Arc<Mutex<effects::Resources>>,
+    pub(crate) scenes: crate::generated::Pool,
+}
 impl std::fmt::Debug for Resources {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClipEffectResources")
@@ -17,7 +20,7 @@ impl std::fmt::Debug for Resources {
 }
 impl Resources {
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, effects::Resources>> {
-        self.0.lock().map_err(|_| {
+        self.effects.lock().map_err(|_| {
             error(
                 "RENDER_VALIDATION_FAILED",
                 "Clip effect resource pool failed",

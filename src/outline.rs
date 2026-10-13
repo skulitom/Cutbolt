@@ -374,7 +374,10 @@ fn arrangement_lines(
             let source_end = clip.source_in.plus(clip.duration)?;
             let source = match &clip.sequence_id {
                 Some(id) => format!("seq:{id}"),
-                None => clip.asset_id.clone(),
+                None => clip
+                    .scene
+                    .as_ref()
+                    .map_or_else(|| clip.asset_id.clone(), |s| format!("scene:{}", s.0.id)),
             };
             let mut line = format!(
                 "  {} {} {} {}",
@@ -661,7 +664,7 @@ pub(crate) fn timeline_words(
                 }
                 for clip in &track.clips {
                     let muted = clip.gain_milli == 0 && clip.gain_curve.is_none();
-                    if clip.sequence_id.is_none() && !muted {
+                    if clip.sequence_id.is_none() && clip.scene.is_none() && !muted {
                         clips.push((
                             &clip.id,
                             clip.start,

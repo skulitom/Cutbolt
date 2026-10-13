@@ -191,6 +191,15 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
         let mut children = Vec::new();
         let mut cursor = Time::ZERO;
         for (ci, clip) in clips.iter().enumerate() {
+            if clip.scene.is_some() {
+                a.loss(
+                    &format!("{path}/clips/{ci}"),
+                    "generated_scene",
+                    "Generated scenes require explicit rendering before interchange export",
+                    true,
+                );
+                continue;
+            }
             if clip.sequence_id.is_some() {
                 a.loss(
                     &format!("{path}/clips/{ci}"),

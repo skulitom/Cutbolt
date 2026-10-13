@@ -1310,7 +1310,9 @@ pub fn handle_json_as(
         result["expanded_scene"] =
             serde_json::to_value(serde_json::from_value::<scene::Scene>(scene)?)?;
     }
-    if !completed.is_empty() && result.is_object() {
+    // timeline.apply returns a strict Project directly; its saved identities are already
+    // in that snapshot. Extra response fields would make the next project input invalid.
+    if !completed.is_empty() && result.is_object() && command != "timeline.apply" {
         result["resolved_identities"] = Value::Array(completed);
     }
     if let Some(workspace) = workspace {
@@ -1351,6 +1353,7 @@ fn prepare(
     crate::scene_short::prepare(request)?;
     let mut completed = crate::fonts::prepare(request)?;
     completed.extend(crate::identity::complete(request)?);
+    completed.extend(crate::generated::prepare(request, workspace)?);
     Ok(completed)
 }
 

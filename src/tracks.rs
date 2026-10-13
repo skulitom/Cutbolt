@@ -32,12 +32,15 @@ impl Kind {
 pub struct TrackClip {
     /// Clip ID unique across all tracks of this arrangement, 1-128 bytes.
     pub id: String,
-    /// Asset added with media.add; omit when `sequence_id` is set. Exactly one of the two is required.
+    /// Asset added with media.add; omit for a sequence or generated scene. Exactly one source is required.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub asset_id: String,
     /// Child sequence created by sequence.create or multicam.create; omit for media clips.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence_id: Option<String>,
+    /// Generated scene source, exclusive with asset_id and sequence_id. Inline recipe or a workspace {file, select?} document resolved before saving; inputs stay content-pinned. Requires schema 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<crate::generated::SceneRef>,
     /// Timeline position in rational seconds; the clip must end by the arrangement duration.
     pub start: Time,
     /// Source (or child sequence) position played at `start`, in rational seconds.
@@ -151,6 +154,7 @@ impl Default for TrackClip {
             id: String::new(),
             asset_id: String::new(),
             sequence_id: None,
+            scene: None,
             start: Time::ZERO,
             source_in: Time::ZERO,
             duration: Time::ZERO,
@@ -230,12 +234,13 @@ impl TrackClip {
         Ok(())
     }
     pub(crate) fn source_duration(&self, project: &Project) -> Result<Time> {
-        match (&self.sequence_id, self.asset_id.is_empty()) {
-            (Some(id), true) => Ok(crate::sequences::get(project, id)?.arrangement.duration),
-            (None, false) => project.asset(&self.asset_id).map(|a| a.duration),
+        match (&self.sequence_id, self.asset_id.is_empty(), &self.scene) {
+            (Some(id), true, None) => Ok(crate::sequences::get(project, id)?.arrangement.duration),
+            (None, false, None) => project.asset(&self.asset_id).map(|a| a.duration),
+            (None, true, Some(scene)) => scene.validate(project),
             _ => Err(error(
                 "INVALID_CLIP_SOURCE",
-                "A track clip requires exactly one nonempty asset_id or sequence_id",
+                "A track clip requires exactly one asset_id, sequence_id or scene",
             )),
         }
     }
@@ -245,7 +250,7 @@ impl TrackClip {
     pub(crate) fn legacy(&self) -> Clip {
         Clip {
             id: self.id.clone(),
-            asset_id: self.sequence_id.is_none().then(|| self.asset_id.clone()),
+            asset_id: (!self.asset_id.is_empty()).then(|| self.asset_id.clone()),
             gap: false,
             source_in: self.source_in,
             duration: self.duration,
@@ -333,6 +338,7 @@ impl Track {
             };
             if clip.asset_id != anchor.asset_id
                 || clip.sequence_id != anchor.sequence_id
+                || clip.scene != anchor.scene
                 || (self.kind == Kind::Video
                     && (clip.effects != anchor.effects || clip.transform != anchor.transform))
                 || clip
@@ -663,6 +669,7 @@ impl Arrangement {
                     .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
                 if track.kind == Kind::Video
                     && clip.sequence_id.is_none()
+                    && clip.scene.is_none()
                     && project.asset(&clip.asset_id)?.audio_only()
                 {
                     return Err(crate::model::no_picture(
@@ -754,7 +761,7 @@ impl Arrangement {
                 return Err(error(
                     "UNSUPPORTED_TIMELINE",
                     format!(
-                        "Track {:?}: alpha_over applies to video tracks of asset clips without transitions",
+                        "Track {:?}: alpha_over requires video tracks without transitions or child-sequence instances",
                         track.id
                     ),
                 ));
@@ -1526,5 +1533,5 @@ pub(crate) fn range(project: &Project, start: Time, duration: Time) -> Result<Pr
 }
 
 pub fn capabilities() -> serde_json::Value {
-    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform","clip_effects","audio_dynamics"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_chunking":"windows_over_64_clips_render_as_exactly_joined_chunks","render_frame_rates":"native_project_rate","audio_clock":48000,"video":"ordered_native_layers_skip_proven_opaque_cover","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"gain_curve":{"clock":"clip_source_time","maximum_keys":2000,"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"rounding":"curve_value_nearest_then_one_sample_rounding"},"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"clip_effects":{"types":["grade","selective_grade","chroma_key","lut","transform","opacity","mask","blend_mode"],"maximum":8,"structural_owners":"one_each","coordinates":"original_source_canvas","structural_order":["pixel_effects","source_mask","transform","opacity","blend"],"blend_modes":["normal","multiply","screen"],"sampling":["scene","box_floor"],"opacity_rounding":["coverage","byte_alpha"],"legacy_overlay":"transform_and_opacity_sugar","clock":"clip_source_time","schema_version":2,"nested_sequences":true,"audio":false,"working_space":"shared_scene_linear_srgb_equations","key_coverage":"retain_alpha_reveal_lower_tracks","proxy_masks":"source_canvas_nearest_center_ties_up","lut_table_pool_bytes":134217728},"dynamics":crate::dynamics::capabilities(),"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","source_profiles":["reference_FFV1_RGB8_PCM16_stereo","indexed_H264_HEVC_420_8bit"],"indexed_scope":"root_and_nested_pictures_and_exact_audio","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
+    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform","clip_effects","audio_dynamics"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_chunking":"windows_over_64_clips_render_as_exactly_joined_chunks","render_frame_rates":"native_project_rate","audio_clock":48000,"video":"ordered_native_layers_skip_proven_opaque_cover","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"gain_curve":{"clock":"clip_source_time","maximum_keys":2000,"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"rounding":"curve_value_nearest_then_one_sample_rounding"},"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"clip_effects":{"types":["grade","selective_grade","chroma_key","lut","transform","opacity","mask","blend_mode"],"maximum":8,"structural_owners":"one_each","coordinates":"original_source_canvas","structural_order":["pixel_effects","source_mask","transform","opacity","blend"],"blend_modes":["normal","multiply","screen"],"sampling":["scene","box_floor"],"opacity_rounding":["coverage","byte_alpha"],"legacy_overlay":"transform_and_opacity_sugar","clock":"clip_source_time","schema_version":2,"nested_sequences":true,"audio":false,"working_space":"shared_scene_linear_srgb_equations","key_coverage":"retain_alpha_reveal_lower_tracks","proxy_masks":"source_canvas_nearest_center_ties_up","lut_table_pool_bytes":134217728},"generated_scenes":crate::generated::capabilities(),"dynamics":crate::dynamics::capabilities(),"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","source_profiles":["reference_FFV1_RGB8_PCM16_stereo","indexed_H264_HEVC_420_8bit"],"indexed_scope":"root_and_nested_pictures_and_exact_audio","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
 }

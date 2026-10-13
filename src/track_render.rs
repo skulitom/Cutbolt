@@ -409,6 +409,16 @@ impl<'a> Graph<'a> {
             .filter_map(crate::tracks::ClipEffect::pixel)
             .collect::<Vec<_>>();
         for source in self.effect_resources.add(&pixels, self.root)? {
+            if self
+                .effect_sources
+                .get(&source.path)
+                .is_some_and(|old| old.sha256 != source.sha256)
+            {
+                return Err(error(
+                    "MEDIA_CHANGED",
+                    "Clip effects and generated scenes disagree on a shared source identity",
+                ));
+            }
             self.effect_sources.insert(source.path.clone(), source);
         }
         let scale = self.project.effect_coordinate_scale.unwrap_or(1);
@@ -471,6 +481,40 @@ impl<'a> Graph<'a> {
                 duration,
                 &raw,
             )?;
+        } else if clip.scene.is_some() {
+            let scene = self.scene(clip)?;
+            let first = clip.source_in.plus(at)?.minus(clip.start)?.units(SAMPLES)?;
+            let samples = duration.units(SAMPLES)?;
+            self.direct_audio_bytes = self
+                .direct_audio_bytes
+                .checked_add(samples * 4)
+                .filter(|&n| n <= 1_073_741_824)
+                .ok_or_else(|| {
+                    error(
+                        "LIMIT_EXCEEDED",
+                        "Generated audio windows exceed the 1 GiB graph bound",
+                    )
+                })?;
+            let input = self.inputs;
+            self.inputs += 1;
+            let path = std::env::temp_dir().join(format!(
+                ".cutbolt-scene-audio-{}-{}-{input}.wav",
+                std::process::id(),
+                self.nonce
+            ));
+            self.args.extend([
+                "-protocol_whitelist".into(),
+                "file,pipe".into(),
+                "-i".into(),
+                path.to_string_lossy().into_owned(),
+            ]);
+            self.generated.push(render::Generated::SceneAudio {
+                path,
+                scene,
+                first,
+                samples,
+            });
+            self.filters.push(format!("[{input}:a:0]atrim=end_sample={samples},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{raw}]"));
         } else {
             let source = self.inspect(clip, Kind::Audio, false)?;
             let (input, first, end) = if let Some(video) = self.indexed.get(&clip.asset_id).cloned()
@@ -638,6 +682,28 @@ impl<'a> Graph<'a> {
         }
         Ok(format!("n{}", self.serial))
     }
+    fn scene(&mut self, clip: &TrackClip) -> Result<std::sync::Arc<crate::scene::FrameSource>> {
+        let scene = clip.scene.as_ref().expect("generated clip");
+        scene.validate(self.project)?;
+        let prepared = self
+            .effect_resources
+            .scenes
+            .get(scene, self.root, self.control)?;
+        for source in prepared.sources() {
+            if self
+                .effect_sources
+                .get(&source.path)
+                .is_some_and(|old| old.sha256 != source.sha256)
+            {
+                return Err(error(
+                    "MEDIA_CHANGED",
+                    "Generated scenes disagree on a shared source identity",
+                ));
+            }
+            self.effect_sources.insert(source.path.clone(), source);
+        }
+        Ok(prepared)
+    }
     fn check_clip(&mut self, clip: &TrackClip, at: Time, duration: Time, kind: Kind) -> Result<()> {
         self.control.check()?;
         self.inspected += 1;
@@ -647,7 +713,22 @@ impl<'a> Graph<'a> {
                 "Nested render exceeds 256 expanded clip/handle inspections",
             ));
         }
-        if let Some(id) = &clip.sequence_id {
+        if clip.scene.is_some() {
+            self.scene(clip)?;
+            let first = clip.source_in.plus(at)?.minus(clip.start)?;
+            first.units(kind.clock(self.project.frame_rate))?;
+            duration.units(kind.clock(self.project.frame_rate))?;
+            if first
+                .plus(duration)?
+                .compare(clip.source_duration(self.project)?)?
+                .is_gt()
+            {
+                return Err(error(
+                    "INVALID_RANGE",
+                    "Generated clip window exceeds its scene",
+                ));
+            }
+        } else if let Some(id) = &clip.sequence_id {
             let a = crate::sequences::get(self.project, id)?.arrangement.clone();
             self.check_arrangement(
                 &a,
@@ -678,7 +759,7 @@ impl<'a> Graph<'a> {
         for t in a.tracks.iter().filter(|t| t.enabled && t.kind == kind) {
             for c in &t.clips {
                 if c.start.compare(end)?.is_lt() && c.end()?.compare(start)?.is_gt() {
-                    if t.composite.is_opaque() {
+                    if t.composite.is_opaque() || c.scene.is_some() {
                         self.check_clip(c, c.start, c.duration, kind)?;
                     } else {
                         // Validated alpha_over tracks hold asset clips only, inspected with alpha.
@@ -869,6 +950,8 @@ impl<'a> Graph<'a> {
             let mut premix = Graph::new(self.project, self.root, self.control);
             premix.audio_only = true;
             premix.sources = self.sources.clone();
+            premix.effect_resources = self.effect_resources.clone();
+            premix.effect_sources = self.effect_sources.clone();
             premix.converted = self.converted.clone();
             premix.indexed = self.indexed.clone();
             premix.overlay_assets = self.overlay_assets.clone();
@@ -891,6 +974,9 @@ impl<'a> Graph<'a> {
                 "{labels}{merge}volume=volume=0.0000152587890625:precision=double,aformat=sample_fmts=s32[premix]"
             ));
             self.inspected = premix.inspected;
+            for (path, source) in &premix.effect_sources {
+                self.effect_sources.insert(path.clone(), source.clone());
+            }
             for (id, source) in &premix.sources {
                 self.sources
                     .entry(id.clone())
@@ -1037,6 +1123,7 @@ impl<'a> Graph<'a> {
                         clip.source_duration(self.project)?,
                     )?;
                     Ok(!self.alpha_assets.contains(&clip.asset_id)
+                        && clip.scene.as_ref().is_none_or(|s| !s.0.transparent)
                         && !clip
                             .effects
                             .iter()
@@ -1088,7 +1175,8 @@ impl<'a> Graph<'a> {
         for Window { clip, first, end } in windows {
             let at = Time::new((window + first) * rate.den, rate.num)?;
             let length = Time::new((end - first) * rate.den, rate.num)?;
-            let alpha = self.alpha_assets.contains(&clip.asset_id);
+            let alpha = self.alpha_assets.contains(&clip.asset_id)
+                || clip.scene.as_ref().is_some_and(|s| s.0.transparent);
             if alpha && clip.transform.as_ref().is_some_and(|t| t.divisor > 1) {
                 return Err(error(
                     "UNSUPPORTED_MEDIA",
@@ -1098,7 +1186,15 @@ impl<'a> Graph<'a> {
                     ),
                 ));
             }
-            let input = if let Some(sequence_id) = &clip.sequence_id {
+            let input = if let Some(scene) = &clip.scene {
+                Input::Generated {
+                    scene_id: scene.0.id.clone(),
+                    recipe_sha256: scene.key()?,
+                    first: clip.source_in.plus(at)?.minus(clip.start)?.units(rate)?,
+                    divisor: self.project.effect_coordinate_scale.unwrap_or(1),
+                    source: self.scene(clip)?,
+                }
+            } else if let Some(sequence_id) = &clip.sequence_id {
                 let arrangement = crate::sequences::get(self.project, sequence_id)?
                     .arrangement
                     .clone();
@@ -1305,6 +1401,7 @@ impl Compiled<'_> {
             height: stack.height,
             frames,
             effect_report: resources.report()?,
+            scene_resources: resources.scenes.report()?,
             effect_resources: resources,
             stack,
         }))

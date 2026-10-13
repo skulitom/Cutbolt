@@ -36,6 +36,7 @@ pub mod expressions;
 pub mod files;
 pub mod fillers;
 pub mod fonts;
+pub mod generated;
 pub mod geometry;
 pub mod graphics;
 pub mod graphics_place;

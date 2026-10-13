@@ -42,7 +42,7 @@ fn shown(project: &Project, time: Time) -> Result<Value> {
     Ok(match a.visible(time)? {
         Some((track, clip)) => json!({"track_id":track.id,"clip_id":clip.id,
             "asset_id":if clip.asset_id.is_empty() { Value::Null } else { json!(clip.asset_id) },
-            "sequence_id":clip.sequence_id,"source_time":clip.source_in.plus(time.minus(clip.start)?)?}),
+            "sequence_id":clip.sequence_id,"scene_id":clip.scene.as_ref().map(|s|&s.0.id),"source_time":clip.source_in.plus(time.minus(clip.start)?)?}),
         None => Value::Null,
     })
 }

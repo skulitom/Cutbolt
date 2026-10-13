@@ -1,5 +1,7 @@
 # Pixel scenes and timeline previews (v0.4)
 
+A scene can also be a [generated timeline clip](GENERATED_CLIPS.md), composed per frame without compiling a movie. Workspace scene files resolve into pinned saved recipes. The standalone scene commands below remain available.
+
 The same pixel recipes, 2D transforms, opacity, rectangle masks and blend modes also work as [native clip effects and properties](CLIP_EFFECTS.md) on footage. Scene curves remain layer-local; native clip curves use source time. Both paths share the layer equations; scene renders provide the comparison oracle.
 
 Text and geometric titles can use [explicit scene shorthand](SCENE_SHORTHAND.md), which expands

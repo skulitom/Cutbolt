@@ -303,6 +303,13 @@ Goal: transform, opacity, mask, blend mode and chroma key transparency are clip 
 
 ## Stage 5: generated clips
 
+Partial implementation, 13 October: native clips save scene recipes and stream their
+pictures without a compiled movie. Exact scene-asset, audio, dependency, saved-history
+and preview/export comparisons pass on Windows and Linux. See [the contract](../GENERATED_CLIPS.md)
+and [core evidence](../../verification/generated-clips-core-2026-10-13.json).
+Caption, graphics-placement and production-title migration, plus the complete stage-5
+quick gate, remain open. This checkpoint does not close the stage.
+
 Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame inside the timeline pass with no `scene.render` step.
 
 - Add `TrackClip.scene: Option<SceneRef>`, holding an inline scene or a document file in a workspace, as the third exclusive source beside `asset_id` and `sequence_id`.

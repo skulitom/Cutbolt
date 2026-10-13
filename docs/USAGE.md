@@ -1,5 +1,7 @@
 # Cutbolt local engine
 
+[Generated scene clips](GENERATED_CLIPS.md) place scene recipes directly on native video or audio tracks. Workspace document references resolve before saving; rendering uses the saved content without an intermediate movie.
+
 Native video clips accept [saved effects and properties](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key, plus transform, opacity, mask and blend mode. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Transparency reveals lower video tracks. The same edit works inside `sequence.edit` for child definitions and on video sequence instances.
 
 For original video that needs normalization, `media.add` with `input_root` saves a conversion recipe. Queued exports prepare it automatically; see [saved source preparation](AUTOMATIC_PREPARATION.md).

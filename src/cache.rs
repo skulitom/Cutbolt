@@ -204,6 +204,27 @@ fn project_sources(p: &Project, root: &Path, proxy_only: Option<&str>) -> Result
         ) {
             for track in &arrangement.tracks {
                 for clip in &track.clips {
+                    if let Some(scene) = &clip.scene {
+                        for (index, (file, bytes)) in crate::generated::dependencies(scene, root)?
+                            .into_iter()
+                            .enumerate()
+                        {
+                            output.push(Source {
+                                id: serde_json::to_string(&(
+                                    "generated_scene",
+                                    scope,
+                                    &track.id,
+                                    &clip.id,
+                                    index,
+                                ))?,
+                                path: file.path,
+                                identity: Identity {
+                                    bytes,
+                                    sha256: file.sha256,
+                                },
+                            });
+                        }
+                    }
                     for (index, effect) in clip.effects.iter().enumerate() {
                         if let crate::tracks::ClipEffect::Lut(lut) = effect {
                             let (path, _) = crate::scene::identity_bytes(&lut.file, root)?;

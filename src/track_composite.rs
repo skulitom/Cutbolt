@@ -26,6 +26,8 @@ pub(crate) struct Compositor {
     pub effect_resources: crate::clip_effects::Resources,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect_report: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_resources: Option<serde_json::Value>,
 }
 impl Compositor {
     fn plane(&self) -> usize {

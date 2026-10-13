@@ -1,0 +1,287 @@
+{
+  "date": "2026-10-13",
+  "kind": "generated_scene_source_core_partial_stage5",
+  "base_commit": "73e2b2ae7ccd12c32183534538bb20b639b15e7c",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/cache.rs": {
+      "bytes": 26131,
+      "sha256": "a9ec0d4f0dd31aa9343eb8e71cf2ef6406f41d0b07740121feee1bb1b42619af"
+    },
+    "src/check.rs": {
+      "bytes": 17187,
+      "sha256": "a1fda800bcc9e4c7d70f472ba07a64afecee5613a5ccdb807b03b0281c8fdce7"
+    },
+    "src/clip_effects.rs": {
+      "bytes": 6776,
+      "sha256": "e8ae34ff9d06181a4e26bd3234c41160194c0813a8bf0b8fc03c27709b18b312"
+    },
+    "src/commands.rs": {
+      "bytes": 112771,
+      "sha256": "30b722071e50256c97e166d3da592f75850578ff2b3804419fefaffa65612373"
+    },
+    "src/delivery/stream.rs": {
+      "bytes": 18420,
+      "sha256": "dbceae0bb055ecb72525caddbcd690bbb8bff813948fe17e970d1bce92d85769"
+    },
+    "src/generated.rs": {
+      "bytes": 9450,
+      "sha256": "51340515f3c6a2382bdda70792bf1749dd5c034b41fb16738c453d2320b5059d"
+    },
+    "src/graphics_place.rs": {
+      "bytes": 10635,
+      "sha256": "e4654b547155b4d604777f01e020108e3f6d628c66d500ed2b8a7dab0d7bdcdf"
+    },
+    "src/interchange/export.rs": {
+      "bytes": 10017,
+      "sha256": "14041b31f7f27a7d74a3bf1126e7bac72a5a9dbc39389d5a47382c1fff2cbe48"
+    },
+    "src/lib.rs": {
+      "bytes": 13006,
+      "sha256": "1d49f7d335313658925f079998e8a7f4010e3e4b83348fb8fe409df7fcc9fad9"
+    },
+    "src/mcp.rs": {
+      "bytes": 66466,
+      "sha256": "1f0bf3571d96f3ddc52750ceb1ce3c00c7538a8946be1425ba249299c517e6fc"
+    },
+    "src/model.rs": {
+      "bytes": 47085,
+      "sha256": "8e3f30ec66898d67a026c7ef32f4f868da50b5e0e7a820aaaa763a0bd39cc2d0"
+    },
+    "src/outline.rs": {
+      "bytes": 26513,
+      "sha256": "4fe441055c43849f4abad079328406fbbca18696aa24b7bae0e8617b415f2a34"
+    },
+    "src/preview.rs": {
+      "bytes": 23743,
+      "sha256": "811ee2cc0099fa8b455c2b3f8655aa419320f77e7aa62d89cf742465241ceb26"
+    },
+    "src/render.rs": {
+      "bytes": 64230,
+      "sha256": "97fd44568b39fd1dd4743ca9921913fa9b0014ed70afae867f63c22987c4d19a"
+    },
+    "src/review.rs": {
+      "bytes": 18437,
+      "sha256": "7cfef439ddc190834f719aa1b4bf43c381c1a6e29e90f4d8626d5fbcc395edc0"
+    },
+    "src/scene.rs": {
+      "bytes": 138829,
+      "sha256": "54214238e15080a5f38854e2f6a25b37271960c1b054b914ad30c27e8ef9e4c6"
+    },
+    "src/sequences.rs": {
+      "bytes": 10330,
+      "sha256": "2bb6707f600e151882b7208e1b64febabd1bb0a74ccbeddeda8b4688e4adb093"
+    },
+    "src/store.rs": {
+      "bytes": 57373,
+      "sha256": "f45df8c99ea42386f0ced35f5cf45d0d28d2ae1c13b3b00a689ac515da277720"
+    },
+    "src/track_composite.rs": {
+      "bytes": 24395,
+      "sha256": "c47f5eb34fadd4730adb663ffd13feb95b172335b55823a13b00dc5a5c95059f"
+    },
+    "src/track_render.rs": {
+      "bytes": 67030,
+      "sha256": "538328e5dce80e1ccd0b5b595bed22e2885d5839d0737dffde0739b11b3f4bad"
+    },
+    "src/track_stack.rs": {
+      "bytes": 19036,
+      "sha256": "9120c5bc80cc22e886894ede2197297c13e368fbf50f5974bbcca812da6a71a3"
+    },
+    "src/tracks.rs": {
+      "bytes": 67122,
+      "sha256": "3ed84a1a99c420586672fd8a50304fc3f670eaad3b1846460185bd997fb83e33"
+    },
+    "src/transcript_cut.rs": {
+      "bytes": 31824,
+      "sha256": "68299fba58d6e774a1a9efee927bed33e391193fa08bef3042b5b6b9d58d75ac"
+    },
+    "tests/generated_clips.py": {
+      "bytes": 18178,
+      "sha256": "ce9983ba9ef5519115d4834ca9a70bd1e171a6445a088469d350aca5527dd74f"
+    },
+    "tools/verify.py": {
+      "bytes": 46180,
+      "sha256": "fb36a75f7833c0c5633767c4240639e20ad35903470d8c81b4a8f16a7995989f"
+    }
+  },
+  "initial_cross_platform_inputs": {
+    "byte_identical_files": 287,
+    "manifest_sha256": "deb7c38b190d07ee8624c48309d71f3ca7064a95e4d91492e57ea9a5d84998af",
+    "manifest_format": "Sorted source/test/tool/build path + NUL + lowercase content SHA-256 + LF. Checkout HEAD labels are not implementation identities."
+  },
+  "final_cross_platform_inputs": {
+    "byte_identical_files": 287,
+    "manifest_sha256": "1052c8e0ce8db93468572b65ad71e74f3a880eca05a33d371e9ae48a57c8d57a",
+    "manifest_format": "Sorted source/test/tool/build path + NUL + lowercase content SHA-256 + LF. Checkout HEAD labels are not implementation identities."
+  },
+  "changes_after_initial_regressions": [
+    "src/check.rs",
+    "src/transcript_cut.rs",
+    "tests/generated_clips.py"
+  ],
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 254,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "rust_log": {
+        "bytes": 22197,
+        "sha256": "28cab282f6423e3a099cf5975e790641458364aa0f6da3260a6912cbf844e541"
+      },
+      "initial_targeted": {
+        "stages": [
+          "agent_costs",
+          "cache_previews",
+          "clip_effects",
+          "generated_clips",
+          "native_layers",
+          "overlays",
+          "proxies",
+          "render_failures",
+          "scenes",
+          "sequences",
+          "sessions",
+          "skills",
+          "tracks"
+        ],
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 350,
+        "report": {
+          "bytes": 10026,
+          "sha256": "04f857e041338e0faaa191249ff5902f2ffc60d42251cf3e7743b21f0796f90d"
+        },
+        "log": {
+          "bytes": 24106,
+          "sha256": "37241a930fcee4ec196edad6031f034d86bd6b9ef4dd1ad6d033a51ed2c09b30"
+        }
+      },
+      "final_static_integration": {
+        "stages": [
+          "agent_ergonomics",
+          "generated_clips",
+          "integration",
+          "transcripts"
+        ],
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 59,
+        "report": {
+          "bytes": 299,
+          "sha256": "735f7095e96b58f924227e76b0dbf9bd61af7d4bf95511ac5ae6acbcd27577fb"
+        },
+        "log": {
+          "bytes": 531,
+          "sha256": "ee9cf47698b572f2af37b0d14dd06df76b4ba842ab4ac482b39b7fb9f872dc28"
+        }
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 253,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "rust_log": {
+        "bytes": 21811,
+        "sha256": "be4e32b0e132a5f3bf81b99eb374d184b63d4066dbf6d596fc7f0b71160551e6"
+      },
+      "initial_targeted": {
+        "stages": [
+          "agent_costs",
+          "cache_previews",
+          "clip_effects",
+          "generated_clips",
+          "native_layers",
+          "overlays",
+          "proxies",
+          "render_failures",
+          "scenes",
+          "sequences",
+          "sessions",
+          "skills",
+          "tracks"
+        ],
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 186,
+        "report": {
+          "bytes": 9550,
+          "sha256": "8b4fed58f0087437a3d7c7bc9c7adb02f7cfe96b45b02ee01fd4046bcc12bddd"
+        },
+        "log": {
+          "bytes": 23720,
+          "sha256": "e5c3b7eb9f60b667a0db1a629593e8d540fbd88e9d3e3e0946619bd64d3e2969"
+        }
+      },
+      "final_static_integration": {
+        "stages": [
+          "agent_ergonomics",
+          "generated_clips",
+          "integration",
+          "transcripts"
+        ],
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 38,
+        "report": {
+          "bytes": 283,
+          "sha256": "97fc5a12b1e028ea129589618ceddfc89c28de39406b39e6f5efc8763d883a4e"
+        },
+        "log": {
+          "bytes": 486,
+          "sha256": "786b14811dd235136ade48f2b04eff309295df9b47e0ba1f0e51ccc9e857fd40"
+        }
+      }
+    }
+  },
+  "requirement_audit": {
+    "third_exclusive_source": "TrackClip.scene saves the resolved inline scene in schema 2; workspace file/select references expand and identities resolve before the atomic edit.",
+    "streaming": "Scene FrameSource calls the existing per-frame composer and supplies native planar pixels; no scene video encoder or intermediate movie is used.",
+    "oracle": "Full and trimmed pictures and PCM equal independently compiled scene assets; exact source slices, transparency, nested clips, saved properties, frame/range/proxy previews and queued reference export are exercised.",
+    "bounds": "Existing scene limits apply. Identical recipes share a prepared source across video/audio/child branches and chunks; retained payload is capped at 1 GiB, with separate frame-buffer accounting.",
+    "dependencies": "Scene input identities are saved, checked on cache hits (including unused definitions), in timeline.check and fully before publication. Same-length changed inputs reject output and originals are restored/preserved in fixtures.",
+    "history": "Receipts include saved recipes; identical retry and undo preserve immutable revisions. Later authoring-JSON changes do not alter a saved project.",
+    "static_tools": "Generated clips are not grouped as empty media IDs by timeline.check; text cuts explicitly reject generated bindings; interchange reports a critical unsupported generated-source loss.",
+    "remaining_stage5": "Caption overlays, graphics.place and production-title workflows still compile. Their migration and a complete stage-5 quick gate remain open."
+  },
+  "prior_background": {
+    "commit": "1486cd703b8210621d91fbfe6aeffedcf21ee72e",
+    "passed": 16,
+    "failed": 0,
+    "superseded_skips": 51,
+    "not_started": 0,
+    "wall_seconds": 2357
+  },
+  "prior_shipment": {
+    "commit": "73e2b2ae7ccd12c32183534538bb20b639b15e7c",
+    "status": "pushed",
+    "gate": "four fixtures plus Rust passed; fourteen reused; fifty-nine deferred; 200 seconds",
+    "background": "still pending at this checkpoint; frozen stage-4 full quick coordinator waits for its completion"
+  },
+  "development_failures": [
+    "Initial lint found manual checked division; fixed before media checks.",
+    "Expanded workspace-document fixture found resolved_identities appended to a strict timeline.apply Project; fixed so the returned snapshot can be used directly by the next command.",
+    "Review found generated clips represented as empty media IDs in static checks and text cuts; focused final fixtures cover the corrections.",
+    "One final-check invocation used the stale plan selector agents, rejected before any fixture ran. The actual integration stage includes tests/agents.py; corrected both invocations and the plan spelling."
+  ],
+  "limitations": [
+    "Targeted correctness evidence only; no stage-5 completion, new points, thorough milestone or speed claim.",
+    "Retained payload charging covers pixels, PCM, LUT tables and conservatively charged sampled/recipe data; it is not an exact process RSS ceiling.",
+    "Compiled standalone scenes and existing high-level workflows remain available. Their migration is a separate checkpoint.",
+    "The static checker detects source-identity failures and avoids false media matches; it does not infer generated speech transcripts.",
+    "Agent-cost replays are scripted regression checks; they are not new fresh-agent trials.",
+    "Final static-check fixes were followed by Rust checks and generated/transcript/integration/MCP/ergonomics fixtures; unchanged rendering paths retain the initial thirteen-suite evidence."
+  ]
+}

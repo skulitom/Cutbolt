@@ -81,6 +81,12 @@ pub(crate) enum Generated {
         first: u64,
         samples: u64,
     },
+    SceneAudio {
+        path: PathBuf,
+        scene: std::sync::Arc<crate::scene::FrameSource>,
+        first: u64,
+        samples: u64,
+    },
     /// A window's audio mixed through track and master limiters.
     Mix(Box<crate::dynamics::Premix>),
 }
@@ -100,6 +106,20 @@ impl Generated {
                 let file = TempFile(path.clone());
                 let mut wave = crate::pcm_stream::Writer::new(output, *samples)?;
                 video.read_audio(*first, *samples, control, |bytes| wave.push(bytes))?;
+                wave.finish_file()?;
+                return Ok(file);
+            }
+            Generated::SceneAudio {
+                path,
+                scene,
+                first,
+                samples,
+            } => {
+                control.check()?;
+                let output = fs::File::create_new(path)?;
+                let file = TempFile(path.clone());
+                let mut wave = crate::pcm_stream::Writer::new(output, *samples)?;
+                scene.write_audio(*first, *samples, control, &mut wave)?;
                 wave.finish_file()?;
                 return Ok(file);
             }
@@ -197,6 +217,13 @@ fn chunk_summary<S: serde::Serializer>(
                 "allocated_table_bytes":report["allocated_table_bytes"],
                 "maximum_table_bytes":report["maximum_table_bytes"],
             });
+        }
+        if let Some(report) = chunk
+            .compositor
+            .as_ref()
+            .and_then(|c| c.scene_resources.as_ref())
+        {
+            summary["scene_resources"] = report.clone();
         }
         seq.serialize_element(&summary)?;
     }
@@ -300,6 +327,7 @@ fn chunked(
     for chunk in &mut chunks {
         if let Some(compositor) = &mut chunk.compositor {
             compositor.effect_report = compositor.effect_resources.report()?;
+            compositor.scene_resources = compositor.effect_resources.scenes.report()?;
         }
     }
     let mut sources: Vec<Source> = Vec::new();

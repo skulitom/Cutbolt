@@ -29,6 +29,8 @@ pub struct Placement {
     pub track_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<crate::generated::SceneRef>,
     pub timeline_start: Time,
     pub clip: Clip,
     /// Audio-track clip gain and fades, when they differ from unity without fades.
@@ -467,6 +469,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                         index,
                         track_id: Some(track.id.clone()),
                         sequence_id: clip.sequence_id.clone(),
+                        scene: clip.scene.clone(),
                         timeline_start: clip.start,
                         clip: clip.legacy(),
                         levels: clip.adjusts_audio().then_some(Levels {
@@ -490,6 +493,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                 index,
                 track_id: None,
                 sequence_id: None,
+                scene: None,
                 timeline_start: start,
                 clip: clip.clone(),
                 levels: None,
@@ -515,6 +519,7 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
                 // Array order within a placed track does not change its playback.
                 a.track_id != b.track_id
                     || a.sequence_id != b.sequence_id
+                    || a.scene != b.scene
                     || a.timeline_start != b.timeline_start
                     || a.clip != b.clip
                     || a.levels != b.levels
@@ -598,6 +603,7 @@ fn summarize_shifts(clips: Vec<ClipChange>) -> Result<(Vec<ClipChange>, Option<S
             a.clip == b.clip
                 && a.track_id == b.track_id
                 && a.sequence_id == b.sequence_id
+                && a.scene == b.scene
                 && a.levels == b.levels
                 && a.transform == b.transform
                 && a.effects == b.effects
