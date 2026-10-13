@@ -1,0 +1,109 @@
+{
+  "date": "2026-10-13",
+  "kind": "native_render_bounds_and_transition_continuity",
+  "base_commit": "00c8d704f8127fed1b6e260837f0d6e966b46cf8",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/render.rs": {
+      "bytes": 63252,
+      "sha256": "c40ac605921f72ca9002b7196a55ae73165da729a0caa30242fa66516b41e812"
+    },
+    "src/store.rs": {
+      "bytes": 56739,
+      "sha256": "33968e13ea8b3a406173551945778352d1c2ff34a2681db2589a270b658ec7e8"
+    },
+    "src/track_render.rs": {
+      "bytes": 96473,
+      "sha256": "42cc04dd5d4f8c9f543a3c644f7393e2fd36a358c0ed78e53b69ef17cf44e964"
+    },
+    "src/tracks.rs": {
+      "bytes": 65468,
+      "sha256": "3f0013c6c74840e649daa6ed68ca95d39dcfb1e4399ba02227338b7dfa1ae10a"
+    },
+    "tests/clip_effects.py": {
+      "bytes": 24650,
+      "sha256": "fd490b5b93f019447bd06484d6316dbb5553ea61a0b2213df06d49f47b86e1a9"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 259,
+    "manifest_sha256": "9e835f176f8c2b132940cf992a094080abd590473670d4d3e69ab2742444d129",
+    "manifest_format": "sorted git-tracked src, tests, Cargo.toml, Cargo.lock, build.rs, tools/verify.py; each UTF-8 path + NUL + lowercase content SHA-256 + LF",
+    "linux_checkout_commit_is_not_the_implementation_identity": true
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 253,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "rust_log_sha256": "bc4242dadb9cf0aa7027dd50d323afd80b953e00d2730593030f7af4db5bd3cf",
+      "targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "large_imports",
+          "render_failures",
+          "sequences",
+          "track_edits",
+          "transitions"
+        ],
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 379,
+        "report_sha256": "80b6eea164cd0c0f62423096850627cd321d92e0ec6857a2cdd61af119075324",
+        "log_sha256": "ef5aa3ef5ca6c6b135d76b21ddbfde7c80e7f37850695948b5ba4b3dc0c6b7f4"
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 252,
+      "clippy_all_targets_warnings_denied": "passed",
+      "combined_build_test_log_sha256": "61ce40defd3fe79384fc238db38cae729c0229f15e853e1edb716ed10a3f4a96",
+      "targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "large_imports",
+          "render_failures",
+          "sequences",
+          "track_edits",
+          "transitions"
+        ],
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 253,
+        "report_sha256": "5c7efdf1ed225efd720f6596ff8677fb788d8fb860a6af2ab80f42ba9560297d",
+        "log_sha256": "61ce40defd3fe79384fc238db38cae729c0229f15e853e1edb716ed10a3f4a96"
+      }
+    }
+  },
+  "specific_checks": [
+    "All render chunks retain one shared 128 MiB LUT allocation pool; repeated declarations reuse their table",
+    "65 cuts force two chunks and introduce distinct LUTs on opposite sides of the boundary; both plan summaries report the same two-table allocation",
+    "The complete allocation equals two single-table allocations, including reserved vector capacity",
+    "All 65 output frames equal the extracted-frame scene oracle, for reference render and range delivery",
+    "Transition edits reject differing video effect recipes across touching source-continuous fragments without changing the input snapshot",
+    "One atomic remove-transition, edit-fragments, restore-transition batch succeeds; each intermediate operation is valid",
+    "The opposite transition endpoint can keep an independent recipe; unchanged split/transition fixtures remain passing",
+    "Existing resource-pool unit tests enforce deduplication and rejection above the retained-table limit"
+  ],
+  "prior_shipment_audit": {
+    "commit": "295ee839b2",
+    "background_passed": 19,
+    "background_failed": 0,
+    "background_skipped": 50,
+    "background_not_started": 0,
+    "wall_seconds": 1246,
+    "skip_reason": "Superseded by the descendant 00c8d70 background verification; not claimed as passes"
+  },
+  "limits": [
+    "These fixes close bounds/recipe gaps in the current native stack; they do not complete stage4 structural properties or legacy overlay sugar",
+    "Stage5 generated clips and stage6 precise working space remain open",
+    "Initial unit run exposed an invalid test assumption about intermediate batch validity; the corrected transaction is tested on both platforms",
+    "An initial integration assertion tried to read omitted internal chunk graphs; compact allocation summaries were added and the final fixture reads those",
+    "No performance, new progress points or thorough milestone claim; frozen stage3 full quick and shipment backgrounds are separate runs"
+  ]
+}

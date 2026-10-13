@@ -1209,6 +1209,58 @@ mod tests {
         assert_eq!(before.apply(0, vec![instance]).unwrap().schema_version, 2);
     }
 
+    #[test]
+    fn transitions_reject_different_video_recipes_across_continuous_fragments() {
+        let mut before = sample();
+        let asset = before.assets[0].id.clone();
+        before.clips.clear();
+        let edit = |value| serde_json::from_value::<Operation>(value).unwrap();
+        let track_edit = |value| edit(json!({"op":"tracks.edit","edit":value}));
+        let split = |id: &str, new_id: &str, at: Time| {
+            track_edit(json!({"op":"split",
+            "clip_ids":[id],"at":at,"links":"include","right_clip_ids":[{"id":id,"new_id":new_id}],"right_link_ids":[]}))
+        };
+        let p = before.apply(0, vec![
+            track_edit(json!({"op":"create","duration":t(5)})),
+            track_edit(json!({"op":"add","track":{"id":"v","kind":"video","locked":false,"enabled":true,"clips":[]}})),
+            track_edit(json!({"op":"place","track_id":"v","collision":"reject","clip":{
+                "id":"c","asset_id":asset,"start":t(0),"source_in":t(0),"duration":t(5)}})),
+            split("c","right",t(2)),
+            track_edit(json!({"op":"transition_set","track_id":"v","transition":{
+                "id":"fx","left_id":"c","right_id":"right","before":t(1),"after":t(1),"kind":"dissolve"}})),
+            split("c","tail",Time::new(7,5).unwrap()),
+        ]).unwrap();
+        let grade = json!({"kind":"grade", "exposure_milli":500, "contrast_milli":1000,"white_balance_milli":[1000,1000,1000]});
+        let effect = |id| track_edit(json!({"op":"clip_effects","clip_id":id,"effects":[grade]}));
+        for id in ["c", "tail"] {
+            let failure = p.apply(1, vec![effect(id)]).unwrap_err();
+            assert_eq!(failure.code, "INVALID_TRANSITION");
+            assert!(failure.message.contains("recipes"));
+        }
+        // Every intermediate operation remains valid: remove and restore the transition
+        // within the same atomic transaction while updating all outgoing fragments.
+        let transition = p.tracks.as_ref().unwrap().tracks[0].transitions[0].clone();
+        let matching = p
+            .apply(
+                1,
+                vec![
+                    track_edit(json!({"op":"transition_remove","track_id":"v","id":"fx"})),
+                    effect("c"),
+                    effect("tail"),
+                    track_edit(
+                        json!({"op":"transition_set","track_id":"v","transition":transition}),
+                    ),
+                ],
+            )
+            .unwrap();
+        matching.validate().unwrap();
+        assert!(!p.has_clip_effects());
+        assert!(matching.has_clip_effects());
+        // The incoming endpoint is independent of the outgoing endpoint recipe.
+        let different = matching.apply(2, vec![effect("right")]).unwrap();
+        different.validate().unwrap();
+    }
+
     fn trim(duration: u64) -> Mutation {
         Mutation::Apply {
             operations: vec![Operation::Trim {

@@ -1,5 +1,35 @@
 # Progress history
 
+## 13 October 2026: whole-export LUT bound and transition recipe consistency
+
+Long native renders now share one retained LUT pool across all render chunks,
+closing a gap where each chunk could independently consume the documented 128 MiB
+limit. Chunk summaries expose only the shared allocation totals; internal graphs
+remain omitted. Reference and range/delivery planning use the same shared context.
+Video transitions spanning source-continuous split fragments now reject differing
+effect/placement recipes rather than silently rendering an endpoint's recipe across
+those fragments. Removing the transition, editing the fragments and restoring it
+within one atomic batch retains the existing intermediate-validity rule.
+
+[Targeted evidence](../verification/render-invariants-2026-10-13.json): 253 Windows
+and 252 Linux Rust tests and warnings-denied lint pass. Six suites pass on each
+platform: clip effects, track edits, transitions, sequences, large imports and
+render failure handling. All 259 compared source, fixture, build-input and verifier
+files are byte-identical. A 65-cut, two-chunk case proves shared two-table allocation
+and exact scene-reference pixels through both reference render and range delivery.
+The transaction test checks rejection without mutation and successful matching
+fragment updates; existing split, transition and resource-budget tests still pass.
+
+The initial test runs found two test assumptions to correct: intermediate edits
+must remain valid, and chunk graphs are intentionally omitted from plan responses.
+The final runs use a valid transaction and the new compact allocation summaries.
+These are fixes within the partial stage-4 renderer, not completion of structural
+clip properties, generated clips or precise working color. No points, speed claim
+or full-thorough evidence change. The 295ee83 background run finished 19 passes,
+no failures and 50 explicit superseded skips; descendant verification and the
+frozen f13453d full quick run remain separate. This commit's shipment gate and
+background checks must be audited after commit and any failures fixed forward.
+
 ## 13 October 2026: nested clip effects with complete saved-catalog checks
 
 Video clips inside child definitions and video sequence instances now accept the

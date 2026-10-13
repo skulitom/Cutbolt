@@ -41,6 +41,11 @@ sequence instance processes the child's already composited RGB8 output using tha
 child's source clock; the child clips keep their own source clocks. Child gaps remain
 opaque black before instance effects. Curves are prepared
 once for each decoder and sampled per frame; memory does not grow with source duration.
+A transition spanning split fragments requires the same effect and placement recipe
+through each endpoint span. A conflicting edit fails atomically with
+`INVALID_TRANSITION`. To change those fragments together, remove the transition,
+edit each fragment and restore the transition within one atomic batch; every
+intermediate operation must still describe a valid timeline.
 
 Processing happens before transition mixing and before the existing overlay
 crop, shrink, opacity and placement operations. Correction masks use the source
@@ -57,7 +62,7 @@ to decode originals into the same declared working transfer as scenes. A LUT use
 `{"kind":"lut","file":{"path":"look.cube","sha256":"…","bytes":123},"interpolation":"linear"}`;
 its path is relative to `input_root`. See [LUTs](LUTS_SCOPES.md) for accepted tables and
 interpolation methods. Each file is bounded to 8 MiB; all stacks and decoder
-branches share a 128 MiB retained-table budget. Repeated identical declarations
+branches and render chunks share one 128 MiB retained-table budget for the complete export. Repeated identical declarations
 reuse the loaded table. Conflicting identities for the same path fail.
 
 The ordered native compositor retains the key's resulting straight alpha. A keyed
@@ -92,13 +97,15 @@ render `sources` with zero media frames/samples, and receive a full content hash
 check before output publication. Cache hits also verify LUT identity and cannot
 reuse an old preview after its table changes. Cache keys validate LUTs throughout
 the saved sequence catalog, including unused definitions. Full compositor plans report table
-resources and each decoder's effect recipe and starting source clock.
+resources and each decoder's effect recipe and starting source clock. Chunk summaries
+include the shared table count, allocated bytes and maximum bytes under
+`effect_resources`; their internal graphs remain omitted.
 
 `tests/clip_effects.py` compares FFV1 and direct H.264 effects against scene renders
 of the same extracted source frames, with zero RGB tolerance. It also checks
 source-clock slips/splits, both transition inputs, cropped overlays, previews,
 proxies, range and queued exports, final H.264 output, and LUT cache dependencies.
-Multilevel child/instance effects are compared against separately rendered scene
+A 65-cut case checks one shared LUT allocation across render chunks and exact reference/range-delivery output. Multilevel child/instance effects are compared against separately rendered scene
 boundaries to preserve each RGB8 rounding step, with trimmed/split clocks, frame/range
 previews and rejection of changed nested LUTs before rendering or cache reuse.
 The fixture's direct-source reference uses the existing explicit conform path.

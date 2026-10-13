@@ -2006,6 +2006,7 @@ fn compile<'a>(
     duration: Time,
     (video, audio): (bool, bool),
     control: &'a dyn media::Control,
+    effect_resources: &crate::clip_effects::Resources,
 ) -> Result<Compiled<'a>> {
     project.validate()?;
     media::input_root(root)?;
@@ -2025,6 +2026,7 @@ fn compile<'a>(
         ));
     }
     let mut graph = Graph::new(project, root, control);
+    graph.effect_resources = effect_resources.clone();
     graph.converted =
         crate::converted::sources(project, root, media::source_preparation_allowed(), control)?;
     graph.audio_only = !video;
@@ -2123,6 +2125,7 @@ pub(crate) fn plan(
         Time::ZERO,
         project.duration()?,
         control,
+        &crate::clip_effects::Resources::default(),
     )
 }
 /// The premix of a whole timeline's audio, with or without limiters, in `parts` or more runs, and
@@ -2174,6 +2177,7 @@ pub(crate) fn plan_audio_window(
         duration,
         (false, true),
         &media::Uncontrolled,
+        &crate::clip_effects::Resources::default(),
     )?
     .graph
     .finish();
@@ -2216,10 +2220,19 @@ pub(crate) fn plan_window(
     start: Time,
     duration: Time,
     control: &dyn media::Control,
+    effect_resources: &crate::clip_effects::Resources,
 ) -> Result<Plan> {
     let output = render::destination(output, output_root)?;
     let frames = duration.units(project.frame_rate)?;
-    let mut compiled = compile(project, input_root, start, duration, (true, true), control)?;
+    let mut compiled = compile(
+        project,
+        input_root,
+        start,
+        duration,
+        (true, true),
+        control,
+        effect_resources,
+    )?;
     let compositor = compiled.compositor(frames)?;
     let (level, slices) = media::ffv1_encoding(project.width, project.height);
     let mut tail = Vec::new();
@@ -2301,6 +2314,7 @@ pub(crate) fn read_frame(
         Time::new(project.frame_rate.den, project.frame_rate.num)?,
         (true, false),
         &media::Uncontrolled,
+        &crate::clip_effects::Resources::default(),
     )?;
     let pixels = if let Some(compositor) = compiled.compositor(1)? {
         track_composite::frame_rgb(&compositor, Duration::from_secs(120), &media::Uncontrolled)?

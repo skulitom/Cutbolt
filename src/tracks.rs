@@ -333,6 +333,8 @@ impl Track {
             };
             if clip.asset_id != anchor.asset_id
                 || clip.sequence_id != anchor.sequence_id
+                || (self.kind == Kind::Video
+                    && (clip.effects != anchor.effects || clip.transform != anchor.transform))
                 || clip
                     .source_in
                     .plus(anchor.start)?
@@ -803,7 +805,7 @@ impl Arrangement {
                 {
                     return Err(error(
                         "INVALID_TRANSITION",
-                        "Transition interval crosses a gap or discontinuous source mapping",
+                        "Transition interval crosses a gap, discontinuous source mapping or differing video effect/transform recipes",
                     ));
                 }
                 if track.kind == Kind::Audio

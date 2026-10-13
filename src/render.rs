@@ -177,7 +177,7 @@ impl Plan {
     }
 }
 
-/// Chunks are reported by size only; their graphs are internal.
+/// Chunks report size and shared effect allocation totals; their graphs remain internal.
 fn chunk_summary<S: serde::Serializer>(
     chunks: &[Plan],
     serializer: S,
@@ -185,7 +185,20 @@ fn chunk_summary<S: serde::Serializer>(
     use serde::ser::SerializeSeq;
     let mut seq = serializer.serialize_seq(Some(chunks.len()))?;
     for chunk in chunks {
-        seq.serialize_element(&json!({"frames":chunk.frames,"samples":chunk.samples}))?;
+        let mut summary = json!({"frames":chunk.frames,"samples":chunk.samples});
+        if let Some(report) = chunk
+            .compositor
+            .as_ref()
+            .and_then(|c| c.effect_report.as_ref())
+        {
+            summary["effect_resources"] = json!({
+                "scope":"whole_render_shared",
+                "lut_table_count":report["lut_tables"].as_array().map(Vec::len),
+                "allocated_table_bytes":report["allocated_table_bytes"],
+                "maximum_table_bytes":report["maximum_table_bytes"],
+            });
+        }
+        seq.serialize_element(&summary)?;
     }
     seq.end()
 }
@@ -281,6 +294,13 @@ fn chunked(
     for (index, (start, duration)) in windows.into_iter().enumerate() {
         let placeholder = output.with_file_name(format!(".cutbolt-chunk-{index}.{extension}"));
         chunks.push(single(start, duration, &placeholder)?);
+    }
+    // All windows retain one pool. Refresh earlier reports after later windows have
+    // loaded their tables so every chunk describes the complete retained allocation.
+    for chunk in &mut chunks {
+        if let Some(compositor) = &mut chunk.compositor {
+            compositor.effect_report = compositor.effect_resources.report()?;
+        }
     }
     let mut sources: Vec<Source> = Vec::new();
     for source in chunks.iter().flat_map(|c| &c.sources) {
@@ -1051,6 +1071,7 @@ fn plan_controlled(
         media::source_preparation_allowed(),
         control,
     )?;
+    let effect_resources = crate::clip_effects::Resources::default();
     if let Some(plan) = chunked(
         project,
         output_root,
@@ -1059,7 +1080,16 @@ fn plan_controlled(
         Time::ZERO,
         project.duration()?,
         |start, duration, chunk| {
-            plan_range(project, input_root, output_root, chunk, start, duration)
+            plan_range_controlled(
+                project,
+                input_root,
+                output_root,
+                chunk,
+                start,
+                duration,
+                control,
+                &effect_resources,
+            )
         },
     )? {
         return Ok(plan);
@@ -1336,6 +1366,29 @@ pub(crate) fn plan_range(
     start: Time,
     duration: Time,
 ) -> Result<Plan> {
+    plan_range_controlled(
+        project,
+        input_root,
+        output_root,
+        output,
+        start,
+        duration,
+        &media::Uncontrolled,
+        &crate::clip_effects::Resources::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_range_controlled(
+    project: &Project,
+    input_root: &Path,
+    output_root: &Path,
+    output: &Path,
+    start: Time,
+    duration: Time,
+    control: &dyn media::Control,
+    effect_resources: &crate::clip_effects::Resources,
+) -> Result<Plan> {
     project.validate()?;
     start.units(project.frame_rate)?;
     if duration.units(project.frame_rate)? == 0
@@ -1350,7 +1403,7 @@ pub(crate) fn plan_range(
         project,
         input_root,
         media::source_preparation_allowed(),
-        &media::Uncontrolled,
+        control,
     )?;
     if let Some(plan) = chunked(
         project,
@@ -1360,7 +1413,16 @@ pub(crate) fn plan_range(
         start,
         duration,
         |start, duration, chunk| {
-            plan_range(project, input_root, output_root, chunk, start, duration)
+            plan_range_controlled(
+                project,
+                input_root,
+                output_root,
+                chunk,
+                start,
+                duration,
+                control,
+                effect_resources,
+            )
         },
     )? {
         return Ok(plan);
@@ -1373,7 +1435,8 @@ pub(crate) fn plan_range(
             output,
             start,
             duration,
-            &media::Uncontrolled,
+            control,
+            effect_resources,
         )
     } else {
         let selected = crate::tracks::range(project, start, duration)?;

@@ -252,6 +252,41 @@ def run(root):
     render(selected,'proxy-selected-final',references['ffv1','selective'][3*STRIDE:9*STRIDE])
     passed.append('clip_effects.proxy_preview_coordinates_and_original_quality_final')
 
+    # A 65-cut render needs more than one graph window. Distinct tables introduced
+    # in different windows still belong to one bounded allocation for the export.
+    second_table = sources/'other-channels.cube'
+    second_table.write_text('LUT_1D_SIZE 2\n0.1 0 0.3\n0.9 1 0.7\n',encoding='ascii')
+    second_lut = {'kind':'lut','file':identity(second_table,sources),'interpolation':'linear'}
+    source_hashes[second_table] = hashlib.sha256(second_table.read_bytes()).hexdigest()
+    second_reference = scene_render('ffv1-other-lut',[second_lut])
+    many = project('ffv1',0,N)
+    ops = [edit('duration',duration=time(65,25)),edit('remove',clip_ids=['c'],links='include')]
+    for n in range(65):
+        clip = placement('cut-'+str(n),'source',n,1,n%N)
+        clip['effects'] = [lut if n<64 else second_lut]
+        ops.append(edit('place',track_id='v',clip=clip,collision='reject'))
+    many = apply(many,ops)
+    plan = call('render.plan',project=many,input_root=str(sources),output_root=str(outputs),output=str(outputs/'chunk-plan.mkv'))
+    assert len(plan['chunks'])==2
+    reports = [chunk['effect_resources'] for chunk in plan['chunks']]
+    assert reports[0]==reports[1]
+    assert reports[0]['scope']=='whole_render_shared'
+    assert reports[0]['lut_table_count']==2
+    assert reports[0]['maximum_table_bytes']==128*1024*1024
+    single_plan = call('render.plan',project=snapshots['ffv1','lut'],input_root=str(sources),
+                       output_root=str(outputs),output=str(outputs/'single-lut-plan.mkv'))
+    one_table_bytes = single_plan['compositor']['effect_report']['allocated_table_bytes']
+    # Charge actual vector capacity, including reserved entries, not only payload size.
+    assert one_table_bytes >= 2*3*8
+    assert reports[0]['allocated_table_bytes']==2*one_table_bytes
+    wanted = b''.join((references['ffv1','lut'] if n<64 else second_reference)[(n%N)*STRIDE:(n%N+1)*STRIDE] for n in range(65))
+    render(many,'chunked-shared-luts',wanted)
+    delivery = outputs/'chunked-shared-luts-delivery.mkv'
+    call('export.run',project=many,input_root=str(sources),output_root=str(outputs),output=str(delivery),
+         profile='reference',streams='video',range={'start':time(0),'duration':time(65,25)})
+    assert decoded(delivery)==wanted
+    passed.append('clip_effects.one_lut_budget_across_reference_and_delivery_chunks')
+
     # Child effects and effects on child instances each run on their own source clock.
     # Compile each reference boundary independently to preserve its RGB8 rounding.
     nested_projects = {}

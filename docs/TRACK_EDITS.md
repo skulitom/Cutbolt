@@ -29,7 +29,7 @@ This example assumes `v0` and `a0` are linked by `link0`, both contain time 9/25
 {"op":"tracks.edit","edit":{"op":"split","clip_ids":["v0"],"at":{"num":9,"den":25},"links":"include","right_clip_ids":[{"id":"v0","new_id":"v0-r"},{"id":"a0","new_id":"a0-r"}],"right_link_ids":[{"id":"link0","new_id":"link0-r"}]}}
 ```
 
-Splits can fall inside an existing transition. The outgoing endpoint becomes its last surviving fragment and the incoming endpoint its first. A transition may span several touching fragments only when they retain the same asset and exact continuous source mapping on their respective sides of the cut. Its original clock and every rendered frame/sample remain unchanged. A gap or discontinuous source mapping inside that interval fails validation. Repeated splits obey the same rule.
+Splits can fall inside an existing transition. The outgoing endpoint becomes its last surviving fragment and the incoming endpoint its first. A transition may span several touching fragments only when they retain the same asset and exact continuous source mapping on their respective sides of the cut. Its original clock and every rendered frame/sample remain unchanged. A gap or discontinuous source mapping inside that interval fails validation. Video fragments on each side must also retain identical effect and placement recipes; conflicting edits fail atomically with `INVALID_TRANSITION`. Remove the transition, update the affected fragments and restore the transition within one atomic batch, keeping every intermediate operation valid. Repeated splits obey the same rule.
 
 For example, these individual operations shift the middle clip's content, the first cut, or the middle clip's position by one frame:
 
