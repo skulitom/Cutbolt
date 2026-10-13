@@ -1,5 +1,37 @@
 # Progress history
 
+## 14 October 2026: precise footage, proxies and publication checks
+
+The new registered `working_footage` fixture checks all three nondefault working
+modes on original FFV1, direct H.264/HEVC and cached 10-bit footage. Its 93 render
+cases and 1,044 frames per platform match exactly: animated grade/LUT/key/spatial
+stacks, source-clock trim/slip/split, nested direct clips, previews, ranges and
+queued preparation. Independent Fraction references cover block-floor shrink,
+authored byte-alpha rounding, feathered masks and native straight alpha.
+
+Reference-master proxies retain original coordinates and reduced-canvas dither;
+final renders use originals. Automatic BT.709 preparation agrees with both the
+explicit declaration and precise-mode fallback. Generated PCM and audio-only
+windows remain sample-exact. Cache keys separate working contexts; changed LUTs
+reject both cache hits and completed PNG encoding before publication. All original
+fixture bytes are restored and verified. No engine behavior changed in this checkpoint.
+
+Nine existing strict regression suites passed on Windows/Linux, followed by the
+corrected registered footage fixture (246/139 seconds).
+Rust tests (261/260), all-target lint and formatting pass. Initial fixture drafts
+incorrectly assumed automatic sRGB normalization and direct proxy generation,
+expected the wrong delivery error code, omitted mandatory scene layers, and
+changed the decoder without refreshing its index. The final fixture follows the
+existing contracts. [Evidence](../verification/working-footage-2026-10-14.json)
+retains both numerical reports, hashes and the bounded acceptance scope.
+
+The previous `b24a712` checkpoint shipped: 27 fixtures plus Rust passed, seven
+unchanged passes were reused and 50 fixtures deferred, with no failures or skips.
+Its background transcription and direct-source checks passed; remaining results
+must be checked forward. This checkpoint needs its own ship gate. The complete default-path quick
+gate, final placed-track performance comparison and whole-plan audit remain open.
+The last thorough evidence remains unchanged; no points or milestone are awarded.
+
 ## 13 October 2026: saved working precision and banding references
 
 Projects now opt into 8/16-bit encoded/linear working storage through

@@ -44,7 +44,7 @@ For direct CLI use, [the usage guide](docs/USAGE.md) describes JSON requests and
 
 ## Current scope
 
-Version 0.4.0 is an actively developed engine. Supported formats and operations have explicit limits; the general timeline currently uses 8-bit SDR processing. See [direct footage](docs/DIRECT_SOURCES.md), [clip effects](docs/CLIP_EFFECTS.md), [generated clips](docs/GENERATED_CLIPS.md) and [export formats](docs/EXPORT.md) for the current contracts.
+Version 0.4.0 is an actively developed engine. Supported formats and operations have explicit limits; the timeline uses 8-bit SDR processing by default. See [direct footage](docs/DIRECT_SOURCES.md), [clip effects](docs/CLIP_EFFECTS.md), [generated clips](docs/GENERATED_CLIPS.md) and [export formats](docs/EXPORT.md) for the current contracts.
 
 Verification checks decoded pictures, audio samples, timing and saved-edit behavior against independent expectations. [Published evidence](docs/PROGRESS.md) records the last full acceptance run; [progress history](docs/PROGRESS_HISTORY.md) records subsequent changes, targeted checks and open work. [Agent workflow measurements](docs/AGENT_COSTS.md) and [footage benchmark results](docs/FOOTAGE_BENCHMARK_RESULTS.md) describe the tested tasks and their limits.
 

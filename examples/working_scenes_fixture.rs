@@ -17,6 +17,8 @@ struct Request {
     frames: Vec<(u64, u32)>,
     #[serde(default)]
     audio: Vec<(u64, u64)>,
+    #[serde(default)]
+    context: Option<cutbolt::color::working::Context>,
 }
 fn run(root: &Path) -> cutbolt::Result<serde_json::Value> {
     let mut bytes = Vec::new();
@@ -36,7 +38,13 @@ fn run(root: &Path) -> cutbolt::Result<serde_json::Value> {
             "Fixture exceeds frame/audio request bounds",
         ));
     }
-    let source = Source::new(&request.scene, root)?;
+    let source = Source::new_in(
+        &request.scene,
+        root,
+        request
+            .context
+            .unwrap_or(cutbolt::color::working::Context::LINEAR16),
+    )?;
     if request.frames.len() as u64
         * u64::from(request.scene.width)
         * u64::from(request.scene.height)

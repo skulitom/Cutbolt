@@ -380,6 +380,14 @@ records the bounded coverage. Broader precise direct/structural/proxy/queue case
 the complete default-path quick gate and final placed-track speed audit still
 remain; this checkpoint does not close stage six or award points.
 
+The 14 October [footage workflow checkpoint](../../verification/working-footage-2026-10-14.json)
+adds 93 render cases and 1,044 exact frames per platform across original, direct
+and cached sources, structural properties, native alpha, proxies, generated PCM,
+queue retries, cache contexts and changed-source publication. Nine existing
+regression suites and the corrected registered fixture pass on Windows/Linux.
+The complete default-path quick gate and final placed-track comparison remain
+open; source normalization and proxy-generation limits remain unchanged.
+
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.
   - 16-bit linear composites in u16 linear light and converts once at output, with an explicit ordered dither for 8-bit delivery.

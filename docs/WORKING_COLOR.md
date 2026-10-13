@@ -26,6 +26,11 @@ sRGB and convert into that context. Set the project transfer to sRGB explicitly
 when native reference footage uses sRGB. H.264/PNG export and scopes use the same
 fallback; an export `input_transfer` that contradicts it is rejected.
 
+Saved normalization recipes retain their own `working_transfer`; changing the
+project declaration does not rewrite or re-normalize those assets. Automatic
+recipes default to BT.709. Supply a matching explicit recipe when preparing
+footage for an sRGB project, as required by the existing normalization contract.
+
 Sequential edits use an ephemeral track arrangement during rendering without
 rewriting saved clips. Generated sources and recursive sequence frames retain
 working pixels until final delivery. Their shared caches include the working
@@ -182,8 +187,18 @@ plateau. This is a bounded precision result; encoded and linear light intentiona
 differ in brightness. [Recorded evidence](../verification/working-timelines-2026-10-13.json)
 includes numerical reports and source hashes.
 
-Broader precise-mode direct-source, structural-effect, proxy and queue cases,
-the complete default-path quick gate, and final performance audit remain required
+`working_footage` adds complete-frame comparisons for direct H.264/HEVC and
+identity-bound cached 10-bit normalization in each nondefault mode. It covers
+source-clock grades, LUTs, keys, masks, spatial properties and blends; independent
+Fraction references cover block-floor shrink, authored byte alpha and native
+straight-alpha compositing. Reference-master proxies retain source coordinates
+and apply delivery dither on the reduced canvas. Generated PCM, queue retries,
+cache context keys and changed-source publication checks exercise the shared
+workflow boundaries. Quick reports retain these numerical results in their
+`working_footage` field. Proxy generation retains its documented reference-master
+requirement; source normalization still outputs native RGB8.
+
+The complete default-path quick gate and final performance audit remain required
 before closing stage six. This checkpoint makes no HDR, speed or points claim. Source normalization
 still supplies the supported native RGB8 inputs; wider working storage does not
 recover source detail already quantized during normalization.
