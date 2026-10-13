@@ -4,7 +4,9 @@ use crate::{
     At, Result,
     animation::Curve,
     composite::{self, AlphaMode, BlendMode, RectMask},
-    error, media,
+    error,
+    layer_composite::{Sample as Parameters, process_region},
+    media,
     registry::{UPDATE_IDENTITY, changed_digest, changed_size},
     render,
     time::Time,
@@ -132,18 +134,6 @@ pub struct Animation {
     /// Curve for opacity, 0..255; omit to keep the static value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<Curve>,
-}
-#[derive(Clone, Debug, Serialize)]
-struct Parameters {
-    position: [i32; 2],
-    opacity: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mask_rect: Option<[i32; 4]>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    effects: Vec<crate::effects::Sample>,
-    /// Boxed: a mapping is large, and long scenes hold one record per layer and frame.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    spatial: Option<Box<crate::spatial::Mapping>>,
 }
 /// One reusable tile: an ordinary held-frame animation with its own clock, relative to layer start.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1274,119 +1264,53 @@ fn sample_parameters(
     times: &[Option<Time>],
     expressions: Option<&[Vec<crate::expressions::Bound>]>,
 ) -> Result<Vec<Option<Parameters>>> {
-    let spatial = layer
-        .transform
-        .spatial
-        .as_ref()
-        .map(|s| s.prepare(layer.duration))
-        .transpose()
-        .under(|| "transform.spatial".into())?;
-    let effects = crate::effects::prepare(&layer.effects, layer.duration)?;
-    let mask = layer
-        .mask
-        .as_ref()
-        .map(|m| m.prepare(layer.duration))
-        .transpose()
-        .under(|| "mask".into())?;
-    let (mut x, mut y, mut opacity) = (None, None, None);
-    if let Some(animation) = &layer.animation {
-        if animation.position_x.is_none()
-            && animation.position_y.is_none()
-            && animation.opacity.is_none()
-        {
-            return Err(error(
-                "INVALID_ANIMATION",
-                "Animation must declare at least one property curve",
-            ));
-        }
-        x = animation
-            .position_x
-            .as_ref()
-            .map(|c| c.prepare(layer.duration, -32768, 32768))
-            .transpose()
-            .under(|| "animation.position_x".into())?;
-        y = animation
-            .position_y
-            .as_ref()
-            .map(|c| c.prepare(layer.duration, -32768, 32768))
-            .transpose()
-            .under(|| "animation.position_y".into())?;
-        opacity = animation
-            .opacity
-            .as_ref()
-            .map(|c| c.prepare(layer.duration, 0, 255))
-            .transpose()
-            .under(|| "animation.opacity".into())?;
-    }
+    let sampler = layer.recipe().prepare(layer.duration)?;
     selected
         .iter()
         .enumerate()
         .map(|(n, frame)| {
-            if frame.is_none() {
+            let Some(frame) = frame else {
                 return Ok(None);
-            }
+            };
             let time = times[n]
                 .expect("selected sample is within the scene")
                 .minus(layer.start)?;
-            let mut position = [
-                x.as_ref()
-                    .map(|c| c.sample(time))
-                    .transpose()?
-                    .unwrap_or(layer.transform.position[0]),
-                y.as_ref()
-                    .map(|c| c.sample(time))
-                    .transpose()?
-                    .unwrap_or(layer.transform.position[1]),
-            ];
-            let mut sampled_opacity = opacity
-                .as_ref()
-                .map(|c| c.sample(time))
-                .transpose()?
-                .map(|v| v as u8)
-                .unwrap_or(layer.transform.opacity);
+            let mut overrides = crate::layer_composite::Overrides::default();
             if let Some(samples) = expressions {
                 for binding in &samples[n] {
                     if binding.layer == layer.id {
                         match binding.property {
                             crate::expressions::Property::Position => {
-                                position = [binding.rounded[0], binding.rounded[1]]
+                                overrides.position = Some([binding.rounded[0], binding.rounded[1]])
                             }
                             crate::expressions::Property::Opacity => {
-                                sampled_opacity = binding.rounded[0] as u8
+                                overrides.opacity = Some(binding.rounded[0] as u8)
                             }
                         }
                     }
                 }
             }
-            let mapped = spatial
-                .as_ref()
-                .map(|sampler| {
-                    let anchor = if layer.graphics.is_some() || layer.tilemap.is_some() {
-                        [0, 0]
-                    } else {
-                        layer.frames[frame.expect("selected")].anchor
-                    };
-                    sampler.mapping(
-                        layer.transform.spatial.as_ref().expect("prepared"),
-                        &layer.transform,
-                        anchor,
-                        position,
-                        time,
-                    )
-                })
-                .transpose()?;
-            Ok(Some(Parameters {
-                spatial: mapped.map(Box::new),
-                effects: effects
-                    .iter()
-                    .map(|e| e.sample(time))
-                    .collect::<Result<_>>()?,
-                mask_rect: mask.as_ref().map(|m| m.sample(time)).transpose()?,
-                position,
-                opacity: sampled_opacity,
-            }))
+            let anchor = if layer.graphics.is_some() || layer.tilemap.is_some() {
+                [0, 0]
+            } else {
+                layer.frames[*frame].anchor
+            };
+            sampler.sample(time, anchor, overrides).map(Some)
         })
         .collect()
+}
+
+impl Layer {
+    fn recipe(&self) -> crate::layer_composite::Recipe<'_> {
+        crate::layer_composite::Recipe {
+            transform: &self.transform,
+            animation: self.animation.as_ref(),
+            mask: self.mask.as_ref(),
+            effects: &self.effects,
+            alpha_mode: self.alpha_mode,
+            blend_mode: self.blend_mode,
+        }
+    }
 }
 
 pub(crate) fn select_frame(layer: &Layer, n: u64, rate: Time) -> Result<Option<usize>> {
@@ -1546,22 +1470,6 @@ fn fill(rgb: &mut [u8], color: [u8; 3]) {
     }
 }
 
-#[cfg(test)]
-thread_local! {
-    static REFERENCE_PATHS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Whether a test asked this thread to compose with the former per-pixel paths, to compare the
-/// faster ones with.
-#[cfg(test)]
-fn reference_paths() -> bool {
-    REFERENCE_PATHS.with(std::cell::Cell::get)
-}
-#[cfg(not(test))]
-fn reference_paths() -> bool {
-    false
-}
-
 /// Composites `layers` of one exposure sample over `rgb`, in order.
 fn compose_layers(
     scene: &Scene,
@@ -1587,7 +1495,6 @@ fn compose_layers(
             let frame = &layer.frames[index];
             (prepared.frame_pixels(frame), frame.offset, frame.anchor)
         };
-        let t = &layer.transform;
         let parameters = prepared.parameters[layer_index][sample]
             .as_ref()
             .expect("selected layer has parameters");
@@ -1602,340 +1509,20 @@ fn compose_layers(
                 ),
             ),
         };
-        if let (Some(spec), Some(mapping)) = (&t.spatial, &parameters.spatial) {
-            let fetch = |sx: i64, sy: i64| -> Option<[u8; 4]> {
-                let ix = sx - offset[0] as i64;
-                let iy = sy - offset[1] as i64;
-                if ix < 0 || iy < 0 || ix >= image.width as i64 || iy >= image.height as i64 {
-                    return None;
-                }
-                Some(
-                    image.rgba[((iy * image.width as i64 + ix) * 4) as usize..][..4]
-                        .try_into()
-                        .expect("RGBA"),
-                )
-            };
-            let tap = |sx: i64, sy: i64, coverage: u32| {
-                if coverage == 0 {
-                    return None;
-                }
-                let p = fetch(sx, sy)?;
-                let processed = processor
-                    .as_ref()
-                    .and_then(|processor| processor.pixel(&p, layer.alpha_mode, [sx, sy]));
-                Some(match processed {
-                    _ if matte => (
-                        [255, 255, 255, processed.unwrap_or(p)[3]],
-                        AlphaMode::Straight,
-                        coverage,
-                    ),
-                    Some(p) => (p, AlphaMode::Straight, coverage),
-                    None => (p, layer.alpha_mode, coverage),
-                })
-            };
-            let size = [scene.width, scene.height];
-            let (opacity, blend) = (parameters.opacity, layer.blend_mode);
-            #[cfg(test)]
-            if reference_paths() {
-                crate::spatial::reference(
-                    &mut rgb,
-                    size,
-                    mapping,
-                    spec,
-                    t.crop,
-                    opacity,
-                    blend,
-                    |sx, sy| {
-                        let coverage = layer
-                            .mask
-                            .as_ref()
-                            .zip(parameters.mask_rect)
-                            .map_or(composite::MASK_WEIGHT, |(mask, rect)| {
-                                mask.coverage(rect, sx, sy)
-                            });
-                        tap(sx, sy, coverage)
-                    },
-                );
-                continue;
-            }
-            // Taps stay inside the crop, so the mask's axes cover the crop.
-            let mask = layer
-                .mask
-                .as_ref()
-                .zip(parameters.mask_rect)
-                .map(|(mask, rect)| mask.axes(rect, t.crop.map(i64::from)));
-            // Per-frame effects on a straight layer run once for each source pixel the frame can
-            // sample, not once per tap, unless those pixels outnumber the taps. Effects read only
-            // a pixel and its position, so the values are the same; taps outside the region
-            // still go through `tap`.
-            let [ox, oy] = offset.map(i64::from);
-            let [cx, cy, cw, ch] = t.crop.map(i64::from);
-            let (x0, y0) = (cx.max(ox), cy.max(oy));
-            let limit = [
-                x0,
-                y0,
-                (cx + cw).min(ox + image.width as i64) - x0,
-                (cy + ch).min(oy + image.height as i64) - y0,
-            ];
-            let frame_processed = processor
-                .as_ref()
-                .filter(|_| layer.alpha_mode.is_straight())
-                .and_then(|processor| {
-                    let (region, taps) =
-                        crate::spatial::sampled_region(mapping, spec, limit, size)?;
-                    (region[2] * region[3] <= taps).then(|| {
-                        let pixels =
-                            process_region(image, offset, region, processor, prepared.threads);
-                        (pixels, region)
-                    })
-                });
-            // Otherwise, without per-frame effects, taps inside the image read its stored pixels
-            // directly, with the values `tap` gives.
-            let plain = match &frame_processed {
-                Some((pixels, [x, y, width, height])) => Some(crate::spatial::Plain {
-                    rgba: &pixels.rgba,
-                    size: [*width, *height],
-                    offset: [*x, *y],
-                    encoding: AlphaMode::Straight,
-                    white: matte,
-                    mask: mask.as_ref(),
-                }),
-                None => processor.is_none().then(|| crate::spatial::Plain {
-                    rgba: &image.rgba,
-                    size: [image.width as i64, image.height as i64],
-                    offset: [ox, oy],
-                    encoding: layer.alpha_mode,
-                    white: matte,
-                    mask: mask.as_ref(),
-                }),
-            };
-            crate::spatial::draw(
-                &mut rgb,
-                size,
-                mapping,
-                spec,
-                t.crop,
-                opacity,
-                blend,
-                prepared.threads,
-                plain,
-                |sx, sy| {
-                    let coverage = mask
-                        .as_ref()
-                        .map_or(composite::MASK_WEIGHT, |m| m.coverage(sx, sy));
-                    tap(sx, sy, coverage)
-                },
-            );
-            continue;
+        crate::layer_composite::Frame {
+            recipe: layer.recipe(),
+            parameters,
+            image,
+            offset,
+            anchor,
         }
-        let [cx, cy, cw, ch] = t.crop;
-        let scale = t.scale as i64;
-        let ax = anchor[0] as i64 - cx as i64;
-        let ay = anchor[1] as i64 - cy as i64;
-        let (ax, ay) = match t.quarter_turns {
-            0 => (ax, ay),
-            1 => (ch as i64 - ay, ax),
-            2 => (cw as i64 - ax, ch as i64 - ay),
-            _ => (ay, cw as i64 - ax),
-        };
-        let left = parameters.position[0] as i64 - ax * scale;
-        let top = parameters.position[1] as i64 - ay * scale;
-        // Iterate only the destination rectangle the transformed crop can cover (clipped to the
-        // canvas), so off-canvas scales cannot cause unbounded work and small layers stay cheap.
-        // Pixels outside it never reach a source pixel, so the result is unchanged.
-        let (span_x, span_y) = if t.quarter_turns.is_multiple_of(2) {
-            (cw as i64 * scale, ch as i64 * scale)
-        } else {
-            (ch as i64 * scale, cw as i64 * scale)
-        };
-        let x0 = left.clamp(0, scene.width as i64) as u32;
-        let x1 = (left + span_x).clamp(0, scene.width as i64) as u32;
-        let y0 = top.clamp(0, scene.height as i64) as u32;
-        let y1 = (top + span_y).clamp(0, scene.height as i64) as u32;
-        if parameters.opacity == 0 {
-            // Zero coverage leaves every destination value unchanged in each blend mode.
-            continue;
-        }
-        // Scaled source offsets of each destination column and row, divided once per layer and
-        // row rather than per pixel. -1 marks a position before the layer, as no source pixel.
-        if (processor.is_none() || layer.alpha_mode.is_straight())
-            && layer.blend_mode.is_normal()
-            && scale == 1
-            && t.quarter_turns == 0
-            && !reference_paths()
-        {
-            // Unscaled, unrotated normal layers (most sprites, cards and stage layers): each
-            // destination row reads one contiguous source run. Effects run once per source pixel
-            // of the run, as the general path runs them once per destination pixel; a straight
-            // pixel they leave unchanged stays straight, so the row is all straight. A mask's
-            // coverage comes from its column and row values; effects also run where it is zero,
-            // which changes nothing there.
-            let mut processed = Vec::new();
-            let mut coverage = Vec::new();
-            let (ox, oy) = (offset[0] as i64, offset[1] as i64);
-            // Source-canvas columns rx + cx must lie in the crop and in the image placed at offset.
-            let rx0 = 0.max(ox - cx as i64).max(x0 as i64 - left);
-            let rx1 = (cw as i64)
-                .min(image.width as i64 + ox - cx as i64)
-                .min(x1 as i64 - left);
-            let ry0 = 0.max(oy - cy as i64).max(y0 as i64 - top);
-            let ry1 = (ch as i64)
-                .min(image.height as i64 + oy - cy as i64)
-                .min(y1 as i64 - top);
-            let mask = layer
-                .mask
-                .as_ref()
-                .zip(parameters.mask_rect)
-                .filter(|_| rx1 > rx0 && ry1 > ry0)
-                .map(|(mask, rect)| {
-                    let area = [rx0 + cx as i64, ry0 + cy as i64, rx1 - rx0, ry1 - ry0];
-                    mask.axes(rect, area)
-                });
-            for ry in ry0..ry1.max(ry0) {
-                if rx1 <= rx0 {
-                    break;
-                }
-                let row_coverage = mask.as_ref().map(|m| m.row(ry + cy as i64));
-                let dy = (ry + top) as usize;
-                let iy = (ry + cy as i64 - oy) as usize;
-                let ix = (rx0 + cx as i64 - ox) as usize;
-                let width = (rx1 - rx0) as usize;
-                let dest = (dy * scene.width as usize + (rx0 + left) as usize) * 3;
-                let source = (iy * image.width as usize + ix) * 4;
-                let run = &image.rgba[source..source + width * 4];
-                let row = match &processor {
-                    None => run,
-                    Some(processor) => {
-                        processed.clear();
-                        if let Some([r, g, b]) = processor.tables() {
-                            // Zero alpha composites nothing, so its table values are harmless.
-                            for p in run.as_chunks::<4>().0 {
-                                processed.extend_from_slice(&[
-                                    r[p[0] as usize],
-                                    g[p[1] as usize],
-                                    b[p[2] as usize],
-                                    p[3],
-                                ]);
-                            }
-                        } else {
-                            let y = ry + cy as i64;
-                            for (i, p) in run.as_chunks::<4>().0.iter().enumerate() {
-                                let position = [rx0 + cx as i64 + i as i64, y];
-                                processed.extend_from_slice(
-                                    &processor
-                                        .pixel(p, AlphaMode::Straight, position)
-                                        .unwrap_or(*p),
-                                );
-                            }
-                        }
-                        &processed
-                    }
-                };
-                let dest = &mut rgb[dest..dest + width * 3];
-                match (&mask, row_coverage) {
-                    (Some(mask), Some(row_value)) => {
-                        coverage.clear();
-                        coverage.extend((rx0..rx1).map(|rx| mask.at(rx + cx as i64, row_value)));
-                        composite::masked_normal_row(
-                            dest,
-                            row,
-                            &coverage,
-                            parameters.opacity,
-                            layer.alpha_mode,
-                            matte,
-                        );
-                    }
-                    _ => composite::normal_row(
-                        dest,
-                        row,
-                        parameters.opacity,
-                        layer.alpha_mode,
-                        matte,
-                    ),
-                }
-            }
-            continue;
-        }
-        let unscale = |r: i64| if r < 0 { -1 } else { r / scale };
-        let columns = (x0..x1)
-            .map(|dx| unscale(dx as i64 - left))
-            .collect::<Vec<_>>();
-        for dy in y0..y1 {
-            let ry = unscale(dy as i64 - top);
-            for (dx, &rx) in (x0..x1).zip(&columns) {
-                let (sx, sy) = match t.quarter_turns {
-                    0 => (rx, ry),
-                    1 => (ry, ch as i64 - 1 - rx),
-                    2 => (cw as i64 - 1 - rx, ch as i64 - 1 - ry),
-                    _ => (cw as i64 - 1 - ry, rx),
-                };
-                if sx < 0 || sy < 0 || sx >= cw as i64 || sy >= ch as i64 {
-                    continue;
-                }
-                let coverage = layer
-                    .mask
-                    .as_ref()
-                    .zip(parameters.mask_rect)
-                    .map_or(composite::MASK_WEIGHT, |(mask, rect)| {
-                        mask.coverage(rect, sx + cx as i64, sy + cy as i64)
-                    });
-                if coverage == 0 {
-                    continue;
-                }
-                let sx = sx + cx as i64 - offset[0] as i64;
-                let sy = sy + cy as i64 - offset[1] as i64;
-                if sx < 0 || sy < 0 || sx >= image.width as i64 || sy >= image.height as i64 {
-                    continue;
-                }
-                let p = &image.rgba[((sy * image.width as i64 + sx) * 4) as usize..][..4];
-                let processed = processor.as_ref().and_then(|processor| {
-                    processor.pixel(
-                        p,
-                        layer.alpha_mode,
-                        [sx + offset[0] as i64, sy + offset[1] as i64],
-                    )
-                });
-                let white;
-                let (p, alpha_mode) = if let Some(processed) = &processed {
-                    (processed.as_slice(), AlphaMode::Straight)
-                } else {
-                    (p, layer.alpha_mode)
-                };
-                if p[3] == 0 {
-                    // Zero alpha (premultiplied RGB is then zero too) leaves the backdrop exact.
-                    continue;
-                }
-                let (p, alpha_mode) = if matte {
-                    white = [255, 255, 255, p[3]];
-                    (white.as_slice(), AlphaMode::Straight)
-                } else {
-                    (p, alpha_mode)
-                };
-                let dest = ((dy * scene.width + dx) * 3) as usize;
-                for c in 0..3 {
-                    rgb[dest + c] = if coverage == composite::MASK_WEIGHT {
-                        composite::channel(
-                            rgb[dest + c],
-                            p[c],
-                            p[3],
-                            parameters.opacity,
-                            layer.blend_mode,
-                            alpha_mode,
-                        )
-                    } else {
-                        composite::masked_channel(
-                            rgb[dest + c],
-                            p[c],
-                            p[3],
-                            parameters.opacity,
-                            layer.blend_mode,
-                            alpha_mode,
-                            coverage,
-                        )
-                    };
-                }
-            }
-        }
+        .draw(
+            &mut rgb,
+            [scene.width, scene.height],
+            processor,
+            matte,
+            prepared.threads,
+        );
     }
     Ok(rgb)
 }
@@ -2265,52 +1852,6 @@ fn process_image(
     let [x, y] = offset.map(i64::from);
     let region = [x, y, i64::from(image.width), i64::from(image.height)];
     process_region(image, offset, region, processor, workers)
-}
-
-/// The `region` (`[x, y, width, height]` in the source canvas, inside the image) of `image`
-/// (straight RGBA placed at `offset`) through an effect chain, in up to `threads` row bands.
-fn process_region(
-    image: &Pixels,
-    offset: [u32; 2],
-    region: [i64; 4],
-    processor: &crate::effects::Processor,
-    threads: usize,
-) -> Pixels {
-    let [rx, ry, rw, rh] = region;
-    let [ox, oy] = offset.map(i64::from);
-    let width = rw as usize;
-    let mut rgba = Vec::with_capacity(width * rh as usize * 4);
-    for y in ry..ry + rh {
-        let start = (((y - oy) * i64::from(image.width) + rx - ox) * 4) as usize;
-        rgba.extend_from_slice(&image.rgba[start..start + width * 4]);
-    }
-    let process = |chunk: &mut [u8], first: usize| {
-        for (i, p) in chunk.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let x = (i % width) as i64 + rx;
-            let y = (first + i / width) as i64 + ry;
-            if let Some(q) = processor.pixel(p, AlphaMode::Straight, [x, y]) {
-                *p = q;
-            }
-        }
-    };
-    if width > 0 && !rgba.is_empty() {
-        let rows = (rh as usize).div_ceil(threads.max(1)).max(1);
-        if threads <= 1 {
-            process(&mut rgba, 0);
-        } else {
-            std::thread::scope(|scope| {
-                for (band, chunk) in rgba.chunks_mut(rows * width * 4).enumerate() {
-                    let process = &process;
-                    scope.spawn(move || process(chunk, band * rows));
-                }
-            });
-        }
-    }
-    Pixels {
-        width: rw as u32,
-        height: rh as u32,
-        rgba,
-    }
 }
 
 /// Composes frames 0..`frames` on `workers` threads and writes them strictly in order. Workers
@@ -2757,6 +2298,7 @@ fn write_png_channels(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layer_composite::REFERENCE_PATHS;
 
     #[test]
     fn lut_cache_matches_unoptimized_frames_and_rehashes_tables() {

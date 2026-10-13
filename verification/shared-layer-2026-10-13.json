@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-13",
+  "kind": "stage_4_shared_layer_prerequisite",
+  "base_commit": "f13453dbcf71d3feee945594828b0a14d4c3a19b",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/lib.rs": {
+      "bytes": 12942,
+      "sha256": "f68fe79a5256338a928ec23ad84e62ddf677628abb024764092a7d9e3cdccbb3"
+    },
+    "src/scene.rs": {
+      "bytes": 132673,
+      "sha256": "93747800956b54ad5005f5cd617e8395ea885204a986711d7ee6d537944283ba"
+    },
+    "src/layer_composite.rs": {
+      "bytes": 27648,
+      "sha256": "56f3239967e30bc73fcd2b5899cf16ce700297d3e0f5e1f1e716385316a52250"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 257,
+    "manifest_sha256": "a8d3ebedea015d71b30244032515392e034ec6973d18f19a9ed4aa3607cbad8b",
+    "manifest_format": "sorted git-tracked src, tests, Cargo.toml, Cargo.lock, build.rs, tools/verify.py plus new src/layer_composite.rs; each UTF-8 path + NUL + lowercase content SHA-256 + LF",
+    "linux_checkout_commit_is_not_the_implementation_identity": true
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 251,
+      "clippy_all_targets_warnings_denied": "passed",
+      "targeted_quick": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 243,
+        "stages": [
+          "animation",
+          "clip_effects",
+          "compositing",
+          "easing",
+          "expressions",
+          "grading",
+          "keying",
+          "scenes",
+          "selection",
+          "spatial",
+          "temporal"
+        ]
+      },
+      "fixture_report_sha256": "e2a695158b61de15539f8a6df7df9dadde860e5f6b44ba9dc04117c2efe4b657",
+      "fixture_log_sha256": "f3b4c72e1e173d53c9061e3bf4451a04d2ea072ddd121602d478e2040d5907eb",
+      "rust_log_sha256": "b1a352e0c48c631d5bb6190862aa95167522924a5e59986ad908a219389cf753"
+    },
+    "linux": {
+      "rust_tests_passed": 250,
+      "clippy_all_targets_warnings_denied": "passed",
+      "targeted_quick": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 129,
+        "stages": [
+          "animation",
+          "clip_effects",
+          "compositing",
+          "easing",
+          "expressions",
+          "grading",
+          "keying",
+          "scenes",
+          "selection",
+          "spatial",
+          "temporal"
+        ]
+      },
+      "fixture_report_sha256": "6a97237f334851f5f387b34e8f95cb15c9009505258b0911609ec9a28ea32da7",
+      "fixture_log_sha256": "dfaddc66f291d0b09dc7a49555c61e69d4b11707e241a5d88498308849d650c5",
+      "rust_log_sha256": "bbad1036915daeffa7eab1ce522d9c70c944d8188b6acaee724f3feae1ac9ec9"
+    }
+  },
+  "specific_checks": [
+    "Random-access source-clock sampling through a two-hour duration without a whole-source frame table",
+    "Position/opacity expression overrides applied before spatial mapping",
+    "A partial-alpha case preserves scene coverage until the final blend; legacy overlay rounding remains separate",
+    "Existing per-pixel, integer Python and spatial reference fixtures retain their exact assertions"
+  ],
+  "limits": [
+    "Internal extraction only: native spatial clip properties and generalized lower-track compositing are not implemented by this checkpoint",
+    "These are targeted quick checks, not a full quick or thorough milestone",
+    "No performance, cross-platform encoded-file identity or new progress-point claim",
+    "Linux fixture bootstrap initially used system Python without psutil; only fixtures were rerun with the existing prepared environment"
+  ]
+}

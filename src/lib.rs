@@ -48,6 +48,7 @@ pub mod inspection_cache;
 pub mod interchange;
 pub mod jobs;
 pub mod keying;
+mod layer_composite;
 pub mod lut;
 pub mod mcp;
 pub mod media;

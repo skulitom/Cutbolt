@@ -1,5 +1,31 @@
 # Progress history
 
+## 13 October 2026: shared single-frame layer compositor prerequisite
+
+Scene property sampling and pixel composition now live in `layer_composite`, with
+borrowed recipes, a prepared curve sampler and one-frame drawing onto a supplied
+backdrop. The scene renderer uses this shared path. The sampler accepts exact
+owner-clock times without building a duration-sized table, so the upcoming native
+clip stack can use the same transform, mask, key and blend arithmetic. Scene
+expression overrides still apply before spatial mapping. Legacy overlay rounding
+remains in its existing path.
+
+[Targeted evidence](../verification/shared-layer-2026-10-13.json): all 251 Windows
+and 250 Linux Rust tests and warnings-denied lint pass. Eleven targeted suites pass
+on each platform: scenes, animation, compositing, easing, spatial, grading,
+selection, keying, expressions, temporal and clip effects. All 257 compared source,
+fixture, build-input and verifier files are byte-identical across the two working
+checkouts. New tests cover random-access samples through a two-hour source,
+expression mapping order and the fractional-alpha rounding difference. Linux's
+first fixture invocation selected system Python without psutil; rerunning only the
+fixtures with the already prepared environment passed.
+
+This is an internal stage-4 prerequisite, not acceptance of native spatial effects
+or lower-track transparency. Stages 4-6 remain open. No points or milestone evidence
+change. The frozen f13453d stage-3 complete quick check remains queued behind active
+verification. This checkpoint's shipment gate and deferred results must be audited
+after commit and any failures fixed forward.
+
 ## 13 October 2026: saved source-clock clip pixel effects
 
 Native asset video clips now save up to eight ordered grade, selective-grade, LUT or
