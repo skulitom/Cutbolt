@@ -1,5 +1,20 @@
 # Progress history
 
+## 13 October 2026: concise product overview
+
+The README now introduces Cutbolt through footage-editing workflows, a source
+installation quickstart and an example agent request. Detailed feature contracts,
+verification reports and development plans remain linked rather than reproduced
+as a checklist. Obsolete status paragraphs and machine-specific checkout notes
+were removed. Public wording focuses on the project's own capabilities; licensing,
+dependency attribution and research/publication records remain intact.
+
+All 18 local README links resolve. This documentation change adds no features,
+coverage points or verification milestone. The working-effects checkpoint 8a69780
+and this cleanup are awaiting the normal ship gate together; the full stage-five
+quick check remains active in its frozen checkout. PROGRESS.md retains its last
+thorough evidence.
+
 ## 13 October 2026: precise effect and property components
 
 Validated library effect stacks now retain floating-point linear RGB and coverage
