@@ -6,7 +6,10 @@ single-frame previews, placed-track base pictures, top-level transitions and cro
 overlays, together with exact sound in sequential/placed-track renders and range exports.
 Eligible files report `timeline.ready: true`, `timeline.direct: true` and
 `source_index.direct_decode_available: true`. The long-source preview/range gate passes as recorded
-below. Inclusive stage-1 verification and later stages remain open.
+below. The complete stage-1 milestone passed at 338e114 on 12 October; later changes have
+separate evidence. The intermittent delivery comparison discussed below remains unresolved.
+Stage 2 adds [automatic normalization](AUTOMATIC_PREPARATION.md); its full quick gate and
+later implementation stages remain open.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame

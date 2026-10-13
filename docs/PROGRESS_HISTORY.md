@@ -1,5 +1,29 @@
 # Progress history
 
+## 13 October 2026: preserve frozen benchmark evidence during aggregation
+
+A read-only summary command checks the frozen engine, harness, protocol, originals, prompts
+and skill copies before aggregating trials. It retains unsuccessful completed attempts,
+reports per-model/task/arm ranges and medians, checks final output identities and records
+CRF settings separately from the original pixel/clock auditor. Matching-output Cutbolt AAC
+receipts and manually reviewed FFmpeg target settings remain supplemental delivery evidence;
+actual AAC bitrate is not equated to its requested target. Incomplete matrices require an
+explicit partial-report flag, and reports cannot overwrite existing files.
+
+The command was exercised against 21 completed baseline attempts: identities match, the
+two recorded failed outputs remain included, the known two-run trim call median is 12.5,
+and every inspected H.264 output declares CRF 18. The default incomplete-matrix call refused
+without creating a report. No complete comparative outcome or statistical lead is claimed.
+Six revised-skill follow-ups were selected and frozen before model starts, separately from
+the unchanged 36-attempt baseline. Their results are still pending.
+
+Shipment 546cac4 is terminal: 26 passed, zero failed, 28 superseded by the newer background
+run, none unstarted. Its fixed checkout has started the full stage-2 quick check. Shipment
+f76b3ad passed its gate (five ran, 33 reused) and is on main; its deferred checks still need
+terminal review. DIRECT_SOURCES now correctly distinguishes the completed 338e114 stage-1
+milestone from later unverified work and the unresolved intermittent delivery comparison.
+No editing points or milestone evidence change. This commit's shipping checks remain pending.
+
 ## 13 October 2026: teach automatic preparation and complete simple footage recipes
 
 The frozen comparative pilot exposed schema discovery and explicit-conversion detours in

@@ -71,3 +71,25 @@ and explain the exclusion before starting a new version; never replace failures 
 
 The results guide the ordering and design of the remaining direct-footage stages. They do
 not remove any deliverable from the active implementation goal.
+
+## Aggregate frozen results
+
+`python tools/summarize_benchmark.py TRIAL_ROOT NEW_REPORT.json` reads the frozen plan and
+attempts without changing them. It rejects an incomplete matrix unless `--allow-partial` is
+explicit, retains all completed failures in the denominator, and never overwrites a report.
+It checks source, prompt, skill, engine and harness identities; reports per-model/task/arm
+ranges and medians; and keeps unavailable measurements separate from zero.
+
+The original output-auditor success is retained as recorded. Additional controls are reported
+separately: x264's bitstream settings must show CRF 18, and a Cutbolt export's AAC target is
+read from a completed receipt matching the final output hash. FFmpeg's requested AAC target
+requires review of the final producing command/script in the retained trace. Actual audio
+bitrate is variable and is not required to equal the requested encoder target. These checks
+complete the declared delivery-control audit; they do not replace the frozen pixel/clock
+oracle or authorize dropping an unsuccessful attempt.
+
+The revised-skill diagnostic follow-up is separate: one Cutbolt trial for each task/model,
+using the same engine, originals, prompts, client, effort, limits and auditor with skills from
+f76b3ad. Its six selected attempts were frozen before model starts and wait for all 36 baseline
+measurements. Report them separately, with all failures and no claim of repeatability. The
+baseline's skill copies and outcomes remain unchanged.
