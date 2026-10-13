@@ -53,6 +53,8 @@ impl Resources {
 pub(crate) struct Stack {
     pub clip_id: String,
     pub effects: Vec<effects::Effect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<crate::clip_properties::Properties>,
     pub source_start: Time,
     pub source_duration: Time,
     pub rate: Time,
@@ -65,6 +67,14 @@ pub(crate) struct Prepared {
     samplers: Vec<effects::Sampler>,
 }
 impl Stack {
+    pub(crate) fn time(&self, frame: u64) -> Result<Time> {
+        self.source_start.plus(Time::new(
+            frame
+                .checked_mul(self.rate.den)
+                .ok_or_else(|| error("INVALID_TIME", "Clip property frame time overflow"))?,
+            self.rate.num,
+        )?)
+    }
     pub(crate) fn prepare(&self) -> Result<Prepared> {
         Ok(Prepared {
             samplers: effects::prepare(&self.effects, self.source_duration)

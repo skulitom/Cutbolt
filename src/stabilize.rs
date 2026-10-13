@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf};
 
 /// Editable rigid camera correction applied to the source canvas before the layer's authored spatial mapping; produced by `stabilization.inspect`.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Compensation {
     /// Fixed rotation and zoom center `[x, y]` in source-canvas millipixels, each within ±32768000.

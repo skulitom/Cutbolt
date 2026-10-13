@@ -18,21 +18,21 @@ const Q_BITS: u32 = Q.trailing_zeros();
 const _: () = assert!(Q == 1 << Q_BITS);
 
 /// Source sampling filter: `nearest` (containing source pixel) or `bilinear` (four neighboring pixel centers).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Sampling {
     Nearest,
     Bilinear,
 }
 /// Crop-edge policy: `transparent` (taps outside the crop are transparent) or `clamp` (samples must map inside the crop; taps clamp to its edge pixels).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Edge {
     Transparent,
     Clamp,
 }
 /// Aspect fitting: `contain` (smaller ratio, uniform), `cover` (larger ratio, uniform) or `stretch` (independent x/y ratios).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FitMode {
     Contain,
@@ -40,7 +40,7 @@ pub enum FitMode {
     Stretch,
 }
 /// Scales the source so its reference size fits a target size, before spatial scale and rotation; does not center or crop.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Fit {
     /// Target `[width, height]` in logical scene pixels, each 1..=32768.
@@ -52,7 +52,7 @@ pub struct Fit {
     pub window_size: Option<[u32; 2]>,
 }
 /// Keyframe curves on the layer-local clock that override static spatial values; at least one curve is required.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Animation {
     /// Horizontal translation curve in millipixels, -32768000..=32768000; omit to keep the static value.
@@ -72,7 +72,7 @@ pub struct Animation {
     pub rotation_mdeg: Option<Curve>,
 }
 /// Optional layer `transform.spatial`: subpixel translation, scale, rotation, mirroring, pixel aspect and fitting with filtered sampling.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
     /// Offset added to the sampled layer position, `[x, y]` in millipixels, each -32768000..=32768000.

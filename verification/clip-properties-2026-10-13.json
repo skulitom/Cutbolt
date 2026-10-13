@@ -1,0 +1,195 @@
+{
+  "date": "2026-10-13",
+  "kind": "saved_clip_spatial_properties",
+  "base_commit": "3f853c00d7fa89bc7a4461a11fd0040a6fce12b4",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/cache.rs": {
+      "bytes": 25377,
+      "sha256": "82d6adb99a8e0cfdd0c886c23156279d5c7fb966a56835d50b27d62d91f95799"
+    },
+    "src/clip_effects.rs": {
+      "bytes": 9791,
+      "sha256": "6561429a0f4f736374abc65749fd727e85a478198b93cde5eb1f9ec3102ba30e"
+    },
+    "src/clip_properties.rs": {
+      "bytes": 16429,
+      "sha256": "dcd9edcd8715bad94b1bd5420f7ac662f3ed5bba568b6e6bd9194a8a340beffb"
+    },
+    "src/composite.rs": {
+      "bytes": 23442,
+      "sha256": "8b54f0a90be9d11ef5b259aa1345ea031fd9ee5ce459619ecb19074c0b68c5f0"
+    },
+    "src/lib.rs": {
+      "bytes": 12986,
+      "sha256": "dac1b72b5a83a9675067f771f9f9a19a990c384aeaa698c23a260046892f38a8"
+    },
+    "src/mcp.rs": {
+      "bytes": 66293,
+      "sha256": "b43a16b9dc839f56c8d18861ee988de12c5dd88ae13a67980d59fb103e77b2c6"
+    },
+    "src/scene.rs": {
+      "bytes": 132703,
+      "sha256": "57690ac38a56c8d4953f8cc297606988caa62572187b7724f999dd0a21ba8ef8"
+    },
+    "src/spatial.rs": {
+      "bytes": 55185,
+      "sha256": "5b542e09a712aa4ed8db51c70ebd578eb84926463fbde6b4e45329bce6e1ec30"
+    },
+    "src/stabilize.rs": {
+      "bytes": 32558,
+      "sha256": "f9e13e27e8195fcab7310e58b895095d30779d482860f6f63fd339e60a306411"
+    },
+    "src/store.rs": {
+      "bytes": 57099,
+      "sha256": "bedfce4893a2dc4d9d7fe631bc57dfd1fbe045321bcbdcf7629bc0971a3279ea"
+    },
+    "src/track_render.rs": {
+      "bytes": 97222,
+      "sha256": "0bb410ce020e20496b3c1c1fcd6aad0517c29d6ec15fef5ec6253606a8ecf32f"
+    },
+    "src/track_stack.rs": {
+      "bytes": 17841,
+      "sha256": "812c39f0753101f67c405a0de232192325279e94928fb00b1e996d4e206bbad8"
+    },
+    "src/tracks.rs": {
+      "bytes": 66538,
+      "sha256": "564d60bc9d49b2be49734499e21e808550a72c5e4482d4d60c75f034f789b6ee"
+    },
+    "tests/clip_properties.py": {
+      "bytes": 13891,
+      "sha256": "aebc0d285240de9be4fc689a694eb2038e77c3cabbde7d066b9af6017cee0809"
+    },
+    "tests/native_layers.py": {
+      "bytes": 10067,
+      "sha256": "1b3f82cb0c9a757c9591605ee60c7d386cb4631f03e1fc76129b84e9b4a9e69b"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 285,
+    "manifest_sha256": "b45a39e36db0a5cbbc735dbd79e4635caf15ea0762005767aa125a0c3119273b",
+    "manifest_format": "sorted source/test/tool/build paths + NUL + lowercase content SHA-256 + LF; final inputs; checkout HEAD labels are not implementation identities"
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 254,
+      "clippy_all_targets_warnings_denied": "passed",
+      "format_check": "passed",
+      "targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "native_layers",
+          "overlays",
+          "sequences",
+          "track_edits",
+          "tracks",
+          "transitions"
+        ],
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 314,
+        "report_sha256": "6b79fde5fa701229819c0e4710e6d4bbbcb33eae8e711a8f5aa0e8c6854b2f39"
+      },
+      "combined_log": {
+        "bytes": 23115,
+        "sha256": "f69c37b2a5567449805607fe0c4fe69f599b44cb8d42d8bcb0afd654fdfff5eb"
+      },
+      "final_interface_quick": {
+        "stages": [
+          "agent_costs",
+          "agent_ergonomics",
+          "integration"
+        ],
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 50,
+        "report_sha256": "8732e77435c361db418ef003d5b7fe09da9e3c50283cd213c3b86fddbbd181e8"
+      },
+      "final_interface_log": {
+        "bytes": 5272,
+        "sha256": "96f1219c4936ab0717fb741a63121a33163b5e61382ac52f18139df69b5bd5b6"
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 253,
+      "clippy_all_targets_warnings_denied": "passed",
+      "format_check": "passed",
+      "targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "native_layers",
+          "overlays",
+          "sequences",
+          "track_edits",
+          "tracks",
+          "transitions"
+        ],
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 152,
+        "report_sha256": "5998855f7bdb400ab960b427391e36a6782282e2a237200ce93ef06227d09b2a"
+      },
+      "combined_log": {
+        "bytes": 22756,
+        "sha256": "271206058f58d203eb763de645c0fade55bd2d89fa7b8a373c573196415723d9"
+      },
+      "final_schema_tests_passed": 9,
+      "final_mcp_tests_passed": 6,
+      "final_interface_log": {
+        "bytes": 3367,
+        "sha256": "5ad40c957e3294e070b969ca34e699de22cd960d63d7ab35b2de27edbd28003b"
+      }
+    }
+  },
+  "specific_checks": [
+    "Direct H.264 and FFV1 PIP, keyed PIP, animated filtered spatial mapping, animated opacity, feathered rectangle reveal and screen/multiply exactly match multi-layer scene renders",
+    "Property list order does not change structural phases; pixel effects retain their ordered shared types",
+    "Trim, slip, split, child-definition and sequence-instance clocks match separately rendered RGB8 scene boundaries",
+    "Different property recipes on dissolve endpoints match independent integer mixing over the same lower backdrop",
+    "Frame/range previews, proxy coordinates, original-quality final export and queued direct-source render match oracles",
+    "Normal, multiply and screen with opacity match independent Fraction channel equations",
+    "Legacy overlay and explicit transform/opacity sugar render identically; Rust oracle also covers all eight shrink factors, seven opacity values and fractional source alpha",
+    "Duplicate/conflicting property owners, crop/anchor/divisor bounds and unknown fields reject edits",
+    "Saved schema upgrade, historical snapshots, replay, undo and restore retain all four structural properties",
+    "Conservative opaque-cover detection preserves lower layers for properties; original-size proxy temporaries count toward the existing 1 GiB frame bound"
+  ],
+  "disclosures": [
+    "The first Rust run found four undocumented schema nodes; descriptions were added and all tests reran successfully",
+    "The first new media test had an incorrect animation-helper argument shape; corrected before the passing Windows/Linux runs",
+    "Final capabilities, error wording and schema descriptions were updated after the Windows media build; Linux media checks include those changes, and final schema/MCP checks cover both platforms",
+    "Agent-cost results in the final interface run are scripted wire-byte replays, not another fresh-model trial",
+    "No full stage-4 quick exit, new thorough milestone, working-precision acceptance or editing points are claimed"
+  ],
+  "prior_shipment_audit": [
+    {
+      "commit": "00c8d704f8",
+      "background_passed": 5,
+      "background_failed": 0,
+      "superseded_skips": 48,
+      "not_started": 0,
+      "wall_seconds": 2188
+    },
+    {
+      "commit": "ef5c98bffd",
+      "background_passed": 4,
+      "background_failed": 0,
+      "superseded_skips": 61,
+      "not_started": 0,
+      "wall_seconds": 1016
+    }
+  ],
+  "remaining_stage4": [
+    "Audit remaining legacy source-role restrictions and acceptance requirements",
+    "Complete the legacy A/B comparison and remove the obsolete nested graphs",
+    "Run the complete stage-4 quick gate"
+  ]
+}

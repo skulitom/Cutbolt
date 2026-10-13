@@ -7,8 +7,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Shared pixel-effect recipe: the scene tagged effect types and equations, sampled on clip source time.
-pub type ClipEffect = crate::effects::Effect;
+/// Saved pixel effects and spatial properties, sampled on clip source time.
+pub use crate::clip_properties::ClipEffect;
 
 /// Track media kind: `video` uses the project frame clock; `audio` (stereo) uses the 48 kHz sample clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -63,7 +63,7 @@ pub struct TrackClip {
     /// `alpha_over` track clips only: crop, shrink, fade and place the clip's frame, as for picture-in-picture; omit to cover the whole frame unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<OverlayTransform>,
-    /// Up to eight ordered pixel effects on video clips, including child-sequence instances. Curve key times use the clip's source clock (`source_in` plays key time `source_in`), so trims, splits and slips stay aligned with source content. Requires snapshot schema 2; default empty.
+    /// Up to eight ordered pixel effects and unique transform/opacity/mask/blend properties on video clips, including child-sequence instances. Curve key times use the clip's source clock (`source_in` plays key time `source_in`), so trims, splits and slips stay aligned with source content. Requires snapshot schema 2; default empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<ClipEffect>,
 }
@@ -252,7 +252,7 @@ impl TrackClip {
         }
     }
 }
-/// Native video or audio track. The highest enabled opaque video track with a clip supplies the frame; enabled audio tracks are summed.
+/// Native video or audio track. Enabled video clips composite bottom to top; a proven opaque cover hides lower tracks. Enabled audio tracks are summed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Track {
@@ -575,11 +575,11 @@ pub enum Edit {
         #[serde(default)]
         clear_gain_curve: bool,
     },
-    /// Replace one video clip's ordered pixel-effect stack; an empty list clears it. Curve times are on the source clock. Promotes a version-1 snapshot to version 2 without rewriting prior revisions.
+    /// Replace one video clip's pixel-effect and spatial-property stack; an empty list clears it. Curve times are on the source clock. Promotes a version-1 snapshot to version 2 without rewriting prior revisions.
     ClipEffects {
         /// Clip on an unlocked video track; use sequence.edit to edit inside a child definition. Parent reference locks also apply.
         clip_id: String,
-        /// At most eight grade, selective_grade, lut or chroma_key effects, in processing order.
+        /// At most eight pixel effects and unique transform, opacity, mask and blend properties; pixel effects retain list order.
         effects: Vec<ClipEffect>,
     },
     /// Set or clear the picture-in-picture transform of `alpha_over` track clips.
@@ -699,14 +699,27 @@ impl Arrangement {
                         return Err(error(
                             "UNSUPPORTED_TIMELINE",
                             format!(
-                                "track {:?} clip {:?}.effects: pixel effects require a video clip; audio is unsupported",
+                                "track {:?} clip {:?}.effects: effects and properties require a video clip; audio is unsupported",
                                 track.id, clip.id
                             ),
                         ));
                     }
-                    crate::effects::prepare(&clip.effects, source_duration)
+                    let pixels = clip
+                        .effects
+                        .iter()
+                        .filter_map(ClipEffect::pixel)
+                        .collect::<Vec<_>>();
+                    crate::effects::prepare(&pixels, source_duration)
                         .under(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
                 }
+                let scale = project.effect_coordinate_scale.unwrap_or(1);
+                crate::clip_properties::normalize(
+                    &clip.effects,
+                    clip.transform.as_ref(),
+                    [project.width * scale, project.height * scale],
+                    source_duration,
+                )
+                .under(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
                 clip.check_audio(track.kind, source_duration)
                     .at(|| format!("track {:?} clip {:?}", track.id, clip.id))?;
                 if source_end.compare(source_duration)?.is_gt() {
@@ -1387,7 +1400,7 @@ pub(crate) fn edit(project: &mut Project, edit: Edit) -> Result<()> {
                 return Err(error(
                     "UNSUPPORTED_TIMELINE",
                     format!(
-                        "clip {clip_id:?}.effects: pixel effects require a video clip; audio is unsupported"
+                        "clip {clip_id:?}.effects: effects and properties require a video clip; audio is unsupported"
                     ),
                 ));
             }
@@ -1513,5 +1526,5 @@ pub(crate) fn range(project: &Project, start: Time, duration: Time) -> Result<Pr
 }
 
 pub fn capabilities() -> serde_json::Value {
-    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform","clip_effects","audio_dynamics"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_chunking":"windows_over_64_clips_render_as_exactly_joined_chunks","render_frame_rates":"native_project_rate","audio_clock":48000,"video":"ordered_native_layers_skip_proven_opaque_cover","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"gain_curve":{"clock":"clip_source_time","maximum_keys":2000,"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"rounding":"curve_value_nearest_then_one_sample_rounding"},"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"clip_effects":{"types":["grade","selective_grade","chroma_key","lut"],"maximum":8,"clock":"clip_source_time","schema_version":2,"nested_sequences":true,"audio":false,"working_space":"shared_scene_linear_srgb_equations","key_coverage":"retain_alpha_reveal_lower_tracks","proxy_masks":"source_canvas_nearest_center_ties_up","lut_table_pool_bytes":134217728},"dynamics":crate::dynamics::capabilities(),"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","source_profiles":["reference_FFV1_RGB8_PCM16_stereo","indexed_H264_HEVC_420_8bit"],"indexed_scope":"root_and_nested_pictures_and_exact_audio","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
+    serde_json::json!({"profile":"native-tracks-v1","operation":"tracks.edit","edits":["transition_set","transition_remove","split","slip","roll","slide","insert","overwrite","ripple_delete","create","promote","add","state","order","duration","place","move","remove","link","unlink","clip_audio","clip_transform","clip_effects","audio_dynamics"],"maximum_tracks":32,"maximum_model_clips":1000,"maximum_render_clips":64,"render_chunking":"windows_over_64_clips_render_as_exactly_joined_chunks","render_frame_rates":"native_project_rate","audio_clock":48000,"video":"ordered_native_layers_skip_proven_opaque_cover","audio":"sum_enabled_stereo_tracks_then_clip_pcm16","clip_audio":{"gain_milli":[0,4000],"gain_curve":{"clock":"clip_source_time","maximum_keys":2000,"interpolation":["hold","linear","ease_in","ease_out","ease_in_out"],"rounding":"curve_value_nearest_then_one_sample_rounding"},"fades":"linear","maximum_fade_seconds":60,"overlapping_fades":false,"rounding":"nearest_ties_away_from_zero_per_clip_before_track_mixing","cuts_inside_fades":"rejected","trims":"fades_follow_clip_edges"},"clip_effects":{"types":["grade","selective_grade","chroma_key","lut","transform","opacity","mask","blend_mode"],"maximum":8,"structural_owners":"one_each","coordinates":"original_source_canvas","structural_order":["pixel_effects","source_mask","transform","opacity","blend"],"blend_modes":["normal","multiply","screen"],"sampling":["scene","box_floor"],"opacity_rounding":["coverage","byte_alpha"],"legacy_overlay":"transform_and_opacity_sugar","clock":"clip_source_time","schema_version":2,"nested_sequences":true,"audio":false,"working_space":"shared_scene_linear_srgb_equations","key_coverage":"retain_alpha_reveal_lower_tracks","proxy_masks":"source_canvas_nearest_center_ties_up","lut_table_pool_bytes":134217728},"dynamics":crate::dynamics::capabilities(),"overlay_transform":{"order":["crop","divisor","opacity","position"],"divisor":[1,8],"shrink":"floor_of_block_mean_per_channel_opaque_sources","opacity":"alpha_x_opacity_over_255_nearest","outside_canvas":"clipped"},"gaps":"implicit_black_and_silence_with_explicit_duration","collision":["reject","replace_clips"],"replacement":"whole_colliding_clips_and_linked_partners;not_interval_overwrite","links":["include","reject_partial"],"locks":"source_target_and_replaced_partner_tracks","source_profile":"reference_FFV1_RGB8_PCM16_stereo","source_profiles":["reference_FFV1_RGB8_PCM16_stereo","indexed_H264_HEVC_420_8bit"],"indexed_scope":"root_and_nested_pictures_and_exact_audio","supported_saved_sessions":true,"transitions":{"video":["dissolve","dip_black","wipe_left","wipe_right"],"audio":["dissolve","dip_black"],"handles":"explicit_before_cut_and_after_cut","sampling":"frame_or_sample_centers","video_rounding":"nearest_ties_up","audio_rounding":"nearest_ties_away_from_zero_before_track_mixing","overlapping_intervals":false},"ripple":true,"boundary_edits":{"fragment_ids":"explicit_right_clip_and_right_link_maps","link_anchors":"preserved","span_selection":"whole_linked_partner_tracks","end_policy":["keep","resize"],"transition_policy":["reject_affected","remove_affected"],"split_transitions":"preserve_clock_across_continuous_source_fragments"},"network":false})
 }

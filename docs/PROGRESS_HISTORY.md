@@ -1,5 +1,32 @@
 # Progress history
 
+## 13 October 2026: saved spatial properties on native clips
+
+Native video clips and sequence instances now save transform, opacity, rectangle
+mask and blend properties alongside their ordered pixel effects. The shared scene
+sampler evaluates source-clock curves per frame. Duplicate owners are rejected.
+Legacy overlay placement is normalized to explicit box-floor transform and
+byte-alpha opacity sugar, preserving its crop and rounding. Proxy geometry keeps
+original-canvas coordinates and accounts for its temporary buffers in the existing
+1 GiB frame bound. Lower tracks remain available whenever a property can expose them.
+
+Windows passed 254 Rust tests and all seven targeted media fixtures in 314 seconds;
+Linux passed 253 Rust tests and the same seven fixtures in 152 seconds. Formatting
+and lint checks passed. Direct H.264 and FFV1 properties match multi-layer scene
+oracles exactly, including PIP, keyed PIP, animated spatial mapping and feathered
+reveals, nested boundaries, transitions, trims/slips/splits, previews, proxy output
+and queued renders. Independent integer blend equations and fractional-alpha
+legacy sugar checks pass. Final schema/MCP tests pass on both platforms; three
+Windows interface fixtures pass in 50 seconds. The agent-cost replay remains a
+scripted regression check. [Evidence](../verification/clip-properties-2026-10-13.json)
+records identities, corrected test/schema issues and precise remaining scope.
+
+Prior backgrounds 00c8d70 and ef5c98b finished with zero failures; their 48 and 61
+superseded checks are skips, not passes. The current commit's shipment/background
+must be checked after shipping. Stage 4 remains open for the restriction audit,
+legacy-graph removal and full quick exit. No new points or thorough claims;
+PROGRESS.md retains the 338e114 milestone evidence.
+
 ## 13 October 2026: complete the frozen stage-3 verification gate
 
 The clean f13453d verification checkout finished all 76 stages of its complete

@@ -104,7 +104,7 @@ pub enum End {
     Transparent,
 }
 /// Integer layer placement: crop, clockwise quarter turns, nearest-neighbor scale, then the anchor lands at `position`.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
     /// `[x, y]` scene pixel where the frame anchor lands; each -32768..32768.
@@ -122,7 +122,7 @@ pub struct Transform {
     pub spatial: Option<crate::spatial::Transform>,
 }
 /// Keyframe curves overriding the layer's static position and opacity on the layer-local clock; declare at least one.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Animation {
     /// Curve for the x position in scene pixels, -32768..32768; omit to keep the static value.

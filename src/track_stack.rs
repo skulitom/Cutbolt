@@ -84,18 +84,26 @@ impl Plan {
         let mut peak = 0;
         for segment in &self.segments {
             let mut active = 0;
+            let mut proxy_canvas = 0;
             for index in segment
                 .layers
                 .iter()
                 .flat_map(|l| std::iter::once(l.outgoing).chain(l.mix.iter().map(|m| m.incoming)))
             {
                 let clip = &self.clips[index];
+                if let Some(stack) = &clip.effects
+                    && stack.properties.is_some()
+                    && stack.coordinate_scale > 1
+                {
+                    proxy_canvas =
+                        proxy_canvas.max(plane * u64::from(stack.coordinate_scale).pow(2) * 7);
+                }
                 active += match &clip.input {
                     Input::Media { .. } => plane * if clip.alpha { 16 } else { 12 },
                     Input::Sequence { plan, .. } => plan.frame_buffer_bytes,
                 };
             }
-            peak = peak.max(canvas + active);
+            peak = peak.max(canvas + active + proxy_canvas);
         }
         self.frame_buffer_bytes = peak;
         if peak > 1024 * 1024 * 1024 {
@@ -123,6 +131,7 @@ pub(crate) struct Frames<'a> {
     pending: Vec<Option<PreparedInput<'a>>>,
     active: Vec<Option<ActiveInput<'a>>>,
     effects: Vec<Option<clip_effects::Prepared>>,
+    properties: Vec<Option<crate::layer_composite::Sampler<'a>>>,
     program: String,
     timeout: Duration,
     abort: Arc<AtomicBool>,
@@ -161,6 +170,17 @@ impl<'a> Frames<'a> {
                 .clips
                 .iter()
                 .map(|c| c.effects.as_ref().map(|s| s.prepare()).transpose())
+                .collect::<Result<_>>()?,
+            properties: plan
+                .clips
+                .iter()
+                .map(|c| {
+                    c.effects
+                        .as_ref()
+                        .and_then(|s| s.properties.as_ref().map(|p| (s, p)))
+                        .map(|(s, p)| p.recipe().prepare(s.source_duration))
+                        .transpose()
+                })
                 .collect::<Result<_>>()?,
             program,
             timeout,
@@ -263,8 +283,18 @@ impl<'a> Frames<'a> {
                 &mut image.rgba,
             )?;
         }
-        if let Some(transform) = &clip.transform {
-            legacy_over(rgb, [self.plan.width, self.plan.height], &image, transform);
+        if let (Some(stack), Some(sampler)) = (&clip.effects, &self.properties[index]) {
+            stack
+                .properties
+                .as_ref()
+                .expect("prepared properties")
+                .draw(
+                    sampler,
+                    stack.time(n - clip.first)?,
+                    &mut image,
+                    rgb,
+                    stack.coordinate_scale,
+                )?;
         } else {
             let transform = Transform {
                 position: [0, 0],
@@ -362,6 +392,7 @@ impl<'a> Frames<'a> {
 
 /// Legacy crop/shrink/placement, preserving byte-alpha opacity rounding. A keyed opaque source
 /// uses associated-color box averaging; an unchanged opaque source keeps floor-of-channel-mean.
+#[cfg(test)]
 fn legacy_over(rgb: &mut [u8], size: [u32; 2], image: &Pixels, transform: &OverlayTransform) {
     let [cx, cy, cw, ch] = transform.crop.unwrap_or([0, 0, image.width, image.height]);
     let k = transform.divisor as i64;
@@ -394,6 +425,58 @@ fn legacy_over(rgb: &mut [u8], size: [u32; 2], image: &Pixels, transform: &Overl
                 let value = sum[c] / sum[3];
                 rgb[dest + c] =
                     ((value * alpha + u64::from(rgb[dest + c]) * (255 - alpha) + 127) / 255) as u8;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{clip_properties, time::Time};
+    #[test]
+    fn overlay_sugar_preserves_legacy_alpha_and_box_rounding() {
+        let size = [24, 16];
+        let mut image = Pixels {
+            width: size[0],
+            height: size[1],
+            rgba: (0..24 * 16)
+                .flat_map(|i| {
+                    [
+                        (i * 17 % 256) as u8,
+                        (i * 29 % 256) as u8,
+                        (i * 37 % 256) as u8,
+                        (i * 41 % 256) as u8,
+                    ]
+                })
+                .collect(),
+        };
+        let duration = Time::new(1, 1).unwrap();
+        for divisor in 1..=8 {
+            for opacity in [0, 1, 63, 127, 128, 254, 255] {
+                let old = OverlayTransform {
+                    crop: Some([2, 1, divisor * 2, divisor]),
+                    divisor,
+                    opacity,
+                    position: [-1, 3],
+                };
+                let mut reference = vec![79; 24 * 16 * 3];
+                legacy_over(&mut reference, size, &image, &old);
+                let sugar = clip_properties::legacy(&old, size);
+                for p in [
+                    clip_properties::normalize(&[], Some(&old), size, duration)
+                        .unwrap()
+                        .unwrap(),
+                    clip_properties::normalize(&sugar, None, size, duration)
+                        .unwrap()
+                        .unwrap(),
+                ] {
+                    let mut actual = vec![79; reference.len()];
+                    let sampler = p.recipe().prepare(duration).unwrap();
+                    p.draw(&sampler, Time::ZERO, &mut image, &mut actual, 1)
+                        .unwrap();
+                    assert_eq!(actual, reference, "divisor {divisor}, opacity {opacity}");
+                }
             }
         }
     }

@@ -986,8 +986,13 @@ mod tests {
             "white_balance_milli":[1000,1000,1000], "animation":{"exposure_milli":{"keys":[
                 {"time":t(0),"value":0,"interpolation":"linear"},
                 {"time":t(20),"value":1000,"interpolation":"hold"}]}}});
+        let properties = json!([grade,
+            {"kind":"transform","value":{"position":[5,7],"crop":[0,0,320,180],"scale":1,"quarter_turns":0,"opacity":255}},
+            {"kind":"opacity","value":193},
+            {"kind":"mask","mask":{"rect":[0,0,160,180],"feather":{"radius":3,"edge":"inner"}}},
+            {"kind":"blend_mode","mode":"screen"}]);
         let op = edit(
-            json!({"op":"tracks.edit","edit":{"op":"clip_effects","clip_id":"c","effects":[grade]}}),
+            json!({"op":"tracks.edit","edit":{"op":"clip_effects","clip_id":"c","effects":properties}}),
         );
         let mutation = || Mutation::Apply {
             operations: vec![op.clone()],
@@ -1008,7 +1013,7 @@ mod tests {
                 .unwrap()
                 .effects
                 .len(),
-            1
+            5
         );
         let effected = get(&root.0, "test", None).unwrap();
         assert_eq!(effected.schema_version, 2);

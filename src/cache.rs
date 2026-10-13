@@ -205,7 +205,7 @@ fn project_sources(p: &Project, root: &Path, proxy_only: Option<&str>) -> Result
             for track in &arrangement.tracks {
                 for clip in &track.clips {
                     for (index, effect) in clip.effects.iter().enumerate() {
-                        if let crate::effects::Effect::Lut(lut) = effect {
+                        if let crate::tracks::ClipEffect::Lut(lut) = effect {
                             let (path, _) = crate::scene::identity_bytes(&lut.file, root)?;
                             output.push(Source {
                                 id: serde_json::to_string(&(

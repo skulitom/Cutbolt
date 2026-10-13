@@ -1,7 +1,8 @@
-# Saved clip pixel effects
+# Saved clip effects and properties
 
-Native video clips, including child-sequence instances, accept an ordered `effects` array of at most eight `grade`,
-`selective_grade`, `chroma_key` or `lut` recipes. These reuse the scene effect types,
+Native video clips, including child-sequence instances, accept an `effects` array of
+at most eight pixel effects and spatial properties: `grade`, `selective_grade`,
+`chroma_key`, `lut`, `transform`, `opacity`, `mask` and `blend_mode`. These reuse the scene effect types,
 validation and pixel equations. They render directly from decoded clip frames, with
 no PNG sequence or scene compilation required by the caller. The PNG scenes in the
 verification fixture are comparison oracles only.
@@ -72,9 +73,55 @@ Legacy overlay opacity still rounds alpha to a byte before blending. Its opaque
 box shrink remains the floor of the channel mean; when a key introduces alpha,
 the box uses alpha-weighted color and the floor of mean alpha.
 
-Saved spatial/opacity/mask/blend properties remain stage 4 work. Child sequences
+Saved spatial/opacity/mask/blend properties use the same layer equations. Child sequences
 use the same ordered compositor and shared LUT resources as the root, including
 direct compressed pictures and effects at each nesting level.
+
+## Transform, opacity, mask and blend
+
+Each structural property may appear once. Pixel effects retain their list order;
+structural entries have fixed phases regardless of list position: process source
+pixels, apply source-mask coverage, map the source, apply opacity, then blend over
+lower active tracks. These declarations work on ordinary video tracks and sequence
+instances, with no `alpha_over` track or compiled scene required.
+
+```json
+[
+  {"kind":"transform","value":{"position":[640,360],"crop":[0,0,1920,1080],"scale":1,"quarter_turns":0,"opacity":255,"spatial":{"translate_milli":[0,0],"scale_milli":[500,500],"rotation_mdeg":0,"flip":[false,false],"pixel_aspect":{"num":1,"den":1},"sampling":"bilinear","edge":"transparent"}},"anchor":[0,0]},
+  {"kind":"opacity","value":224},
+  {"kind":"mask","mask":{"rect":[0,0,1920,1080],"feather":{"radius":12,"edge":"inner"}}},
+  {"kind":"blend_mode","mode":"normal"}
+]
+```
+
+`transform.value` is the existing scene transform. `transform.animation` accepts
+position/opacity curves; `value.spatial.animation` accepts subpixel position,
+scale and rotation curves. Every curve uses clip source time. The optional
+`anchor` is a source-canvas pivot, default `[0,0]`; cropping does not move it.
+`opacity` takes `value` (0–255) and an optional `curve`. A separate opacity entry
+requires transform opacity 255 and no transform opacity curve, preventing two
+owners. `mask.mask` is the existing scene rectangle mask, with feather, inversion
+and source-clock animation. Blend modes are `normal`, `multiply` and `screen` in
+encoded RGB. Scene coverage combines alpha, opacity and mask before final rounding.
+
+Existing `OverlayTransform` remains valid on `alpha_over` clips. It is normalized
+to a transform with crop-origin anchor and `sampling:{"filter":"box_floor",
+"divisor":N}`, plus `opacity` with `rounding:"byte_alpha"`. The box filter uses
+associated-color means and floor-of-mean alpha; byte alpha rounds opacity into
+alpha before blending. This preserves existing output exactly. Box sampling
+requires divisible crop dimensions, scale 1, no rotation or spatial mapping,
+and an anchor at the crop origin. A source mask weights the box's input pixels
+before averaging. Legacy placement already owns transform and opacity; duplicate
+explicit owners are rejected. The eight-entry cap applies to user entries.
+
+Coordinates remain on the original source canvas in proxy previews. After pixel
+processing, proxy blocks are expanded for property mapping and output block
+centers are selected with ties upward. This preserves crop, pivot and mask units.
+The renderer charges the temporary original-size RGB/RGBA buffers against the
+same 1 GiB frame-memory bound. Full-quality exports always use original media.
+Existing `alpha_over` track restrictions on proxy selection, transitions and
+sequence instances remain; the new properties on ordinary tracks cover those
+workflows. The private legacy A/B renderer explicitly rejects new properties.
 
 ## Snapshots, receipts and verification
 
@@ -111,4 +158,7 @@ previews and rejection of changed nested LUTs before rendering or cache reuse.
 The fixture's direct-source reference uses the existing explicit conform path.
 `tests/native_layers.py` adds lower-track key coverage against multi-layer scenes and
 an independent integer alpha equation, exact source-window occlusion and direct
-child-sequence pictures. Spatial properties and linear-light modes remain separate work.
+child-sequence pictures. Its `clip_properties.py` cases compare saved transforms,
+animated opacity, feathered masks and blend modes with scene oracles on reference
+and direct footage, plus independent integer blends and exact overlay sugar.
+Linear-light modes remain separate work.

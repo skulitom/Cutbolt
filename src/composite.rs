@@ -22,7 +22,9 @@ impl AlphaMode {
 }
 
 /// Blend with the backdrop in encoded sRGB: `normal` (default) uses the source, `multiply` uses `s*d`, `screen` uses `1-(1-s)*(1-d)`.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum BlendMode {
     #[default]

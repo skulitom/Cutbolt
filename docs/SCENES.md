@@ -1,6 +1,6 @@
 # Pixel scenes and timeline previews (v0.4)
 
-The same grade, selective-grade, chroma-key and LUT pixel recipes also work as [native clip effects](CLIP_EFFECTS.md) on footage. Scene curves remain layer-local; native clip curves use source time. Scene rendering remains the stage-3 pixel oracle.
+The same pixel recipes, 2D transforms, opacity, rectangle masks and blend modes also work as [native clip effects and properties](CLIP_EFFECTS.md) on footage. Scene curves remain layer-local; native clip curves use source time. Both paths share the layer equations; scene renders provide the comparison oracle.
 
 Text and geometric titles can use [explicit scene shorthand](SCENE_SHORTHAND.md), which expands
 to this same scene format with resolved inputs. The full format below retains its existing defaults.

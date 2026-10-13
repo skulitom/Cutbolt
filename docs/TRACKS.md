@@ -2,7 +2,7 @@
 
 The `native-tracks-v1` model stores explicitly placed clips in the existing project snapshot and local session history. It supports opaque and straight-alpha overlay video tracks, stereo audio tracks, linked selections, track targeting, locks, enabled state and explicit collision policies. Use the existing `timeline.apply` or `session.preview`/`session.apply` commands with `tracks.edit` operations. The MCP tools expose the same schema; no separate service or database is introduced.
 
-Video clips and child-sequence instances also support [saved pixel effects](CLIP_EFFECTS.md): grade, selective grade, LUT and chroma key, with source-clock curves and schema-2 saved history.
+Video clips and child-sequence instances also support [saved effects and properties](CLIP_EFFECTS.md): grade, selective grade, LUT, chroma key, transform, opacity, mask and blend mode, with source-clock curves and schema-2 saved history.
 
 ## Model and clocks
 
@@ -11,7 +11,8 @@ A project uses either its original sequential `clips` list or an optional `track
 Each track has a unique `id`, `kind` (`video` or `audio`), explicit `locked` and `enabled` booleans, a `clips` array and optional [transitions](TRANSITIONS.md). Each clip has an `id` unique across its arrangement's tracks, exactly one source reference (`asset_id` or [nested `sequence_id`](SEQUENCES.md)), `start`, `source_in` and positive `duration`. Time fields use exact nonnegative `{num,den}` seconds. Video placements and source ranges align to the project frame rate; audio aligns to 48,000 samples per second. Arrangement duration aligns to the project frame rate. Declared source ranges and clip ends must fit the source and arrangement duration. Intervals include their start and exclude their end, so touching clips are legal. Clips may overlap across tracks but never within one track. Array order within a track does not control playback.
 
 Video tracks composite bottom to top, with black below the lowest active clip.
-An upper gap or a chroma key's reduced alpha exposes lower video. A normal,
+An upper gap, key, mask, transformed edge or reduced opacity exposes lower video.
+Each clip uses its declared blend mode, normal by default. A normal,
 full-frame opaque clip hides all lower tracks; the render planner omits their
 decoder windows. This preserves the previous highest-opaque-track result for
 clips without transparency. Source inspection and final identity checks still
@@ -50,6 +51,7 @@ Wrap every edit as `{"op":"tracks.edit","edit":{...}}`. Each operation must leav
 | `insert`, `overwrite`, `ripple_delete` | See [interval fields and policies](TRACK_EDITS.md#interval-operations) | Edit intervals across selected/linked tracks with explicit survivor IDs, end policy and transition policy |
 | `clip_audio` | `clip_ids`, optional `gain_milli`, `fade_in`, `fade_out` | Set the [gain and fades](#clip-gain-and-fades) of audio-track clips; omitted fields keep their values |
 | `clip_transform` | `clip_ids`, `transform` | Set the [picture-in-picture transform](#picture-in-picture) of `alpha_over` track clips; null restores the full frame |
+| `clip_effects` | `clip_id`, `effects` | Replace the complete saved pixel-effect and spatial-property stack; empty clears it |
 | `audio_dynamics` | optional `track_id`, `dynamics` | Set or clear the [limiter](AUDIO.md#timeline-limiters) of an audio track, or of the master mix without `track_id` |
 
 `shift` requires `backward` and nonnegative rational `amount`; zero supports retargeting alone. `targets` is an explicit array of `{clip_id,track_id}`. Omitted members keep their existing track; included linked partners may have explicit targets too. All placements are calculated together, so simultaneous swaps are evaluated against the final placement. A video clip cannot be retargeted to an audio track or vice versa.

@@ -437,15 +437,28 @@ impl<'a> Graph<'a> {
         at: Time,
         origin: [u32; 2],
     ) -> Result<Option<crate::clip_effects::Stack>> {
-        if clip.effects.is_empty() {
+        if clip.effects.is_empty() && clip.transform.is_none() {
             return Ok(None);
         }
-        for source in self.effect_resources.add(&clip.effects, self.root)? {
+        let pixels = clip
+            .effects
+            .iter()
+            .filter_map(crate::tracks::ClipEffect::pixel)
+            .collect::<Vec<_>>();
+        for source in self.effect_resources.add(&pixels, self.root)? {
             self.effect_sources.insert(source.path.clone(), source);
         }
+        let scale = self.project.effect_coordinate_scale.unwrap_or(1);
+        let properties = crate::clip_properties::normalize(
+            &clip.effects,
+            clip.transform.as_ref(),
+            [self.project.width * scale, self.project.height * scale],
+            clip.source_duration(self.project)?,
+        )?;
         Ok(Some(crate::clip_effects::Stack {
             clip_id: clip.id.clone(),
-            effects: clip.effects.clone(),
+            effects: pixels,
+            properties,
             source_start: clip.source_in.plus(at)?.minus(clip.start)?,
             source_duration: clip.source_duration(self.project)?,
             rate: self.project.frame_rate,
@@ -1657,22 +1670,23 @@ impl<'a> Graph<'a> {
                 if right.is_none() && left.transform.as_ref().is_some_and(|t| t.opacity == 0) {
                     continue;
                 }
-                let opaque = |clip: &TrackClip| {
-                    !self.alpha_assets.contains(&clip.asset_id)
+                let opaque = |clip: &TrackClip| -> Result<bool> {
+                    let scale = self.project.effect_coordinate_scale.unwrap_or(1);
+                    let canvas = [self.project.width * scale, self.project.height * scale];
+                    let properties = crate::clip_properties::normalize(
+                        &clip.effects,
+                        clip.transform.as_ref(),
+                        canvas,
+                        clip.source_duration(self.project)?,
+                    )?;
+                    Ok(!self.alpha_assets.contains(&clip.asset_id)
                         && !clip
                             .effects
                             .iter()
-                            .any(|e| matches!(e, crate::effects::Effect::ChromaKey(_)))
-                        && clip.transform.as_ref().is_none_or(|t| {
-                            t.opacity == 255
-                                && t.divisor == 1
-                                && t.position == [0, 0]
-                                && t.crop.is_none_or(|c| {
-                                    c == [0, 0, self.project.width, self.project.height]
-                                })
-                        })
+                            .any(|e| matches!(e, crate::tracks::ClipEffect::ChromaKey(_)))
+                        && properties.as_ref().is_none_or(|p| p.opaque(canvas)))
                 };
-                let covers = opaque(left) && right.is_none_or(opaque);
+                let covers = opaque(left)? && right.map(opaque).transpose()?.unwrap_or(true);
                 visible.push((index, left, right, transition));
                 if covers {
                     break;
@@ -2051,15 +2065,13 @@ fn compile<'a>(
                 .iter()
                 .flat_map(|t| &t.clips)
                 .any(|c| !c.effects.is_empty())
-        }) || a
-            .tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .any(|c| c.sequence_id.is_some() && !c.effects.is_empty())
-        {
+        }) || a.tracks.iter().flat_map(|t| &t.clips).any(|c| {
+            (c.sequence_id.is_some() && !c.effects.is_empty())
+                || c.effects.iter().any(crate::tracks::ClipEffect::structural)
+        }) {
             return Err(error(
                 "UNSUPPORTED_TIMELINE",
-                "The legacy A/B compositor does not support nested effects; use the default native compositor",
+                "The legacy A/B compositor does not support nested effects or structural properties; use the default native compositor",
             ));
         }
         let video_tracks = || (a.tracks.iter()).filter(|t| t.kind == Kind::Video && t.enabled);

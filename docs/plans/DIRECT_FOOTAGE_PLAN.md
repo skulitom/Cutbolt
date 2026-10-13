@@ -269,8 +269,11 @@ alpha over lower tracks, skips provably hidden render windows and recursively re
 child pictures, including direct sources. The new multi-layer scene/integer fixture
 passes on Windows and Linux. Nested pixel effects now support child definitions and
 sequence instances, with source-clock, saved-history and LUT dependency checks.
-Saved spatial/opacity/mask/blend properties and overlay sugar remain open; the old
-nested graphs remain as A/B oracles. See [layer evidence](../../verification/native-layers-2026-10-13.json)
+Saved transform/opacity/mask/blend properties and exact overlay sugar now pass
+scene, independent-integer, source-clock and preview/export checks on Windows and
+Linux; see [property evidence](../../verification/clip-properties-2026-10-13.json).
+The old nested graphs remain as A/B oracles pending the remaining restriction audit,
+comparison cleanup and complete quick gate. See [layer evidence](../../verification/native-layers-2026-10-13.json)
 and [nested-effect evidence](../../verification/nested-effects-2026-10-13.json).
 This is not the stage exit.
 

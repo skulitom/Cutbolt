@@ -135,9 +135,12 @@ def run(root):
             seqedit('shot',edit('place',track_id='v',clip=placement('child','presenter',2,N-4,2),collision='reject')),
             edit('place',track_id='presenter',clip=nested('instance','shot',0,N),collision='reject')])
         render(child,f'{codec}-nested',bytes(2*STRIDE)+raw[prefix+'presenter'][2*STRIDE:(N-2)*STRIDE]+bytes(2*STRIDE))
+    from clip_properties import check
+    properties = check(root, sources, outputs, pictures, raw, call, apply, project, render)
     assert all(hashlib.sha256(p.read_bytes()).hexdigest()==digest for p,digest in original_hashes.items())
     report={'passed':['native_layers.key_retains_lower_tracks','native_layers.scene_and_integer_oracles','native_layers.preview_and_range','native_layers.opaque_cover_omits_hidden_decoder_windows','native_layers.nested_direct_frames_and_black_gaps','native_layers.source_preservation'],
-            'cases':cases,'rgb_tolerance':0,'scope':'Ordered stack, retained key alpha and native child sources; spatial clip property acceptance remains separate.'}
+            'cases':cases,'rgb_tolerance':0,'scope':'Ordered stack, saved spatial properties, retained key alpha and native child sources.'}
+    report['passed'] += properties
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report))
 
