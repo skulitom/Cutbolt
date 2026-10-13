@@ -1,5 +1,36 @@
 # Progress history
 
+## 13 October 2026: pin transcription cleanup test identities
+
+A 4bf1191 background finished with two passes, one transcription failure and 55
+superseded skips. Its final guard scan reported two live processes using saved PID
+namespace numbers. An original controlled probe reproduced a false positive:
+a later unrelated namespace reused an exited namespace's number. The historical
+processes had already exited when inspected, so that log cannot prove their
+identity or attribute the original failure conclusively.
+
+The fixture now holds namespace descriptors from live supervisors/workers through
+the final scan. This prevents identity reuse while still checking every descendant,
+including detached processes without a project path in their command. Both native
+cancellation paths use the same check; request rejections are covered before input.
+Production transcription code is unchanged.
+
+All 254 Rust tests and the complete pinned transcription suite pass (805 seconds,
+zero skips/reuse/failures). A standalone guard checks eleven namespaces; two parallel
+guards check another 22. Positive controls detect live owned processes and detached
+children, preserve a concurrent unrelated namespace, and prevent identity reuse
+during 32 replacement namespace creations. The verifier reports no unresolved
+failures. [Investigation and evidence](../verification/transcription-namespace-lifetime-2026-10-13.json)
+record the exact source identities and the limit on historical attribution.
+
+The d04a362 graphics shipment succeeded and its main-branch push was independently
+confirmed. Its background and the frozen stage-four full quick run remain live;
+this fix's shipment/background also need terminal audits. Candidate generated
+1080p caption-window planning retained 893,800,160 bytes at ten minutes and hit
+the shared 1 GiB bound at twenty minutes. Resource handling must be corrected
+before migrating long caption workflows. Stage 5, stage 6 and the final plan audit
+remain open. No points or new thorough claim; PROGRESS.md retains 338e114.
+
 ## 13 October 2026: place graphics as saved scene clips
 
 `graphics.place` now instantiates and pins a scene, then saves its native clip in

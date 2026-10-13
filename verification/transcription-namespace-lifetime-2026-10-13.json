@@ -1,0 +1,131 @@
+{
+  "date": "2026-10-13",
+  "kind": "transcription_cleanup_verification_fix",
+  "base_commit": "d04a3626f64a4254f3e500999ed45c8b0826f7ee",
+  "tested_working_changes": true,
+  "production_engine_changed": false,
+  "source_hashes": {
+    "tests/transcription_guard.py": {
+      "bytes": 11876,
+      "sha256": "9e4ea9f6a001287ce53f9aad603b6a582b39948712db6cc0729a50605e90cd7a"
+    },
+    "tests/transcription_runtime.py": {
+      "bytes": 36778,
+      "sha256": "5eabfd0ed6bfaa1b17e8ceec8dc6607d6ccfac97d297ef059980dcd7d535809d"
+    },
+    "tests/transcription.py": {
+      "bytes": 25413,
+      "sha256": "443303fa19f9d0d5fcb7fa67d4c08d4605cd2aea69467820e7e73de115e2b6d9"
+    },
+    "tools/transcribe_supervisor.py": {
+      "bytes": 5184,
+      "sha256": "76493bdfaebd22d37d59e8bbfe99d65e494fe8b96b4a8d3aa5ed5ce3ce1f12d8"
+    },
+    "tools/transcribe_worker.py": {
+      "bytes": 46049,
+      "sha256": "a2060f4bb0562c54aea2fae04f75cdce81c1500f4c7ecf6a4d7ee2ee422e97ae"
+    }
+  },
+  "investigation": {
+    "prior_background": {
+      "commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+      "passed": 2,
+      "failed": [
+        "transcription"
+      ],
+      "superseded_skips": 55,
+      "not_started": 0,
+      "wall_seconds": 1736,
+      "failure": "Final guard scan reported two processes in a saved namespace number."
+    },
+    "historical_failure_attribution": "The two reported processes had exited by inspection and their original namespace/argv details were not retained. Their exact identity and the historical cause cannot be proved from that log.",
+    "reproduced_test_defect": {
+      "namespace_reuse_after_attempts": 6,
+      "original_invocation_exited_zero": true,
+      "unrelated_replacement_alive": true,
+      "old_check_false_positive_process_count": 1,
+      "mechanism": "A saved ns/pid symlink string can identify a different namespace after its original owner exits."
+    },
+    "fix": "Retain an open namespace descriptor from a live supervisor or production worker until the final process scan. The descriptor pins the identity, not its processes. Scan every process in the pinned namespace, regardless of its command arguments.",
+    "additional_coverage": "Pin request-rejection supervisors before input, including cases that never start a worker. Keep native library cancellation and owner-kill namespace handles alive through their cleanup assertions."
+  },
+  "verification": {
+    "windows_rust_tests": {
+      "passed": 254,
+      "failed": 0
+    },
+    "full_transcription": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 805,
+      "scope": "The complete existing pinned Windows/WSL speech fixture, including real recognition, timing, native cancellations, owner shutdown and all supervisor guard modes.",
+      "report_identity": {
+        "bytes": 238,
+        "sha256": "c42002d807eefe66eb0f5cea954e50a5415510115af9c490c4f730c3fe0cf6f3"
+      },
+      "log_identity": {
+        "bytes": 22057,
+        "sha256": "26ece5d7bf1af3f4af4542ec54946cb9785f9ed557f43f990ccf753a93d0496d"
+      }
+    },
+    "standalone_guard": {
+      "namespaces_checked": 11,
+      "worker_namespaces_checked": 9,
+      "namespace_descriptors_held_until_check": true,
+      "live_owned_process_positive_control": true,
+      "surviving_owned_processes": 0,
+      "unrelated_files_preserved": true
+    },
+    "standalone_guard_modes": [
+      "success",
+      "nonzero",
+      "malformed",
+      "oversized",
+      "stderr-limit",
+      "timeout",
+      "owner-eof",
+      "bridge-kill",
+      "success-detached",
+      "changed-worker",
+      "unknown-field"
+    ],
+    "concurrent_guards": {
+      "parallel_guards": 2,
+      "cases": 22,
+      "namespaces_checked": 22,
+      "surviving_owned_processes": 0,
+      "both_positive_controls": true
+    },
+    "ownership_controls": {
+      "detached_child_with_unrelated_argv_detected": true,
+      "unrelated_namespace_survived_owned_cleanup": true,
+      "surviving_owned_processes": 0,
+      "replacement_namespaces_created": 32,
+      "held_namespace_not_recycled": true
+    },
+    "verifier_status_after_run": "No unresolved failures reported."
+  },
+  "external_probe_script_hashes": {
+    "probe-namespace-reuse-02.py": {
+      "bytes": 1421,
+      "sha256": "865837210d97d30e765aa2971dcf3dff86ec105b6b72a63c542b4ab94c8c2eae"
+    },
+    "namespace-pin-controls-01.py": {
+      "bytes": 3000,
+      "sha256": "0750ce1334b4f041e45d889350875c87b4095ca9e48ccd4d96a80dac7af7147d"
+    },
+    "run-namespace-pin-concurrent-01.py": {
+      "bytes": 982,
+      "sha256": "9f1eac628620db3354168170410b5f5a58c4bb4b06e23b53bf0eec62a5e0c1a1"
+    }
+  },
+  "limits": [
+    "The reproduced false positive establishes a defect in the previous fixture, not the identity of the two historical processes.",
+    "This is targeted verification, not a new thorough evidence run or a stage exit.",
+    "The stage-four frozen full quick run and d04a362 background remain live and require terminal audits."
+  ],
+  "progress_points_awarded": 0
+}

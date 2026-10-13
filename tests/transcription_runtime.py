@@ -12,7 +12,7 @@ import subprocess
 import time as clock
 import wave
 from tracks import time, seconds
-from transcription_guard import linux, processes, no_namespaces, wsl
+from transcription_guard import linux, processes, NamespacePins, wsl
 from transcription_speech import lines
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -453,8 +453,9 @@ def failures(root,request,runtime,call,preserved):
         cancel=root/(mode+'.signal');command=[str(EXE)]
         if mode=='library-cancel':candidate.pop('command');command=[str(binary),str(cancel)]
         child=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        started=clock.monotonic();namespaces=set();observed=[]
+        started=clock.monotonic();namespaces=set();observed=[];pins=None
         try:
+            pins=NamespacePins(runtime)
             child.stdin.write(json.dumps(candidate).encode());child.stdin.close();child.stdin=None
             deadline=clock.monotonic()+25
             while clock.monotonic()<deadline:
@@ -467,6 +468,8 @@ def failures(root,request,runtime,call,preserved):
             # matches the scratch path, so only the actual worker identifies
             # the namespace owned by this invocation.
             namespaces={p['namespace'] for p in observed if any(a.endswith('/transcribe_worker.py') for a in p['argv'])}
+            pins.pin([p['pid'] for p in observed if p['namespace'] in namespaces])
+            assert namespaces<=pins.namespaces,'Live worker namespace was not pinned'
             (root/(mode+'-observed.json')).write_text(json.dumps(observed,indent=2),encoding='utf-8')
             if mode=='library-cancel':cancel.write_text('explicit fixture cancellation',encoding='utf-8')
             else:child.kill()
@@ -476,10 +479,11 @@ def failures(root,request,runtime,call,preserved):
             deadline=clock.monotonic()+8
             while list(owned.iterdir()) and clock.monotonic()<deadline:clock.sleep(.05)
             assert not list(owned.iterdir()),(mode,'scratch remains')
-            no_namespaces(runtime,namespaces);preserved()
+            pins.no_processes();preserved()
             records.append({'case':mode,'seconds':clock.monotonic()-started,'live_worker_observed':True,'surviving_owned_processes':0,
-                'scratch_removed':True,'source_preserved':True})
+                'namespace_descriptors_held_until_check':True,'scratch_removed':True,'source_preserved':True})
         finally:
             if child.poll() is None:child.kill();child.wait(timeout=5)
+            if pins is not None:pins.close()
     (root/'verification.json').write_text(json.dumps(records,indent=2)+'\n',encoding='utf-8')
     return records

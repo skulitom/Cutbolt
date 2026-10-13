@@ -6,6 +6,7 @@ no worker override; its separate tests invoke the embedded production worker.
 import hashlib
 import json
 from pathlib import Path
+import queue
 import subprocess
 import threading
 import time
@@ -39,17 +40,92 @@ print(json.dumps(out))
 """,needle)
 
 
-def no_namespaces(runtime,namespaces):
-    alive=wsl(runtime,"""import json,os,sys
+PIN_SERVER=r'''import json,os,sys
 from pathlib import Path
-wanted=set(json.loads(sys.argv[1]));out=[]
-for path in Path('/proc').glob('[0-9]*'):
- try:
-  if os.readlink(path/'ns/pid') in wanted:out.append(int(path.name))
- except OSError:pass
-print(json.dumps(out))
-""",json.dumps(list(namespaces)))
-    assert not alive,('owned namespace survived',alive)
+held={};host=os.readlink('/proc/self/ns/pid')
+def reply(value):print(json.dumps(value),flush=True)
+reply({'host_namespace':host})
+try:
+ for line in sys.stdin:
+  try:
+   request=json.loads(line)
+   if request['command']=='pin':
+    for pid in request['pids']:
+     fd=os.open('/proc/'+str(int(pid))+'/ns/pid',os.O_RDONLY|os.O_CLOEXEC)
+     name=os.readlink('/proc/self/fd/'+str(fd))
+     if name==host:
+      os.close(fd);raise ValueError('Refusing to pin the host PID namespace')
+     if name in held:os.close(fd)
+     else:held[name]=fd
+    reply({'namespaces':sorted(held)})
+   elif request['command']=='check':
+    alive=[]
+    for path in Path('/proc').glob('[0-9]*'):
+     try:
+      name=os.readlink(path/'ns/pid')
+      if name in held:
+       alive.append({'pid':int(path.name),'namespace':name,
+        'argv':(path/'cmdline').read_bytes().decode(errors='replace').split('\0')})
+     except OSError:pass
+    reply({'namespaces':sorted(held),'alive':alive})
+   else:raise ValueError('Unknown pin-server command')
+  except Exception as exc:reply({'error':repr(exc)})
+finally:
+ for fd in held.values():os.close(fd)
+'''
+
+
+class NamespacePins:
+    """Keep namespace identities allocated until every cleanup assertion ends.
+
+    A saved ns/pid symlink string alone is unsafe: the kernel can recycle that
+    inode number after exit. An open namespace descriptor prevents recycling
+    without keeping its processes alive, and covers descendants with any argv.
+    """
+    def __init__(self,runtime):
+        self.child=subprocess.Popen(['wsl','--distribution',runtime['distribution'],'--exec',runtime['python'],'-c',PIN_SERVER],
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        self.responses=queue.Queue();self.errors=[]
+        def read():
+            for line in self.child.stdout:self.responses.put(line)
+            self.responses.put(None)
+        self.readers=[threading.Thread(target=read,daemon=True),
+            threading.Thread(target=drain,args=(self.child.stderr,self.errors),daemon=True)]
+        for reader in self.readers:reader.start()
+        try:self.host_namespace=self._read()['host_namespace']
+        except BaseException:self.close();raise
+        self.namespaces=set()
+
+    def _read(self):
+        line=self.responses.get(timeout=20)
+        assert line is not None,('Namespace pin server exited',self.errors)
+        value=json.loads(line)
+        assert 'error' not in value,('Namespace pin server failed',value)
+        return value
+
+    def request(self,value):
+        self.child.stdin.write(json.dumps(value).encode()+b'\n');self.child.stdin.flush()
+        return self._read()
+
+    def pin(self,pids):
+        assert pids,'No live process to pin'
+        value=self.request({'command':'pin','pids':pids})
+        self.namespaces=set(value['namespaces'])
+
+    def no_processes(self):
+        value=self.request({'command':'check'})
+        assert set(value['namespaces'])==self.namespaces,'Lost a namespace pin'
+        assert not value['alive'],('owned namespace survived',value['alive'])
+        return value
+
+    def close(self):
+        if not self.child.stdin.closed:self.child.stdin.close()
+        try:self.child.wait(timeout=10)
+        except subprocess.TimeoutExpired:self.child.kill();self.child.wait(timeout=5)
+        for reader in self.readers:reader.join(5)
+
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
 
 
 def drain(stream,output):
@@ -77,6 +153,10 @@ if mode=='nonzero':sys.exit(7)
 
 
 def run(root,runtime):
+    with NamespacePins(runtime) as pins:return run_pinned(root,runtime,pins)
+
+
+def run_pinned(root,runtime,pins):
     root=Path(root);root.mkdir();records=[];namespaces=set()
     supervisor=(ROOT/'tools/transcribe_supervisor.py').read_bytes()
     for mode in ['success','nonzero','malformed','oversized','stderr-limit','timeout','owner-eof','bridge-kill','success-detached','changed-worker','unknown-field']:
@@ -96,6 +176,20 @@ def run(root,runtime):
         for reader in readers:reader.start()
         started=time.monotonic()
         try:
+            # Pin the real supervisor while it waits for its initial request.
+            # This also covers request rejections which never start a worker.
+            deadline=time.monotonic()+8
+            while True:
+                observed=[p for p in processes(runtime,linux(owned/'transcribe_supervisor.py'))
+                    if p['namespace']!=pins.host_namespace]
+                if observed:break
+                assert child.poll() is None and time.monotonic()<deadline,('No live namespace supervisor',mode)
+                time.sleep(.02)
+            pins.pin([p['pid'] for p in observed])
+            if mode=='success':
+                try:pins.no_processes()
+                except AssertionError as exc:assert exc.args[0][0]=='owned namespace survived',exc
+                else:raise AssertionError('Cleanup assertion missed a live owned supervisor')
             child.stdin.write(json.dumps(settings).encode()+b'\n');child.stdin.flush()
             if mode in ('owner-eof','bridge-kill'):
                 deadline=time.monotonic()+10
@@ -134,8 +228,11 @@ def run(root,runtime):
         finally:
             if child.poll() is None:child.kill();child.wait(timeout=5)
             if not child.stdin.closed:child.stdin.close()
-    no_namespaces(runtime,namespaces)
+    assert namespaces<=pins.namespaces,('Unpinned worker namespace',namespaces-pins.namespaces)
+    pins.no_processes()
     report={'production_supervisor_sha256':hashlib.sha256(supervisor).hexdigest(),'records':records,
-        'namespaces_checked':len(namespaces),'surviving_owned_processes':0,'unrelated_files_preserved':True}
+        'namespaces_checked':len(pins.namespaces),'worker_namespaces_checked':len(namespaces),
+        'namespace_descriptors_held_until_check':True,'live_owned_process_positive_control':True,
+        'surviving_owned_processes':0,'unrelated_files_preserved':True}
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     return report
