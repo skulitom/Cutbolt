@@ -1,5 +1,31 @@
 # Progress history
 
+## 13 October 2026: bounded encoded output for conversion-cache preparation
+
+Explicit media.conform accepts an optional positive max_output_bytes ceiling, also forwarded
+by persisted jobs. The limited Matroska encoder streams through a checked sink that never
+writes a block beyond the ceiling; WAV uses its exact header/sample size before conversion.
+Over-budget work returns structured LIMIT_EXCEEDED, cancels the encoder and removes scratch
+without publishing. Existing temporary decoded-window bounds are separate. Legacy requests
+retain the original encoding path; decoded RGB/RGBA/PCM equality is checked before publication.
+Receipts expose the verified decoded hashes/counts for future content-verified cache entries.
+
+Windows and Linux pass conform, color, integration (including agents.py), agent_ergonomics,
+agent_costs and skills; no failures or skips. Rust tests pass 236/235 respectively, clippy
+is warning-free, and formatting/material checks pass. Bounded tests cover RGB, fractional and
+variable timing, silent picture, exact WAV size, alpha with display geometry, direct/queued
+failures, source preservation and partial-output cleanup. See the source/binary identities and
+scope in verification/conform-budget-2026-10-13.json. An initial Windows build collided with a
+fixture holding the executable; checks were rerun using the verifier's copied engine. An
+initial targeted invocation used the obsolete agents fixture name; integration ran the actual
+agents.py checks successfully in the corrected selection.
+
+The previous e668c16 shipment completed all 54 deferred checks, with zero failures, skips or
+unstarted fixtures, including recording and direct_sources. This new commit still needs its
+ship gate and deferred follow-up. The historical H.264 mismatch remains unexplained; retention
+stays enabled. Automatic cached conversion, provenance and preparing-source phases remain
+open. Full milestone evidence stays at 338e114; no points, G2 or plan scope changes.
+
 ## 12 October 2026: explicit display rotation and sample-aspect normalization
 
 SDR conform accepts an explicit `source.geometry.fit` policy: contain, cover or stretch.

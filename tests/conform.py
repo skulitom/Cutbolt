@@ -176,6 +176,9 @@ def run(root):
         actual_pcm=ff(["-i",str(output/(label+".mkv")),"-map","0:a:0","-f","s16le","-"])
         assert actual_rgb==rgb,label
         assert actual_pcm==pcm,label
+        assert receipt['decoded']=={'pixel_format':'rgb24','video_bytes':len(rgb),
+            'video_sha256':hashlib.sha256(rgb).hexdigest(),'pcm_bytes':len(pcm),
+            'pcm_sha256':hashlib.sha256(pcm).hexdigest()},label
         assert receipt["source_frame_indices"]==plan["source_frame_indices"]==indices
         if "frame_rate" in changes:
             assert indices==list(range(len(indices))),(label,indices)
@@ -217,6 +220,52 @@ def run(root):
     render(recipe("audio-24000-1.wav","bad"),"bad-audio","UNSUPPORTED_OUTPUT",extension="wav")
     assert not list(output.glob("bad-audio*"))
     passed.append("conform.audio_only_wav_exact")
+    # A cache's encoded-byte cap is enforced while writing, including streamed Matroska.
+    bounded_cases=[]
+    bounded_frames=bounded_samples=0
+    for name,label,changes in cases:
+        if label not in ('rgb25','native-fractional','variable','wav-mono'):continue
+        value=recipe(name,label,**changes);path=output/('bounded-'+label+'.mkv')
+        req={'command':'media.conform','recipe':value,'input_root':str(sources),
+             'output_root':str(output),'output':str(path),'max_output_bytes':4*1024*1024}
+        receipt=request(req)
+        rgb,pcm=expected_outputs[label]
+        assert ff(['-i',str(path),'-map','0:v:0','-pix_fmt','rgb24','-f','rawvideo','-'])==rgb,label
+        assert ff(['-i',str(path),'-map','0:a:0','-f','s16le','-'])==pcm,label
+        assert receipt['decoded']==receipts[label]['decoded'],label
+        assert receipt['storage']=={'max_output_bytes':4*1024*1024,'encoded_bytes':path.stat().st_size}
+        bounded_cases.append(label)
+        bounded_frames+=len(rgb)//(value["width"]*value["height"]*3)
+        bounded_samples+=len(pcm)//4
+    audio=audio_recipe('audio-24000-1.wav','bounded-wav');size=44+48000*4
+    audio_request={'command':'media.conform','recipe':audio,'input_root':str(sources),
+                   'output_root':str(output),'output':str(output/'bounded.wav'),'max_output_bytes':size}
+    result=request(audio_request)
+    assert (output/'bounded.wav').stat().st_size==size
+    assert wav_pcm(output/'bounded.wav')==resampled(24000,1,audio)
+    bounded_samples+=(size-44)//4
+    assert result['storage']=={'max_output_bytes':size,'encoded_bytes':size}
+    before={p.name:sha(p) for p in output.iterdir()}
+    for cap in (0,1,4096):
+        denied={'command':'media.conform','recipe':recipe('rgb25.mkv','limit'),
+            'input_root':str(sources),'output_root':str(output),'output':str(output/f'limit-{cap}.mkv'),
+            'max_output_bytes':cap}
+        failure=request(denied,'LIMIT_EXCEEDED')['error']
+        assert failure['path']=='max_output_bytes' and failure['detail']['max_output_bytes']==cap
+    request({**audio_request,'output':str(output/'short.wav'),'max_output_bytes':size-1},'LIMIT_EXCEEDED')
+    # The persisted worker forwards the cap and preserves its structured failure.
+    jobs=root/'budget-jobs';jobs.mkdir()
+    arguments={k:v for k,v in denied.items() if k!='command'}
+    arguments['output']=str(output/'queued-limit.mkv')
+    ticket=request({'command':'job.start','job_root':str(jobs),'request_id':'limited-conversion',
+                    'run':'media.conform','arguments':arguments})
+    for _ in range(6):
+        status=request({'command':'job.wait','job_root':str(jobs),'job_id':ticket['job_id'],'timeout_seconds':30})
+        if status.get('finished'):break
+    assert status['status']=='failed' and status['error']['code']=='LIMIT_EXCEEDED',status
+    assert before=={p.name:sha(p) for p in output.iterdir()}
+    assert not list(output.glob('.cutbolt-*'))
+    passed.append('conform.bounded_encoded_output')
     # One-step preparation: a fitting ready source is returned as it is; anything else is converted
     # with the readiness recipe, identical to running that recipe through media.conform.
     def prepare(name,label=None,project=None,error=None):
@@ -425,7 +474,7 @@ def run(root):
     assert originals=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.iterdir()}
     assert not list(output.glob(".cutbolt-scene-*"))
     passed.append("conform.malformed_boundaries_preservation")
-    report={"passed":passed,"cases":comparisons,"rejected_cases":len(bad),"reference":"All decoded output pixels and PCM compared with independent Fraction clocks, source timestamp lookup and source RGB/PCM; source codec decoding uses external FFmpeg. Audio-only WAVs compared with an integer resampler over the sources' generating formula","frames_compared":sum(v["frames"] for v in comparisons)+45+75,"sample_frames_compared":sum(v["sample_frames"] for v in comparisons)+86400+4*144000}
+    report={"passed":passed,"bounded_output":{"video_cases":bounded_cases,"exact_wav_ceiling":True,"queued_failure":True,"partial_output_cleanup":True},"cases":comparisons,"rejected_cases":len(bad),"reference":"All decoded output pixels and PCM compared with independent Fraction clocks, source timestamp lookup and source RGB/PCM; source codec decoding uses external FFmpeg. Audio-only WAVs compared with an integer resampler over the sources' generating formula","frames_compared":sum(v["frames"] for v in comparisons)+45+75+bounded_frames,"sample_frames_compared":sum(v["sample_frames"] for v in comparisons)+86400+4*144000+bounded_samples}
     (root/"verification.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     (root/"recipe.json").write_text(json.dumps(recipe("fractional.mp4","fast-example",rate=time(3,2)),indent=2)+"\n",encoding="utf-8")
     print(json.dumps(report))

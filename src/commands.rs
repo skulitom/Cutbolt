@@ -727,6 +727,9 @@ pub enum Request {
         output_root: PathBuf,
         /// Absolute path of a new .mkv (audio-only: .wav) file inside output_root; existing files are never overwritten.
         output: PathBuf,
+        /// Optional hard ceiling on encoded output bytes. Decoded scratch is separate; exceeding it cancels conversion without publication.
+        #[serde(default)]
+        max_output_bytes: Option<u64>,
         /// Transcripts of the source to move onto the output, so it need not be recognized again; forward, unit-speed recipes only.
         #[serde(default)]
         transcripts: Vec<crate::transcript::Document>,
@@ -1680,10 +1683,17 @@ pub fn handle(request: Request) -> Result<Value> {
             input_root,
             output_root,
             output,
+            max_output_bytes,
             transcripts,
         } => {
             crate::readiness::can_follow(&transcripts, &recipe)?;
-            let mut receipt = conform::run(&recipe, &input_root, &output_root, &output)?;
+            let mut receipt = conform::run_bounded(
+                &recipe,
+                &input_root,
+                &output_root,
+                &output,
+                max_output_bytes,
+            )?;
             if !transcripts.is_empty() {
                 receipt["transcripts"] = json!(crate::readiness::follow(
                     &transcripts,

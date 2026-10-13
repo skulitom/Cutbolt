@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "scope": "Hard encoded-output ceiling for explicit conform; automatic conversion/cache not implemented by this checkpoint.",
+  "source_base": "e668c16a668f34a10c96b4b30c627b44235087d1",
+  "source_sha256": {
+    "src/commands.rs": "c04af0e64310d0b976810b63486efc82f14f219e18b1547cbcfd092f2d19629f",
+    "src/conform.rs": "58294c5fc4018c3f0a3e0613f781f3a3313142db88a6a70cca497af7a9faf4d9",
+    "src/conform/encode.rs": "d1becd1653b73a76cc83b8d94ce3d127fca9f5d2ec4ce6253fe1009f87d461fd",
+    "tests/conform.py": "32b90313f496acd9b111030dce872f0db2282a82897e597158115500ce4abc60",
+    "tests/support/conform_geometry.py": "91961f35bcb6518ff344e73a0befee416029e2c094403c9f5e255014aacc0730"
+  },
+  "reference": "Independent timestamp/Fraction clocks, source RGB/PCM, integer WAV resampler; geometry fixture adds exact native YUV/Decimal color, rotation and alpha comparison.",
+  "checks": {
+    "bounded_video_cases": [
+      "rgb25",
+      "wav-mono",
+      "variable",
+      "native-fractional"
+    ],
+    "video_pixels_and_pcm_equal_legacy": true,
+    "transparent_geometry_cases": 2,
+    "exact_wav_limit_bytes": 192044,
+    "rejected_video_limits_bytes": [
+      0,
+      1,
+      4096
+    ],
+    "wav_one_byte_under_rejected": true,
+    "persisted_worker_preserves_limit_failure": true,
+    "source_and_existing_outputs_preserved": true,
+    "partial_output_cleanup": true,
+    "conform_total_frames_compared": 645,
+    "conform_total_sample_frames_compared": 2135961
+  },
+  "verification": {
+    "windows": {
+      "rust_tests": 236,
+      "clippy_all_targets_deny_warnings": true,
+      "targeted_fixtures": [
+        "agent_costs",
+        "agent_ergonomics",
+        "color",
+        "conform",
+        "integration",
+        "skills"
+      ]
+    },
+    "linux": {
+      "rust_tests": 235,
+      "clippy_all_targets_deny_warnings": true,
+      "targeted_fixtures": [
+        "agent_costs",
+        "agent_ergonomics",
+        "color",
+        "conform",
+        "integration",
+        "skills"
+      ]
+    }
+  },
+  "windows_engine": {
+    "bytes": 43237376,
+    "sha256": "cf736671d5cada97ef644dcdb80af9d1b0ef3245af81e5332c89d79f73d1c356"
+  },
+  "linux_engine": {
+    "bytes": 201225840,
+    "sha256": "5ec07d955c7d18d0fe6fa3e5337df5c16ad96c3bd070dba3cf06bd42fc8a63a5"
+  },
+  "linux_checkout_note": "Linux reports base c4064df; changed source files were copied into that existing checkout. Tested source hashes above and engine identity bind this patch.",
+  "previous_ship": {
+    "commit": "e668c16",
+    "background_passed": 54,
+    "failed": 0,
+    "skipped": 0,
+    "unstarted": 0
+  },
+  "limitations": [
+    "Encoded output cap excludes existing bounded decoded scratch.",
+    "Streamed and seekable Matroska container bytes may differ; decoded equality is required.",
+    "No automatic conversion, persistent conform cache, new points or comparative lead claimed."
+  ]
+}

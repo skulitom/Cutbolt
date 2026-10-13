@@ -24,6 +24,23 @@ The source file must be at most 16 GiB, referenced by a relative path inside an 
 
 Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV, H.264/HEVC 8/10-bit YUV420, and H.264 8/10-bit or ProRes 10-bit YUV422 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. ProRes 4444 and FFV1/bgra also normalize with an explicit `source.alpha: "straight"` declaration. Output remains RGB8, or straight FFV1/bgra for alpha sources placed on `alpha_over` tracks; optional `source.geometry` normalizes quarter-turn rotation and non-square pixels as described below. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
 
+### Encoded output size limit
+
+The blocking `media.conform` request, including its `job.start` arguments, accepts optional
+`max_output_bytes`: a positive integer ceiling on the complete encoded output. With a ceiling,
+Matroska is encoded through a pipe and each block is checked before it reaches the scratch file.
+Audio-only WAV has a known size (44 header bytes plus four bytes per output sample frame),
+checked before conversion. Exceeding the ceiling returns `LIMIT_EXCEEDED` with path
+`max_output_bytes`, the requested ceiling and `published: false`; partial scratch is removed.
+The limit is independent of existing temporary decoded-video/audio window limits and does not
+cap all scratch use. It does not create a conversion cache or change explicit preparation.
+
+Without this field, the existing encoder path remains in use. Streamed Matroska can have
+different container bytes, while its decoded pixels, alpha and PCM must pass the same exact
+verification before publication. Video receipts now expose those verified digests and byte
+counts in `decoded`; a limited request also reports `storage.max_output_bytes` and
+`storage.encoded_bytes`. Original sources are fully checked again before publication.
+
 ### Explicit display geometry
 
 With `source.sdr` and `working_transfer`, set `source.geometry: {"fit":"contain"}` to interpret a source's display metadata before resizing. `fit` is required and accepts `contain`, `cover` or `stretch`. Only exact identity/90/180/270-degree matrices and fixed positive rational sample aspect ratios are supported. Reflection, shear, translation, matrix scale, contradictory rotation tags, and changing decoded geometry are rejected before output publication. Missing sample aspect is explicitly reported as an assumed 1:1; frame metadata falls back to the container value when absent. SAR components are integers in 1..2147483647. Other side data remains unsupported.

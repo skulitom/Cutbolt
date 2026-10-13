@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod encode;
 pub(crate) mod geometry;
 pub use geometry::{Fit, Geometry};
 
@@ -899,7 +900,12 @@ pub fn inspect(recipe: &Recipe, root: &Path) -> Result<Value> {
 }
 /// SHA-256 of decoded RGB/RGBA video or 48 kHz stereo PCM of `path`: `bytes` raw bytes, hashed in
 /// Rust (crate::digest) rather than by FFmpeg's much slower hash muxer.
-fn decoded_hash(path: &Path, video: Option<&str>, bytes: u64, timeout: Duration) -> Result<String> {
+pub(crate) fn decoded_hash(
+    path: &Path,
+    video: Option<&str>,
+    bytes: u64,
+    timeout: Duration,
+) -> Result<String> {
     let mut args = input_args(path);
     args.extend(
         if let Some(format) = video {
@@ -1191,9 +1197,36 @@ enum SourceFrames {
 }
 
 pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> Result<Value> {
+    run_bounded(recipe, root, output_root, output, None)
+}
+
+/// Convert with an optional hard limit on encoded output bytes; temporary decode data is separate.
+pub fn run_bounded(
+    recipe: &Recipe,
+    root: &Path,
+    output_root: &Path,
+    output: &Path,
+    max_output_bytes: Option<u64>,
+) -> Result<Value> {
+    if max_output_bytes == Some(0) {
+        return Err(encode::limit(0));
+    }
     let started = Instant::now();
     let Some((width, height)) = recipe.picture()? else {
-        return run_audio(recipe, root, output_root, output, started);
+        let bytes = recipe
+            .duration
+            .units(Time::new(48000, 1)?)?
+            .checked_mul(4)
+            .and_then(|n| n.checked_add(44))
+            .ok_or_else(|| error("LIMIT_EXCEEDED", "WAV size overflow"))?;
+        if let Some(limit) = max_output_bytes.filter(|limit| bytes > *limit) {
+            return Err(encode::limit(limit));
+        }
+        let mut result = run_audio(recipe, root, output_root, output, started)?;
+        if let Some(limit) = max_output_bytes {
+            result["storage"] = json!({"max_output_bytes":limit,"encoded_bytes":bytes});
+        }
+        return Ok(result);
     };
     let output = render::destination(output, output_root)?;
     let source = check(&recipe.source, root)?;
@@ -1405,15 +1438,20 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     // The expected digest of a silent picture is that of all-zero frames, hashed while it encodes.
     let mut silent_hash = None;
     if silent {
-        let zeros = std::thread::spawn(move || crate::digest::zeros_sha256(frame_bytes, count));
-        media::capture(&media::tool("ffmpeg"), &args, timeout)?;
-        silent_hash = Some(
-            zeros
-                .join()
-                .map_err(|_| error("TOOL_FAILED", "Digest thread failed"))?,
-        );
+        if let Some(limit) = max_output_bytes {
+            encode::bounded(&args, &temp, limit, timeout, |_| Ok(()))?;
+            silent_hash = Some(crate::digest::zeros_sha256(frame_bytes, count));
+        } else {
+            let zeros = std::thread::spawn(move || crate::digest::zeros_sha256(frame_bytes, count));
+            media::capture(&media::tool("ffmpeg"), &args, timeout)?;
+            silent_hash = Some(
+                zeros
+                    .join()
+                    .map_err(|_| error("TOOL_FAILED", "Digest thread failed"))?,
+            );
+        }
     } else {
-        media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, |stdin| {
+        let produce = |stdin: &mut dyn Write| {
             let mut first_pixels = vec![0u8; source_size];
             let mut second_pixels = vec![0u8; source_size];
             let mut first_index = None;
@@ -1530,7 +1568,12 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
                 stdin.write_all(&pixels)?;
             }
             Ok(())
-        })?;
+        };
+        if let Some(limit) = max_output_bytes {
+            encode::bounded(&args, &temp, limit, timeout, produce)?;
+        } else {
+            media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, produce)?;
+        }
     }
     if let Some(SourceFrames::Stream { reader, .. }) = frames_in {
         reader.finish()?;
@@ -1544,10 +1587,11 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
         render::inspect_reference_audio(&temp, width, height, rate, &media::Uncontrolled)?
     };
     let samples = recipe.duration.units(Time::new(48000, 1)?)?;
+    let pcm_hash = media::file_hash(&raw_audio)?;
     if verified.frames != count
         || verified.samples != samples
         || decoded_hash(&temp, Some(pixel_format), frame_bytes * count, timeout)? != video_hash
-        || decoded_hash(&temp, None, samples * 4, timeout)? != media::file_hash(&raw_audio)?
+        || decoded_hash(&temp, None, samples * 4, timeout)? != pcm_hash
     {
         return Err(error(
             "RENDER_VALIDATION_FAILED",
@@ -1594,13 +1638,25 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     result["sha256"] = json!(verified.sha256);
     result["ffmpeg"] = json!(media::version("ffmpeg")?);
     result["ffprobe"] = json!(media::version("ffprobe")?);
-    result["asset"] = json!({"id":recipe.id,"path":output,"duration":recipe.duration,"identity":{"sha256":verified.sha256,"bytes":fs::metadata(&temp)?.len()}});
+    let encoded_bytes = fs::metadata(&temp)?.len();
+    result["asset"] = json!({"id":recipe.id,"path":output,"duration":recipe.duration,"identity":{"sha256":verified.sha256,"bytes":encoded_bytes}});
+    result["decoded"] = json!({"pixel_format":pixel_format,"video_bytes":frame_bytes * count,"video_sha256":video_hash,"pcm_bytes":samples * 4,"pcm_sha256":pcm_hash});
+    if let Some(limit) = max_output_bytes {
+        if encoded_bytes > limit {
+            return Err(encode::limit(limit));
+        }
+        result["storage"] = json!({"max_output_bytes":limit,"encoded_bytes":encoded_bytes});
+    }
     media::publish(&temp, &output)?;
     Ok(result)
 }
 pub fn capabilities() -> Value {
     let mut value = json!({"profile":"media-conform-v1","containers":["mkv_ffv1_pcm16","mp4_mov_h264_aac","wav_pcm16"],"source_identity_required":true,"output":"reference-ffv1-pcm-v1","audio_only_output":"wav_pcm16_48000_stereo_without_width_height","output_frame_rates":"eight_native_rates_default_25","video_selection":"latest_timestamp_at_or_before_output_time_plus_half_source_tick","maximum_seconds":OUTPUT_FRAMES/25,"maximum_output_frames":OUTPUT_FRAMES,"source_maximum_bytes":SOURCE_BYTES,"source_maximum_frames":SOURCE_FRAMES,"source_maximum_audio_seconds":SOURCE_AUDIO_SECONDS,"decoding":{"forward":"streamed_needed_frames","reverse_or_non_monotonic":"random_access_window","maximum_window_bytes":VIDEO_BYTES,"maximum_audio_window_bytes":AUDIO_BYTES,"source_hash":"streamed_sha256"},"output_encoding":"streamed_with_running_decoded_hash","rate_minimum":{"num":1,"den":16},"rate_maximum":{"num":16,"den":1},"reverse":true,"freeze":true,"reverse_freeze_audio":"explicit_mute","forward_audio":"linear_resampling_changes_pitch","runtime_network":false,"remap":{"maximum_segments":64,"segment_clock":48000,"rate_minimum":0,"rate_maximum":16,"speed_interpolation":"linear_exact_integral","video_sampling":["previous","nearest","linear"],"audio_pitch":["follow_speed","mute"],"reverse_freeze_pitch":"mute","continuous_source_position":true},"sdr_normalization":color::capabilities(),"lut":crate::lut::capabilities()});
     value["decode"] = crate::acceleration::capabilities();
+    value["storage"] = json!({"max_output_bytes":"optional_positive_hard_encoded_output_limit",
+        "enforcement":"before_each_encoded_write_or_exact_wav_size_preflight",
+        "temporary_decode_bytes":"separate_existing_window_limits",
+        "over_budget":"LIMIT_EXCEEDED_without_publication"});
     value["display_geometry"] = json!({"requires":"source.sdr_and_explicit_source.geometry.fit",
         "rotation_counterclockwise":[0,90,180,270],"sample_aspect_component_maximum":2147483647,
         "fit":["contain","cover","stretch"],"sampling":"nearest_top_left",

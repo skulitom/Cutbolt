@@ -127,7 +127,8 @@ def run(root, convert_pixel):
             request=recipe(name,canvas,fit); label=f'{name}-{fit}'
             inspected=call({'command':'media.conform.inspect','input_root':str(sources),'recipe':request})
             output=outputs/(label+'.mkv')
-            result=call({'command':'media.conform','input_root':str(sources),'output_root':str(outputs),'output':str(output),'recipe':request})
+            result=call({'command':'media.conform','input_root':str(sources),'output_root':str(outputs),'output':str(output),'recipe':request,
+                         **({'max_output_bytes':4*1024*1024} if alpha and fit=='contain' else {})})
             assert inspected['geometry']==result['geometry']
             assert result['geometry']['rotation_counterclockwise']==rotation
             assert result['geometry']['sample_aspect']==time(sar)
