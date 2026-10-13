@@ -1,5 +1,35 @@
 # Progress history
 
+## 13 October 2026: shared LUT effects for the scene reference
+
+Stage 3 requires native clip effects to match a scene reference, but scene layers previously
+had no LUT effect. They now accept ordered identity-bound 1D/3D `.cube` tables alongside
+grades and keys. The shared processor keeps floating-point colors between effects, preserves
+alpha, and applies LUTs before spatial filtering. Identical file/interpolation declarations
+share a loaded table. Retained table allocations are bounded at 128 MiB per render, with
+8 MiB input files and one additional bounded parsing allocation. Movie and still publication
+fully re-hash LUT sources; conflicting table identities reject. Existing scenes without LUTs
+keep their report shape and processing behavior.
+
+[Targeted evidence](../verification/scene-luts-2026-10-13.json) records six checks and 75
+decoded frames on each platform, covering all interpolation modes, clipping/domain bounds,
+ordered and animated grades, keys, premultiplied alpha, static/moving layers, bilinear spatial
+filtering, MCP schemas/path-only identities and queued rendering. The Fraction/60-digit
+Decimal reference permits at most one RGB code value; every case's decoded digest matches
+between Windows and Linux. Seven invalid recipes publish nothing and preserve sources. Two
+new Rust tests cover allocation/deduplication, encoded ties, optimized/uncached equality and
+same-size table changes before publication. All 246 Windows / 245 Linux Rust tests, all-target
+lint and ten affected verifier fixtures per platform pass. Early fixture/setup mistakes are
+retained in the evidence notes.
+
+This is a prerequisite, not completion of native clip effects or stage 3. The stage-2 full
+quick run is still running. The frozen 36-attempt comparative baseline has just finished;
+its final audit and separate revised-skill follow-ups remain open. Shipment f76b3ad finished
+with nine passes, zero failures and 27 superseded stages; its successor 4297d1d finished with
+35 passes, zero failures and no skipped/unstarted work. No unresolved verifier failure is
+currently reported. This new commit's shipment checks still need terminal review. The
+338e114 full milestone evidence and all editing points remain unchanged.
+
 ## 13 October 2026: preserve frozen benchmark evidence during aggregation
 
 A read-only summary command checks the frozen engine, harness, protocol, originals, prompts

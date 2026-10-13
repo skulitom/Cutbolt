@@ -112,6 +112,8 @@ pub enum Effect {
     SelectiveGrade(SelectiveGrade),
     /// Chroma key that lowers alpha near a screen color.
     ChromaKey(crate::keying::ChromaKey),
+    /// Identity-bound .cube table on encoded working RGB, at this point in the ordered chain; alpha is preserved.
+    Lut(crate::lut::Transform),
 }
 impl Effect {
     /// Whether the recipe alone fixes every sampled value: no curves and no animated mask.
@@ -125,6 +127,7 @@ impl Effect {
                 s.grade.animation.is_none() && s.mix_curve.is_none() && still(&s.mask)
             }
             Self::ChromaKey(k) => k.strength_curve.is_none() && still(&k.mask),
+            Self::Lut(_) => true,
         }
     }
 }
@@ -149,6 +152,7 @@ pub struct SelectiveGrade {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Sample {
+    Lut,
     ChromaKey {
         strength_milli: i32,
         mask_rect: Option<[i32; 4]>,
@@ -176,6 +180,7 @@ pub enum Sample {
     },
 }
 pub(crate) enum Sampler {
+    Lut,
     Grade(Box<GradeSampler>),
     Key(Box<crate::keying::Sampler>),
 }
@@ -207,6 +212,10 @@ pub(crate) fn prepare(effects: &[Effect], duration: Time) -> Result<Vec<Sampler>
         .collect()
 }
 fn prepare_one(effect: &Effect, duration: Time) -> Result<Sampler> {
+    if let Effect::Lut(lut) = effect {
+        lut.validate()?;
+        return Ok(Sampler::Lut);
+    }
     if let Effect::ChromaKey(key) = effect {
         return Ok(Sampler::Key(Box::new(key.prepare(duration)?)));
     }
@@ -241,7 +250,7 @@ fn prepare_one(effect: &Effect, duration: Time) -> Result<Sampler> {
                 "grade.",
             )
         }
-        Effect::ChromaKey(_) => unreachable!("key prepared above"),
+        Effect::ChromaKey(_) | Effect::Lut(_) => unreachable!("key and LUT prepared above"),
     };
     let values = [
         g.exposure_milli,
@@ -329,6 +338,7 @@ impl Sampler {
         match self {
             Self::Grade(grade) => grade.sample(time),
             Self::Key(key) => key.sample(time),
+            Self::Lut => Ok(Sample::Lut),
         }
     }
 }
@@ -368,21 +378,82 @@ impl GradeSampler {
     }
 }
 
+/// Identity-bound tables shared by every effect stack in one render. Repeated declarations
+/// of the same file and interpolation reuse one loaded table.
+#[derive(Default)]
+pub(crate) struct Resources {
+    luts: Vec<(crate::lut::Transform, crate::lut::Loaded)>,
+    table_bytes: usize,
+}
+const MAX_LUT_TABLE_BYTES: usize = 128 * 1024 * 1024;
+impl Resources {
+    pub(crate) fn add(&mut self, effects: &[Effect], root: &std::path::Path) -> Result<()> {
+        for (index, effect) in effects.iter().enumerate() {
+            let Effect::Lut(spec) = effect else { continue };
+            if self.luts.iter().any(|(previous, _)| previous == spec) {
+                continue;
+            }
+            if self.luts.iter().any(|(previous, _)| {
+                previous.file.path == spec.file.path && previous.file != spec.file
+            }) {
+                return Err(error(
+                    "INVALID_IDENTITY",
+                    "One effect LUT path cannot have conflicting identities",
+                ))
+                .at(|| format!("effects[{index}].file"));
+            }
+            let loaded = spec.load(root).under(|| format!("effects[{index}]"))?;
+            let bytes = loaded.memory_bytes();
+            if bytes > MAX_LUT_TABLE_BYTES.saturating_sub(self.table_bytes) {
+                return Err(error(
+                    "LIMIT_EXCEEDED",
+                    "Loaded effect LUT tables exceed the 128 MiB render budget",
+                ))
+                .at(|| format!("effects[{index}].file"));
+            }
+            self.table_bytes += bytes;
+            self.luts.push((spec.clone(), loaded));
+        }
+        Ok(())
+    }
+    fn get(&self, spec: &crate::lut::Transform) -> &crate::lut::Loaded {
+        &self
+            .luts
+            .iter()
+            .find(|(saved, _)| saved == spec)
+            .expect("effect resources are loaded before processing")
+            .1
+    }
+    pub(crate) fn identities(&self) -> impl Iterator<Item = &crate::scene::Identity> {
+        self.luts.iter().map(|(spec, _)| &spec.file)
+    }
+    pub(crate) fn report(&self) -> Option<Value> {
+        (!self.luts.is_empty()).then(|| json!({"lut_tables":self.luts.iter().map(|(_, table)| {
+            let mut report = table.report();
+            report["render_output"] = "clip_0_1_float_chain_then_nearest_8bit_after_last_effect".into();
+            report
+        }).collect::<Vec<_>>(),
+            "allocated_table_bytes":self.table_bytes,"maximum_table_bytes":MAX_LUT_TABLE_BYTES}))
+    }
+}
+
 enum Stage<'a> {
     Grade(GradeStage<'a>),
     Key(crate::keying::Stage<'a>),
+    Lut(&'a crate::lut::Loaded),
 }
 impl Stage<'_> {
     fn identity(&self) -> bool {
         match self {
             Self::Grade(g) => g.identity,
             Self::Key(k) => k.strength == 0.0,
+            Self::Lut(_) => false,
         }
     }
     fn per_pixel(&self) -> bool {
         match self {
             Self::Grade(g) => g.selection.is_some() || g.hue_saturation.is_some(),
-            Self::Key(_) => true,
+            Self::Key(_) | Self::Lut(_) => true,
         }
     }
 }
@@ -538,11 +609,18 @@ pub(crate) struct Processor<'a> {
     per_pixel: bool,
 }
 impl<'a> Processor<'a> {
-    pub(crate) fn new(effects: &'a [Effect], samples: &[Sample]) -> Option<Self> {
+    pub(crate) fn new(
+        effects: &'a [Effect],
+        samples: &[Sample],
+        resources: &'a Resources,
+    ) -> Option<Self> {
         let stages: Vec<_> = effects
             .iter()
             .zip(samples)
             .map(|(effect, sample)| {
+                if let (Effect::Lut(spec), Sample::Lut) = (effect, sample) {
+                    return Stage::Lut(resources.get(spec));
+                }
                 if let (
                     Effect::ChromaKey(effect),
                     Sample::ChromaKey {
@@ -693,6 +771,7 @@ impl<'a> Processor<'a> {
                     ]
                 }
             };
+            let mut encoded_lut: Option<[f64; 3]> = None;
             let mut changed = false;
             let mut coverage = rgba[3] as f64;
             for stage in &self.stages {
@@ -701,17 +780,35 @@ impl<'a> Processor<'a> {
                 }
                 let stage = match stage {
                     Stage::Grade(g) => g,
+                    Stage::Lut(table) => {
+                        let encoded_color = encoded_lut.unwrap_or_else(|| match source {
+                            Some(rgb) => rgb.map(|v| v as f64 / 255.0),
+                            None => color.map(encoded),
+                        });
+                        let result = table
+                            .sample(encoded_color)
+                            .expect("prepared effects supply finite encoded RGB in 0..1")
+                            .map(|v| v.clamp(0.0, 1.0));
+                        color = result.map(linear);
+                        // Keep the encoded result until another effect changes it. This avoids
+                        // an unnecessary transfer round trip at LUT-only quantization ties.
+                        encoded_lut = Some(result);
+                        changed = true;
+                        source = None;
+                        continue;
+                    }
                     Stage::Key(k) => {
-                        let encoded_color = match source {
+                        let encoded_color = encoded_lut.unwrap_or_else(|| match source {
                             Some(rgb) => rgb.map(|v| tables.encoded[v]),
                             None => color.map(encoded),
-                        };
+                        });
                         if let Some((candidate, retention, weight)) =
                             k.apply(encoded_color, position)
                         {
                             coverage *= retention;
                             changed = true;
                             source = None;
+                            encoded_lut = None;
                             // A fully keyed pixel is returned transparent whatever its color.
                             if coverage != 0.0 {
                                 for (value, candidate) in color.iter_mut().zip(candidate) {
@@ -729,7 +826,9 @@ impl<'a> Processor<'a> {
                     .selection
                     .as_ref()
                     .map(|s| {
-                        let bytes = source.map(|rgb| rgb.map(|v| tables.byte[v]));
+                        let bytes = source.map(|rgb| rgb.map(|v| tables.byte[v])).or_else(|| {
+                            encoded_lut.map(|rgb| rgb.map(|v| (v * 255.0).round() as u8))
+                        });
                         s.weight(color, bytes, position)
                     })
                     .unwrap_or(1.0);
@@ -737,13 +836,16 @@ impl<'a> Processor<'a> {
                     continue;
                 }
                 stage.blend(&mut color, weight);
+                encoded_lut = None;
                 changed = true;
                 source = None;
             }
             if !changed {
                 return None;
             }
-            let [r, g, b] = color.map(encoded_byte);
+            let [r, g, b] = encoded_lut
+                .map(|rgb| rgb.map(|v| (v * 255.0).round() as u8))
+                .unwrap_or_else(|| color.map(encoded_byte));
             return Some([r, g, b, coverage.round().clamp(0.0, 255.0) as u8]);
         }
         let mut result = [0, 0, 0, rgba[3]];
@@ -757,12 +859,84 @@ impl<'a> Processor<'a> {
     }
 }
 pub fn capabilities() -> Value {
-    json!({"scope":"scene_layer","types":["grade","selective_grade","chroma_key"],"maximum_per_layer":8,"working_space":"linear_srgb_f64","output":"straight_srgb_u8_before_compositing","order":"exposure_and_white_balance_then_contrast_then_master_curve_then_channel_curve_then_hue_saturation","contrast_pivot":0.18,"clipping":"after_contrast_in_each_grade","exposure_milli":[-8000,8000],"contrast_milli":[0,4000],"white_balance_milli":[100,4000],"hue_shift_mdeg":[-360000,360000],"saturation_milli":[0,4000],"hue_saturation":"encoded_srgb_hsl_keeps_lightness_saturation_at_most_1","tone_curve":{"domain":[0,65535],"maximum_points":32,"interpolation":"linear","animated_points":false},"animated_properties":["exposure_milli","contrast_milli","red_balance_milli","green_balance_milli","blue_balance_milli","hue_shift_mdeg","saturation_milli"],"clock":"layer_local","alpha":"unpremultiply_before_processing_grades_preserve_keys_reduce","neutral_chain":"exact_integer_bypass","keying":crate::keying::capabilities(),"selection":{"qualifier":"quantized_srgb8_hsl_integer","hue_unit":"millidegrees","hue_range":[0,359999],"saturation_lightness_unit":"thousandths","achromatic_hue":"excluded_before_inversion","combination":"product_then_qualifier_inversion_then_mask_then_mix","mask":"source_canvas_rectangle_inward_linear_feather","mask_maximum_feather":4096,"animated":["grade_controls","mix_milli","mask_rect"],"unselected_pixels":"preserve_original_alpha_encoding"}})
+    json!({"scope":"scene_layer","types":["grade","selective_grade","chroma_key","lut"],"maximum_per_layer":8,"working_space":"linear_srgb_f64","output":"straight_srgb_u8_before_compositing","order":"exposure_and_white_balance_then_contrast_then_master_curve_then_channel_curve_then_hue_saturation","contrast_pivot":0.18,"clipping":"after_contrast_in_each_grade","exposure_milli":[-8000,8000],"contrast_milli":[0,4000],"white_balance_milli":[100,4000],"hue_shift_mdeg":[-360000,360000],"saturation_milli":[0,4000],"hue_saturation":"encoded_srgb_hsl_keeps_lightness_saturation_at_most_1","tone_curve":{"domain":[0,65535],"maximum_points":32,"interpolation":"linear","animated_points":false},"animated_properties":["exposure_milli","contrast_milli","red_balance_milli","green_balance_milli","blue_balance_milli","hue_shift_mdeg","saturation_milli"],"clock":"layer_local","alpha":"unpremultiply_before_processing_grades_preserve_keys_reduce","neutral_chain":"exact_integer_bypass","lut":{"file":crate::lut::capabilities(),"maximum_loaded_table_bytes":MAX_LUT_TABLE_BYTES,"working_transfer":"encoded_srgb_f64","clipping":"after_each_lut","quantization":"once_after_last_effect","animation":false,"alpha":"preserved"},"keying":crate::keying::capabilities(),"selection":{"qualifier":"quantized_srgb8_hsl_integer","hue_unit":"millidegrees","hue_range":[0,359999],"saturation_lightness_unit":"thousandths","achromatic_hue":"excluded_before_inversion","combination":"product_then_qualifier_inversion_then_mask_then_mix","mask":"source_canvas_rectangle_inward_linear_feather","mask_maximum_feather":4096,"animated":["grade_controls","mix_milli","mask_rect"],"unselected_pixels":"preserve_original_alpha_encoding"}})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lut_resources_are_shared_bounded_and_preserve_encoded_ties() {
+        let root = std::env::temp_dir().join(format!(
+            "cutbolt-effect-lut-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("half.cube");
+        std::fs::write(&path, "LUT_1D_SIZE 2\n0.5 0.5 0.5\n0.5 0.5 0.5\n").unwrap();
+        let spec = crate::lut::Transform {
+            file: crate::scene::Identity {
+                path: "half.cube".into(),
+                sha256: crate::media::file_hash(&path).unwrap(),
+                bytes: std::fs::metadata(&path).unwrap().len(),
+            },
+            interpolation: crate::lut::Interpolation::Linear,
+        };
+        let effects = vec![Effect::Lut(spec.clone()), Effect::Lut(spec.clone())];
+        let mut resources = Resources::default();
+        resources.add(&effects, &root).unwrap();
+        resources.add(&effects, &root).unwrap();
+        assert_eq!(resources.luts.len(), 1);
+        assert_eq!(resources.table_bytes, resources.get(&spec).memory_bytes());
+        let samples = vec![Sample::Lut; 2];
+        let processor = Processor::new(&effects, &samples, &resources).unwrap();
+        for alpha in [1, 127, 128, 254, 255] {
+            for v in 0..=255 {
+                assert_eq!(
+                    processor.pixel(&[v, 255 - v, v, alpha], AlphaMode::Straight, [0, 0]),
+                    Some([128, 128, 128, alpha])
+                );
+            }
+        }
+        assert_eq!(
+            processor.pixel(&[10, 20, 30, 0], AlphaMode::Straight, [0, 0]),
+            None
+        );
+        let mut conflict = spec.clone();
+        conflict.file.sha256 = "0".repeat(64);
+        let error = resources.add(&[Effect::Lut(conflict)], &root).unwrap_err();
+        assert_eq!(error.code, "INVALID_IDENTITY");
+        assert!(error.message.contains("effects[0].file"));
+        // The retained table's actual allocation is counted. Exercise the aggregate
+        // boundary without making the unit suite allocate another 128 MiB.
+        let mut second = spec.clone();
+        second.interpolation = crate::lut::Interpolation::Nearest;
+        let bytes = resources.table_bytes;
+        resources.table_bytes = MAX_LUT_TABLE_BYTES - bytes;
+        resources
+            .add(&[Effect::Lut(second.clone())], &root)
+            .unwrap();
+        assert_eq!(resources.table_bytes, MAX_LUT_TABLE_BYTES);
+        std::fs::copy(&path, root.join("extra.cube")).unwrap();
+        second.file.path = "extra.cube".into();
+        assert_eq!(
+            resources
+                .add(&[Effect::Lut(second)], &root)
+                .unwrap_err()
+                .code,
+            "LIMIT_EXCEEDED"
+        );
+        assert_eq!(resources.luts.len(), 2);
+        assert_eq!(resources.table_bytes, MAX_LUT_TABLE_BYTES);
+        std::fs::remove_file(root.join("extra.cube")).unwrap();
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
 
     impl Processor<'_> {
         /// The former `pixel`, as the reference for the table lookups.
@@ -793,6 +967,7 @@ mod tests {
                     }
                     let stage = match stage {
                         Stage::Grade(g) => g,
+                        Stage::Lut(_) => unreachable!("historical grade/key oracle"),
                         Stage::Key(k) => {
                             if let Some((candidate, retention, weight)) =
                                 k.apply(color.map(encoded), position)
@@ -850,6 +1025,7 @@ mod tests {
 
     #[test]
     fn per_pixel_chains_match_the_former_processing() {
+        let resources = Resources::default();
         let effect = |value: Value| -> Effect { serde_json::from_value(value).unwrap() };
         let key = |rgb: [u8; 3], strength: i32, unmix: u16, mask: Value| {
             let mut key = json!({"kind":"chroma_key","key_rgb":rgb,"inner_milli":80,"outer_milli":260,
@@ -939,7 +1115,8 @@ mod tests {
         ];
         for chain in chains {
             let (effects, samples): (Vec<_>, Vec<_>) = chain.into_iter().unzip();
-            let processor = Processor::new(&effects, &samples).expect("a per-pixel chain");
+            let processor =
+                Processor::new(&effects, &samples, &resources).expect("a per-pixel chain");
             assert!(processor.tables().is_none());
             for r in (0..=255u8).step_by(7) {
                 for g in (0..=255u8).step_by(5) {
@@ -981,6 +1158,7 @@ mod tests {
 
     #[test]
     fn hue_and_saturation_are_sampled_and_bypass_when_neutral() {
+        let resources = Resources::default();
         let neutral = || json!({"kind":"grade","exposure_milli":0,"contrast_milli":1000,"white_balance_milli":[1000,1000,1000]});
         let mut whole = neutral();
         whole["hue_shift_mdeg"] = 360_000.into();
@@ -1004,12 +1182,12 @@ mod tests {
         assert_eq!(reported[1]["saturation_milli"], 1000);
         assert!(reported[2].get("hue_shift_mdeg").is_none());
         // Whole turns and a neutral scale keep the exact integer bypass.
-        assert!(Processor::new(&effects, &samples).is_none());
+        assert!(Processor::new(&effects, &samples, &resources).is_none());
         let mut shifted = neutral();
         shifted["hue_shift_mdeg"] = 55_000.into();
         let effects: Vec<Effect> = serde_json::from_value(json!([shifted])).unwrap();
         let samples = sampled(&effects);
-        let processor = Processor::new(&effects, &samples).expect("a hue shift");
+        let processor = Processor::new(&effects, &samples, &resources).expect("a hue shift");
         assert!(processor.tables().is_none());
         // Pip's scarf: HSL hue 353.4 degrees turns to 48.4, keeping its largest and smallest
         // channels; a gray is unchanged.

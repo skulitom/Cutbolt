@@ -53,7 +53,7 @@ fn triple(words: &[&str]) -> Result<[f64; 3]> {
     Ok([number(words[0])?, number(words[1])?, number(words[2])?])
 }
 impl Transform {
-    pub fn load(&self, root: &Path) -> Result<Loaded> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.file.bytes > 8 * 1024 * 1024
             || !self
                 .file
@@ -63,6 +63,10 @@ impl Transform {
         {
             return Err(invalid("Use an identity-bound .cube file of at most 8 MiB"));
         }
+        Ok(())
+    }
+    pub fn load(&self, root: &Path) -> Result<Loaded> {
+        self.validate()?;
         let (_, bytes) = scene::identity_bytes(&self.file, root)?;
         let text =
             std::str::from_utf8(&bytes).map_err(|_| invalid("LUT must contain ASCII text"))?;
@@ -191,6 +195,9 @@ impl Transform {
     }
 }
 impl Loaded {
+    pub(crate) fn memory_bytes(&self) -> usize {
+        self.values.capacity() * std::mem::size_of::<[f64; 3]>()
+    }
     fn at(&self, p: [usize; 3]) -> [f64; 3] {
         self.values[p[0] + self.size * (p[1] + self.size * p[2])]
     }
@@ -290,7 +297,7 @@ pub fn inspect(spec: &Transform, root: &Path, samples: &[[f64; 3]]) -> Result<Va
     Ok(report)
 }
 pub fn capabilities() -> Value {
-    json!({"format":"bounded_ascii_cube_1d_or_3d","one_d_size":[2,65536],"three_d_size":[2,65],"maximum_bytes":8388608,"one_d_interpolation":["nearest","linear"],"three_d_interpolation":["nearest","trilinear","tetrahedral"],"application":"media.conform_after_explicit_sdr_normalization","source_identity_required":true})
+    json!({"format":"bounded_ascii_cube_1d_or_3d","one_d_size":[2,65536],"three_d_size":[2,65],"maximum_bytes":8388608,"one_d_interpolation":["nearest","linear"],"three_d_interpolation":["nearest","trilinear","tetrahedral"],"application":"media.conform_after_explicit_sdr_normalization","additional_application":"scene_layer_ordered_effect","source_identity_required":true})
 }
 #[cfg(test)]
 mod tests {

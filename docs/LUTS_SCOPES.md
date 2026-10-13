@@ -32,13 +32,23 @@ Supported headers precede all data and occur at most once:
 
 Declare exactly one size. Numbers must be finite and within -16 through 16; each domain span must be at least 0.000001. Missing/extra data, duplicate/unknown headers and combined shaper/3D tables fail explicitly. The 3D table varies red fastest, then green, then blue.
 
-One-dimensional tables support `nearest` or `linear`; three-dimensional tables support `nearest`, `trilinear` or `tetrahedral`. Each input channel maps its declared domain to the table grid and clamps at the endpoints. Nearest sampling rounds a grid midpoint upward. Trilinear interpolation weights the eight surrounding corners. Tetrahedral interpolation selects the four-vertex simplex from the fractional-coordinate ordering; equal coordinates use stable R/G/B ordering. Arithmetic uses f64. Inspection returns unbounded table results plus their clipped/rounded RGB8 equivalents; rendering clips results to 0..1 and rounds once to the nearest 8-bit value.
+One-dimensional tables support `nearest` or `linear`; three-dimensional tables support `nearest`, `trilinear` or `tetrahedral`. Each input channel maps its declared domain to the table grid and clamps at the endpoints. Nearest sampling rounds a grid midpoint upward. Trilinear interpolation weights the eight surrounding corners. Tetrahedral interpolation selects the four-vertex simplex from the fractional-coordinate ordering; equal coordinates use stable R/G/B ordering. Arithmetic uses f64. Inspection returns unbounded table results plus their clipped/rounded RGB8 equivalents; conform rendering clips results to 0..1 and rounds once to the nearest 8-bit value. Ordered scene effects follow the float-chain rule below.
 
 LUTs operate on the declared **encoded working transfer**, after normalization has produced 8-bit full-range RGB. They retain that transfer and the BT.709/D65 primaries interpretation; there is no inferred gamut or transfer conversion from a table's title. A LUT cannot be combined with the older implicit conversion path: `source.sdr` and `working_transfer` are required. A recipe has one LUT. Compose additional conversion stages explicitly if needed; this introduces another 8-bit quantization step.
 
 The existing conversion duration, pixel, source-size and frame-count bounds still apply. LUTs do not alter audio, time selection or source media. Source and table identities are rechecked before no-overwrite publication. Inspection reports the exact table identity, domain, dimensions, channel minima/maxima, interpolation and clipping policy.
 
 Public interface references: [FFmpeg LUT filter descriptions](https://ffmpeg.org/ffmpeg-filters.html#lut3d) and [supported color table formats](https://opencolorio.readthedocs.io/en/stable/guides/using_ocio/using_ocio.html). These are interface facts, not imported implementations or additional dependencies.
+
+## Ordered scene effects
+
+A scene layer can include `{"kind":"lut","file":{"path":"look.cube","sha256":"<verified SHA-256>","bytes":1234},"interpolation":"tetrahedral"}` in its `effects` list. Use the actual file identity; MCP accepts a path-only file object and fills its identity before a queued request is saved. The same 1D/3D formats and interpolation rules apply. LUTs count toward the eight effects per layer limit.
+
+Effects run in list order, before masks, transforms and compositing. LUT input is encoded sRGB with BT.709/D65 primaries; table output is clipped to 0..1. Grades use linear sRGB, with transfer conversion at LUT boundaries. Colors remain floating point between effects and are rounded to straight RGB8 only after the last effect. Thus grade/LUT/grade and consecutive LUTs do not insert intermediate 8-bit quantization. LUTs preserve alpha; premultiplied sources are unpremultiplied first. A LUT has no animated parameters, but surrounding grades and keys retain their existing animation.
+
+A render loads each identical file/interpolation declaration once across all layers. Allocated table capacities total at most 128 MiB; different interpolation declarations count separately. Each table file is at most 8 MiB. Parsing may temporarily hold one additional bounded table and its file text before enforcing the aggregate allocation limit. `scene.inspect` reports the loaded tables and allocation budget in `effect_resources`; scenes without LUTs keep their existing report shape. Conflicting identities for one table path reject. Both movie and still publication fully re-hash all LUT files with the other sources.
+
+These are scene-layer effects. Saved native video-clip effects remain the next stage of the [direct-footage plan](plans/DIRECT_FOOTAGE_PLAN.md).
 
 ## Numerical frame scopes
 

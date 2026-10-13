@@ -1,0 +1,282 @@
+{
+  "date": "2026-10-13",
+  "kind": "targeted_scene_lut_prerequisite",
+  "base_commit": "4297d1d41c578d60219328e2a25127ea7ac74dcc",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/effects.rs": {
+      "bytes": 51791,
+      "sha256": "d41520ae96577c2cf043efedfda3732dbc8b6029ae49f0495ae7f05bc40addb7"
+    },
+    "src/lut.rs": {
+      "bytes": 13299,
+      "sha256": "cb270822f152a2bd01c914ce14ff91da95c3071c8f83f7f1cfdd8088d0625caf"
+    },
+    "src/scene.rs": {
+      "bytes": 152079,
+      "sha256": "e554b3c241a8c2d9bc43d44ab29ef742a4736a3f2ad8479f527f096401ea666c"
+    },
+    "tests/scene_luts.py": {
+      "bytes": 12077,
+      "sha256": "267a5ede41567bcfa549313070161b0c120660ccacc1a09181106a33a8333940"
+    },
+    "tools/verify.py": {
+      "bytes": 45813,
+      "sha256": "be67c934a9319ac261ff0bff4bd794ba723385acb541b1c915395c91b4809d9d"
+    }
+  },
+  "fixture": {
+    "passed": [
+      "scene_luts.rational_interpolation_and_clipping",
+      "scene_luts.ordered_float_chains_animation_and_alpha",
+      "scene_luts.shared_tables_static_and_moving_layers",
+      "scene_luts.effects_before_bilinear_spatial_filter",
+      "scene_luts.mcp_schema_path_identity_and_queued_output",
+      "scene_luts.validation_and_source_preservation"
+    ],
+    "render_cases": [
+      {
+        "case": "identity1-nearest",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "539b6db39db211e5a7a3737b0ab131cee60c62b15a2e58f25965c8ccc2f4283a"
+      },
+      {
+        "case": "identity1-linear",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "3c29500de6202c90e1a9577566738daabd41ec555f9906f1b83ef073e6375a86"
+      },
+      {
+        "case": "curve1-nearest",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "22204e9509cbcf093ea1cb6598aa15bb240d7897186496c0f21dd218b81b8588"
+      },
+      {
+        "case": "curve1-linear",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "7673be091a73a1a4e8a3bf267a4d3bddbb72795ac8223a92e2c30398a33bafb0"
+      },
+      {
+        "case": "identity3-nearest",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "88315f530ccba8f05071ba22d7c396ef466dc9106aa8e9afdfb05c9d7e03aa55"
+      },
+      {
+        "case": "identity3-trilinear",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "3c29500de6202c90e1a9577566738daabd41ec555f9906f1b83ef073e6375a86"
+      },
+      {
+        "case": "identity3-tetrahedral",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "3c29500de6202c90e1a9577566738daabd41ec555f9906f1b83ef073e6375a86"
+      },
+      {
+        "case": "cross3-nearest",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "4c809f9efeea3b2fc2fbc487e25f0c691b2baba781f5c5e75507553c4428d4f6"
+      },
+      {
+        "case": "cross3-trilinear",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "f69d2ca85f6be273f00922d965357716a0891f3b037b7d0ef0f922fa8ec1c5d0"
+      },
+      {
+        "case": "cross3-tetrahedral",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "090a9793b86b8c7d71c3617cc74389383e3202baae2106cef899c88f48602a7c"
+      },
+      {
+        "case": "clip3-nearest",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "bb3c500e970dd4c8f81f8e08f87c356810dc90f0007983acce0a1002f0edcb04"
+      },
+      {
+        "case": "clip3-trilinear",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "969740783f245e0f0960c1c56795bc6a526c0a28511861b66ba07859f74dd530"
+      },
+      {
+        "case": "clip3-tetrahedral",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "5d4fce36dc033933975e4841ff124419ab292ac0fbbc4c303dbd5dbcc7faecaa"
+      },
+      {
+        "case": "domain-clamp",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "fb33f9661d564aa1d849b20a28e3bd3a2e5b0374ea175ce4a265a720ffd14056"
+      },
+      {
+        "case": "grade-lut",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "79cbb7c7d568be2f8d5b122be2325b34555193afe6c0c0ed7381f665f9b4e5f5"
+      },
+      {
+        "case": "lut-grade",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "a21547ea558b9e849651dd457495fbed436b5df00625b33d7f653cb8cd91eb1e"
+      },
+      {
+        "case": "grade-lut-grade",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "d58c2cd1c63ef699ee260a041d5212ee02dd0c4fba8fc5f11d503f3a1285da98"
+      },
+      {
+        "case": "lut-lut",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "eb68a8b1e7a550302927ac03edafa5089935fa9309b587cedf5a5bfbb1ff8e13"
+      },
+      {
+        "case": "animated-grade-lut",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "82dd0d55377fcd1e22ebaa58f9373911e8ee912e79db05963417f3cd1e6d551f"
+      },
+      {
+        "case": "premultiplied",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "6f7a43a73659d0b0c0a465989cde197b98c3b3c62c708546f4065aa338b83e11"
+      },
+      {
+        "case": "key-lut",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "18d45af8964226dbdd0697ed03bc5c6a8a80b883c9df1f107d3742d65274a130"
+      },
+      {
+        "case": "lut-key",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "bb6354d6ba53e96e8dfa3ef5736c2c852ead537af93876a5457e7d84b64690a9"
+      },
+      {
+        "case": "shared-static-moving",
+        "frames": 3,
+        "maximum_rgb_error": 1,
+        "decoded_sha256": "eb606bfa3faf1c3b453487679af6b2ce72a4ba4f4f3ea76a09562ef01a6c2235"
+      },
+      {
+        "case": "lut-before-spatial-filter",
+        "frames": 3,
+        "maximum_rgb_error": 0,
+        "decoded_sha256": "40d4f1fa5a58e418d4a7fc31db23946ed6e77e8f52e561cf0f7f49f685f382fe"
+      }
+    ],
+    "decoded_frames": 75,
+    "rgb_tolerance": 1,
+    "maximum_rgb_error": 1,
+    "rejected_cases": 7,
+    "reference": "Exact Fraction analytic LUT interpolation and 60-digit Decimal grading, independent forward alpha composition",
+    "scope": "Scene LUT prerequisite for clip effects; no native clip effects or stage 3 completion claim"
+  },
+  "platforms": {
+    "windows": {
+      "rust_unit_tests": 246,
+      "clippy_all_targets": "passed",
+      "targeted_regressions": {
+        "ok": true,
+        "run": "quick",
+        "commit": "4297d1d41c578d60219328e2a25127ea7ac74dcc",
+        "ran": [
+          "compositing",
+          "geometry",
+          "grading",
+          "keying",
+          "luts_scopes",
+          "scene_luts",
+          "scene_short",
+          "selection",
+          "spatial",
+          "temporal"
+        ],
+        "failed": [],
+        "deferred": [],
+        "reused": [],
+        "not_impacted": [],
+        "skipped": {},
+        "agent_costs": null
+      },
+      "fixture_identity": {
+        "bytes": 5333,
+        "sha256": "cecc52e0b8d125a00c10e889b949d5cc0f0157eb90b6f402016b8c6c2c903a20"
+      },
+      "rust_log_identity": {
+        "bytes": 21385,
+        "sha256": "77c479ab48558c61752dd3a16f6f79f3854f7ef5319140f7a171235e19cf36ba"
+      }
+    },
+    "linux": {
+      "rust_unit_tests": 245,
+      "clippy_all_targets": "passed",
+      "targeted_regressions": {
+        "ok": true,
+        "run": "quick",
+        "commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5",
+        "ran": [
+          "compositing",
+          "geometry",
+          "grading",
+          "keying",
+          "luts_scopes",
+          "scene_luts",
+          "scene_short",
+          "selection",
+          "spatial",
+          "temporal"
+        ],
+        "failed": [],
+        "deferred": [],
+        "reused": [],
+        "not_impacted": [],
+        "skipped": {},
+        "agent_costs": null
+      },
+      "fixture_identity": {
+        "bytes": 5171,
+        "sha256": "09ea769aab86f62c6fe906aada1ee23ad56ea4fc33534875e91863db8ebbc45a"
+      },
+      "rust_log_identity": {
+        "bytes": 20721,
+        "sha256": "e60a009a30def860b27a90b9a5bddbebd93e842348362dff46e831dbb089129c"
+      },
+      "checkout_note": "Existing Linux checkout retains its base Git commit; the touched sources and fixture were copied byte for byte from the Windows worktree."
+    }
+  },
+  "cross_platform_all_case_decoded_digests_equal": true,
+  "unit_checks": [
+    "LUT resource deduplication, conflicting identities and exact aggregate allocation boundary",
+    "Exact encoded half-tie preservation and original alpha",
+    "Static-base and processed-source caches match uncached opaque/transparent scenes",
+    "A same-size LUT change after preparation fails the common publication identity check"
+  ],
+  "limits": [
+    "75 decoded frames per platform, 24 synchronous render cases and one queued render; independent RGB tolerance is one byte.",
+    "The aggregate allocation boundary unit test uses actual small-table allocation sizes with a seeded near-cap total, not a 128 MiB allocation stress test.",
+    "No native clip effect, full stage 3, new editing point or milestone claim.",
+    "Full milestone evidence remains commit 338e114; this commit still needs its shipment gate and background verification."
+  ],
+  "fixture_iteration_notes": [
+    "Initial fixture lacked the required existing job directory; corrected before the passing runs.",
+    "Second fixture expected SOURCE_CHANGED instead of the existing MEDIA_CHANGED error; corrected.",
+    "One regression command named the non-standalone agents stage and rejected before any fixture ran; corrected to the listed stage names.",
+    "Made the already effective 60-digit Decimal precision explicit, corrected its report label and reran the new fixture on both platforms; all render digests match the preceding runs."
+  ]
+}

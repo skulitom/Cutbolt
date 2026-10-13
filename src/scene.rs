@@ -404,6 +404,7 @@ struct Prepared {
     /// Rasterized graphics by layer ID, with the image's offset inside the layer canvas.
     graphics: HashMap<String, (Pixels, [u32; 2])>,
     sources: Vec<(PathBuf, Identity)>,
+    effect_resources: crate::effects::Resources,
     pcm: Vec<i16>,
     report: Value,
     parameters: Vec<Vec<Option<Parameters>>>,
@@ -433,6 +434,12 @@ struct Base {
 }
 
 impl Prepared {
+    fn verify_sources(&self, root: &Path) -> Result<()> {
+        for (_, identity) in &self.sources {
+            crate::fonts::identity_bytes(identity, root)?;
+        }
+        Ok(())
+    }
     fn frame_pixels(&self, frame: &Frame) -> &Pixels {
         match &frame.matte {
             Some(matte) => &self.matted[&(frame.image.path.clone(), matte.path.clone())],
@@ -884,6 +891,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
     let mut graphics = HashMap::new();
     let mut font_cache = crate::graphics::Cache::default();
     let mut sources = Vec::<(PathBuf, Identity)>::new();
+    let mut effect_resources = crate::effects::Resources::default();
     let mut pixels = 0u64;
     let mut source_bytes = 0u128;
     let mut timing = Vec::new();
@@ -908,6 +916,9 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
             expression_samples.as_deref(),
         )
         .under(|| format!("layers[{li}] ({})", layer.id))?;
+        effect_resources
+            .add(&layer.effects, root)
+            .under(|| format!("layers[{li}] ({})", layer.id))?;
         selections.push(selected.clone());
         let mut total = Time::ZERO;
         let graphic_report = if let Some(graphic) = &layer.graphics {
@@ -1112,6 +1123,22 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         parameters.push(sampled);
     }
     sources.extend(font_cache.sources());
+    for identity in effect_resources.identities() {
+        if let Some((_, previous)) = sources
+            .iter()
+            .find(|(_, previous)| previous.path == identity.path)
+        {
+            if previous != identity {
+                return Err(error(
+                    "INVALID_IDENTITY",
+                    "One scene path cannot have conflicting identities",
+                ));
+            }
+        } else {
+            let path = media::allowed_file(&root.join(&identity.path), root)?;
+            sources.push((path, identity.clone()));
+        }
+    }
     let samples = scene.duration.units(RATE)?;
     let mut pcm = vec![0i16; samples as usize * 2];
     let mut audio_report = json!({"silence":true,"output_samples":samples});
@@ -1218,11 +1245,15 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
     if let Some(geometry) = &geometry {
         report["geometry"] = geometry.report.clone();
     }
+    if let Some(resources) = effect_resources.report() {
+        report["effect_resources"] = resources;
+    }
     Ok(Prepared {
         images,
         matted,
         graphics,
         sources,
+        effect_resources,
         pcm,
         report,
         parameters,
@@ -1564,7 +1595,11 @@ fn compose_layers(
             Some(processed) => (processed, None),
             None => (
                 image,
-                crate::effects::Processor::new(&layer.effects, &parameters.effects),
+                crate::effects::Processor::new(
+                    &layer.effects,
+                    &parameters.effects,
+                    &prepared.effect_resources,
+                ),
             ),
         };
         if let (Some(spec), Some(mapping)) = (&t.spatial, &parameters.spatial) {
@@ -2000,9 +2035,13 @@ fn compose_geometry(
         .iter()
         .enumerate()
         .map(|(i, layer)| {
-            prepared.parameters[i][sample]
-                .as_ref()
-                .and_then(|p| crate::effects::Processor::new(&layer.effects, &p.effects))
+            prepared.parameters[i][sample].as_ref().and_then(|p| {
+                crate::effects::Processor::new(
+                    &layer.effects,
+                    &p.effects,
+                    &prepared.effect_resources,
+                )
+            })
         })
         .collect::<Vec<_>>();
     crate::geometry::compose(scene, state, |i, sx, sy| {
@@ -2180,7 +2219,11 @@ fn processed_sources(
         if !constant {
             continue;
         }
-        let Some(processor) = crate::effects::Processor::new(&layer.effects, &first.effects) else {
+        let Some(processor) = crate::effects::Processor::new(
+            &layer.effects,
+            &first.effects,
+            &prepared.effect_resources,
+        ) else {
             continue;
         };
         let indices = prepared.selected[layer_index]
@@ -2591,9 +2634,7 @@ pub fn run(scene: &Scene, root: &Path, output_root: &Path, output: &Path) -> Res
             "Scene output counts differ",
         ));
     }
-    for (_, identity) in &prepared.sources {
-        crate::fonts::identity_bytes(identity, root)?;
-    }
+    prepared.verify_sources(root)?;
     let mut report = prepared.report;
     report["output"] = json!(output);
     report["sha256"] = json!(verified.sha256);
@@ -2647,9 +2688,7 @@ pub fn still(
     let temp = scratch.0.join("frame.png");
     let (out_w, out_h) = ((width * scale) as u32, (height * scale) as u32);
     write_png_channels(&temp, out_w, out_h, &enlarged, scene.transparent)?;
-    for (_, identity) in &prepared.sources {
-        crate::fonts::identity_bytes(identity, root)?;
-    }
+    prepared.verify_sources(root)?;
     media::publish(&temp, &output)?;
     Ok(
         json!({"output":output,"scene_id":scene.id,"frame":n,"time":Time::new(n * rate.den, rate.num)?,
@@ -2718,6 +2757,78 @@ fn write_png_channels(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lut_cache_matches_unoptimized_frames_and_rehashes_tables() {
+        let root = std::env::temp_dir().join(format!(
+            "cutbolt-scene-lut-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("color.cube");
+        fs::write(&path, "LUT_1D_SIZE 2\n0.2 0.9 0.1\n0.8 0.3 0.7\n").unwrap();
+        let mut scene = panel_scene();
+        scene.duration = Time::new(3, 25).unwrap();
+        let layer = &mut scene.layers[0];
+        layer.duration = scene.duration;
+        layer.effects = serde_json::from_value(json!([{"kind":"lut", "file":{
+            "path":"color.cube", "sha256":media::file_hash(&path).unwrap(), "bytes":fs::metadata(&path).unwrap().len()
+        },"interpolation":"linear"}])).unwrap();
+        let mut moving = layer.clone();
+        moving.id = "moving-lut".into();
+        moving.animation = Some(
+            serde_json::from_value(json!({"position_x":{"keys":[
+                {"time":{"num":0,"den":1},"value":-10,"interpolation":"linear"},
+                {"time":{"num":2,"den":25},"value":10,"interpolation":"hold"}
+            ]}}))
+            .unwrap(),
+        );
+        scene.layers.push(moving);
+        for transparent in [false, true] {
+            scene.transparent = transparent;
+            let plain = prepare(&scene, &root).unwrap();
+            let mut cached = prepare(&scene, &root).unwrap();
+            cached.base = static_base(&scene, &cached).unwrap();
+            cached.processed = processed_sources(&scene, &cached).unwrap();
+            assert_eq!(cached.base.as_ref().unwrap().layers, 1);
+            assert_eq!(cached.processed.len(), 1);
+            assert_eq!(
+                cached.effect_resources.report().unwrap()["lut_tables"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(
+                cached
+                    .sources
+                    .iter()
+                    .filter(|(_, i)| i.path == Path::new("color.cube"))
+                    .count(),
+                1
+            );
+            for frame in 0..3 {
+                assert_eq!(
+                    compose(&scene, &plain, frame).unwrap(),
+                    compose(&scene, &cached, frame).unwrap()
+                );
+            }
+            cached.verify_sources(&root).unwrap();
+        }
+        let prepared = prepare(&scene, &root).unwrap();
+        // Same size, different content: both rendering publication paths use this full hash.
+        fs::write(&path, "LUT_1D_SIZE 2\n0.3 0.9 0.1\n0.8 0.3 0.7\n").unwrap();
+        assert_eq!(
+            prepared.verify_sources(&root).unwrap_err().code,
+            "MEDIA_CHANGED"
+        );
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
 
     #[test]
     fn transparent_frames_straighten_premultiplied_color() {
