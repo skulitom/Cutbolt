@@ -73,4 +73,7 @@ receipts retain their replay behavior. `captions.render` with `mode: "generated"
 writes revision-checked scene operations to a JSON file, using the same bounded
 caption windows and trimming the final placed clip to exact coverage; see
 [CAPTIONS](CAPTIONS.md#generated-captions-without-a-compiled-movie). Production-title
-and default workflow migration and the complete stage-5 quick gate remain open.
+migration and the complete stage-5 quick gate remain open. The caption and talking-head
+skills now use generated scene operations, with Windows/Linux schema-validated examples
+and a fresh-model rerun meeting 15 calls and 33,441 peak input tokens; see
+[workflow evidence](../verification/generated-caption-skills-2026-10-13.json).

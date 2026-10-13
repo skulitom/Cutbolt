@@ -543,6 +543,18 @@ pub fn listing(schema: &mut Value, workspace: bool) {
     } else {
         "A full snapshot (cutbolt_schema {\"name\":\"project\"}), or {\"project_id\", \"revision\", \"store_root\"} to load a saved revision (default the head)."
     };
+    if workspace
+        && let Some(operations) = schema.pointer_mut("/properties/operations")
+        && operations["type"] == "array"
+    {
+        // The document loader resolves this before request decoding. Advertise it to
+        // clients that validate tool arguments before forwarding a saved edit proposal.
+        let inline = std::mem::take(operations);
+        *operations = json!({"description":"Atomic edits, inline or selected from a workspace JSON file.",
+            "anyOf":[inline,{"type":"object","additionalProperties":false,"required":["file"],
+                "properties":{"file":{"type":"string","description":"Workspace JSON document path."},
+                    "select":{"type":"string","description":"Optional dotted field or array-index path."}}}]});
+    }
     trim(schema, saved);
     let Some(Value::Object(definitions)) = schema.get("$defs") else {
         return;

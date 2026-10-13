@@ -10,6 +10,7 @@ import re
 import subprocess
 
 import numpy as np
+from jsonschema import Draft202012Validator
 
 from agents import Client
 from agent_costs import transcript
@@ -132,7 +133,8 @@ def run(root):
         results = {}
         try:
             client.initialize()
-            names = {t['name'] for t in client.rpc('tools/list')['result']['tools']}
+            tools = {t['name']: t['inputSchema'] for t in client.rpc('tools/list')['result']['tools']}
+            names = set(tools)
             assert len(names) == 18
             for skill, count in sequence:
                 if skill == 'interview-multicam':
@@ -147,6 +149,9 @@ def run(root):
                     fields = request
                     if name not in names:
                         name, fields = 'cutbolt_run', {'command': command, 'arguments': request}
+                    # Real clients reject invalid arguments before the engine can resolve
+                    # document references. Validate that public boundary on every example.
+                    Draft202012Validator(tools[name]).validate(fields)
                     raw = client.rpc('tools/call', {'name': name, 'arguments': fields})
                     assert 'error' not in raw, (skill, label, raw)
                     tool = raw['result']
@@ -192,13 +197,17 @@ def run(root):
                         context['CAPTION_DOCUMENT'] = result['document']
                     if command == 'job.start':
                         context['JOB_ID'] = result['job_id']
+                        if request['run'] == 'captions.render':
+                            context['CAPTION_ARGUMENTS'] = copy.deepcopy(request['arguments'])
                         context['JOB_RECEIPT'] = {'captions.render':'caption-job.json', 'graphics.place':'title-job.json',
                                                    'export.run':'export-job.json', 'export.review':'review-job.json'}[request['run']]
                     if command == 'job.wait':
                         assert result['status'] == 'completed', (skill,label,result.get('error'),result['status'])
                         outcome = result['result']
                         if context['JOB_RECEIPT'] == 'caption-job.json':
-                            context.update(CAPTION_ASSET=outcome['asset'], CAPTION_ASSET_ID=outcome['asset']['id'], CAPTION_DURATION=outcome['asset']['duration'])
+                            assert outcome['compiled'] is False and 'asset' not in outcome
+                            assert outcome['expected_revision'] == context['REVISION']
+                            context.update(CAPTION_OPERATIONS=outcome['operations'], CAPTION_REVISION=outcome['expected_revision'])
                         if context['JOB_RECEIPT'] == 'title-job.json':
                             context['REVISION'] = outcome['revision']
                     if command == 'interchange.export.inspect':
@@ -234,7 +243,19 @@ def run(root):
             source_rgb = rgb_reference(source_decoded(source_path,True,'yuv420p'),160,90) if case == 'talking-head-direct' else decoded(source_path)
             rgb = np.frombuffer(source_rgb,dtype=np.uint8).reshape(150,90,160,3)
             expected_rgb = np.concatenate([rgb[start:end] for start,end in spans]).astype(np.uint32)
-            rgba = np.frombuffer(subprocess.check_output([FFMPEG,'-v','error','-i',str(workspace/'captions.mkv'),
+            assert not (workspace/'captions.mkv').exists() and (workspace/'caption-edits.json').is_file()
+            saved = cli(workspace, {'command':'session.get','project_id':case})
+            caption_clips = next(t for t in saved['tracks']['tracks'] if t['id']=='captions')['clips']
+            assert saved['schema_version'] == 2 and caption_clips
+            assert all(c.get('scene') and not c.get('asset_id') for c in caption_clips)
+            # The compiler is used only by this independent reference, after the agent's
+            # workflow has finished. The workflow itself created no caption movie.
+            oracle = copy.deepcopy(context['CAPTION_ARGUMENTS'])
+            oracle.update(mode='compiled',output='caption-oracle.mkv')
+            oracle.pop('track_id')
+            oracle['project']['revision'] = context['CAPTION_REVISION']
+            cli(workspace, {'command':'captions.render',**oracle})
+            rgba = np.frombuffer(subprocess.check_output([FFMPEG,'-v','error','-i',str(workspace/'caption-oracle.mkv'),
                 '-map','0:v:0','-pix_fmt','rgba','-f','rawvideo','-'],timeout=120),dtype=np.uint8).reshape(wanted,90,160,4).astype(np.uint32)
             alpha = rgba[:,:,:,3:4]
             composed = ((rgba[:,:,:,:3]*alpha + expected_rgb*(255-alpha) + 127)//255).astype(np.uint8)

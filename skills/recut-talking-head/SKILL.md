@@ -108,7 +108,7 @@ Overflow is rejected so cut-off text cannot silently pass.
 
 <!-- example: render -->
 ~~~json
-{"command":"job.start","request_id":"caption-render","run":"captions.render","arguments":{"document":"$CAPTION_DOCUMENT","project":{"project_id":"$PROJECT_ID"},"layouts":{"default":{"fonts":["$FONT"],"size":"$FONT_SIZE","rect":"$CAPTION_RECT","line_height":"$LINE_HEIGHT","letter_spacing":0,"wrap":"none","overflow":"reject"}},"output":"captions.mkv"}}
+{"command":"job.start","request_id":"caption-render","run":"captions.render","arguments":{"document":"$CAPTION_DOCUMENT","project":{"project_id":"$PROJECT_ID"},"layouts":{"default":{"fonts":["$FONT"],"size":"$FONT_SIZE","rect":"$CAPTION_RECT","line_height":"$LINE_HEIGHT","letter_spacing":0,"wrap":"none","overflow":"reject"}},"output":"caption-edits.json","mode":"generated","track_id":"captions","asset_id":"caption"}}
 ~~~
 
 $JOB_ID is the returned ticket.
@@ -118,19 +118,21 @@ $JOB_ID is the returned ticket.
 {"command":"job.wait","job_id":"$JOB_ID","timeout_seconds":120}
 ~~~
 
-Continue only when status is completed. Keep result.asset as $CAPTION_ASSET, and read its id and duration
-as $CAPTION_ASSET_ID and $CAPTION_DURATION. Attach the generated asset and a fresh overlay
-track together. If a captions track already exists, choose fresh IDs or explicitly replace
-its intended clip; do not duplicate captions or overwrite unrelated graphics.
+Continue only when status is completed. Keep result.operations as $CAPTION_OPERATIONS
+(a file reference) and result.expected_revision as $CAPTION_REVISION. Apply that proposal
+at its recorded revision. The command creates the captions track when absent. If it already
+holds overlapping captions, explicitly remove the intended old clips and prepare again
+against the new head. Do not duplicate captions or overwrite unrelated graphics.
 
 <!-- example: attach -->
 ~~~json
-{"command":"session.apply","project_id":"$PROJECT_ID","expected_revision":"$REVISION","request_id":"attach-captions","operations":[{"op":"media.add","asset":"$CAPTION_ASSET"},{"op":"tracks.edit","edit":{"op":"add","track":{"id":"captions","kind":"video","clips":[],"enabled":true,"locked":false,"composite":"alpha_over"}}},{"op":"tracks.edit","edit":{"op":"place","track_id":"captions","clip":{"id":"caption","asset_id":"$CAPTION_ASSET_ID","start":0,"source_in":0,"duration":"$CAPTION_DURATION"},"collision":"reject"}}]}
+{"command":"session.apply","project_id":"$PROJECT_ID","expected_revision":"$CAPTION_REVISION","request_id":"attach-captions","operations":"$CAPTION_OPERATIONS"}
 ~~~
 
 Keep the new revision. Export and inspect the actual captions at representative times,
 including the first/last cues. A timing edit after this step needs regenerated captions.
-This recipe burns one transparent overlay; it does not claim editable generated clips.
+The saved clips retain editable scene recipes and render directly with the footage; no
+intermediate caption movie is compiled. Keep the caption document for later text/timing edits.
 
 ## Deliver when requested
 
@@ -197,5 +199,5 @@ not a visual check of the encoded file. Report actual paths and material limitat
 
 Windows and Linux support this workflow; speech requires a separately configured local runtime
 and model. Recording and hardware decode have no Linux backend. The plugin bundles no engine,
-models, fonts or media tools. This recipe burns a transparent caption asset, not an editable
-generated clip, and does not establish general recognition or long-form editorial quality.
+models, fonts or media tools. Caption recipes stay editable in the saved project. This
+workflow does not establish general recognition or long-form editorial quality.

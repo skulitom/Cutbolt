@@ -1,5 +1,31 @@
 # Progress history
 
+## 13 October 2026: generated caption skills and client schema repair
+
+The caption and talking-head recipes now attach editable scene operations from a
+JSON proposal. Scripted workflows still use 14 editing calls and compare their
+final RGB/PCM against the compiled reference; no caption movie is created by the
+workflow. Windows/Linux passed 255/254 Rust tests and all three affected strict
+quick fixtures (skills, integration/MCP, agent costs) in 46/30 seconds. Both skill
+files pass the skill validator; source copies match across platforms.
+
+A fresh plugin-only model run found an interface bug missed by the old replay:
+the engine accepted operation-file references, but its dedicated MCP tool schema
+allowed arrays only. The agent recovered in 16 calls, with correct output. Workspace
+MCP listings now describe the reference, and skill tests validate every request
+against the advertised schema. The unchanged-prompt rerun uses 15 calls, no failures
+or schema lookups, and 33,441 peak input tokens (323,339 cumulative with cache reads).
+All 20 independent output checks pass; the delivered sheet was inspected. Both
+attempts and separate preflight/harness corrections are retained in
+[workflow evidence](../verification/generated-caption-skills-2026-10-13.json).
+
+The preceding 0d953da shipment passed four gate fixtures plus Rust, reused 12 and
+deferred 62 in 196 seconds; remote main was independently confirmed. Its background
+is pending. The 2ae9be2 background finished: 12 passes, zero failures, 49 superseded
+skips, zero unstarted in 2,198 seconds. Production migration, stage-five full quick,
+stage six and the final requirement/performance audit remain open. No new points,
+repeatability or thorough milestone claim; PROGRESS.md retains 338e114 evidence.
+
 ## 13 October 2026: repair shorthand placement oracle
 
 The 9e048b6 push gate stopped with 21 fixture passes and one `scene_short`

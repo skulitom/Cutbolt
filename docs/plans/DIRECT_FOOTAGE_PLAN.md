@@ -319,8 +319,11 @@ separates retained payload from sampled process memory and makes no long-export 
 `captions.render` now offers explicit generated edit-file output; compiled defaults
 and actual older job retries remain compatible. [Caption evidence](../../verification/generated-captions-2026-10-13.json)
 covers Windows/Linux pixels, exact PCM and publication/session boundaries. Default
-skill and production-title/caption workflow migration, plus the complete stage-5
-quick gate, remain open. These checkpoints do not close the stage.
+caption/talking-head skills now use generated scene operations; the schema-validated
+Windows/Linux examples and a fresh 15-call, 33,441-peak-token trial pass
+([workflow evidence](../../verification/generated-caption-skills-2026-10-13.json)).
+Production-title/caption migration and the complete stage-5 quick gate remain open.
+These checkpoints do not close the stage.
 
 Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame inside the timeline pass with no `scene.render` step.
 

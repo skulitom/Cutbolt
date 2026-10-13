@@ -583,3 +583,23 @@ These observations do not establish repeatability, speech accuracy or a comparat
 Release binaries remain separate work. The [two-model comparative pilot](FOOTAGE_BENCHMARK_RESULTS.md)
 is now complete, with losses and limitations reported; direct-footage stage 2 has passed its
 full quick check, while stages 3-6 remain unfinished. No editing points or generated milestone evidence change.
+
+## Generated caption workflow update, 13 October 2026
+
+The caption and talking-head skills now save native caption scenes through a JSON
+operations file. Their Windows/Linux examples pass with client-side schema validation,
+14 editing calls and exact picture/PCM comparisons against the compiled reference.
+
+Fresh plugin-only trial 01 exposed a dedicated-tool schema mismatch: file operations
+were accepted by the engine but rejected by the client. Recovery produced correct
+output in 16 calls, with one failure and 34,107 peak input tokens. The workspace MCP
+schema now advertises file/select references. Trial 02 repeats the same prompt and
+original inputs: **15 total calls (one skill, 14 MCP), zero failures or schema lookups,
+33,441 peak input tokens**, 323,339 cumulative input tokens including cache reads,
+4,911 output tokens, 51.672 seconds. Claude Code 2.1.280 used claude-opus-5-5[1m].
+
+All 20 independent output checks passed and the actual delivery sheet was inspected.
+The [evidence](../verification/generated-caption-skills-2026-10-13.json) retains both
+attempts, source/binary identities and separate preflight/harness corrections. This
+is bounded single-run evidence; earlier tutorial/handoff results remain historical,
+and no repeatability or provider-token reduction from stage zero is claimed.

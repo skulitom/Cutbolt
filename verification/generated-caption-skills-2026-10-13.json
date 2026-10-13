@@ -1,0 +1,478 @@
+{
+  "date": "2026-10-13",
+  "kind": "native_caption_skills_and_schema_repair",
+  "parent_commit": "0d953da37911378b5c47c4258827a0e4b3951d16",
+  "source_sha256": {
+    "skills/captions/SKILL.md": "141c9225a1c63f516f72103bb4c3050b911bf789a50a8eed29d58db470c7e19f",
+    "skills/recut-talking-head/SKILL.md": "0b780104cb5ca97bfe0c23bd5eb86e211074c4ba85c5b8bdff3abd3b8932ddfb",
+    "tests/skills.py": "06fe2e6dff4d230ca2fc82bdcb6065d83c43502416336b79aee053ebabe820d3",
+    "src/schema.rs": "667e25a34c43b785b623be96542585b25a20a349fe57b0b939e8f39214a31702"
+  },
+  "linux_source_hashes_match": true,
+  "checks": {
+    "windows": {
+      "rust_passes": 255,
+      "quick_passes": [
+        "agent_costs",
+        "integration",
+        "skills"
+      ],
+      "failed": [],
+      "skipped": [],
+      "wall_seconds": 46,
+      "report_sha256": "4d0ac8718739b4a94b864e994f286b908362073914b1e923a665a8d7bcf1517b",
+      "log_sha256": "93f12b7f6da554d338b8ef98fd632fbfe6fd852b39181d1fdd3d112839592702",
+      "rust_log_sha256": "598e6bd22731ec7c2189d221653d225ff14914586be037ca5176a0147eba71e8"
+    },
+    "linux": {
+      "rust_passes": 254,
+      "quick_passes": [
+        "agent_costs",
+        "integration",
+        "skills"
+      ],
+      "failed": [],
+      "skipped": [],
+      "wall_seconds": 30,
+      "report_sha256": "066d8fea7f5688256350de4801ad8070f296bf375fa395316a8a3873e06d2001",
+      "log_sha256": "16ef18a0c8fa1796b1a240f9e3cb5516d8343f57ffacef913b511ad700e8bd44",
+      "rust_log_sha256": "59c7180626c3def78d0e6a196458bf6e0965fca0a667acf82c34e365cacf573d"
+    }
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "model": "claude-opus-5-5[1m]",
+      "client_version": "2.1.280",
+      "all_calls": 16,
+      "skill_calls": 1,
+      "mcp_calls": 15,
+      "failed_calls": 1,
+      "schema_lookups": 0,
+      "peak_request_input": 34107,
+      "cumulative_input_with_cache_reads": 394393,
+      "output_tokens": 5678,
+      "wall_seconds": 69.07800000000861,
+      "isolation": {
+        "unexpected_tools": [],
+        "visible_tool_count": 19,
+        "visible_skills": [
+          "cutbolt:captions",
+          "cutbolt:cutbolt",
+          "cutbolt:deliver-and-review",
+          "cutbolt:interview-multicam",
+          "cutbolt:recut-talking-head",
+          "cutbolt:screen-tutorial"
+        ],
+        "passed": true
+      },
+      "engine_identity": {
+        "bytes": 44483072,
+        "sha256": "abf426c064b97fa0019c6d4763d9052c768ab860e3c106d0738aa86e5c29d43e"
+      },
+      "source_commit": "0d953da37911378b5c47c4258827a0e4b3951d16",
+      "source_patch": {
+        "bytes": 11252,
+        "sha256": "24c110bc0d246e31742a3d7580a17766d460a8ef87cf52411aea7c46b0e0be78"
+      },
+      "skill_identities": {
+        "captions": {
+          "bytes": 3438,
+          "sha256": "141c9225a1c63f516f72103bb4c3050b911bf789a50a8eed29d58db470c7e19f"
+        },
+        "cutbolt": {
+          "bytes": 9929,
+          "sha256": "23ee8608646b021eb040dd6f6ef71c7fe1fb25f12863b0b8c1b7dc332cf29473"
+        },
+        "deliver-and-review": {
+          "bytes": 3991,
+          "sha256": "5e01ec80c64d903fd457c88427378f5b07891aeecc8302796580fada33bf4651"
+        },
+        "interview-multicam": {
+          "bytes": 5166,
+          "sha256": "03e34d296041cdcc0ff5f489b0e820a397d6a8eeb44af0dfd12892d91b5a03ac"
+        },
+        "recut-talking-head": {
+          "bytes": 11121,
+          "sha256": "0b780104cb5ca97bfe0c23bd5eb86e211074c4ba85c5b8bdff3abd3b8932ddfb"
+        },
+        "screen-tutorial": {
+          "bytes": 7388,
+          "sha256": "ae3116f9a065348e72a612c05fba66a154af406573feb001511bbdcbade968f6"
+        }
+      },
+      "independent_checks": {
+        "case": "talking-head",
+        "expected_frames": 124,
+        "checks": {
+          "all_original_files_preserved": {
+            "passed": true,
+            "detail": null
+          },
+          "saved_snapshot_integrity": {
+            "passed": true,
+            "detail": null
+          },
+          "project_format": {
+            "passed": true,
+            "detail": null
+          },
+          "exact_edit_duration": {
+            "passed": true,
+            "detail": null
+          },
+          "video_source_frames_exact": {
+            "passed": true,
+            "detail": {
+              "expected_spans": [
+                [
+                  0,
+                  20
+                ],
+                [
+                  25,
+                  74
+                ],
+                [
+                  95,
+                  150
+                ]
+              ]
+            }
+          },
+          "audio_source_frames_exact": {
+            "passed": true,
+            "detail": {
+              "expected_spans": [
+                [
+                  0,
+                  20
+                ],
+                [
+                  25,
+                  74
+                ],
+                [
+                  95,
+                  150
+                ]
+              ]
+            }
+          },
+          "picture_sound_linked": {
+            "passed": true,
+            "detail": null
+          },
+          "caption_pixels_inside_requested_box": {
+            "passed": true,
+            "detail": null
+          },
+          "expected_overlay_count": {
+            "passed": true,
+            "detail": [
+              {
+                "track": "captions",
+                "start_frame": 0,
+                "frames": 124,
+                "visible_pixel_samples": 8160,
+                "zero_alpha_pixel_samples": 1777440,
+                "asset": "C:\\DEV\\CutboltData\\plan-fixes-20261011\\fresh-generated-caption-trial-01\\talking-head\\compiled-oracles\\0.mkv"
+              }
+            ]
+          },
+          "native_captions_without_intermediate_movie": {
+            "passed": true,
+            "detail": null
+          },
+          "caption_words_in_intended_order": {
+            "passed": true,
+            "detail": null
+          },
+          "captions_cover_the_retained_words": {
+            "passed": true,
+            "detail": null
+          },
+          "requested_caption_layout": {
+            "passed": true,
+            "detail": null
+          },
+          "original_caption_font": {
+            "passed": true,
+            "detail": null
+          },
+          "visible_captions_follow_cue_intervals": {
+            "passed": true,
+            "detail": null
+          },
+          "encoder_picture_matches_independent_composite": {
+            "passed": true,
+            "detail": null
+          },
+          "encoder_audio_matches_independent_edit": {
+            "passed": true,
+            "detail": null
+          },
+          "delivery_format_and_frame_count": {
+            "passed": true,
+            "detail": null
+          },
+          "actual_stream_durations": {
+            "passed": true,
+            "detail": null
+          },
+          "review_actual_delivery_timing": {
+            "passed": true,
+            "detail": null
+          }
+        },
+        "scope": "Independent source-frame/sample assembly, saved edit and actual delivery; synthetic six-second corpus.",
+        "delivered_lossy_picture": {
+          "mean_absolute_error": 7.315532034050179,
+          "peak_absolute_error": 245.0,
+          "psnr_db": 24.30151940094082
+        },
+        "follow_up_audit": "Inspect visible caption/title glyphs and actual review images. Automated cue/layout, loudness and OTIO/loss checks do not establish general editorial or third-party application compatibility.",
+        "all_automated_checks_pass": true
+      },
+      "artifacts_sha256": {
+        "stream.jsonl": "07c58a89041547195d347e517780fdccaf5ca25cfc55a6c9d7ef14f0253d7a17",
+        "measurement.json": "36a17eea79dc290196593473881cd1883313647c6f0ac3e6e2c150ef1bb4d9bb",
+        "independent-audit.json": "7f4c389f4726f38c9e5de04272ec4f6a7de303848fe4d2e6f4fe0381ef1bb5b0",
+        "isolation.json": "40c44e0a94b3c2ea90458e366a6dbcaac1dd6a78b25641618890003e72796f96",
+        "prompt.txt": "a2e3f98bc532074517c4769277c28913c0398f06ee10991f8b15b6368615a2f6",
+        "metadata.json": "b0e4182e6312f898b0716198f7b7b1e58d9526977581577fe5435f8da4123d86"
+      }
+    },
+    {
+      "trial": 2,
+      "model": "claude-opus-5-5[1m]",
+      "client_version": "2.1.280",
+      "all_calls": 15,
+      "skill_calls": 1,
+      "mcp_calls": 14,
+      "failed_calls": 0,
+      "schema_lookups": 0,
+      "peak_request_input": 33441,
+      "cumulative_input_with_cache_reads": 323339,
+      "output_tokens": 4911,
+      "wall_seconds": 51.671999999991385,
+      "isolation": {
+        "unexpected_tools": [],
+        "visible_tool_count": 19,
+        "visible_skills": [
+          "cutbolt:captions",
+          "cutbolt:cutbolt",
+          "cutbolt:deliver-and-review",
+          "cutbolt:interview-multicam",
+          "cutbolt:recut-talking-head",
+          "cutbolt:screen-tutorial"
+        ],
+        "passed": true
+      },
+      "engine_identity": {
+        "bytes": 44491264,
+        "sha256": "4fd04a16d8b41eabd60ef379d55f4650fcd61ec37d263b3b57c496bae42d8e0d"
+      },
+      "source_commit": "0d953da37911378b5c47c4258827a0e4b3951d16",
+      "source_patch": {
+        "bytes": 13904,
+        "sha256": "5f3bc5b5c1d6b1943864f6c4445e5861c631d85cb6deb4c00abe185ffede6329"
+      },
+      "skill_identities": {
+        "captions": {
+          "bytes": 3438,
+          "sha256": "141c9225a1c63f516f72103bb4c3050b911bf789a50a8eed29d58db470c7e19f"
+        },
+        "cutbolt": {
+          "bytes": 9929,
+          "sha256": "23ee8608646b021eb040dd6f6ef71c7fe1fb25f12863b0b8c1b7dc332cf29473"
+        },
+        "deliver-and-review": {
+          "bytes": 3991,
+          "sha256": "5e01ec80c64d903fd457c88427378f5b07891aeecc8302796580fada33bf4651"
+        },
+        "interview-multicam": {
+          "bytes": 5166,
+          "sha256": "03e34d296041cdcc0ff5f489b0e820a397d6a8eeb44af0dfd12892d91b5a03ac"
+        },
+        "recut-talking-head": {
+          "bytes": 11121,
+          "sha256": "0b780104cb5ca97bfe0c23bd5eb86e211074c4ba85c5b8bdff3abd3b8932ddfb"
+        },
+        "screen-tutorial": {
+          "bytes": 7388,
+          "sha256": "ae3116f9a065348e72a612c05fba66a154af406573feb001511bbdcbade968f6"
+        }
+      },
+      "independent_checks": {
+        "case": "talking-head",
+        "expected_frames": 124,
+        "checks": {
+          "all_original_files_preserved": {
+            "passed": true,
+            "detail": null
+          },
+          "saved_snapshot_integrity": {
+            "passed": true,
+            "detail": null
+          },
+          "project_format": {
+            "passed": true,
+            "detail": null
+          },
+          "exact_edit_duration": {
+            "passed": true,
+            "detail": null
+          },
+          "video_source_frames_exact": {
+            "passed": true,
+            "detail": {
+              "expected_spans": [
+                [
+                  0,
+                  20
+                ],
+                [
+                  25,
+                  74
+                ],
+                [
+                  95,
+                  150
+                ]
+              ]
+            }
+          },
+          "audio_source_frames_exact": {
+            "passed": true,
+            "detail": {
+              "expected_spans": [
+                [
+                  0,
+                  20
+                ],
+                [
+                  25,
+                  74
+                ],
+                [
+                  95,
+                  150
+                ]
+              ]
+            }
+          },
+          "picture_sound_linked": {
+            "passed": true,
+            "detail": null
+          },
+          "caption_pixels_inside_requested_box": {
+            "passed": true,
+            "detail": null
+          },
+          "expected_overlay_count": {
+            "passed": true,
+            "detail": [
+              {
+                "track": "captions",
+                "start_frame": 0,
+                "frames": 124,
+                "visible_pixel_samples": 8160,
+                "zero_alpha_pixel_samples": 1777440,
+                "asset": "C:\\DEV\\CutboltData\\plan-fixes-20261011\\fresh-generated-caption-trial-02\\talking-head\\compiled-oracles\\0.mkv"
+              }
+            ]
+          },
+          "native_captions_without_intermediate_movie": {
+            "passed": true,
+            "detail": null
+          },
+          "caption_words_in_intended_order": {
+            "passed": true,
+            "detail": null
+          },
+          "captions_cover_the_retained_words": {
+            "passed": true,
+            "detail": null
+          },
+          "requested_caption_layout": {
+            "passed": true,
+            "detail": null
+          },
+          "original_caption_font": {
+            "passed": true,
+            "detail": null
+          },
+          "visible_captions_follow_cue_intervals": {
+            "passed": true,
+            "detail": null
+          },
+          "encoder_picture_matches_independent_composite": {
+            "passed": true,
+            "detail": null
+          },
+          "encoder_audio_matches_independent_edit": {
+            "passed": true,
+            "detail": null
+          },
+          "delivery_format_and_frame_count": {
+            "passed": true,
+            "detail": null
+          },
+          "actual_stream_durations": {
+            "passed": true,
+            "detail": null
+          },
+          "review_actual_delivery_timing": {
+            "passed": true,
+            "detail": null
+          }
+        },
+        "scope": "Independent source-frame/sample assembly, saved edit and actual delivery; synthetic six-second corpus.",
+        "delivered_lossy_picture": {
+          "mean_absolute_error": 7.312639075567503,
+          "peak_absolute_error": 245.0,
+          "psnr_db": 24.304997809309242
+        },
+        "follow_up_audit": "Inspect visible caption/title glyphs and actual review images. Automated cue/layout, loudness and OTIO/loss checks do not establish general editorial or third-party application compatibility.",
+        "all_automated_checks_pass": true
+      },
+      "artifacts_sha256": {
+        "stream.jsonl": "1ceb31f54ce8456d8435828472df2d4e4c55743d55cac848a3dfb496a3a290a5",
+        "measurement.json": "4bbd058241dba222eec323c2a84abf66790f7bcb8015852db87eed82ebcc69a7",
+        "independent-audit.json": "c63f460a69e655568435392e84f932515887879f81aa08574f3621a205c13dcf",
+        "isolation.json": "40c44e0a94b3c2ea90458e366a6dbcaac1dd6a78b25641618890003e72796f96",
+        "prompt.txt": "a2e3f98bc532074517c4769277c28913c0398f06ee10991f8b15b6368615a2f6",
+        "metadata.json": "701e52426b10d664ba583ed4995db8f6312844252b4c8618d3afbb6d7783b928"
+      }
+    }
+  ],
+  "token_policy": "Maximum provider input per request including cache reads/writes is the 40000-token acceptance metric; cumulative input is reported separately.",
+  "trial_01_failure": "The client rejected operations as a document reference because the dedicated MCP schema allowed arrays only. The agent recovered through cutbolt_run. Exact output checks passed, call target failed.",
+  "repair": "Workspace MCP listings advertise inline operations or a strict file/select reference. Every executable skill example is validated against its advertised schema before sending. Parsing and non-workspace rules are unchanged.",
+  "oracles": "Scripted examples compare final pre-encoding RGB against independently composed source frames and separately compiled captions; exact source PCM is retained. Fresh trials compile saved scenes with pinned older 4bf1191 solely into separate audit outputs, preserving the trial workspace.",
+  "oracle_engine_sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f",
+  "visual_review": "The second trial actual delivery contact sheet was inspected. Both caption cue intervals show the original synthetic block glyphs inside the requested box; samples between cues show footage alone.",
+  "harness_notes": [
+    "Initial isolated preflight stopped before inference for expired credentials. A normal-client renewal probe ended at its small budget limit, then isolated execution succeeded; excluded from workflow metrics.",
+    "Initial Windows/Linux quick invocations named agents, which is not a standalone fixture. Corrected to integration (which runs agents.py); both complete corrected reports are retained."
+  ],
+  "previous_ship": {
+    "commit": "0d953da37911378b5c47c4258827a0e4b3951d16",
+    "pushed_main_confirmed": true,
+    "gate_passed_fixtures": 4,
+    "reused": 12,
+    "deferred": 62,
+    "seconds": 196,
+    "background": "pending"
+  },
+  "previous_background": {
+    "commit": "2ae9be28997314b8575912593ea1121903f79554",
+    "passed": 12,
+    "failed": 0,
+    "superseded_skips": 49,
+    "not_started": 0,
+    "seconds": 2198
+  },
+  "scope": "Bounded talking-head rerun and Windows/Linux skill/schema regression checks. No repeatability, long-form export, comparative lead, new points or thorough milestone claim. Production migration, stage-five full quick, stage six and final audit remain open."
+}
