@@ -1,5 +1,39 @@
 # Progress history
 
+## 13 October 2026: saved source-clock clip pixel effects
+
+Native asset video clips now save up to eight ordered grade, selective-grade, LUT or
+chroma-key recipes through `tracks.edit clip_effects`. Schema 2 is introduced only in
+the new revision that first carries effects; version-1 snapshots and prior revisions
+are preserved. Diffs, retries, undo, restore and locked/audio/nested rejection have
+explicit tests. An older external engine rejects schema 2 with `UNSUPPORTED_SCHEMA`.
+
+The native compositor uses the shared scene processor on decoded frames before
+transition mixing and overlay crop/shrink. Curves use source time without a
+whole-duration sample table. All decoder branches share bounded LUT resources;
+render publications and preview-cache hits verify the table files. Tests caught and
+fixed an incorrect interpretation of the processor's unchanged-pixel result and a
+single-frame preview shortcut that omitted effects.
+
+[Targeted evidence](../verification/clip-effects-2026-10-13.json): 249 Windows and
+248 Linux Rust tests, warnings-denied lint, eight Windows and five Linux fixture
+suites pass. The new fixture compares 29 reference renders (186 frames) with zero
+RGB tolerance, including direct H.264, every pixel-effect type, animated masks/keys,
+slipped/split clips, transitions and cropped overlays. It also checks MCP edits,
+previews, proxies, range/queued exports, H.264 equality against scene output and
+changed-LUT cache rejection. The compared source files are byte-identical between
+the Windows and Linux working checkouts; Linux's older checkout commit alone does
+not identify the tested implementation.
+
+This is stage-3 pixel behavior: key coverage is flattened onto black within the
+clip, preserving the existing track visibility rule. Generalized transparency,
+spatial properties and nested effects remain stage 4; generated clips and the
+optional precise linear-light path remain stages 5-6. See [the contract](CLIP_EFFECTS.md).
+No v2 points, long-source performance or new full-thorough evidence are claimed.
+The previous eabf014 background verification completed with all 44 deferred fixtures
+passing, including recording. This commit's own foreground and background shipment
+checks must be checked after commit and any failures fixed forward.
+
 ## 13 October 2026: complete the stage-2 gate and first comparative pilot
 
 The fixed 546cac4 checkout finished its complete strict quick run: 74 stages passed, no

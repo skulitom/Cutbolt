@@ -41,6 +41,8 @@ pub(crate) struct Layer {
     pub divisor: u32,
     pub opacity: u8,
     pub position: [i32; 2],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effects: Option<crate::clip_effects::Stack>,
     pub arguments: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct: Option<crate::direct::Picture>,
@@ -64,6 +66,8 @@ pub(crate) struct Mix {
     /// Frames in the whole effect interval, and the effect frame of window frame `first`.
     pub count: u64,
     pub offset: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effects: Option<crate::clip_effects::Stack>,
     /// Decoder of the incoming side: planar G, B, R frames of the canvas size on stdout.
     pub arguments: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -75,7 +79,12 @@ pub(crate) struct Mix {
 pub(crate) struct DirectRun {
     pub first: u64,
     pub end: u64,
-    pub picture: crate::direct::Picture,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<crate::direct::Picture>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub arguments: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effects: Option<crate::clip_effects::Stack>,
 }
 
 /// The base picture's decoder plus the transitions mixed into it and the overlay clips
@@ -96,6 +105,10 @@ pub(crate) struct Compositor {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<Mix>,
     pub layers: Vec<Layer>,
+    #[serde(skip)]
+    pub effect_resources: crate::clip_effects::Resources,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_report: Option<serde_json::Value>,
 }
 
 impl Compositor {
@@ -216,6 +229,9 @@ struct Decoders<'a> {
     direct: VecDeque<(usize, PreparedReader)>,
     direct_active: Option<(usize, Ahead)>,
     active: Vec<(usize, Ahead)>,
+    direct_effects: Vec<Option<crate::clip_effects::Prepared>>,
+    mix_effects: Vec<Option<crate::clip_effects::Prepared>>,
+    layer_effects: Vec<Option<crate::clip_effects::Prepared>>,
     program: String,
     timeout: Duration,
     abort: Arc<AtomicBool>,
@@ -285,6 +301,17 @@ impl Decoders<'_> {
             let replacement = decoder.next()?;
             self.base.recycle(frame);
             frame = replacement;
+            let run = &c.direct[*index];
+            if let (Some(stack), Some(prepared)) = (&run.effects, &self.direct_effects[*index]) {
+                prepared.apply(
+                    stack,
+                    &c.effect_resources,
+                    n - run.first,
+                    [c.width, c.height],
+                    false,
+                    &mut frame,
+                )?;
+            }
             if c.direct[*index].end == n + 1 {
                 self.direct_active
                     .take()
@@ -297,7 +324,17 @@ impl Decoders<'_> {
             && c.transitions[*index].first <= n
         {
             let m = &c.transitions[*index];
-            let incoming = decoder.next()?;
+            let mut incoming = decoder.next()?;
+            if let (Some(stack), Some(prepared)) = (&m.effects, &self.mix_effects[*index]) {
+                prepared.apply(
+                    stack,
+                    &c.effect_resources,
+                    n - m.first,
+                    [c.width, c.height],
+                    false,
+                    &mut incoming,
+                )?;
+            }
             let effect = Effect::new(m.kind, c.width, m.count, m.offset + (n - m.first));
             effect.apply(&mut frame, &incoming, c.width as usize);
             decoder.recycle(incoming);
@@ -312,7 +349,17 @@ impl Decoders<'_> {
             if layer.first > n {
                 continue;
             }
-            let pixels = decoder.next()?;
+            let mut pixels = decoder.next()?;
+            if let (Some(stack), Some(prepared)) = (&layer.effects, &self.layer_effects[*index]) {
+                prepared.apply(
+                    stack,
+                    &c.effect_resources,
+                    n - layer.first,
+                    [layer.width, layer.height],
+                    layer.alpha,
+                    &mut pixels,
+                )?;
+            }
             if base.is_none_or(|b| layer.track > b) {
                 over(&mut frame, c.width, c.height, layer, &pixels);
             }
@@ -384,9 +431,29 @@ fn decoders<'a>(
             .direct
             .iter()
             .enumerate()
-            .map(|(i, r)| Ok((i, PreparedReader::Direct(r.picture.prepare(control)?))))
+            .map(|(i, r)| {
+                Ok((
+                    i,
+                    PreparedReader::prepare(&r.arguments, r.picture.as_ref(), &program, control)?,
+                ))
+            })
             .collect::<Result<_>>()?,
         direct_active: None,
+        direct_effects: compositor
+            .direct
+            .iter()
+            .map(|r| r.effects.as_ref().map(|s| s.prepare()).transpose())
+            .collect::<Result<_>>()?,
+        mix_effects: compositor
+            .transitions
+            .iter()
+            .map(|r| r.effects.as_ref().map(|s| s.prepare()).transpose())
+            .collect::<Result<_>>()?,
+        layer_effects: compositor
+            .layers
+            .iter()
+            .map(|r| r.effects.as_ref().map(|s| s.prepare()).transpose())
+            .collect::<Result<_>>()?,
         active: Vec::new(),
         program,
         timeout,
@@ -814,6 +881,7 @@ mod tests {
             divisor,
             opacity,
             position,
+            effects: None,
             arguments: Vec::new(),
             direct: None,
         }

@@ -175,6 +175,7 @@ fn operations(request: &Place, project: &Project, asset: Asset) -> Result<Vec<Op
             gain_curve: None,
             envelope: None,
             transform: None,
+            effects: Vec::new(),
         },
     }));
     Ok(operations)

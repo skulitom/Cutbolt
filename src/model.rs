@@ -114,7 +114,7 @@ impl Clip {
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
-    /// Snapshot schema version; must be 1.
+    /// Snapshot schema version: 1 for legacy projects, 2 for native clip effects. A first nonempty clip-effect edit upgrades only the new revision; old snapshots are preserved.
     pub schema_version: u32,
     /// Project ID, 1-128 bytes.
     pub id: String,
@@ -142,6 +142,10 @@ pub struct Project {
     /// Declared transfer of the timeline's encoded RGB values, set by project.transfer; exports and scopes that omit `input_transfer` use it. Omitted when undeclared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transfer: Option<crate::color::Transfer>,
+    /// Internal proxy mapping only; never persisted or accepted from project JSON.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) effect_coordinate_scale: Option<u32>,
 }
 
 /// One edit in an atomic timeline.apply or session.apply batch, tagged by `op`; each must leave a valid project. The clip.* operations and timeline.ripple_delete edit the sequential `clips` list and are rejected once native tracks exist.
@@ -407,6 +411,7 @@ impl Project {
             sequences: vec![],
             preview_scale: None,
             transfer: None,
+            effect_coordinate_scale: None,
         };
         project.validate()?;
         Ok(project)
@@ -420,10 +425,16 @@ impl Project {
             .try_fold(Time::ZERO, |sum, c| sum.plus(c.duration))
     }
     pub fn validate(&self) -> Result<()> {
-        if self.schema_version != 1 {
+        if !matches!(self.schema_version, 1 | 2) {
             return Err(error(
                 "UNSUPPORTED_SCHEMA",
-                "Only schema version 1 is supported",
+                "Only snapshot schema versions 1 and 2 are supported",
+            ));
+        }
+        if self.schema_version == 1 && self.has_clip_effects() {
+            return Err(error(
+                "UNSUPPORTED_SCHEMA",
+                "Native clip effects require snapshot schema 2; use tracks.edit clip_effects to upgrade a version-1 snapshot",
             ));
         }
         valid_id(&self.id)?;
@@ -557,6 +568,14 @@ impl Project {
         }
         self.duration()?;
         Ok(())
+    }
+    pub(crate) fn has_clip_effects(&self) -> bool {
+        self.tracks.as_ref().is_some_and(|a| {
+            a.tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .any(|c| !c.effects.is_empty())
+        })
     }
     /// Atomic snapshot transform: caller's project remains unchanged on success or failure.
     /// Explicit media input roots may read originals and populate derived source caches.
@@ -829,6 +848,9 @@ impl Project {
                     let clip = next.clips.remove(i);
                     next.clips.insert(to_index, clip);
                 }
+            }
+            if next.schema_version == 1 && next.has_clip_effects() {
+                next.schema_version = 2;
             }
             next.validate()?;
         }

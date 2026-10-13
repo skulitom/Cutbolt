@@ -1,0 +1,650 @@
+{
+  "date": "2026-10-13",
+  "kind": "native_clip_pixel_effects_stage_3_targeted_acceptance",
+  "base_commit": "eabf014c389b18b24ea27791b044cd1097dd30f4",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/animation.rs": {
+      "bytes": 18556,
+      "sha256": "d9bba7cc140e300ad4e140455e05949cecdb86134301a18f2b54dfa9caedcae3"
+    },
+    "src/cache.rs": {
+      "bytes": 24489,
+      "sha256": "933341352e44a6f71e9088ac0aac5991b71f8ade345d76185d60a742bdf3d89c"
+    },
+    "src/composite.rs": {
+      "bytes": 23420,
+      "sha256": "3837f5f4afa4e49cd5712423d76a88ee26c9654148ae55b7333765896e96fe82"
+    },
+    "src/delivery/stream.rs": {
+      "bytes": 18090,
+      "sha256": "dbde06a09f66c6f4ac1f86be04626bc2487013e955c0f8766b210513cdf366f3"
+    },
+    "src/effects.rs": {
+      "bytes": 51956,
+      "sha256": "300fbbd670523b4ebb6a26789c51bfe630eb4a52d66a4aab692c1b6d52fa5470"
+    },
+    "src/graphics_place.rs": {
+      "bytes": 10610,
+      "sha256": "6e46f13c4d1d20d039cf00fce8ffe63c7ec8adb06915adab068a8da20d707433"
+    },
+    "src/interchange/export.rs": {
+      "bytes": 9687,
+      "sha256": "e0c8ebaf8289dab3e0abcbd4199642ac7544db64c0da435cf966a041c5bce469"
+    },
+    "src/interchange/import.rs": {
+      "bytes": 13303,
+      "sha256": "562f97029058e3930689e53d988e34bd22cd7c2b751a3f0f407315aa4f7bb1ea"
+    },
+    "src/keying.rs": {
+      "bytes": 9424,
+      "sha256": "a7395b9866fa7a7495bc8815f11d51126e2141c5099e5a3483dc9a9557a24c13"
+    },
+    "src/lib.rs": {
+      "bytes": 12920,
+      "sha256": "fbcf6596f2a5de7f47a66635f0aeb43712946e2266e77506aa340752e0f086d9"
+    },
+    "src/model.rs": {
+      "bytes": 47018,
+      "sha256": "32b793022e6d7c063c9bdde38e811c7f715773011e69465d0ae9a038c68b82ad"
+    },
+    "src/preview.rs": {
+      "bytes": 23722,
+      "sha256": "c0f318cf143e4bc5234a93e222fcac7819a4b774524e8845d7ee8abf6d819f8a"
+    },
+    "src/proxy.rs": {
+      "bytes": 12269,
+      "sha256": "3f3f61970244ee18b82f378e9da49a59cce98f67bfaf140d030810c960ee9bea"
+    },
+    "src/selection.rs": {
+      "bytes": 8655,
+      "sha256": "660ba0318eb972efc3ad11b4c1cb96456627c2e0e1e0cb0b4ebd5549e1c443e9"
+    },
+    "src/sequences.rs": {
+      "bytes": 10732,
+      "sha256": "93e46be30e51f6d77ac32681ff6cdc7662c66d4cb0bc54f6037d6ca641d65454"
+    },
+    "src/store.rs": {
+      "bytes": 50207,
+      "sha256": "eeedbca61eb3bdd8749898be2e63f41dce8ad13f7be817717871a194026960a4"
+    },
+    "src/track_composite.rs": {
+      "bytes": 39885,
+      "sha256": "9d8d7aefb0ae05b6ebb8cf5b25ae271aeb8b1be83345731cbdf84b7b623c1fce"
+    },
+    "src/track_render.rs": {
+      "bytes": 84744,
+      "sha256": "50bef5be85ec90a3ea0d909065ab5480f159a7d45d501718412f1bb292a2059b"
+    },
+    "src/tracks.rs": {
+      "bytes": 65398,
+      "sha256": "b0d8667f4f0dda63da267d1c6411d0531f5029dece071e6e5053d0786f9ae4a1"
+    },
+    "tools/verify.py": {
+      "bytes": 45930,
+      "sha256": "f52204d1ee696351bf1855ba5ff13c63812c3b030b23dff1ce23ad8e40c5f51c"
+    },
+    "src/clip_effects.rs": {
+      "bytes": 7323,
+      "sha256": "0e4c1f461569b6f0b3c68d0b18ee92b7833cc4606e6ad457e992b87c64575f7d"
+    },
+    "tests/clip_effects.py": {
+      "bytes": 18118,
+      "sha256": "32fb10166b1bbb004287bcfcc4e390f48010562986f0970086f8a87a48b37f19"
+    }
+  },
+  "fixture": {
+    "name": "clip_effects",
+    "reference_render_cases": 29,
+    "reference_render_frames_compared": 186,
+    "rgb_tolerance": 0,
+    "types": [
+      "grade",
+      "selective_grade",
+      "chroma_key",
+      "lut"
+    ],
+    "input_profiles": [
+      "FFV1 RGB8",
+      "direct H.264 8-bit 4:2:0"
+    ],
+    "checks": [
+      "exact extracted-frame scene oracles for each type and ordered chains",
+      "source-clock grade, key strength, selection mix and mask animation",
+      "slips and splits preserve source-clock curves",
+      "MCP schema and edit",
+      "frame preview, range export, queued export and final H.264 scene equality",
+      "both effected transition inputs against independent integer dissolve",
+      "mask coordinates before overlay crop and shrink",
+      "selected proxy mask coordinates and full-quality final",
+      "cache hit rejects changed LUT; source files preserved"
+    ],
+    "cross_platform_claim": "Each platform passed zero-tolerance scene comparisons; no cross-platform encoded-file identity claim"
+  },
+  "rust": {
+    "windows_tests": 249,
+    "linux_tests": 248,
+    "clippy_all_targets_warnings_denied": true,
+    "new_checks": [
+      "snapshot migration without rewriting old revisions; retries, diffs, undo and restore",
+      "locked/audio/nested/oversized rejection",
+      "loaded LUTs remain full-hash publication dependencies"
+    ]
+  },
+  "windows_regressions": {
+    "ok": true,
+    "run": "quick",
+    "commit": "eabf014c389b18b24ea27791b044cd1097dd30f4",
+    "ran": [
+      "agent_costs",
+      "cache_previews",
+      "clip_effects",
+      "interchange",
+      "overlays",
+      "portable_projects",
+      "tracks",
+      "transitions"
+    ],
+    "failed": [],
+    "deferred": [],
+    "reused": [],
+    "not_impacted": [],
+    "skipped": {},
+    "agent_costs": {
+      "passed": [
+        "agent_costs.five_sdk_workflows_with_wire_budgets",
+        "agent_costs.structured_error_recovery"
+      ],
+      "kind": "scripted_replay",
+      "sdk_version": "1.12.3",
+      "engine": "cutbolt 0.4.0 (commit eabf014c389b18b24ea27791b044cd1097dd30f4, sources modified)",
+      "catalog": "default",
+      "sources_preserved": true,
+      "budgets": {
+        "talking-head": [
+          15,
+          9500,
+          235000
+        ],
+        "interview": [
+          6,
+          4500,
+          55000
+        ],
+        "tutorial": [
+          10,
+          4000,
+          60000
+        ],
+        "revision": [
+          8,
+          2500,
+          48000
+        ],
+        "handoff": [
+          8,
+          2600,
+          210000
+        ]
+      },
+      "workflows": {
+        "talking-head": {
+          "initialize_bytes": 555,
+          "tools_list_bytes": 22291,
+          "calls": 15,
+          "failed_calls": 0,
+          "schema_lookups": 0,
+          "capabilities_lookups": 0,
+          "per_call": [
+            {
+              "command": "session.create",
+              "sent_bytes": 186,
+              "received_bytes": 755,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 550,
+              "received_bytes": 2531,
+              "failed": false
+            },
+            {
+              "command": "transcript.inspect",
+              "sent_bytes": 1232,
+              "received_bytes": 3313,
+              "failed": false
+            },
+            {
+              "command": "audio.tighten",
+              "sent_bytes": 194,
+              "received_bytes": 2377,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 577,
+              "received_bytes": 5415,
+              "failed": false
+            },
+            {
+              "command": "transcript.fillers",
+              "sent_bytes": 1277,
+              "received_bytes": 2561,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 573,
+              "received_bytes": 8061,
+              "failed": false
+            },
+            {
+              "command": "captions.draft",
+              "sent_bytes": 1273,
+              "received_bytes": 1875,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 853,
+              "received_bytes": 376,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 197,
+              "received_bytes": 1982,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 730,
+              "received_bytes": 4760,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 289,
+              "received_bytes": 366,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 197,
+              "received_bytes": 5186,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 270,
+              "received_bytes": 372,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 197,
+              "received_bytes": 143654,
+              "failed": false
+            }
+          ],
+          "sent_bytes": 8850,
+          "received_bytes": 206430
+        },
+        "interview": {
+          "initialize_bytes": 552,
+          "tools_list_bytes": 22291,
+          "calls": 6,
+          "failed_calls": 0,
+          "schema_lookups": 0,
+          "capabilities_lookups": 0,
+          "per_call": [
+            {
+              "command": "session.create",
+              "sent_bytes": 183,
+              "received_bytes": 749,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 730,
+              "received_bytes": 2547,
+              "failed": false
+            },
+            {
+              "command": "session.get",
+              "sent_bytes": 126,
+              "received_bytes": 2585,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 2449,
+              "received_bytes": 9241,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 284,
+              "received_bytes": 365,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 196,
+              "received_bytes": 5179,
+              "failed": false
+            }
+          ],
+          "sent_bytes": 4223,
+          "received_bytes": 43509
+        },
+        "tutorial": {
+          "initialize_bytes": 551,
+          "tools_list_bytes": 22291,
+          "calls": 10,
+          "failed_calls": 0,
+          "schema_lookups": 0,
+          "capabilities_lookups": 0,
+          "per_call": [
+            {
+              "command": "session.create",
+              "sent_bytes": 182,
+              "received_bytes": 747,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 546,
+              "received_bytes": 2523,
+              "failed": false
+            },
+            {
+              "command": "session.get",
+              "sent_bytes": 125,
+              "received_bytes": 2217,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 758,
+              "received_bytes": 5429,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 579,
+              "received_bytes": 373,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 196,
+              "received_bytes": 6075,
+              "failed": false
+            },
+            {
+              "command": "audio.normalize",
+              "sent_bytes": 189,
+              "received_bytes": 1429,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 308,
+              "received_bytes": 2901,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 284,
+              "received_bytes": 366,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 197,
+              "received_bytes": 5178,
+              "failed": false
+            }
+          ],
+          "sent_bytes": 3619,
+          "received_bytes": 50080,
+          "title": {
+            "calls": 2,
+            "sent_bytes": 775
+          }
+        },
+        "revision": {
+          "initialize_bytes": 551,
+          "tools_list_bytes": 22291,
+          "calls": 8,
+          "failed_calls": 0,
+          "schema_lookups": 0,
+          "capabilities_lookups": 0,
+          "per_call": [
+            {
+              "command": "session.create",
+              "sent_bytes": 182,
+              "received_bytes": 747,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 642,
+              "received_bytes": 1195,
+              "failed": false
+            },
+            {
+              "command": "session.get",
+              "sent_bytes": 125,
+              "received_bytes": 1371,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 311,
+              "received_bytes": 2329,
+              "failed": false
+            },
+            {
+              "command": "session.undo",
+              "sent_bytes": 168,
+              "received_bytes": 2317,
+              "failed": false
+            },
+            {
+              "command": "session.get",
+              "sent_bytes": 125,
+              "received_bytes": 1371,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 316,
+              "received_bytes": 365,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 196,
+              "received_bytes": 5165,
+              "failed": false
+            }
+          ],
+          "sent_bytes": 2320,
+          "received_bytes": 37702
+        },
+        "handoff": {
+          "initialize_bytes": 550,
+          "tools_list_bytes": 22291,
+          "calls": 8,
+          "failed_calls": 0,
+          "schema_lookups": 0,
+          "capabilities_lookups": 0,
+          "per_call": [
+            {
+              "command": "session.create",
+              "sent_bytes": 181,
+              "received_bytes": 745,
+              "failed": false
+            },
+            {
+              "command": "session.apply",
+              "sent_bytes": 545,
+              "received_bytes": 2521,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 282,
+              "received_bytes": 365,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 196,
+              "received_bytes": 5179,
+              "failed": false
+            },
+            {
+              "command": "job.start",
+              "sent_bytes": 263,
+              "received_bytes": 371,
+              "failed": false
+            },
+            {
+              "command": "job.wait",
+              "sent_bytes": 196,
+              "received_bytes": 144369,
+              "failed": false
+            },
+            {
+              "command": "interchange.export.inspect",
+              "sent_bytes": 181,
+              "received_bytes": 5023,
+              "failed": false
+            },
+            {
+              "command": "interchange.export",
+              "sent_bytes": 252,
+              "received_bytes": 1147,
+              "failed": false
+            }
+          ],
+          "sent_bytes": 2351,
+          "received_bytes": 182561
+        }
+      },
+      "recovery": {
+        "initialize_bytes": 551,
+        "tools_list_bytes": 22291,
+        "calls": 9,
+        "failed_calls": 3,
+        "schema_lookups": 0,
+        "capabilities_lookups": 0,
+        "per_call": [
+          {
+            "command": "session.create",
+            "sent_bytes": 185,
+            "received_bytes": 584,
+            "failed": true
+          },
+          {
+            "command": "session.create",
+            "sent_bytes": 182,
+            "received_bytes": 747,
+            "failed": false
+          },
+          {
+            "command": "session.apply",
+            "sent_bytes": 267,
+            "received_bytes": 1135,
+            "failed": false
+          },
+          {
+            "command": "session.apply",
+            "sent_bytes": 267,
+            "received_bytes": 752,
+            "failed": true
+          },
+          {
+            "command": "session.get",
+            "sent_bytes": 125,
+            "received_bytes": 621,
+            "failed": false
+          },
+          {
+            "command": "session.apply",
+            "sent_bytes": 267,
+            "received_bytes": 1137,
+            "failed": false
+          },
+          {
+            "command": "preview.frame",
+            "sent_bytes": 199,
+            "received_bytes": 1207,
+            "failed": false
+          },
+          {
+            "command": "preview.frame",
+            "sent_bytes": 199,
+            "received_bytes": 838,
+            "failed": true
+          },
+          {
+            "command": "preview.frame",
+            "sent_bytes": 289,
+            "received_bytes": 1212,
+            "failed": false
+          }
+        ],
+        "sent_bytes": 2235,
+        "received_bytes": 31075
+      }
+    }
+  },
+  "linux_regressions": {
+    "ok": true,
+    "run": "quick",
+    "commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5",
+    "ran": [
+      "cache_previews",
+      "clip_effects",
+      "overlays",
+      "tracks",
+      "transitions"
+    ],
+    "failed": [],
+    "deferred": [],
+    "reused": [],
+    "not_impacted": [],
+    "skipped": {},
+    "agent_costs": null
+  },
+  "linux_checkout_note": "The Linux checkout identifies its older base commit; the working files listed in source_hashes were copied from Windows and checked byte-for-byte identical.",
+  "legacy_schema": {
+    "legacy_sha256": "6a5626b89383cc4d6c6408cbd8412694a81bda26f7ff9de6a81044a8b0965d04",
+    "legacy_rejection": {
+      "error": {
+        "code": "UNSUPPORTED_SCHEMA",
+        "message": "Only schema version 1 is supported"
+      },
+      "ok": false
+    },
+    "current_accepts_schema_2": true,
+    "scope": "Snapshot schema check before edits; saved-history migration separately covered by Rust tests"
+  },
+  "limits": [
+    "Stage 3 retains existing coverage: chroma key is flattened onto black within the clip. Lower-track reveal and generalized spatial/nested effects remain stage 4.",
+    "Tests are small correctness fixtures; no new long-source throughput claim.",
+    "Prior thorough capability evidence and v1 points are unchanged; the shipped commit still requires its foreground and background gate."
+  ],
+  "initial_failures_fixed": [
+    "Processor None means exact bypass; preserve unselected pixels.",
+    "Frame-preview single-clip shortcut now routes effect stacks through the shared compositor.",
+    "Cached previews include LUT file dependencies."
+  ],
+  "fixture_development_notes": [
+    "Earlier drafts had incorrect parameter names or reused one asset ID as both an opaque and overlay source; corrected to the existing command contract before final passing runs."
+  ]
+}

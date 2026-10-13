@@ -244,6 +244,7 @@ pub(crate) fn preview_project(project: &Project, root: &Path) -> Result<Project>
     mapped.width = width;
     mapped.height = height;
     mapped.preview_scale = None;
+    mapped.effect_coordinate_scale = Some(scale);
     for a in &mut mapped.assets {
         if used.contains(&a.id) {
             // Audio-only WAV remains full quality when video previews select proxies.

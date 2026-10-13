@@ -227,6 +227,12 @@ Goal: an agent never has to call `media.prepare` by hand. Files that cannot be d
 
 ## Stage 3: pixel effects on any video clip
 
+Implementation note, 13 October 2026: the stage-3 pixel contract and targeted Windows/Linux
+acceptance are recorded in [CLIP_EFFECTS.md](../CLIP_EFFECTS.md) and
+[the evidence](../../verification/clip-effects-2026-10-13.json). Key coverage is flattened
+onto black in this stage, as required by the unchanged-visibility rule below. Stage 4
+retains transparency and changes the layering rule. The original requirements follow.
+
 Goal: grade, selective grade, LUT and chroma key are properties of any video clip on a native track, rendered in the same pass.
 
 1. **Model.** Add `TrackClip.effects: Vec<ClipEffect>` (`tracks.rs:26-63`), with a serde default of empty, at most 8 entries. `ClipEffect` is a tagged enum that reuses the existing types verbatim, so schema descriptions and validation are shared:

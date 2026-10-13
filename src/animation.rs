@@ -18,7 +18,7 @@ pub enum Interpolation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Keyframe {
-    /// Layer-local rational seconds, 0..layer duration; reduced denominator at most 1,000,000.
+    /// Owner-clock rational seconds, 0..source duration for native clip effects or 0..layer duration for scenes; reduced denominator at most 1,000,000.
     pub time: Time,
     /// Integer property value within the animated property's range.
     pub value: i32,
@@ -26,7 +26,7 @@ pub struct Keyframe {
     pub interpolation: Interpolation,
 }
 
-/// Keyframed integer property on the layer-local clock. Endpoint values hold outside the keys; samples round to nearest.
+/// Keyframed integer property on the owning layer or clip clock. Endpoint values hold outside the keys; samples round to nearest.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Curve {
@@ -41,7 +41,7 @@ pub struct Curve {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Retime {
-    /// Layer-local rational seconds, at most the layer duration; until then the first key holds (last when reversed).
+    /// Owner-clock rational seconds, at most the source duration for native clips or layer duration for scenes; until then the first key holds (last when reversed).
     pub start: Time,
     /// Positive rational speed multiplier, 1/16..16; denominators reduce to at most 1,000,000.
     pub rate: Time,

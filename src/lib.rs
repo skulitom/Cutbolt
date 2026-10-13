@@ -12,6 +12,7 @@ mod cache_store;
 pub mod caption_overlay;
 pub mod captions;
 pub mod check;
+mod clip_effects;
 pub mod color;
 pub mod color_match;
 pub mod commands;

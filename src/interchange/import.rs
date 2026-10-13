@@ -41,6 +41,7 @@ pub(super) fn prepare(request: &Import, document: &Value, a: &mut Analysis) -> R
         sequences: vec![],
         preview_scale: None,
         transfer: None,
+        effect_coordinate_scale: None,
     };
     project.validate()?;
     schema(document, &["Timeline.1"], "$")?;

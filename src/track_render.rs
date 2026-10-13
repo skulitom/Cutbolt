@@ -35,6 +35,8 @@ struct Graph<'a> {
     indexed: BTreeMap<String, std::sync::Arc<crate::direct::Video>>,
     converted: BTreeMap<String, Source>,
     direct_runs: Vec<track_composite::DirectRun>,
+    effect_resources: crate::clip_effects::Resources,
+    effect_sources: BTreeMap<PathBuf, Source>,
     direct_audio_bytes: u64,
     /// This graph's FFmpeg input index of each asset it reads.
     indices: BTreeMap<String, usize>,
@@ -88,6 +90,8 @@ impl<'a> Graph<'a> {
             indexed: BTreeMap::new(),
             converted: BTreeMap::new(),
             direct_runs: Vec::new(),
+            effect_resources: Default::default(),
+            effect_sources: BTreeMap::new(),
             direct_audio_bytes: 0,
             indices: BTreeMap::new(),
             starts: BTreeMap::new(),
@@ -427,7 +431,29 @@ impl<'a> Graph<'a> {
                 .unwrap_or(crate::color::Transfer::Bt709),
         )))
     }
-    /// Direct pictures replace a black base placeholder after native decoding/conversion in Rust.
+    fn clip_effects(
+        &mut self,
+        clip: &TrackClip,
+        at: Time,
+        origin: [u32; 2],
+    ) -> Result<Option<crate::clip_effects::Stack>> {
+        if clip.effects.is_empty() {
+            return Ok(None);
+        }
+        for source in self.effect_resources.add(&clip.effects, self.root)? {
+            self.effect_sources.insert(source.path.clone(), source);
+        }
+        Ok(Some(crate::clip_effects::Stack {
+            clip_id: clip.id.clone(),
+            effects: clip.effects.clone(),
+            source_start: clip.source_in.plus(at)?.minus(clip.start)?,
+            source_duration: clip.source_duration(self.project)?,
+            rate: self.project.frame_rate,
+            origin,
+            coordinate_scale: self.project.effect_coordinate_scale.unwrap_or(1),
+        }))
+    }
+    /// Direct pictures and effected clips replace a black base placeholder in Rust.
     fn base_source(
         &mut self,
         clip: &TrackClip,
@@ -437,12 +463,37 @@ impl<'a> Graph<'a> {
         first: u64,
     ) -> Result<()> {
         let crop = [0, 0, self.project.width, self.project.height];
-        if let Some(picture) = self.direct_picture(clip, at, duration, crop)? {
-            let count = picture.count;
+        let picture = self.direct_picture(clip, at, duration, crop)?;
+        let effects = self.clip_effects(clip, at, [0, 0])?;
+        if picture.is_some() || effects.is_some() {
+            let count = duration.units(self.project.frame_rate)?;
+            let arguments = if picture.is_some() {
+                Vec::new()
+            } else {
+                let mut decoder = self.branch();
+                decoder.video_source(clip, at, duration, "effected")?;
+                decoder.arguments_with(
+                    &[
+                        "-map",
+                        "[effected]",
+                        "-an",
+                        "-fps_mode",
+                        "passthrough",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        "gbrp",
+                        "pipe:1",
+                    ]
+                    .map(str::to_owned),
+                )?
+            };
             self.direct_runs.push(track_composite::DirectRun {
                 first,
                 end: first + count,
                 picture,
+                arguments,
+                effects,
             });
             let rate = self.project.frame_rate;
             self.filters.push(format!("color=c=black:s={}x{}:r={}/{},format=pix_fmts=gbrp,trim=end_frame={count},settb=expr={},setpts=N[{label}]", self.project.width, self.project.height, rate.num, rate.den, timebase(rate)));
@@ -1317,6 +1368,7 @@ impl<'a> Graph<'a> {
     }
     fn sources(&self) -> Vec<Source> {
         let mut values: Vec<_> = self.sources.values().cloned().collect();
+        values.extend(self.effect_sources.values().cloned());
         values.sort_by(|a, b| a.path.cmp(&b.path));
         values
     }
@@ -1327,6 +1379,8 @@ impl<'a> Graph<'a> {
         next.sources = self.sources.clone();
         next.converted = self.converted.clone();
         next.indexed = self.indexed.clone();
+        next.effect_resources = self.effect_resources.clone();
+        next.effect_sources = self.effect_sources.clone();
         next.overlay_assets = self.overlay_assets.clone();
         next.alpha_assets = self.alpha_assets.clone();
         next.audio_only = self.audio_only;
@@ -1450,7 +1504,9 @@ impl<'a> Graph<'a> {
                 if direct.is_some() {
                     arguments.clear();
                 }
+                let effects = self.clip_effects(clip, at, [cx, cy])?;
                 layers.push(track_composite::Layer {
+                    effects,
                     track: index,
                     track_id: track.id.clone(),
                     clip_id: clip.id.clone(),
@@ -1525,7 +1581,9 @@ impl<'a> Graph<'a> {
                     .map(str::to_owned),
                 )?
             };
+            let effects = self.clip_effects(track.endpoints(effect)?.1, at, [0, 0])?;
             mixes.push(track_composite::Mix {
+                effects,
                 track_id: track.id.clone(),
                 transition_id: effect.id.clone(),
                 first,
@@ -1662,6 +1720,8 @@ impl Compiled<'_> {
         let project = picture.project;
         let runs = picture.runs.clone();
         let direct = picture.direct_runs.clone();
+        let effect_resources = picture.effect_resources.clone();
+        let effect_report = effect_resources.report()?;
         let base = picture.arguments_with(
             &[
                 "-map",
@@ -1677,8 +1737,9 @@ impl Compiled<'_> {
             ]
             .map(str::to_owned),
         )?;
-        for arguments in
-            (transitions.iter().map(|m| &m.arguments)).chain(layers.iter().map(|l| &l.arguments))
+        for arguments in (transitions.iter().map(|m| &m.arguments))
+            .chain(layers.iter().map(|l| &l.arguments))
+            .chain(direct.iter().map(|r| &r.arguments))
         {
             if too_long(arguments) {
                 return Err(error(
@@ -1693,6 +1754,8 @@ impl Compiled<'_> {
             frames,
             base,
             direct,
+            effect_resources,
+            effect_report,
             runs,
             transitions,
             layers,
@@ -1746,7 +1809,10 @@ fn compile<'a>(
             })
             .collect::<Result<Vec<_>>>()?
             .contains(&true);
-        if overlays || transitions || !graph.indexed.is_empty() {
+        let effects = video_tracks()
+            .flat_map(|t| &t.clips)
+            .any(|c| !c.effects.is_empty());
+        if overlays || transitions || !graph.indexed.is_empty() || effects {
             // Top-level transitions and overlays are composited by the engine; nested ones stay
             // in the graph.
             graph.compose_with(a, start, duration, Kind::Video, "vout", true)?;

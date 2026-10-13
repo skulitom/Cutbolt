@@ -8,7 +8,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 /// Circular hue band in millidegrees: weight 1 within `inner` of center, falling linearly to 0 at `outer`.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HueBand {
     /// Center hue in millidegrees, 0..359999.
@@ -19,7 +19,7 @@ pub struct HueBand {
     pub outer: u32,
 }
 /// Scalar band in thousandths: weight 1 inside the inclusive low..high range, falling linearly to 0 over `feather`.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Band {
     /// Inclusive lower bound in thousandths, 0..1000; at most `high`.
@@ -49,7 +49,7 @@ impl Band {
     }
 }
 /// HSL color selection measured on 8-bit encoded sRGB; weight is the product of present bands. Needs at least one band.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Qualifier {
     /// Hue band; black, white and exact gray have no hue and get weight 0.
@@ -140,7 +140,7 @@ fn hsl(rgb: [u8; 3]) -> (Option<u32>, u16, u16) {
 }
 
 /// Correction mask weighting a selective grade or chroma key, in source-canvas pixels before crop and transform.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Mask {
     /// `[x, y, width, height]`; x/y -32768..32768, size 0..32768; may extend outside the canvas.
@@ -150,7 +150,7 @@ pub struct Mask {
     /// Use 1 minus coverage; default false.
     #[serde(default)]
     pub inverted: bool,
-    /// Optional curves overriding rectangle components on the layer-local clock.
+    /// Optional curves overriding rectangle components on the owning layer or clip clock (scene-local or native source time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<MaskAnimation>,
 }

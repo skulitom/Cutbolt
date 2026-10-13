@@ -37,6 +37,9 @@ pub struct Placement {
     /// Picture-in-picture transform of an alpha_over clip, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<crate::tracks::OverlayTransform>,
+    /// Ordered pixel effects saved on an asset video clip; empty for legacy placements.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<crate::tracks::ClipEffect>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,6 +75,9 @@ pub struct Shifted {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Changes {
+    /// Snapshot-schema upgrade or undo/restoration; omitted when unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<SchemaChange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sequences: Vec<SequenceChange>,
     pub duration_before: Time,
@@ -88,6 +94,12 @@ pub struct Changes {
     pub track_layout: Option<TrackLayoutChange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transfer: Option<TransferChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchemaChange {
+    pub before: u32,
+    pub after: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -464,6 +476,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                             gain_curve: clip.gain_curve.clone(),
                         }),
                         transform: clip.transform.clone(),
+                        effects: clip.effects.clone(),
                     },
                 );
             }
@@ -481,6 +494,7 @@ fn placements(project: &Project) -> Result<BTreeMap<String, Placement>> {
                 clip: clip.clone(),
                 levels: None,
                 transform: None,
+                effects: Vec::new(),
             },
         );
         start = start.plus(clip.duration)?;
@@ -505,6 +519,7 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
                     || a.clip != b.clip
                     || a.levels != b.levels
                     || a.transform != b.transform
+                    || a.effects != b.effects
             }
             (a, b) => a != b,
         })
@@ -518,6 +533,10 @@ pub fn diff(before: &Project, after: &Project) -> Result<Changes> {
     let old_assets: BTreeMap<_, _> = before.assets.iter().map(|a| (&a.id, a)).collect();
     let new_assets: BTreeMap<_, _> = after.assets.iter().map(|a| (&a.id, a)).collect();
     Ok(Changes {
+        schema_version: (before.schema_version != after.schema_version).then_some(SchemaChange {
+            before: before.schema_version,
+            after: after.schema_version,
+        }),
         sequences: {
             let old: BTreeMap<_, _> = before.sequences.iter().map(|s| (&s.id, s)).collect();
             let new: BTreeMap<_, _> = after.sequences.iter().map(|s| (&s.id, s)).collect();
@@ -581,6 +600,7 @@ fn summarize_shifts(clips: Vec<ClipChange>) -> Result<(Vec<ClipChange>, Option<S
                 && a.sequence_id == b.sequence_id
                 && a.levels == b.levels
                 && a.transform == b.transform
+                && a.effects == b.effects
         }
         _ => false,
     };
@@ -943,6 +963,149 @@ mod tests {
                 assert!(changes.shifted.is_none());
             }
         }
+    }
+
+    #[test]
+    fn clip_effects_upgrade_only_new_revisions_and_survive_retries_undo_and_restore() {
+        let root = Temp::new();
+        let edit = |value| serde_json::from_value::<Operation>(value).unwrap();
+        let mut before = sample();
+        crate::tracks::edit(
+            &mut before,
+            crate::tracks::Edit::Promote {
+                video_track_id: "v".into(),
+                audio_track_id: "a".into(),
+            },
+        )
+        .unwrap();
+        let old_bytes = serde_json::to_vec(&before).unwrap();
+        assert!(!String::from_utf8_lossy(&old_bytes).contains("effects"));
+        create(&root.0, before.clone(), "create").unwrap();
+        // Keys after the placed clip's end are valid on the full source clock.
+        let grade = json!({"kind":"grade", "exposure_milli":0, "contrast_milli":1000,
+            "white_balance_milli":[1000,1000,1000], "animation":{"exposure_milli":{"keys":[
+                {"time":t(0),"value":0,"interpolation":"linear"},
+                {"time":t(20),"value":1000,"interpolation":"hold"}]}}});
+        let op = edit(
+            json!({"op":"tracks.edit","edit":{"op":"clip_effects","clip_id":"c","effects":[grade]}}),
+        );
+        let mutation = || Mutation::Apply {
+            operations: vec![op.clone()],
+        };
+        let receipt = mutate(&root.0, "test", "effect", 0, mutation()).unwrap();
+        assert_eq!(
+            receipt.changes.schema_version,
+            Some(SchemaChange {
+                before: 1,
+                after: 2
+            })
+        );
+        assert_eq!(receipt.changes.clips.len(), 1);
+        assert_eq!(
+            receipt.changes.clips[0]
+                .after
+                .as_ref()
+                .unwrap()
+                .effects
+                .len(),
+            1
+        );
+        let effected = get(&root.0, "test", None).unwrap();
+        assert_eq!(effected.schema_version, 2);
+        assert_eq!(
+            serde_json::from_slice::<Project>(&serde_json::to_vec(&effected).unwrap()).unwrap(),
+            effected
+        );
+        assert_eq!(
+            serde_json::to_vec(&get(&root.0, "test", Some(0)).unwrap()).unwrap(),
+            old_bytes
+        );
+        let mut mislabeled = effected.clone();
+        mislabeled.schema_version = 1;
+        assert_eq!(
+            mislabeled.validate().unwrap_err().code,
+            "UNSUPPORTED_SCHEMA"
+        );
+        let cleared = effected.apply(1, vec![edit(json!({"op":"tracks.edit","edit":{"op":"clip_effects","clip_id":"c","effects":[]}}))]).unwrap();
+        assert_eq!(cleared.schema_version, 2);
+        assert!(
+            cleared.tracks.unwrap().tracks[0].clips[0]
+                .effects
+                .is_empty()
+        );
+        let undo = mutate(&root.0, "test", "undo", 1, Mutation::Undo).unwrap();
+        assert_eq!(
+            undo.changes.schema_version,
+            Some(SchemaChange {
+                before: 2,
+                after: 1
+            })
+        );
+        let undone = get(&root.0, "test", None).unwrap();
+        assert_eq!(undone.schema_version, 1);
+        assert_eq!(undone.tracks, before.tracks);
+        assert_eq!(
+            mutate(&root.0, "test", "effect", 0, mutation()).unwrap(),
+            receipt
+        );
+        mutate(
+            &root.0,
+            "test",
+            "restore",
+            2,
+            Mutation::Restore { target_revision: 1 },
+        )
+        .unwrap();
+        assert_eq!(get(&root.0, "test", None).unwrap().tracks, effected.tracks);
+    }
+
+    #[test]
+    fn clip_effects_reject_audio_locked_nested_and_oversized_stacks_atomically() {
+        let mut before = sample();
+        crate::tracks::edit(
+            &mut before,
+            crate::tracks::Edit::Promote {
+                video_track_id: "v".into(),
+                audio_track_id: "a".into(),
+            },
+        )
+        .unwrap();
+        let grade = json!({"kind":"grade", "exposure_milli":1000, "contrast_milli":1000,"white_balance_milli":[1000,1000,1000]});
+        let op = |id: &str, count| {
+            serde_json::from_value::<Operation>(json!({"op":"tracks.edit","edit":{"op":"clip_effects","clip_id":id,"effects":vec![grade.clone();count]}})).unwrap()
+        };
+        let audio = before.tracks.as_ref().unwrap().tracks[1].clips[0]
+            .id
+            .clone();
+        assert_eq!(
+            before.apply(0, vec![op(&audio, 1)]).unwrap_err().code,
+            "UNSUPPORTED_TIMELINE"
+        );
+        assert_eq!(
+            before.apply(0, vec![op("c", 9)]).unwrap_err().code,
+            "INVALID_EFFECT"
+        );
+        assert!(
+            before.tracks.as_ref().unwrap().tracks[0].clips[0]
+                .effects
+                .is_empty()
+        );
+        let mut locked = before.clone();
+        locked.tracks.as_mut().unwrap().tracks[0].locked = true;
+        assert_eq!(
+            locked.apply(0, vec![op("c", 1)]).unwrap_err().code,
+            "TRACK_LOCKED"
+        );
+        let effected = before.apply(0, vec![op("c", 1)]).unwrap();
+        let mut nested = effected.clone();
+        nested.sequences.push(crate::sequences::Sequence {
+            id: "child".into(),
+            arrangement: nested.tracks.take().unwrap(),
+            multicam: None,
+        });
+        let failure = nested.validate().unwrap_err();
+        assert_eq!(failure.code, "UNSUPPORTED_TIMELINE");
+        assert!(failure.message.contains("c") && failure.message.contains("effects"));
     }
 
     fn trim(duration: u64) -> Mutation {

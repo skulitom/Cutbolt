@@ -145,6 +145,14 @@ pub(super) fn prepare(project: &Project, input_root: &Path) -> Result<(Value, An
         value["enabled"] = json!(track.enabled);
         let mut clips = track.clips.iter().collect::<Vec<_>>();
         clips.sort_by(|x, y| x.start.compare(y.start).expect("validated times"));
+        for clip in clips.iter().filter(|c| !c.effects.is_empty()) {
+            a.loss(
+                &format!("{path}/clips/{}/effects", clip.id),
+                "clip_effects",
+                "Native clip pixel effects cannot be represented in this editorial profile",
+                true,
+            );
+        }
         for clip in clips.iter().filter(|c| c.transform.is_some()) {
             a.loss(
                 &format!("{path}/clips/{}", clip.id),

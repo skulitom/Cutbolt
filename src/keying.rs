@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Color channel whose spill is suppressed: `red`, `green` or `blue`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
     Red,
@@ -29,7 +29,7 @@ impl Channel {
     }
 }
 /// Spill suppression: lowers the named channel's excess above the larger of the other two channels.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Spill {
     /// Channel to suppress.
@@ -38,7 +38,7 @@ pub struct Spill {
     pub strength_milli: u16,
 }
 /// Chroma key lowering alpha by opponent-channel distance from a screen color, with optional unmix and spill suppression.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChromaKey {
     /// Screen color as encoded sRGB `[r, g, b]` bytes; must not be gray (all three equal).
@@ -55,7 +55,7 @@ pub struct ChromaKey {
     /// Optional spill suppression, applied throughout the mask, including fully kept pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spill: Option<Spill>,
-    /// Curve overriding `strength_milli` on the layer-local clock, 0..1000.
+    /// Curve overriding `strength_milli` on the owning layer or clip clock (scene-local or native source time), 0..1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strength_curve: Option<Curve>,
     /// Optional source-canvas mask limiting where the key applies.
@@ -179,7 +179,7 @@ impl Stage<'_> {
 }
 
 /// Chroma key preset: `green_soft`/`blue_soft` use thresholds 60/180, `green_hard`/`blue_hard` 100/100, keying and de-spilling pure green or blue.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {
     GreenSoft,

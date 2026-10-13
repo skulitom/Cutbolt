@@ -304,6 +304,7 @@ mod tests {
             sequences: Vec::new(),
             preview_scale: None,
             transfer: Some(Transfer::Bt709),
+            effect_coordinate_scale: None,
         };
         Checked {
             range: Range {
@@ -370,6 +371,8 @@ mod tests {
             runs: Vec::new(),
             transitions: Vec::new(),
             layers: Vec::new(),
+            effect_resources: Default::default(),
+            effect_report: None,
         });
         assert_eq!(layout(&composited).unwrap().2, "[0:v:0]");
         // Joined chunks and unknown layouts keep the lossless intermediate.

@@ -188,7 +188,7 @@ pub(crate) fn masked_normal_row(
 }
 
 /// Rectangle limiting layer opacity, in source-canvas pixels before crop and transform.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RectMask {
     /// `[x, y, width, height]`; x/y -32768..32768, size 0..32768; may extend outside the canvas.
@@ -196,7 +196,7 @@ pub struct RectMask {
     /// Keep pixels outside the rectangle instead; default false.
     #[serde(default)]
     pub inverted: bool,
-    /// Optional curves overriding rectangle components on the layer-local clock.
+    /// Optional curves overriding rectangle components on the owning layer or clip clock (scene-local or native source time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<MaskAnimation>,
     /// Optional soft edge; omit for a hard edge.
@@ -205,7 +205,7 @@ pub struct RectMask {
 }
 
 /// Feather ramp placement: `inner` fades in inside the edge, `centered` straddles it, `outer` fades out beyond it.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatherEdge {
     Inner,
@@ -214,7 +214,7 @@ pub enum FeatherEdge {
 }
 
 /// Linear soft edge for a layer mask, with square corners.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Feather {
     /// Ramp width in source pixels, 1..4096.
@@ -224,7 +224,7 @@ pub struct Feather {
 }
 
 /// Keyframe curves overriding mask rectangle components; declare at least one.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MaskAnimation {
     /// Curve for the left edge in source pixels, -32768..32768.

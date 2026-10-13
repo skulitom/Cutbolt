@@ -80,7 +80,7 @@ fn read_frame_with_publication(
         if a.tracks
             .iter()
             .flat_map(|t| &t.clips)
-            .any(|c| c.sequence_id.is_some())
+            .any(|c| c.sequence_id.is_some() || !c.effects.is_empty())
         {
             let (pixels, sources) = crate::track_render::read_frame(project, input_root, time)?;
             let visible = a.visible(time)?;

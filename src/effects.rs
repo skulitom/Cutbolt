@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Piecewise-linear tone curve on normalized linear light; output knots need not be monotonic.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToneCurve {
     /// 2..32 `[input, output]` knots where 0..65535 means 0..1; inputs strictly increase from 0 to 65535.
@@ -45,7 +45,7 @@ impl ToneCurve {
 }
 
 /// Primary grade in linear sRGB: exposure and white balance, contrast around 0.18, clamp to 0..1, master and channel curves, then HSL hue and saturation.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Grade {
     /// Exposure in thousandths of a stop, -8000..8000; 1000 doubles linear light, 0 is neutral.
@@ -72,12 +72,12 @@ pub struct Grade {
     /// HSL saturation scale in thousandths, 0..4000, with the hue shift; omit for 1000 (neutral).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saturation_milli: Option<u16>,
-    /// Optional curves overriding the numeric controls on the layer-local clock.
+    /// Optional curves overriding the numeric controls on the owning layer or clip clock (scene-local or native source time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<GradeAnimation>,
 }
 /// Keyframe curves overriding grade controls, using the same ranges; declare at least one.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GradeAnimation {
     /// Curve for `exposure_milli`, -8000..8000.
@@ -103,7 +103,7 @@ pub struct GradeAnimation {
     pub saturation_milli: Option<Curve>,
 }
 /// One ordered layer effect, tagged by `kind`. Effects run in list order on source pixels before compositing.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
     /// Primary grade of every layer pixel; alpha is preserved.
@@ -132,14 +132,14 @@ impl Effect {
     }
 }
 /// Grade applied only where a color qualifier and/or correction mask select pixels.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SelectiveGrade {
     /// Grade controls, as in a `grade` effect but without `kind`.
     pub grade: Grade,
     /// Correction strength in thousandths, 0..1000; 0 bypasses, 1000 applies the full selected grade.
     pub mix_milli: u16,
-    /// Curve overriding `mix_milli` on the layer-local clock, 0..1000.
+    /// Curve overriding `mix_milli` on the owning layer or clip clock (scene-local or native source time), 0..1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mix_curve: Option<Curve>,
     /// HSL color selection; at least one of `qualifier` or `mask` is required.

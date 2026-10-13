@@ -192,6 +192,29 @@ fn project_sources(p: &Project, root: &Path, proxy_only: Option<&str>) -> Result
         let resolved = media::project_file(path, root)?;
         output.push(source(asset.id.clone(), &resolved, root, expected)?);
     }
+    // An unchanged snapshot alone is insufficient for a cache hit: bound effect files
+    // must still match, including when the cache would otherwise skip rendering entirely.
+    if proxy_only.is_none()
+        && let Some(arrangement) = &p.tracks
+    {
+        for track in &arrangement.tracks {
+            for clip in &track.clips {
+                for (index, effect) in clip.effects.iter().enumerate() {
+                    if let crate::effects::Effect::Lut(lut) = effect {
+                        let (path, _) = crate::scene::identity_bytes(&lut.file, root)?;
+                        output.push(Source {
+                            id: format!("clip_effect_lut:{}:{}:{index}", track.id, clip.id),
+                            path,
+                            identity: Identity {
+                                bytes: lut.file.bytes,
+                                sha256: lut.file.sha256.clone(),
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
     output.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(output)
 }
