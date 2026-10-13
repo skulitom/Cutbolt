@@ -267,7 +267,7 @@ Goal: grade, selective grade, LUT and chroma key are properties of any video cli
 
 ## Stage 4: spatial and transparency effects, and real layering
 
-**Partial implementation, 13 October:** the ordered native frame stack retains key
+**Implemented and verified, 13 October:** the ordered native frame stack retains key
 alpha over lower tracks, skips provably hidden render windows and recursively renders
 child pictures, including direct sources. The new multi-layer scene/integer fixture
 passes on Windows and Linux. Nested pixel effects now support child definitions and
@@ -280,9 +280,12 @@ shared fixtures agreed on both systems. The native-only renderer passes 11
 targeted suites plus the scene/spatial/compositing/tracking regressions on both
 systems; the restriction audit is recorded in
 [removal evidence](../../verification/native-only-timeline-2026-10-13.json).
-The complete quick gate on the cleanup commit remains pending. See [layer evidence](../../verification/native-layers-2026-10-13.json)
-and [nested-effect evidence](../../verification/nested-effects-2026-10-13.json).
-This is not the stage exit.
+The [complete strict quick gate](../../verification/stage4-full-quick-2026-10-13.json)
+on cleanup commit 73e2b2a passed all 77 fixtures, with zero failures, skips or reuse.
+Together with the Windows/Linux [layer evidence](../../verification/native-layers-2026-10-13.json)
+and [nested-effect evidence](../../verification/nested-effects-2026-10-13.json), this closes
+the declared stage-4 correctness exit. No throughput claim: the final long
+placed-footage performance comparison remains outstanding.
 
 Goal: transform, opacity, mask, blend mode and chroma key transparency are clip properties. A clip that becomes partly transparent shows the tracks below it.
 

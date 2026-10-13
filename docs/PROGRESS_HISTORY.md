@@ -1,5 +1,26 @@
 # Progress history
 
+## 13 October 2026: complete stage-four correctness gate
+
+A frozen, clean 73e2b2a checkout completed all 77 strict quick fixtures in 2,930
+seconds, with zero failures, skips, reuse or unstarted checks. Recording passed
+in 44 seconds and transcription in 771 seconds. The isolated all-target build
+and every implementation hash match the native-only renderer checkpoint. Paired
+with the recorded Windows/Linux scene/integer layering oracles, structural
+property checks and compatibility suites, this closes the declared stage-four
+correctness exit. [Full quick evidence](../verification/stage4-full-quick-2026-10-13.json)
+identifies the frozen commit and retained reports; it does not cover later
+generated-clip changes or replace the last thorough milestone. The completed
+managed verification checkout was archived after its processes ended.
+
+The transcription test fix c25f308 was pushed successfully and its remote main
+identity independently confirmed. Its gate passed six fixtures (plus Rust),
+reused nine passes and deferred 63; zero failures. Its background and the older
+d04a362 background remain pending. Stage 5 now needs bounded long-caption resource
+handling and caption/production-title migration; stage 6 and the complete-plan
+and before/after placed-footage performance audits remain open. No progress
+points or speed claim; PROGRESS.md retains 338e114.
+
 ## 13 October 2026: pin transcription cleanup test identities
 
 A 4bf1191 background finished with two passes, one transcription failure and 55
