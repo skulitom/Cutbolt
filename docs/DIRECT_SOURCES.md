@@ -8,8 +8,9 @@ Eligible files report `timeline.ready: true`, `timeline.direct: true` and
 `source_index.direct_decode_available: true`. The long-source preview/range gate passes as recorded
 below. The complete stage-1 milestone passed at 338e114 on 12 October; later changes have
 separate evidence. The intermittent delivery comparison discussed below remains unresolved.
-Stage 2 adds [automatic normalization](AUTOMATIC_PREPARATION.md); its full quick gate and
-later implementation stages remain open.
+Stage 2 adds [automatic normalization](AUTOMATIC_PREPARATION.md). Its fixed 546cac4 checkout
+passed all 74 full-quick stages on 13 October; [bounded evidence](../verification/stage2-full-quick-2026-10-13.json)
+records the separate stage-2 acceptance. Stages 3-6 remain open.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame

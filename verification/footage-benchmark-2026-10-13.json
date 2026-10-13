@@ -1,0 +1,4481 @@
+{
+  "date": "2026-10-13",
+  "kind": "frozen_fresh_agent_diagnostic_pilot",
+  "engine_base_commit": "2dbab3c16f963078e7ae43e904e3051d53740510",
+  "engine": {
+    "bytes": 43843072,
+    "sha256": "d580af6d69c2addacd8eeeda49d23c8eb2ce1d7d1510d6328b576a348dd14801"
+  },
+  "client_version": "2.1.280 (Claude Code)",
+  "resolved_models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5"
+  ],
+  "effort": "high",
+  "protocol": {
+    "bytes": 5004,
+    "sha256": "19c682c98e48b1739beecfa85dd39e666e95e3a229377f8668288b99407c44c7"
+  },
+  "oracle": {
+    "bytes": 10995,
+    "sha256": "3fac5218f810ccb8af8130af7a1f4d05485e9cb06a418c7da6524281ecae5337"
+  },
+  "runner": {
+    "bytes": 15987,
+    "sha256": "16eccc1c376a6612fcbbd1abc968c21f21c6680fbec0276f94238c0b2106b497"
+  },
+  "input_manifest": {
+    "bytes": 2816,
+    "sha256": "17f83e6fbecef7932da637e12522565d9a180952618e14532da71f664c0fed3b"
+  },
+  "plan_sha256": "0bc375036ec7fb731b85f937e08d78ad722bef248a9664afc765aa37d1a8ad41",
+  "baseline": {
+    "planned": 36,
+    "completed": 36,
+    "matrix_complete": true,
+    "missing": [],
+    "integrity": {
+      "engine": true,
+      "protocol": true,
+      "oracle": true,
+      "runner": true,
+      "input_manifest": true,
+      "source:a.mov": true,
+      "source:b.mov": true,
+      "opus-1-trim-cutbolt": true,
+      "opus-1-trim-ffmpeg": true,
+      "opus-1-reorder-ffmpeg": true,
+      "opus-1-reorder-cutbolt": true,
+      "opus-1-broll-inset-cutbolt": true,
+      "opus-1-broll-inset-ffmpeg": true,
+      "sonnet-1-trim-ffmpeg": true,
+      "sonnet-1-trim-cutbolt": true,
+      "sonnet-1-reorder-cutbolt": true,
+      "sonnet-1-reorder-ffmpeg": true,
+      "sonnet-1-broll-inset-ffmpeg": true,
+      "sonnet-1-broll-inset-cutbolt": true,
+      "opus-2-trim-ffmpeg": true,
+      "opus-2-trim-cutbolt": true,
+      "opus-2-reorder-cutbolt": true,
+      "opus-2-reorder-ffmpeg": true,
+      "opus-2-broll-inset-ffmpeg": true,
+      "opus-2-broll-inset-cutbolt": true,
+      "sonnet-2-trim-cutbolt": true,
+      "sonnet-2-trim-ffmpeg": true,
+      "sonnet-2-reorder-ffmpeg": true,
+      "sonnet-2-reorder-cutbolt": true,
+      "sonnet-2-broll-inset-cutbolt": true,
+      "sonnet-2-broll-inset-ffmpeg": true,
+      "opus-3-trim-cutbolt": true,
+      "opus-3-trim-ffmpeg": true,
+      "opus-3-reorder-ffmpeg": true,
+      "opus-3-reorder-cutbolt": true,
+      "opus-3-broll-inset-cutbolt": true,
+      "opus-3-broll-inset-ffmpeg": true,
+      "sonnet-3-trim-ffmpeg": true,
+      "sonnet-3-trim-cutbolt": true,
+      "sonnet-3-reorder-cutbolt": true,
+      "sonnet-3-reorder-ffmpeg": true,
+      "sonnet-3-broll-inset-ffmpeg": true,
+      "sonnet-3-broll-inset-cutbolt": true
+    },
+    "client_version": "2.1.280 (Claude Code)",
+    "resolved_models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5"
+    ],
+    "unresolved_model_trials": [],
+    "groups": [
+      {
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 24.0,
+            "median": 25.0,
+            "maximum": 26.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 47955.0,
+            "median": 53788.0,
+            "maximum": 54150.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 720875.0,
+            "median": 831829.0,
+            "maximum": 875129.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.5763685999999999,
+            "median": 0.6632804000000001,
+            "maximum": 0.6706443999999999
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 82.31200000000536,
+            "median": 100.86000000001513,
+            "maximum": 103.34400000001187
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.06965174129353234,
+            "median": 0.07106598984771574,
+            "maximum": 0.5
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 6.0,
+            "median": 8.0,
+            "maximum": 8.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 35.194584979218156,
+            "median": 35.194584979218156,
+            "maximum": 35.194584979218156
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 40.61635433804619,
+            "median": 40.61635433804619,
+            "maximum": 40.61635433804619
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 5.818623566474578,
+            "median": 5.818623566474578,
+            "maximum": 5.818623566474578
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 179284.0,
+            "median": 179284.0,
+            "maximum": 179284.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 252947.0,
+            "median": 252947.0,
+            "maximum": 252947.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 9.0,
+            "median": 13.0,
+            "maximum": 15.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 15093.0,
+            "median": 20801.0,
+            "maximum": 24100.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 93598.0,
+            "median": 180975.0,
+            "maximum": 208814.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.258733,
+            "median": 0.4094012000000001,
+            "maximum": 0.4793288
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 85.98399999999674,
+            "median": 156.54699999999139,
+            "maximum": 209.43799999999464
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.10119047619047619,
+            "median": 0.4387254901960784,
+            "maximum": 0.6524590163934426
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 28.260677814253693,
+            "median": 36.889814308268065,
+            "maximum": 36.889814308268065
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 41.32138677529578,
+            "median": 42.30634187683394,
+            "maximum": 42.30634187683394
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 5.494358217501133,
+            "median": 5.494358217501133,
+            "maximum": 5.494358217501133
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 147137.0,
+            "median": 147176.0,
+            "maximum": 156510.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 249775.0,
+            "median": 249775.0,
+            "maximum": 249775.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 12.0,
+            "median": 13.0,
+            "maximum": 16.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 29225.0,
+            "median": 31186.0,
+            "maximum": 36462.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 249148.0,
+            "median": 281931.0,
+            "maximum": 301016.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.2679932,
+            "median": 0.2952332000000001,
+            "maximum": 0.352563
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 38.10899999999674,
+            "median": 47.812999999994645,
+            "maximum": 49.171999999991385
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.40860215053763443,
+            "median": 0.44594594594594594,
+            "maximum": 0.6770833333333334
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 1.0,
+            "median": 2.0,
+            "maximum": 2.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 37.52757269884458,
+            "median": 37.52757269884458,
+            "maximum": 37.52757269884458
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 43.37110035769426,
+            "median": 43.37110035769426,
+            "maximum": 43.37110035769426
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 7.702495807637072,
+            "median": 7.702495807637072,
+            "maximum": 7.702495807637072
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 184668.0,
+            "median": 184668.0,
+            "maximum": 184668.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 252667.0,
+            "median": 252667.0,
+            "maximum": 252667.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 5.0,
+            "median": 7.0,
+            "maximum": 8.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 10917.0,
+            "median": 12033.0,
+            "maximum": 13284.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 40147.0,
+            "median": 70778.0,
+            "maximum": 75122.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.1679196,
+            "median": 0.1884534,
+            "maximum": 0.21286
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 64.40599999998813,
+            "median": 67.90599999998813,
+            "maximum": 88.98500000001513
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.352,
+            "median": 0.5722543352601156,
+            "maximum": 0.946969696969697
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 43.53324123736017,
+            "median": 43.53324123736017,
+            "maximum": 43.59839018916533
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 47.99572633128313,
+            "median": 48.289073949888746,
+            "maximum": 48.289073949888746
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 8.072720266428163,
+            "median": 8.072720266428163,
+            "maximum": 8.072720266428163
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 151576.0,
+            "median": 156099.0,
+            "maximum": 156099.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 249715.0,
+            "median": 249715.0,
+            "maximum": 249715.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "trim",
+        "arm": "cutbolt",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 12.0,
+            "median": 13.0,
+            "maximum": 19.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 28177.0,
+            "median": 30455.0,
+            "maximum": 36245.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 224730.0,
+            "median": 240179.0,
+            "maximum": 316272.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.255525,
+            "median": 0.34041540000000003,
+            "maximum": 0.3875892
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 38.23399999999674,
+            "median": 40.421999999991385,
+            "maximum": 62.594000000011874
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.5163934426229508,
+            "median": 0.7088607594936709,
+            "maximum": 0.7837837837837838
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 1.0,
+            "median": 1.0,
+            "maximum": 2.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 37.49112737634353,
+            "median": 37.49112737634353,
+            "maximum": 37.49112737634353
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 42.95811897116333,
+            "median": 42.95811897116333,
+            "maximum": 42.95811897116333
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 6.495918590417627,
+            "median": 6.495918590417627,
+            "maximum": 6.495918590417627
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 186373.0,
+            "median": 186405.0,
+            "maximum": 186405.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 254573.0,
+            "median": 254573.0,
+            "maximum": 254573.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 4.0,
+            "median": 5.0,
+            "maximum": 6.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 9197.0,
+            "median": 9679.0,
+            "maximum": 10754.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 35043.0,
+            "median": 42825.0,
+            "maximum": 49995.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.12590279999999998,
+            "median": 0.1517454,
+            "maximum": 0.1634112
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 44.01600000000326,
+            "median": 52.219000000011874,
+            "maximum": 52.639999999984866
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.23529411764705882,
+            "median": 0.4019607843137255,
+            "maximum": 0.9019607843137255
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 44.305338712922335,
+            "median": 44.305338712922335,
+            "maximum": 44.305338712922335
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 48.26910156965304,
+            "median": 48.26910156965304,
+            "maximum": 48.26910156965304
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 6.593256234803693,
+            "median": 6.593256234803693,
+            "maximum": 6.593256234803693
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 158653.0,
+            "median": 158653.0,
+            "maximum": 158653.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 251372.0,
+            "median": 251372.0,
+            "maximum": 251372.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 32.0,
+            "median": 37.0,
+            "maximum": 42.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 87522.0,
+            "median": 102061.0,
+            "maximum": 116141.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 1273843.0,
+            "median": 2048930.0,
+            "maximum": 2768927.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.7106633999999998,
+            "median": 0.9117377999999998,
+            "maximum": 1.2232491999999997
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 187.9529999999795,
+            "median": 251.68700000000536,
+            "maximum": 361.85900000002584
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.09863013698630137,
+            "median": 0.1954674220963173,
+            "maximum": 0.6435845213849287
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 13.0,
+            "median": 14.0,
+            "maximum": 17.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 35.194584979218156,
+            "median": 35.194584979218156,
+            "maximum": 35.194584979218156
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 40.61635433804619,
+            "median": 40.61635433804619,
+            "maximum": 40.61635433804619
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 5.818623566474578,
+            "median": 5.818623566474578,
+            "maximum": 5.818623566474578
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 179284.0,
+            "median": 179284.0,
+            "maximum": 179284.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 252947.0,
+            "median": 252947.0,
+            "maximum": 252947.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "completed": 3,
+        "successes": 2,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 26.0,
+            "median": 33.0,
+            "maximum": 40.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 44720.0,
+            "median": 59338.0,
+            "maximum": 62364.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 776821.0,
+            "median": 1364725.0,
+            "maximum": 1415736.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.4976762,
+            "median": 0.7430042,
+            "maximum": 0.7585687999999999
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 263.9530000000086,
+            "median": 341.06200000000536,
+            "maximum": 408.6570000000065
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.337890625,
+            "median": 0.46096096096096095,
+            "maximum": 0.5714285714285714
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 2,
+            "minimum": 28.297706585967664,
+            "median": 32.3480783449787,
+            "maximum": 36.398450103989745
+          },
+          "frame_psnr_median": {
+            "n": 2,
+            "minimum": 41.32138677529578,
+            "median": 41.658185979675466,
+            "maximum": 41.99498518405516
+          },
+          "audio_rms_error": {
+            "n": 2,
+            "minimum": 5.494358217501133,
+            "median": 5.494358217501133,
+            "maximum": 5.494358217501133
+          },
+          "video_bit_rate": {
+            "n": 2,
+            "minimum": 154356.0,
+            "median": 154975.0,
+            "maximum": 155594.0
+          },
+          "audio_bit_rate": {
+            "n": 2,
+            "minimum": 249775.0,
+            "median": 249775.0,
+            "maximum": 249775.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 8.0,
+            "median": 14.0,
+            "maximum": 15.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 35669.0,
+            "median": 40493.0,
+            "maximum": 46951.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 249240.0,
+            "median": 437433.0,
+            "maximum": 531376.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.1756918,
+            "median": 0.2409796,
+            "maximum": 0.3026221999999999
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 56.73399999999674,
+            "median": 78.17200000002049,
+            "maximum": 101.59399999998277
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.5454545454545454,
+            "median": 0.6842105263157895,
+            "maximum": 0.8468468468468469
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 1.0,
+            "median": 2.0,
+            "maximum": 4.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 37.52757269884458,
+            "median": 37.52757269884458,
+            "maximum": 37.52757269884458
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 43.37110035769426,
+            "median": 43.37110035769426,
+            "maximum": 43.37110035769426
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 7.702495807637072,
+            "median": 7.702495807637072,
+            "maximum": 7.702495807637072
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 184668.0,
+            "median": 184668.0,
+            "maximum": 184668.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 252667.0,
+            "median": 252667.0,
+            "maximum": 252667.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "completed": 3,
+        "successes": 2,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 21.0,
+            "median": 28.0,
+            "maximum": 30.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 60577.0,
+            "median": 61849.0,
+            "maximum": 65498.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 811786.0,
+            "median": 905377.0,
+            "maximum": 1126589.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.6839348,
+            "median": 0.6893944000000001,
+            "maximum": 0.698094
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 385.39100000000326,
+            "median": 450.3429999999935,
+            "maximum": 460.48500000001513
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.27030625832223704,
+            "median": 0.4602272727272727,
+            "maximum": 0.4972191323692992
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 2,
+            "minimum": 43.53324123736017,
+            "median": 43.53324123736017,
+            "maximum": 43.53324123736017
+          },
+          "frame_psnr_median": {
+            "n": 2,
+            "minimum": 48.289073949888746,
+            "median": 48.289073949888746,
+            "maximum": 48.289073949888746
+          },
+          "audio_rms_error": {
+            "n": 2,
+            "minimum": 8.072720266428163,
+            "median": 8.072720266428163,
+            "maximum": 8.072720266428163
+          },
+          "video_bit_rate": {
+            "n": 2,
+            "minimum": 156099.0,
+            "median": 156099.0,
+            "maximum": 156099.0
+          },
+          "audio_bit_rate": {
+            "n": 2,
+            "minimum": 249715.0,
+            "median": 249715.0,
+            "maximum": 249715.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "cutbolt",
+        "completed": 3,
+        "successes": 3,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 9.0,
+            "median": 12.0,
+            "maximum": 13.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 36745.0,
+            "median": 37027.0,
+            "maximum": 39349.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 260154.0,
+            "median": 308326.0,
+            "maximum": 388592.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.19416500000000003,
+            "median": 0.22492059999999997,
+            "maximum": 0.22864820000000002
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 56.280999999988126,
+            "median": 61.92200000002049,
+            "maximum": 69.93700000000536
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.19852941176470587,
+            "median": 0.34710743801652894,
+            "maximum": 0.8715596330275229
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 1.0,
+            "median": 1.0,
+            "maximum": 3.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 3,
+            "minimum": 37.43583560306127,
+            "median": 37.49112737634353,
+            "maximum": 37.49112737634353
+          },
+          "frame_psnr_median": {
+            "n": 3,
+            "minimum": 42.95811897116333,
+            "median": 42.95811897116333,
+            "maximum": 42.95841685820448
+          },
+          "audio_rms_error": {
+            "n": 3,
+            "minimum": 6.495918590417627,
+            "median": 6.495918590417627,
+            "maximum": 6.495918590417627
+          },
+          "video_bit_rate": {
+            "n": 3,
+            "minimum": 186405.0,
+            "median": 186405.0,
+            "maximum": 186746.0
+          },
+          "audio_bit_rate": {
+            "n": 3,
+            "minimum": 254573.0,
+            "median": 254573.0,
+            "maximum": 254573.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "completed": 3,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 3,
+            "minimum": 19.0,
+            "median": 23.0,
+            "maximum": 41.0
+          },
+          "peak_context": {
+            "n": 3,
+            "minimum": 44665.0,
+            "median": 46904.0,
+            "maximum": 55206.0
+          },
+          "cumulative_input": {
+            "n": 3,
+            "minimum": 582419.0,
+            "median": 636009.0,
+            "maximum": 1274894.0
+          },
+          "reported_usd": {
+            "n": 3,
+            "minimum": 0.438795,
+            "median": 0.46440159999999997,
+            "maximum": 0.7000164
+          },
+          "seconds": {
+            "n": 3,
+            "minimum": 220.64100000000326,
+            "median": 240.90599999998813,
+            "maximum": 375.06299999999464
+          },
+          "busy_fraction": {
+            "n": 3,
+            "minimum": 0.16511627906976745,
+            "median": 0.22404371584699453,
+            "maximum": 0.4267515923566879
+          },
+          "schema_lookups": {
+            "n": 3,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 44.305338712922335,
+            "median": 44.305338712922335,
+            "maximum": 44.305338712922335
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 48.26910156965304,
+            "median": 48.26910156965304,
+            "maximum": 48.26910156965304
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 6.593256234803693,
+            "median": 6.593256234803693,
+            "maximum": 6.593256234803693
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 158653.0,
+            "median": 158653.0,
+            "maximum": 158653.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 251372.0,
+            "median": 251372.0,
+            "maximum": 251372.0
+          }
+        }
+      }
+    ],
+    "trials": [
+      {
+        "name": "opus-1-trim-cutbolt",
+        "model": "opus",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 13,
+        "skill_calls": 2,
+        "schema_lookups": 1,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 30455,
+        "cumulative_input": 224730,
+        "output_tokens": 2893,
+        "reported_usd": 0.34041540000000003,
+        "seconds": 38.23399999999674,
+        "busy_fraction": 0.7837837837837838,
+        "first_output_file_seconds": 18.905999999988126,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169622,
+            "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+          },
+          "video_bit_rate": "186405",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 8040,
+          "sha256": "fe4b12183c31b99780e3e7b092b09de973cffbea057d31e7e34d632cb866c165"
+        }
+      },
+      {
+        "name": "opus-1-trim-ffmpeg",
+        "model": "opus",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 6,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 9679,
+        "cumulative_input": 42825,
+        "output_tokens": 3966,
+        "reported_usd": 0.1634112,
+        "seconds": 52.219000000011874,
+        "busy_fraction": 0.9019607843137255,
+        "first_output_file_seconds": 15.35899999999674,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991420081084,
+          "audio_rms_error": 6.593256234803693,
+          "frame_psnr_min": 44.305338712922335,
+          "frame_psnr_median": 48.26910156965304,
+          "frame_psnr_max": 50.72219870725781,
+          "output_identity": {
+            "bytes": 158138,
+            "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+          },
+          "video_bit_rate": "158653",
+          "audio_bit_rate": "251372"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 4359,
+          "sha256": "c912dcaa1d2661028adca92a02ed8d4342cbd1b3855a80f6f5e065c2a08ffff5"
+        }
+      },
+      {
+        "name": "opus-1-reorder-ffmpeg",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 8,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 12033,
+        "cumulative_input": 70778,
+        "output_tokens": 5079,
+        "reported_usd": 0.1884534,
+        "seconds": 67.90599999998813,
+        "busy_fraction": 0.946969696969697,
+        "first_output_file_seconds": 17.875,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999986893427537,
+          "audio_rms_error": 8.072720266428163,
+          "frame_psnr_min": 43.53324123736017,
+          "frame_psnr_median": 48.289073949888746,
+          "frame_psnr_max": 51.08904016640154,
+          "output_identity": {
+            "bytes": 259488,
+            "sha256": "67ad188133d385124e7b2ada750bc80a8bf559a1ee835b1441f7ecef840c716d"
+          },
+          "video_bit_rate": "156099",
+          "audio_bit_rate": "249715"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 4746,
+          "sha256": "47c91dfea276eda6396232dd7b0d3261cffaf16da95e5c1e776456ed1ca37fcf"
+        }
+      },
+      {
+        "name": "opus-1-reorder-cutbolt",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 12,
+        "skill_calls": 2,
+        "schema_lookups": 1,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 29225,
+        "cumulative_input": 249148,
+        "output_tokens": 3260,
+        "reported_usd": 0.2679932,
+        "seconds": 38.10899999999674,
+        "busy_fraction": 0.44594594594594594,
+        "first_output_file_seconds": 21.0,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7889,
+          "sha256": "d777cfd06f51bc6eef603c802264ff92530e65fbbb2a17aa95eef8808cfc9058"
+        }
+      },
+      {
+        "name": "opus-1-broll-inset-cutbolt",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 24,
+        "skill_calls": 2,
+        "schema_lookups": 6,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 2,
+        "peak_context": 47955,
+        "cumulative_input": 720875,
+        "output_tokens": 6653,
+        "reported_usd": 0.5763685999999999,
+        "seconds": 82.31200000000536,
+        "busy_fraction": 0.5,
+        "first_output_file_seconds": 60.969000000011874,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 10894,
+          "sha256": "1ae41d2f9493da79f956747795e353317617ae2d39b7d8049008c9141c985a7f"
+        }
+      },
+      {
+        "name": "opus-1-broll-inset-ffmpeg",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 15,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 0,
+        "peak_context": 24100,
+        "cumulative_input": 208814,
+        "output_tokens": 13534,
+        "reported_usd": 0.4793288,
+        "seconds": 209.43799999999464,
+        "busy_fraction": 0.4387254901960784,
+        "first_output_file_seconds": 30.09399999998277,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999994044789559,
+          "audio_rms_error": 5.494358217501133,
+          "frame_psnr_min": 36.889814308268065,
+          "frame_psnr_median": 42.30634187683394,
+          "frame_psnr_max": 51.6310244400157,
+          "output_identity": {
+            "bytes": 304340,
+            "sha256": "93d7a5c2e682fb596f3f3e76812e7b7d5d034b8998788db699e2e7fd2babb1b0"
+          },
+          "video_bit_rate": "147137",
+          "audio_bit_rate": "249775"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 8369,
+          "sha256": "2c8ba4ca6fbe41c869ad76a6ab0e2b990fbd394ac2478c85cabf7b5b0eadb469"
+        }
+      },
+      {
+        "name": "sonnet-1-trim-ffmpeg",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "repeat": 1,
+        "success": false,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 19,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 3,
+        "mcp_failed_calls": 0,
+        "peak_context": 44665,
+        "cumulative_input": 582419,
+        "output_tokens": 17813,
+        "reported_usd": 0.46440159999999997,
+        "seconds": 220.64100000000326,
+        "busy_fraction": 0.16511627906976745,
+        "first_output_file_seconds": 29.703000000008615,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": false,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": false,
+          "audio_presentation_seconds": "224/75",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9981846728344035,
+          "audio_rms_error": 298.1128902676803,
+          "frame_psnr_min": 44.305338712922335,
+          "frame_psnr_median": 48.26910156965304,
+          "frame_psnr_max": 50.72219870725781,
+          "output_identity": {
+            "bytes": 183683,
+            "sha256": "ec2c110e8d83044a86dee49cd1d77cef24edf5e5bb4cd9c483a76d8f220f49a6"
+          },
+          "video_bit_rate": "158653",
+          "audio_bit_rate": "322786"
+        },
+        "failure_checks": [
+          "audio_clock",
+          "audio_rms_error"
+        ],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 8301,
+          "sha256": "ee8bb4086f7c212eb0343088c1906372612999be027c30debf2acb6aacdd973e"
+        }
+      },
+      {
+        "name": "sonnet-1-trim-cutbolt",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 9,
+        "skill_calls": 1,
+        "schema_lookups": 1,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 37027,
+        "cumulative_input": 260154,
+        "output_tokens": 3589,
+        "reported_usd": 0.22864820000000002,
+        "seconds": 56.280999999988126,
+        "busy_fraction": 0.8715596330275229,
+        "first_output_file_seconds": 38.905999999988126,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.43583560306127,
+          "frame_psnr_median": 42.95841685820448,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169750,
+            "sha256": "aa92635a0231e2cbee3a6d8c366504d2fd5aa2a1cdeaa2d6155c04fc87aec5b8"
+          },
+          "video_bit_rate": "186746",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7677,
+          "sha256": "c6f95e8784cbeb5744954a9890e9a08762103a60df1ed93e037f1cb9afc1aa6d"
+        }
+      },
+      {
+        "name": "sonnet-1-reorder-cutbolt",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 15,
+        "skill_calls": 2,
+        "schema_lookups": 4,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 46951,
+        "cumulative_input": 531376,
+        "output_tokens": 6525,
+        "reported_usd": 0.3026221999999999,
+        "seconds": 101.59399999998277,
+        "busy_fraction": 0.5454545454545454,
+        "first_output_file_seconds": 81.875,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 9647,
+          "sha256": "92b1604511cf9838906155af454431c50a1e316b5c2e346b7944b36eba37b722"
+        }
+      },
+      {
+        "name": "sonnet-1-reorder-ffmpeg",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "repeat": 1,
+        "success": false,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 21,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 0,
+        "peak_context": 65498,
+        "cumulative_input": 811786,
+        "output_tokens": 30635,
+        "reported_usd": 0.6839348,
+        "seconds": 460.48500000001513,
+        "busy_fraction": 0.4972191323692992,
+        "first_output_file_seconds": 32.28200000000652,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": false,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": false,
+          "audio_presentation_seconds": "624/125",
+          "decoded_audio_samples": 239616,
+          "audio_correlation": null,
+          "audio_rms_error": null,
+          "frame_psnr_min": 43.53324123736017,
+          "frame_psnr_median": 48.289073949888746,
+          "frame_psnr_max": 51.08904016640154,
+          "output_identity": {
+            "bytes": 303454,
+            "sha256": "073b37ef51591bf7c9cc2d21ff441ff763091661840c12509fb3a68f23c781a9"
+          },
+          "video_bit_rate": "156099",
+          "audio_bit_rate": "321684"
+        },
+        "failure_checks": [
+          "audio_clock",
+          "audio_correlation",
+          "audio_rms_error"
+        ],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 14372,
+          "sha256": "fc7ab62d8c315c508d5a21b21bfc4c6cc9a0917243fab52df111aa189b3007b8"
+        }
+      },
+      {
+        "name": "sonnet-1-broll-inset-ffmpeg",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 33,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 4,
+        "mcp_failed_calls": 0,
+        "peak_context": 62364,
+        "cumulative_input": 1415736,
+        "output_tokens": 27206,
+        "reported_usd": 0.7585687999999999,
+        "seconds": 341.06200000000536,
+        "busy_fraction": 0.46096096096096095,
+        "first_output_file_seconds": 46.530999999988126,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999994044789559,
+          "audio_rms_error": 5.494358217501133,
+          "frame_psnr_min": 36.398450103989745,
+          "frame_psnr_median": 41.99498518405516,
+          "frame_psnr_max": 51.615297866057986,
+          "output_identity": {
+            "bytes": 309737,
+            "sha256": "2cfe398a488988116c7109552ed3e1dac976a2b5a9861d53edbc1a76bc5e5895"
+          },
+          "video_bit_rate": "154356",
+          "audio_bit_rate": "249775"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 11388,
+          "sha256": "9de7019b1391440d8478239e75fecdf63f12ab3a9b6974062d5ac7e7f0a7c95b"
+        }
+      },
+      {
+        "name": "sonnet-1-broll-inset-cutbolt",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 42,
+        "skill_calls": 1,
+        "schema_lookups": 17,
+        "failed_tool_results": 6,
+        "mcp_failed_calls": 6,
+        "peak_context": 116141,
+        "cumulative_input": 2768927,
+        "output_tokens": 27538,
+        "reported_usd": 1.2232491999999997,
+        "seconds": 361.85900000002584,
+        "busy_fraction": 0.1954674220963173,
+        "first_output_file_seconds": 325.68700000000536,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 20650,
+          "sha256": "111be64f2b857f6ada2d62687811eb35b97cc969b3bb65acaad0d13ca3e9c9d1"
+        }
+      },
+      {
+        "name": "opus-2-trim-ffmpeg",
+        "model": "opus",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 5,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 10754,
+        "cumulative_input": 49995,
+        "output_tokens": 3951,
+        "reported_usd": 0.1517454,
+        "seconds": 52.639999999984866,
+        "busy_fraction": 0.4019607843137255,
+        "first_output_file_seconds": 14.34299999999348,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991420081084,
+          "audio_rms_error": 6.593256234803693,
+          "frame_psnr_min": 44.305338712922335,
+          "frame_psnr_median": 48.26910156965304,
+          "frame_psnr_max": 50.72219870725781,
+          "output_identity": {
+            "bytes": 158138,
+            "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+          },
+          "video_bit_rate": "158653",
+          "audio_bit_rate": "251372"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 4358,
+          "sha256": "6edd2dd7767f577849e3387f99690c58b87e85d78e9f9347afe5d09aaf7a5b07"
+        }
+      },
+      {
+        "name": "opus-2-trim-cutbolt",
+        "model": "opus",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 12,
+        "skill_calls": 2,
+        "schema_lookups": 1,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 28177,
+        "cumulative_input": 240179,
+        "output_tokens": 3135,
+        "reported_usd": 0.255525,
+        "seconds": 40.421999999991385,
+        "busy_fraction": 0.7088607594936709,
+        "first_output_file_seconds": 21.48399999999674,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169622,
+            "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+          },
+          "video_bit_rate": "186405",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7924,
+          "sha256": "082e791c69e9c95edfb7f82631c053b9533d66db2c2b4454a4e8255f4bdf6111"
+        }
+      },
+      {
+        "name": "opus-2-reorder-cutbolt",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 13,
+        "skill_calls": 2,
+        "schema_lookups": 2,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 31186,
+        "cumulative_input": 281931,
+        "output_tokens": 3529,
+        "reported_usd": 0.2952332000000001,
+        "seconds": 47.812999999994645,
+        "busy_fraction": 0.40860215053763443,
+        "first_output_file_seconds": 24.562999999994645,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 8295,
+          "sha256": "dbe328a80460c44bd1736a0088967f2db9925d3ac423d3e1d1a21fb513d232f8"
+        }
+      },
+      {
+        "name": "opus-2-reorder-ffmpeg",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 7,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 0,
+        "peak_context": 13284,
+        "cumulative_input": 75122,
+        "output_tokens": 5768,
+        "reported_usd": 0.21286,
+        "seconds": 88.98500000001513,
+        "busy_fraction": 0.5722543352601156,
+        "first_output_file_seconds": 22.01600000000326,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999986893427537,
+          "audio_rms_error": 8.072720266428163,
+          "frame_psnr_min": 43.53324123736017,
+          "frame_psnr_median": 48.289073949888746,
+          "frame_psnr_max": 51.08904016640154,
+          "output_identity": {
+            "bytes": 259488,
+            "sha256": "67ad188133d385124e7b2ada750bc80a8bf559a1ee835b1441f7ecef840c716d"
+          },
+          "video_bit_rate": "156099",
+          "audio_bit_rate": "249715"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 5286,
+          "sha256": "576e58be8e49f79a181d7e764dc6441d0e6887b2d523a7a0560304852c08d725"
+        }
+      },
+      {
+        "name": "opus-2-broll-inset-ffmpeg",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 13,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 0,
+        "peak_context": 20801,
+        "cumulative_input": 180975,
+        "output_tokens": 11603,
+        "reported_usd": 0.4094012000000001,
+        "seconds": 156.54699999999139,
+        "busy_fraction": 0.6524590163934426,
+        "first_output_file_seconds": 31.28200000000652,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999994044789559,
+          "audio_rms_error": 5.494358217501133,
+          "frame_psnr_min": 36.889814308268065,
+          "frame_psnr_median": 42.30634187683394,
+          "frame_psnr_max": 51.6310244400157,
+          "output_identity": {
+            "bytes": 304369,
+            "sha256": "339b5ea63fc664685c9c30bf8bfba75c4f4c1f671b9eaeae8b1c33a406c1518c"
+          },
+          "video_bit_rate": "147176",
+          "audio_bit_rate": "249775"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 7036,
+          "sha256": "4236df6f57a3f66005707a29606154cba2a261c800490427a519e724a9cf1875"
+        }
+      },
+      {
+        "name": "opus-2-broll-inset-cutbolt",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 26,
+        "skill_calls": 2,
+        "schema_lookups": 8,
+        "failed_tool_results": 2,
+        "mcp_failed_calls": 3,
+        "peak_context": 53788,
+        "cumulative_input": 875129,
+        "output_tokens": 7549,
+        "reported_usd": 0.6706443999999999,
+        "seconds": 103.34400000001187,
+        "busy_fraction": 0.06965174129353234,
+        "first_output_file_seconds": 81.42200000002049,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 11790,
+          "sha256": "9b1d5927207d9f14983840682f83dd19cb4c89ca1fbb8fdddb78833ccdc28f42"
+        }
+      },
+      {
+        "name": "sonnet-2-trim-cutbolt",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 13,
+        "skill_calls": 1,
+        "schema_lookups": 3,
+        "failed_tool_results": 2,
+        "mcp_failed_calls": 2,
+        "peak_context": 39349,
+        "cumulative_input": 388592,
+        "output_tokens": 4500,
+        "reported_usd": 0.22492059999999997,
+        "seconds": 69.93700000000536,
+        "busy_fraction": 0.19852941176470587,
+        "first_output_file_seconds": 56.764999999984866,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169622,
+            "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+          },
+          "video_bit_rate": "186405",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 8638,
+          "sha256": "3f1b4dfcd28cddb8fa6d06040c97d8aae3156008f7513d12ab3d83195cc82928"
+        }
+      },
+      {
+        "name": "sonnet-2-trim-ffmpeg",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 23,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 4,
+        "mcp_failed_calls": 0,
+        "peak_context": 46904,
+        "cumulative_input": 636009,
+        "output_tokens": 16703,
+        "reported_usd": 0.438795,
+        "seconds": 240.90599999998813,
+        "busy_fraction": 0.4267515923566879,
+        "first_output_file_seconds": 45.95299999997951,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991420081084,
+          "audio_rms_error": 6.593256234803693,
+          "frame_psnr_min": 44.305338712922335,
+          "frame_psnr_median": 48.26910156965304,
+          "frame_psnr_max": 50.72219870725781,
+          "output_identity": {
+            "bytes": 158138,
+            "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+          },
+          "video_bit_rate": "158653",
+          "audio_bit_rate": "251372"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 8813,
+          "sha256": "7bdf5c39f8d2f79692971be3c05fdaaf8f03eca772b181fca983dffc8c990a4d"
+        }
+      },
+      {
+        "name": "sonnet-2-reorder-ffmpeg",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 30,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 60577,
+        "cumulative_input": 1126589,
+        "output_tokens": 26752,
+        "reported_usd": 0.6893944000000001,
+        "seconds": 450.3429999999935,
+        "busy_fraction": 0.4602272727272727,
+        "first_output_file_seconds": 32.780999999988126,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999986893427537,
+          "audio_rms_error": 8.072720266428163,
+          "frame_psnr_min": 43.53324123736017,
+          "frame_psnr_median": 48.289073949888746,
+          "frame_psnr_max": 51.08904016640154,
+          "output_identity": {
+            "bytes": 259488,
+            "sha256": "84f3f55a09a1cd0d7a0b046a7d670dccb7bd7be02bb39ea4e827912e81044880"
+          },
+          "video_bit_rate": "156099",
+          "audio_bit_rate": "249715"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 14154,
+          "sha256": "f330cb3f3296d1254aebf05d8cb6b5b98149e725b13c09b3bf5d4e735ee6f7a5"
+        }
+      },
+      {
+        "name": "sonnet-2-reorder-cutbolt",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 8,
+        "skill_calls": 1,
+        "schema_lookups": 1,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 35669,
+        "cumulative_input": 249240,
+        "output_tokens": 3764,
+        "reported_usd": 0.1756918,
+        "seconds": 56.73399999999674,
+        "busy_fraction": 0.8468468468468469,
+        "first_output_file_seconds": 39.35899999999674,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7564,
+          "sha256": "a1d0b9737a164b2c2c53a7b8dec8db0715468ac56339299bff9fbb5bc0b4b2c2"
+        }
+      },
+      {
+        "name": "sonnet-2-broll-inset-cutbolt",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 32,
+        "skill_calls": 1,
+        "schema_lookups": 14,
+        "failed_tool_results": 2,
+        "mcp_failed_calls": 3,
+        "peak_context": 87522,
+        "cumulative_input": 1273843,
+        "output_tokens": 17061,
+        "reported_usd": 0.7106633999999998,
+        "seconds": 251.68700000000536,
+        "busy_fraction": 0.6435845213849287,
+        "first_output_file_seconds": 211.82800000000861,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 16350,
+          "sha256": "7cae435cf9c533d2a386687e4b61b95107c0a3f1d57e3e2d91c280e34f2911b0"
+        }
+      },
+      {
+        "name": "sonnet-2-broll-inset-ffmpeg",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "repeat": 2,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 40,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 5,
+        "mcp_failed_calls": 0,
+        "peak_context": 59338,
+        "cumulative_input": 1364725,
+        "output_tokens": 27820,
+        "reported_usd": 0.7430042,
+        "seconds": 408.6570000000065,
+        "busy_fraction": 0.5714285714285714,
+        "first_output_file_seconds": 52.28200000000652,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999994044789559,
+          "audio_rms_error": 5.494358217501133,
+          "frame_psnr_min": 28.297706585967664,
+          "frame_psnr_median": 41.32138677529578,
+          "frame_psnr_max": 51.615297866057986,
+          "output_identity": {
+            "bytes": 310682,
+            "sha256": "d6560b23d205130821966a4d7726e3cadd5fd219b3f5b6ce996615120b737473"
+          },
+          "video_bit_rate": "155594",
+          "audio_bit_rate": "249775"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 13095,
+          "sha256": "680bf304b9a51bed7ae320c6f89e7771db7aa6d1784fee7510822a6bf4f7e8ad"
+        }
+      },
+      {
+        "name": "opus-3-trim-cutbolt",
+        "model": "opus",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 19,
+        "skill_calls": 2,
+        "schema_lookups": 2,
+        "failed_tool_results": 2,
+        "mcp_failed_calls": 2,
+        "peak_context": 36245,
+        "cumulative_input": 316272,
+        "output_tokens": 5830,
+        "reported_usd": 0.3875892,
+        "seconds": 62.594000000011874,
+        "busy_fraction": 0.5163934426229508,
+        "first_output_file_seconds": 20.98399999999674,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169610,
+            "sha256": "4f2fdedfee346237ed266f9d329073921e15db71d9cd767df34b8e1a9a0ffd34"
+          },
+          "video_bit_rate": "186373",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 9662,
+          "sha256": "e8b446f3aa79a4e80b6ab115741b5f59fcfa0ab16ec92ba8fbfd5f0ce8b04782"
+        }
+      },
+      {
+        "name": "opus-3-trim-ffmpeg",
+        "model": "opus",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 4,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 9197,
+        "cumulative_input": 35043,
+        "output_tokens": 3416,
+        "reported_usd": 0.12590279999999998,
+        "seconds": 44.01600000000326,
+        "busy_fraction": 0.23529411764705882,
+        "first_output_file_seconds": 13.312999999994645,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991420081084,
+          "audio_rms_error": 6.593256234803693,
+          "frame_psnr_min": 44.305338712922335,
+          "frame_psnr_median": 48.26910156965304,
+          "frame_psnr_max": 50.72219870725781,
+          "output_identity": {
+            "bytes": 158138,
+            "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+          },
+          "video_bit_rate": "158653",
+          "audio_bit_rate": "251372"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 4144,
+          "sha256": "62b2b3775c3741b25b8617f29a8590fee492b9a446ed00713e0310b570f8c2b5"
+        }
+      },
+      {
+        "name": "opus-3-reorder-ffmpeg",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 5,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 10917,
+        "cumulative_input": 40147,
+        "output_tokens": 4795,
+        "reported_usd": 0.1679196,
+        "seconds": 64.40599999998813,
+        "busy_fraction": 0.352,
+        "first_output_file_seconds": 22.530999999988126,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999986893427537,
+          "audio_rms_error": 8.072720266428163,
+          "frame_psnr_min": 43.59839018916533,
+          "frame_psnr_median": 47.99572633128313,
+          "frame_psnr_max": 51.134573952957524,
+          "output_identity": {
+            "bytes": 256661,
+            "sha256": "f555ef2ed0e8418c7de8491b882aa40840c649ff47c5ec7b2a3f98de9485f373"
+          },
+          "video_bit_rate": "151576",
+          "audio_bit_rate": "249715"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 4651,
+          "sha256": "483ca4ceb048d65beffcea743c6d3b2bfab99726e859d4befa0016c6637be644"
+        }
+      },
+      {
+        "name": "opus-3-reorder-cutbolt",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 16,
+        "skill_calls": 2,
+        "schema_lookups": 2,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 36462,
+        "cumulative_input": 301016,
+        "output_tokens": 4147,
+        "reported_usd": 0.352563,
+        "seconds": 49.171999999991385,
+        "busy_fraction": 0.6770833333333334,
+        "first_output_file_seconds": 22.53100000001723,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 8829,
+          "sha256": "fc79934617238f90112df4466d58b98d86bf114e2ac940a6a8225f2c557bb212"
+        }
+      },
+      {
+        "name": "opus-3-broll-inset-cutbolt",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 25,
+        "skill_calls": 2,
+        "schema_lookups": 8,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 2,
+        "peak_context": 54150,
+        "cumulative_input": 831829,
+        "output_tokens": 7473,
+        "reported_usd": 0.6632804000000001,
+        "seconds": 100.86000000001513,
+        "busy_fraction": 0.07106598984771574,
+        "first_output_file_seconds": 74.68799999999464,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 11537,
+          "sha256": "b8e25f73ab84b930fe1b7375837b48fbf800518cdd4acad7099265dd7d2eb9aa"
+        }
+      },
+      {
+        "name": "opus-3-broll-inset-ffmpeg",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 9,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 2,
+        "mcp_failed_calls": 0,
+        "peak_context": 15093,
+        "cumulative_input": 93598,
+        "output_tokens": 7171,
+        "reported_usd": 0.258733,
+        "seconds": 85.98399999999674,
+        "busy_fraction": 0.10119047619047619,
+        "first_output_file_seconds": 24.07799999997951,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999994044789559,
+          "audio_rms_error": 5.494358217501133,
+          "frame_psnr_min": 28.260677814253693,
+          "frame_psnr_median": 41.32138677529578,
+          "frame_psnr_max": 51.615297866057986,
+          "output_identity": {
+            "bytes": 311386,
+            "sha256": "eb49cfdf4af66042b4df58ddc2afd6df6e8fe627741240a346fc1af485fddaa8"
+          },
+          "video_bit_rate": "156510",
+          "audio_bit_rate": "249775"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 5241,
+          "sha256": "9203b07eefc8e9a42310b65a8c055595f39c2190cbcf70d0d68435c3d193ddbc"
+        }
+      },
+      {
+        "name": "sonnet-3-trim-ffmpeg",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "ffmpeg",
+        "repeat": 3,
+        "success": false,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 41,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 6,
+        "mcp_failed_calls": 0,
+        "peak_context": 55206,
+        "cumulative_input": 1274894,
+        "output_tokens": 26888,
+        "reported_usd": 0.7000164,
+        "seconds": 375.06299999999464,
+        "busy_fraction": 0.22404371584699453,
+        "first_output_file_seconds": 42.96899999998277,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": false,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": false,
+          "audio_presentation_seconds": "224/75",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9981846728344035,
+          "audio_rms_error": 298.1128902676803,
+          "frame_psnr_min": 44.305338712922335,
+          "frame_psnr_median": 48.26910156965304,
+          "frame_psnr_max": 50.72219870725781,
+          "output_identity": {
+            "bytes": 183683,
+            "sha256": "fb5c8758cfe68f44357ae070b80112ac6f079181131b201b9046f045499b782f"
+          },
+          "video_bit_rate": "158653",
+          "audio_bit_rate": "322786"
+        },
+        "failure_checks": [
+          "audio_clock",
+          "audio_rms_error"
+        ],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 12223,
+          "sha256": "989a2f1d91a95c2e3853775827cdadddfd454d539e67d487680ae494cace1697"
+        }
+      },
+      {
+        "name": "sonnet-3-trim-cutbolt",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 12,
+        "skill_calls": 1,
+        "schema_lookups": 1,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 1,
+        "peak_context": 36745,
+        "cumulative_input": 308326,
+        "output_tokens": 4020,
+        "reported_usd": 0.19416500000000003,
+        "seconds": 61.92200000002049,
+        "busy_fraction": 0.34710743801652894,
+        "first_output_file_seconds": 46.594000000011874,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169622,
+            "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+          },
+          "video_bit_rate": "186405",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 8332,
+          "sha256": "e29426b384e58e20ca3c216f18f16f11805003c8ea5e86513ac898ba3d8a3b02"
+        }
+      },
+      {
+        "name": "sonnet-3-reorder-cutbolt",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 14,
+        "skill_calls": 1,
+        "schema_lookups": 2,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 1,
+        "peak_context": 40493,
+        "cumulative_input": 437433,
+        "output_tokens": 4694,
+        "reported_usd": 0.2409796,
+        "seconds": 78.17200000002049,
+        "busy_fraction": 0.6842105263157895,
+        "first_output_file_seconds": 59.64000000001397,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 9073,
+          "sha256": "397478363d16d563e7d02ec4af0a1b40a76889005b321b80a02ea2e00a22cedd"
+        }
+      },
+      {
+        "name": "sonnet-3-reorder-ffmpeg",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "ffmpeg",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 28,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 2,
+        "mcp_failed_calls": 0,
+        "peak_context": 61849,
+        "cumulative_input": 905377,
+        "output_tokens": 31565,
+        "reported_usd": 0.698094,
+        "seconds": 385.39100000000326,
+        "busy_fraction": 0.27030625832223704,
+        "first_output_file_seconds": 35.76600000000326,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999986893427537,
+          "audio_rms_error": 8.072720266428163,
+          "frame_psnr_min": 43.53324123736017,
+          "frame_psnr_median": 48.289073949888746,
+          "frame_psnr_max": 51.08904016640154,
+          "output_identity": {
+            "bytes": 259488,
+            "sha256": "84f3f55a09a1cd0d7a0b046a7d670dccb7bd7be02bb39ea4e827912e81044880"
+          },
+          "video_bit_rate": "156099",
+          "audio_bit_rate": "249715"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 12474,
+          "sha256": "4e3602715a10ce37de772b353a1b1d55941b9d97dba95e6e43cd29d97b7db0c4"
+        }
+      },
+      {
+        "name": "sonnet-3-broll-inset-ffmpeg",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "ffmpeg",
+        "repeat": 3,
+        "success": false,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 26,
+        "skill_calls": 0,
+        "schema_lookups": 0,
+        "failed_tool_results": 3,
+        "mcp_failed_calls": 0,
+        "peak_context": 44720,
+        "cumulative_input": 776821,
+        "output_tokens": 20603,
+        "reported_usd": 0.4976762,
+        "seconds": 263.9530000000086,
+        "busy_fraction": 0.337890625,
+        "first_output_file_seconds": 73.75,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": false,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": false,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": false,
+          "audio_presentation_seconds": "2248/375",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9990951598475936,
+          "audio_rms_error": 210.51857977517224,
+          "frame_psnr_min": 10.749936680321031,
+          "frame_psnr_median": 41.07900843153104,
+          "frame_psnr_max": 50.872424324595784,
+          "output_identity": {
+            "bytes": 363187,
+            "sha256": "4a5b87707951c6ebcecccfc5f426811805d95a9b84f113930dd99c826e62469a"
+          },
+          "video_bit_rate": "155193",
+          "audio_bit_rate": "321404"
+        },
+        "failure_checks": [
+          "frame_counters",
+          "audio_clock",
+          "frame_psnr_min"
+        ],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": null,
+        "aac_target_review": "pending_trace_review",
+        "measurement_identity": {
+          "bytes": 9365,
+          "sha256": "76ae8ca3800db25fbc51852ee54f9af8cb7001271dcae87bcfc8bf1dcb1a3b63"
+        }
+      },
+      {
+        "name": "sonnet-3-broll-inset-cutbolt",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 3,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 37,
+        "skill_calls": 3,
+        "schema_lookups": 13,
+        "failed_tool_results": 1,
+        "mcp_failed_calls": 2,
+        "peak_context": 102061,
+        "cumulative_input": 2048930,
+        "output_tokens": 16139,
+        "reported_usd": 0.9117377999999998,
+        "seconds": 187.9529999999795,
+        "busy_fraction": 0.09863013698630137,
+        "first_output_file_seconds": 138.09299999999348,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 15175,
+          "sha256": "d4513d9788419f2b51983843c9ebc94d936fc9127ab7d5eac713e977a83f5bd1"
+        }
+      }
+    ],
+    "all_material_frozen": true,
+    "limits": [
+      "Descriptive diagnostic results only; limited repeats do not establish statistical significance.",
+      "Machine load overlaps verification; speed observations remain provisional.",
+      "Quality scores use the declared FFmpeg RGB reference; requested CRF is not matched bitrate.",
+      "AAC target controls require separate receipt/trace review; actual AAC bitrate need not equal its target.",
+      "No release gate or implementation scope is changed."
+    ]
+  },
+  "supplemental_ffmpeg_delivery_controls": {
+    "kind": "supplemental_delivery_control_review",
+    "complete": true,
+    "trials": {
+      "opus-1-broll-inset-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          117
+        ],
+        "trace_sha256": "96cbfcdeab662adafb912babf270449f71776479f0425fdd39c41d0df7661e30",
+        "output_identity": {
+          "bytes": 304340,
+          "sha256": "93d7a5c2e682fb596f3f3e76812e7b7d5d034b8998788db699e2e7fd2babb1b0"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename.",
+        "script": {
+          "path": "render.sh",
+          "sha256": "7f06706e8e0ffcc28be3adcf2c39dd1f5fbdfafcaa1c945c23a394968f186a9f"
+        }
+      },
+      "opus-1-reorder-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          11
+        ],
+        "trace_sha256": "eca407d126e18e2f88ac6b8698970ecb994ef24bb01d55c7f8f8235109fd6ac8",
+        "output_identity": {
+          "bytes": 259488,
+          "sha256": "67ad188133d385124e7b2ada750bc80a8bf559a1ee835b1441f7ecef840c716d"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "opus-1-trim-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          12
+        ],
+        "trace_sha256": "2d27845182b65581be1cd1dafc0352d47339d4a4af56b894e126c3a8945836f6",
+        "output_identity": {
+          "bytes": 158138,
+          "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "opus-2-broll-inset-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          86
+        ],
+        "trace_sha256": "8fdd30d46028e286cb3217e5dfaf080aca345db34d1b302ae26f1d787ac58ae9",
+        "output_identity": {
+          "bytes": 304369,
+          "sha256": "339b5ea63fc664685c9c30bf8bfba75c4f4c1f671b9eaeae8b1c33a406c1518c"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename.",
+        "script": {
+          "path": "render.sh",
+          "sha256": "12938ca0b93c78babaf4397d6784bbcb3cb2b8719cf931e07e453ca69c809311"
+        }
+      },
+      "opus-2-reorder-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          12
+        ],
+        "trace_sha256": "7adff016266ea1a819bd86d863de51d6dd435164e49ca4b14e5e6aabab535ae3",
+        "output_identity": {
+          "bytes": 259488,
+          "sha256": "67ad188133d385124e7b2ada750bc80a8bf559a1ee835b1441f7ecef840c716d"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "opus-2-trim-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          8
+        ],
+        "trace_sha256": "4deaf7b6cd9a1dbc28917a5d6b5ae7dd27131d5068cdb46ec35f9b1160924ec7",
+        "output_identity": {
+          "bytes": 158138,
+          "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "sonnet-1-broll-inset-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          201
+        ],
+        "trace_sha256": "02dcf101914ef50f82be6cb821e874190f48c21e111732e8d217b551ade64cd9",
+        "output_identity": {
+          "bytes": 309737,
+          "sha256": "2cfe398a488988116c7109552ed3e1dac976a2b5a9861d53edbc1a76bc5e5895"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "sonnet-1-reorder-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac_mf",
+        "trace_lines": [
+          286
+        ],
+        "trace_sha256": "c5cd9163d3cb9176d44705d00bd5dcf3f787c68cee101026c009717666709b17",
+        "output_identity": {
+          "bytes": 303454,
+          "sha256": "073b37ef51591bf7c9cc2d21ff441ff763091661840c12509fb3a68f23c781a9"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "sonnet-1-trim-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac_mf",
+        "trace_lines": [
+          77,
+          152
+        ],
+        "trace_sha256": "849bdc183cdacedcd6684b1889f3b4b6a108ed8a6e06a70fd2a2c59e28c54431",
+        "output_identity": {
+          "bytes": 183683,
+          "sha256": "ec2c110e8d83044a86dee49cd1d77cef24edf5e5bb4cd9c483a76d8f220f49a6"
+        },
+        "basis": "Reviewed AAC_MF producing delivery_mf_test.mp4 at line 77 and its rename to delivery.mp4 at line 152."
+      },
+      "sonnet-2-trim-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          38
+        ],
+        "trace_sha256": "4fd01942e9af533576ad9307e83c37f992d66f2107c737ad5a27e86d75ab0e7c",
+        "output_identity": {
+          "bytes": 158138,
+          "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+        },
+        "basis": "Reviewed the final producing FFmpeg command and its final delivery filename."
+      },
+      "opus-3-broll-inset-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          14
+        ],
+        "trace_sha256": "7d88772aa3febd8d5ffc6922161a6eb71148f337984a3df2be0baff93ebc0c85",
+        "output_identity": {
+          "bytes": 311386,
+          "sha256": "eb49cfdf4af66042b4df58ddc2afd6df6e8fe627741240a346fc1af485fddaa8"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file.",
+        "script": {
+          "path": "render.sh",
+          "sha256": "ea60a770a729084d33d7387098c2930514bd40e0ed43c13dcbc7fdb48ac6201f"
+        }
+      },
+      "opus-3-reorder-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          10
+        ],
+        "trace_sha256": "a82681016c27a6cf4be0e4f7815e698bc2c849abcbde1b51708927a3869f9583",
+        "output_identity": {
+          "bytes": 256661,
+          "sha256": "f555ef2ed0e8418c7de8491b882aa40840c649ff47c5ec7b2a3f98de9485f373"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file.",
+        "script": {
+          "path": "render.sh",
+          "sha256": "ff3ab8e1e7d7da1742b7061870fdce52376c3b5a2df594e050cddfa1f30af2c6"
+        }
+      },
+      "opus-3-trim-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          8
+        ],
+        "trace_sha256": "5c9b948d57076585b3bffb182ff5e469b796b188779dbaed9968fe34f1bc43b8",
+        "output_identity": {
+          "bytes": 158138,
+          "sha256": "2e2c7ba57933125a00da004d5bda09970dc8f916ff81736ce601d2e173a95bd2"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file."
+      },
+      "sonnet-2-broll-inset-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          217
+        ],
+        "trace_sha256": "68e73d1952b76b047b288abab973f29c1b4f4314dd3cd82bdfc77374bbee7b4d",
+        "output_identity": {
+          "bytes": 310682,
+          "sha256": "d6560b23d205130821966a4d7726e3cadd5fd219b3f5b6ce996615120b737473"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file."
+      },
+      "sonnet-2-reorder-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          227
+        ],
+        "trace_sha256": "5b6ebc93fd5809c3abf322d091fb8062cae9bcee1b534a6928777edb22e382d0",
+        "output_identity": {
+          "bytes": 259488,
+          "sha256": "84f3f55a09a1cd0d7a0b046a7d670dccb7bd7be02bb39ea4e827912e81044880"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file."
+      },
+      "sonnet-3-reorder-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac",
+        "trace_lines": [
+          25
+        ],
+        "trace_sha256": "ea63f3f7614ef0f7da92fb98b168e6f6341d69199d3c8f1b90c88e71d2258d11",
+        "output_identity": {
+          "bytes": 259488,
+          "sha256": "84f3f55a09a1cd0d7a0b046a7d670dccb7bd7be02bb39ea4e827912e81044880"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file."
+      },
+      "sonnet-3-trim-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac_mf",
+        "trace_lines": [
+          128,
+          269
+        ],
+        "trace_sha256": "9cf5cd7560d35af9baf0a8c099cbb52be889e6757ff6b731d6acf29cc47ec18c",
+        "output_identity": {
+          "bytes": 183683,
+          "sha256": "fb5c8758cfe68f44357ae070b80112ac6f079181131b201b9046f045499b782f"
+        },
+        "basis": "Reviewed final producing FFmpeg command and final delivery filename; sonnet-3-trim includes the later copy of the tested AAC_MF file."
+      },
+      "sonnet-3-broll-inset-ffmpeg": {
+        "aac_requested_bitrate": 320000,
+        "encoder": "aac_mf",
+        "trace_lines": [
+          63,
+          114
+        ],
+        "trace_sha256": "5f6f4e3fc134252546171ae48078da63761c71e28e6acd16d0162abcddb9dfc4",
+        "output_identity": {
+          "bytes": 363187,
+          "sha256": "4a5b87707951c6ebcecccfc5f426811805d95a9b84f113930dd99c826e62469a"
+        },
+        "basis": "Reviewed final producing FFmpeg command; filter script content is retained in trace line 63, then deleted by the model at line 190. Inclusive B-roll end expression also merits separate frame-boundary diagnosis."
+      }
+    },
+    "limits": [
+      "Requested bitrate is the encoder target, not actual stream bitrate.",
+      "Does not alter the frozen output auditor or any model output.",
+      "Missing trials must be reviewed before a complete delivery-control claim."
+    ],
+    "remaining_ffmpeg_trials": []
+  },
+  "endpoint_diagnosis": {
+    "trial": "sonnet-3-broll-inset-ffmpeg",
+    "output_identity": {
+      "bytes": 363187,
+      "sha256": "4a5b87707951c6ebcecccfc5f426811805d95a9b84f113930dd99c826e62469a"
+    },
+    "frame_counter_mismatches": [
+      {
+        "frame": 75,
+        "seconds": "75/25",
+        "expected_source_frame": [
+          0,
+          125
+        ],
+        "actual_source_frame": [
+          1,
+          74
+        ]
+      }
+    ],
+    "trace_basis": "stream.jsonl line 63 uses inclusive between(t,1,3) for B-roll; line 114 creates the final output."
+  },
+  "scope_notes": [
+    "The isolation field checks the exposed tool/skill catalog and fresh profiles, not an OS filesystem sandbox. Some FFmpeg attempts used shared temporary directories despite the workspace-only prompt; this is a protocol limitation, not a proven sandbox boundary.",
+    "All four failed final FFmpeg outputs used AAC_MF after the model chased an actual 320 kb/s bitrate; the prompt said AAC at 320 kb/s, while the intended control was the encoder target. Report this wording ambiguity and do not replace these attempts.",
+    "Repeated clocks/output thresholds are descriptive on synthetic short sources; no statistical significance or general superiority claim.",
+    "The final inset failure also shows source B frame 74 at timeline frame 75 (3 seconds), where A frame 125 is required.",
+    "Updated skill trials remain a separate six-attempt diagnostic with the same engine.",
+    "No G2 adoption, milestone, release tag or editing points change."
+  ],
+  "revised_skills_followup": {
+    "planned": 6,
+    "completed": 6,
+    "matrix_complete": true,
+    "missing": [],
+    "integrity": {
+      "engine": true,
+      "protocol": true,
+      "oracle": true,
+      "runner": true,
+      "input_manifest": true,
+      "source:a.mov": true,
+      "source:b.mov": true,
+      "opus-1-trim-cutbolt": true,
+      "opus-1-reorder-cutbolt": true,
+      "opus-1-broll-inset-cutbolt": true,
+      "sonnet-1-trim-cutbolt": true,
+      "sonnet-1-reorder-cutbolt": true,
+      "sonnet-1-broll-inset-cutbolt": true
+    },
+    "client_version": "2.1.280 (Claude Code)",
+    "resolved_models": [
+      "claude-opus-5-5",
+      "claude-sonnet-5"
+    ],
+    "unresolved_model_trials": [],
+    "groups": [
+      {
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "completed": 1,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 1,
+            "minimum": 23.0,
+            "median": 23.0,
+            "maximum": 23.0
+          },
+          "peak_context": {
+            "n": 1,
+            "minimum": 43870.0,
+            "median": 43870.0,
+            "maximum": 43870.0
+          },
+          "cumulative_input": {
+            "n": 1,
+            "minimum": 431913.0,
+            "median": 431913.0,
+            "maximum": 431913.0
+          },
+          "reported_usd": {
+            "n": 1,
+            "minimum": 0.4724676,
+            "median": 0.4724676,
+            "maximum": 0.4724676
+          },
+          "seconds": {
+            "n": 1,
+            "minimum": 81.03200000000652,
+            "median": 81.03200000000652,
+            "maximum": 81.03200000000652
+          },
+          "busy_fraction": {
+            "n": 1,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          },
+          "schema_lookups": {
+            "n": 1,
+            "minimum": 2.0,
+            "median": 2.0,
+            "maximum": 2.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 35.194584979218156,
+            "median": 35.194584979218156,
+            "maximum": 35.194584979218156
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 40.61635433804619,
+            "median": 40.61635433804619,
+            "maximum": 40.61635433804619
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 5.818623566474578,
+            "median": 5.818623566474578,
+            "maximum": 5.818623566474578
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 179284.0,
+            "median": 179284.0,
+            "maximum": 179284.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 252947.0,
+            "median": 252947.0,
+            "maximum": 252947.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "completed": 1,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 1,
+            "minimum": 11.0,
+            "median": 11.0,
+            "maximum": 11.0
+          },
+          "peak_context": {
+            "n": 1,
+            "minimum": 30372.0,
+            "median": 30372.0,
+            "maximum": 30372.0
+          },
+          "cumulative_input": {
+            "n": 1,
+            "minimum": 174557.0,
+            "median": 174557.0,
+            "maximum": 174557.0
+          },
+          "reported_usd": {
+            "n": 1,
+            "minimum": 0.2556388,
+            "median": 0.2556388,
+            "maximum": 0.2556388
+          },
+          "seconds": {
+            "n": 1,
+            "minimum": 37.29700000002049,
+            "median": 37.29700000002049,
+            "maximum": 37.29700000002049
+          },
+          "busy_fraction": {
+            "n": 1,
+            "minimum": 0.013888888888888888,
+            "median": 0.013888888888888888,
+            "maximum": 0.013888888888888888
+          },
+          "schema_lookups": {
+            "n": 1,
+            "minimum": 1.0,
+            "median": 1.0,
+            "maximum": 1.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 37.52757269884458,
+            "median": 37.52757269884458,
+            "maximum": 37.52757269884458
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 43.37110035769426,
+            "median": 43.37110035769426,
+            "maximum": 43.37110035769426
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 7.702495807637072,
+            "median": 7.702495807637072,
+            "maximum": 7.702495807637072
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 184668.0,
+            "median": 184668.0,
+            "maximum": 184668.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 252667.0,
+            "median": 252667.0,
+            "maximum": 252667.0
+          }
+        }
+      },
+      {
+        "model": "opus",
+        "task": "trim",
+        "arm": "cutbolt",
+        "completed": 1,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 1,
+            "minimum": 9.0,
+            "median": 9.0,
+            "maximum": 9.0
+          },
+          "peak_context": {
+            "n": 1,
+            "minimum": 25152.0,
+            "median": 25152.0,
+            "maximum": 25152.0
+          },
+          "cumulative_input": {
+            "n": 1,
+            "minimum": 136331.0,
+            "median": 136331.0,
+            "maximum": 136331.0
+          },
+          "reported_usd": {
+            "n": 1,
+            "minimum": 0.19731,
+            "median": 0.19731,
+            "maximum": 0.19731
+          },
+          "seconds": {
+            "n": 1,
+            "minimum": 33.046999999991385,
+            "median": 33.046999999991385,
+            "maximum": 33.046999999991385
+          },
+          "busy_fraction": {
+            "n": 1,
+            "minimum": 0.109375,
+            "median": 0.109375,
+            "maximum": 0.109375
+          },
+          "schema_lookups": {
+            "n": 1,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 37.49112737634353,
+            "median": 37.49112737634353,
+            "maximum": 37.49112737634353
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 42.95811897116333,
+            "median": 42.95811897116333,
+            "maximum": 42.95811897116333
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 6.495918590417627,
+            "median": 6.495918590417627,
+            "maximum": 6.495918590417627
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 186405.0,
+            "median": 186405.0,
+            "maximum": 186405.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 254573.0,
+            "median": 254573.0,
+            "maximum": 254573.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "completed": 1,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 1,
+            "minimum": 18.0,
+            "median": 18.0,
+            "maximum": 18.0
+          },
+          "peak_context": {
+            "n": 1,
+            "minimum": 66128.0,
+            "median": 66128.0,
+            "maximum": 66128.0
+          },
+          "cumulative_input": {
+            "n": 1,
+            "minimum": 620531.0,
+            "median": 620531.0,
+            "maximum": 620531.0
+          },
+          "reported_usd": {
+            "n": 1,
+            "minimum": 0.45285859999999994,
+            "median": 0.45285859999999994,
+            "maximum": 0.45285859999999994
+          },
+          "seconds": {
+            "n": 1,
+            "minimum": 167.5470000000205,
+            "median": 167.5470000000205,
+            "maximum": 167.5470000000205
+          },
+          "busy_fraction": {
+            "n": 1,
+            "minimum": 0.01529051987767584,
+            "median": 0.01529051987767584,
+            "maximum": 0.01529051987767584
+          },
+          "schema_lookups": {
+            "n": 1,
+            "minimum": 9.0,
+            "median": 9.0,
+            "maximum": 9.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 35.16030098972002,
+            "median": 35.16030098972002,
+            "maximum": 35.16030098972002
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 40.61540054259322,
+            "median": 40.61540054259322,
+            "maximum": 40.61540054259322
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 5.818623566474578,
+            "median": 5.818623566474578,
+            "maximum": 5.818623566474578
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 179478.0,
+            "median": 179478.0,
+            "maximum": 179478.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 252947.0,
+            "median": 252947.0,
+            "maximum": 252947.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "completed": 1,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 1,
+            "minimum": 7.0,
+            "median": 7.0,
+            "maximum": 7.0
+          },
+          "peak_context": {
+            "n": 1,
+            "minimum": 33793.0,
+            "median": 33793.0,
+            "maximum": 33793.0
+          },
+          "cumulative_input": {
+            "n": 1,
+            "minimum": 218832.0,
+            "median": 218832.0,
+            "maximum": 218832.0
+          },
+          "reported_usd": {
+            "n": 1,
+            "minimum": 0.15887779999999999,
+            "median": 0.15887779999999999,
+            "maximum": 0.15887779999999999
+          },
+          "seconds": {
+            "n": 1,
+            "minimum": 56.14100000000326,
+            "median": 56.14100000000326,
+            "maximum": 56.14100000000326
+          },
+          "busy_fraction": {
+            "n": 1,
+            "minimum": 0.11926605504587157,
+            "median": 0.11926605504587157,
+            "maximum": 0.11926605504587157
+          },
+          "schema_lookups": {
+            "n": 1,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 37.52757269884458,
+            "median": 37.52757269884458,
+            "maximum": 37.52757269884458
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 43.37110035769426,
+            "median": 43.37110035769426,
+            "maximum": 43.37110035769426
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 7.702495807637072,
+            "median": 7.702495807637072,
+            "maximum": 7.702495807637072
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 184668.0,
+            "median": 184668.0,
+            "maximum": 184668.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 252667.0,
+            "median": 252667.0,
+            "maximum": 252667.0
+          }
+        }
+      },
+      {
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "cutbolt",
+        "completed": 1,
+        "successes": 1,
+        "all_completed_metrics": {
+          "calls": {
+            "n": 1,
+            "minimum": 7.0,
+            "median": 7.0,
+            "maximum": 7.0
+          },
+          "peak_context": {
+            "n": 1,
+            "minimum": 32060.0,
+            "median": 32060.0,
+            "maximum": 32060.0
+          },
+          "cumulative_input": {
+            "n": 1,
+            "minimum": 212051.0,
+            "median": 212051.0,
+            "maximum": 212051.0
+          },
+          "reported_usd": {
+            "n": 1,
+            "minimum": 0.1406162,
+            "median": 0.1406162,
+            "maximum": 0.1406162
+          },
+          "seconds": {
+            "n": 1,
+            "minimum": 42.46799999999348,
+            "median": 42.46799999999348,
+            "maximum": 42.46799999999348
+          },
+          "busy_fraction": {
+            "n": 1,
+            "minimum": 0.30120481927710846,
+            "median": 0.30120481927710846,
+            "maximum": 0.30120481927710846
+          },
+          "schema_lookups": {
+            "n": 1,
+            "minimum": 0.0,
+            "median": 0.0,
+            "maximum": 0.0
+          }
+        },
+        "successful_output_metrics": {
+          "frame_psnr_min": {
+            "n": 1,
+            "minimum": 37.49112737634353,
+            "median": 37.49112737634353,
+            "maximum": 37.49112737634353
+          },
+          "frame_psnr_median": {
+            "n": 1,
+            "minimum": 42.95811897116333,
+            "median": 42.95811897116333,
+            "maximum": 42.95811897116333
+          },
+          "audio_rms_error": {
+            "n": 1,
+            "minimum": 6.495918590417627,
+            "median": 6.495918590417627,
+            "maximum": 6.495918590417627
+          },
+          "video_bit_rate": {
+            "n": 1,
+            "minimum": 186405.0,
+            "median": 186405.0,
+            "maximum": 186405.0
+          },
+          "audio_bit_rate": {
+            "n": 1,
+            "minimum": 254573.0,
+            "median": 254573.0,
+            "maximum": 254573.0
+          }
+        }
+      }
+    ],
+    "trials": [
+      {
+        "name": "opus-1-trim-cutbolt",
+        "model": "opus",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 9,
+        "skill_calls": 1,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 25152,
+        "cumulative_input": 136331,
+        "output_tokens": 2444,
+        "reported_usd": 0.19731,
+        "seconds": 33.046999999991385,
+        "busy_fraction": 0.109375,
+        "first_output_file_seconds": 17.375,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169622,
+            "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+          },
+          "video_bit_rate": "186405",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7403,
+          "sha256": "b55c666cf9f35878061a444d14cb310a17a88e1733853562ef184d42356fb05c"
+        }
+      },
+      {
+        "name": "opus-1-reorder-cutbolt",
+        "model": "opus",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 11,
+        "skill_calls": 1,
+        "schema_lookups": 1,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 30372,
+        "cumulative_input": 174557,
+        "output_tokens": 2942,
+        "reported_usd": 0.2556388,
+        "seconds": 37.29700000002049,
+        "busy_fraction": 0.013888888888888888,
+        "first_output_file_seconds": 18.985000000015134,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7903,
+          "sha256": "4a1c84697f91f61f95e3f9ebb9919affeab7c064913729d49159c87814a711f6"
+        }
+      },
+      {
+        "name": "opus-1-broll-inset-cutbolt",
+        "model": "opus",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-opus-5-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 23,
+        "skill_calls": 3,
+        "schema_lookups": 2,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 43870,
+        "cumulative_input": 431913,
+        "output_tokens": 5943,
+        "reported_usd": 0.4724676,
+        "seconds": 81.03200000000652,
+        "busy_fraction": 0.0,
+        "first_output_file_seconds": 37.344000000011874,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.194584979218156,
+          "frame_psnr_median": 40.61635433804619,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330584,
+            "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+          },
+          "video_bit_rate": "179284",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 10630,
+          "sha256": "07c0c58e2ed4df51d7905cc32bf81af269872d604e5566afa65a93041f1ef522"
+        }
+      },
+      {
+        "name": "sonnet-1-trim-cutbolt",
+        "model": "sonnet",
+        "task": "trim",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 7,
+        "skill_calls": 1,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 32060,
+        "cumulative_input": 212051,
+        "output_tokens": 2372,
+        "reported_usd": 0.1406162,
+        "seconds": 42.46799999999348,
+        "busy_fraction": 0.30120481927710846,
+        "first_output_file_seconds": 30.187000000005355,
+        "audit": {
+          "task": "trim",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 75,
+          "expected_frames": 75,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "3",
+          "decoded_audio_samples": 144384,
+          "audio_correlation": 0.9999991692535588,
+          "audio_rms_error": 6.495918590417627,
+          "frame_psnr_min": 37.49112737634353,
+          "frame_psnr_median": 42.95811897116333,
+          "frame_psnr_max": 45.89329711592324,
+          "output_identity": {
+            "bytes": 169622,
+            "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+          },
+          "video_bit_rate": "186405",
+          "audio_bit_rate": "254573"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7044,
+          "sha256": "fe537da9778df672c2ffd335bf779834188a1522e4356daee38d7c3fad62ff9b"
+        }
+      },
+      {
+        "name": "sonnet-1-reorder-cutbolt",
+        "model": "sonnet",
+        "task": "reorder",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 7,
+        "skill_calls": 1,
+        "schema_lookups": 0,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 33793,
+        "cumulative_input": 218832,
+        "output_tokens": 3404,
+        "reported_usd": 0.15887779999999999,
+        "seconds": 56.14100000000326,
+        "busy_fraction": 0.11926605504587157,
+        "first_output_file_seconds": 34.328000000008615,
+        "audit": {
+          "task": "reorder",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 125,
+          "expected_frames": 125,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "5",
+          "decoded_audio_samples": 240640,
+          "audio_correlation": 0.9999988127553074,
+          "audio_rms_error": 7.702495807637072,
+          "frame_psnr_min": 37.52757269884458,
+          "frame_psnr_median": 43.37110035769426,
+          "frame_psnr_max": 45.4081291546996,
+          "output_identity": {
+            "bytes": 279001,
+            "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+          },
+          "video_bit_rate": "184668",
+          "audio_bit_rate": "252667"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 7403,
+          "sha256": "8865385a58bd133cfcae87357781f16c8e32c294bfaf6c8795a176f9363624c0"
+        }
+      },
+      {
+        "name": "sonnet-1-broll-inset-cutbolt",
+        "model": "sonnet",
+        "task": "broll-inset",
+        "arm": "cutbolt",
+        "repeat": 1,
+        "success": true,
+        "client_result": "success",
+        "resolved_model": "claude-sonnet-5",
+        "isolated": true,
+        "frozen_inputs": true,
+        "output_unchanged": true,
+        "calls": 18,
+        "skill_calls": 1,
+        "schema_lookups": 9,
+        "failed_tool_results": 0,
+        "mcp_failed_calls": 0,
+        "peak_context": 66128,
+        "cumulative_input": 620531,
+        "output_tokens": 12479,
+        "reported_usd": 0.45285859999999994,
+        "seconds": 167.5470000000205,
+        "busy_fraction": 0.01529051987767584,
+        "first_output_file_seconds": 145.81299999999464,
+        "audit": {
+          "task": "broll-inset",
+          "source_preservation": true,
+          "output_exists": true,
+          "passed": true,
+          "frame_count": 150,
+          "expected_frames": 150,
+          "frame_counters": true,
+          "inset_counters": true,
+          "profile": true,
+          "color": true,
+          "audio_clock": true,
+          "audio_presentation_seconds": "6",
+          "decoded_audio_samples": 288768,
+          "audio_correlation": 0.9999993298559263,
+          "audio_rms_error": 5.818623566474578,
+          "frame_psnr_min": 35.16030098972002,
+          "frame_psnr_median": 40.61540054259322,
+          "frame_psnr_max": 45.49184139768385,
+          "output_identity": {
+            "bytes": 330730,
+            "sha256": "954e1d6585374d7644e26750c6402d3880382a9b8cd7ecce42f9fb02518a9e34"
+          },
+          "video_bit_rate": "179478",
+          "audio_bit_rate": "252947"
+        },
+        "failure_checks": [],
+        "x264_crf18_sei": true,
+        "aac_target_receipts": [
+          320000
+        ],
+        "aac_target_review": "matched_output_receipt",
+        "measurement_identity": {
+          "bytes": 11938,
+          "sha256": "6a06228c37cb90aad57d95cb1441f866a123b444cd862a591c6341327090b5e0"
+        }
+      }
+    ],
+    "all_material_frozen": true,
+    "limits": [
+      "Descriptive diagnostic results only; limited repeats do not establish statistical significance.",
+      "Machine load overlaps verification; speed observations remain provisional.",
+      "Quality scores use the declared FFmpeg RGB reference; requested CRF is not matched bitrate.",
+      "AAC target controls require separate receipt/trace review; actual AAC bitrate need not equal its target.",
+      "No release gate or implementation scope is changed."
+    ]
+  },
+  "preparation_checkout": {
+    "source_commit": "2dbab3c16f963078e7ae43e904e3051d53740510",
+    "source_modified": true,
+    "engine_version": "cutbolt 0.4.0 (commit 2dbab3c16f963078e7ae43e904e3051d53740510)"
+  },
+  "followup_preparation_checkout": {
+    "source_commit": "f76b3ad97542ce3743699123e189a92d145359b7",
+    "source_modified": false,
+    "engine_version": "cutbolt 0.4.0 (commit 2dbab3c16f963078e7ae43e904e3051d53740510)"
+  },
+  "followup_plan_sha256": "b9c58a741e1930252a2368afe23fe51a2b167e0ff798e6653c7719c73913eb05",
+  "followup_skill_commit": "f76b3ad97542ce3743699123e189a92d145359b7"
+}

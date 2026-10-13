@@ -93,3 +93,7 @@ using the same engine, originals, prompts, client, effort, limits and auditor wi
 f76b3ad. Its six selected attempts were frozen before model starts and wait for all 36 baseline
 measurements. Report them separately, with all failures and no claim of repeatability. The
 baseline's skill copies and outcomes remain unchanged.
+
+The [completed pilot results](FOOTAGE_BENCHMARK_RESULTS.md) report all 36 baseline attempts,
+the separate six revised-skill attempts, delivery-control reviews, failures and protocol
+limitations. They leave the draft release gate and implementation scope unchanged.

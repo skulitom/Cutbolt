@@ -68,7 +68,7 @@ def summarize(root):
   'client_version':plan['client_version'],'resolved_models':sorted({r['resolved_model'] for r in rows if r['resolved_model'] is not None}),
   'unresolved_model_trials':[r['name'] for r in rows if r['resolved_model'] is None],
   'groups':summary,'trials':rows,'all_material_frozen':all(integrity.values()),
-  'limits':['Descriptive diagnostic results only; three repeats do not establish statistical significance.',
+  'limits':['Descriptive diagnostic results only; limited repeats do not establish statistical significance.',
    'Machine load overlaps verification; speed observations remain provisional.',
    'Quality scores use the declared FFmpeg RGB reference; requested CRF is not matched bitrate.',
    'AAC target controls require separate receipt/trace review; actual AAC bitrate need not equal its target.',

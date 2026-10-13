@@ -65,3 +65,9 @@ reduced byte cap. Saved-recipe rejection, workspace defaults and a transparent P
 overlay against its explicit conversion are also checked. These are
 small original synthetic sources; no broad codec, long-form conversion speed or new editing
 points are claimed.
+
+Stage 2 acceptance is complete for these declared bounds. The fixed 546cac4 checkout passed
+all 74 quick verification stages on 13 October, including recording, with no failures,
+skips or reused passes. [Recorded evidence](../verification/stage2-full-quick-2026-10-13.json)
+links the Windows/Linux targeted checks and earlier Rust/lint results. This is not a new
+long-form or milestone claim; native clip effects and later plan stages remain open.

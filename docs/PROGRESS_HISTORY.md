@@ -1,5 +1,34 @@
 # Progress history
 
+## 13 October 2026: complete the stage-2 gate and first comparative pilot
+
+The fixed 546cac4 checkout finished its complete strict quick run: 74 stages passed, no
+failures, no skips and no reused passes, in 2,924 seconds. Recording passed. Together with
+the recorded Windows/Linux automatic-preparation and direct-binding fixtures and Rust/lint
+checks, this satisfies stage 2's declared exit. The managed verification checkout is no
+longer needed and was queued for archival after both processes finished. The 338e114 full
+milestone evidence stays unchanged; short-mode checks do not replace thorough acceptance.
+
+The [fresh-agent pilot](FOOTAGE_BENCHMARK_RESULTS.md) completed all 36 frozen baseline
+attempts: Cutbolt 18/18, ordinary FFmpeg 14/18 against the original output oracle. All source,
+frozen-material and final-output identities match. Every final CRF setting and AAC target
+was checked separately. Failures remain in the denominator: three AAC timing/content
+failures and an inset trial with both AAC timing and one extra B-roll frame. The prompt's
+320 kb/s wording encouraged attempts to match actual rather than target bitrate; this and
+shared temporary-directory use limit the comparison. Opus used fewer calls and less context
+with FFmpeg in all three categories. Speed was observed under unequal background load and
+is provisional. No broad superiority or draft-G2 adoption is claimed.
+
+Six separately frozen f76b3ad skill follow-ups all passed without tool errors. They are
+single attempts, not additional baseline repeats. Inset still used 23/18 calls and
+43,870/66,128 peak tokens for Opus/Sonnet, with two/nine schema lookups. Native clip effects
+and later stages stay in scope, with remaining discovery costs measured explicitly.
+
+The shared scene-LUT prerequisite a9969bd is pushed to main. Its shipment gate passed five
+stages and reused 19 unchanged passes; 51 deferred stages are running in the background and
+still require terminal review. This documentation/report update needs its own ship check.
+No editing points or generated milestone evidence change.
+
 ## 13 October 2026: shared LUT effects for the scene reference
 
 Stage 3 requires native clip effects to match a scene reference, but scene layers previously

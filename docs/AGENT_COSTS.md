@@ -567,5 +567,6 @@ preflight; a separate normal-client probe renewed login before measurement. Neit
 the auditor correction is counted as an agent workflow. No raw media/transcripts enter Git.
 
 These observations do not establish repeatability, speech accuracy or a comparative lead.
-Release binaries and the two-model comparative benchmark remain separate work; direct-footage
-stages 2-6 remain unfinished. No editing points or generated milestone evidence change.
+Release binaries remain separate work. The [two-model comparative pilot](FOOTAGE_BENCHMARK_RESULTS.md)
+is now complete, with losses and limitations reported; direct-footage stage 2 has passed its
+full quick check, while stages 3-6 remain unfinished. No editing points or generated milestone evidence change.
