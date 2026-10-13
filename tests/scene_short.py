@@ -150,8 +150,23 @@ def run(root):
     assert placed['scene_sha256'] == expanded['scene_sha256']
     reference_path = output / 'placed-reference.mkv'
     call({'command': 'scene.render', 'scene': expanded['scene'], 'input_root': str(inputs), 'output_root': str(output), 'output': str(reference_path)})
-    for kind in ('video', 'audio'):
-        assert decoded(placed['asset']['path'], kind) == decoded(reference_path, kind)
+    assert placed['compiled'] is False and 'asset' not in placed and list(generated.iterdir()) == []
+    native = call({'command': 'session.get', 'store_root': str(store), 'project_id': 'short-place'})
+    assert native['schema_version'] == 2 and native['assets'] == []
+    clip = next(t for t in native['tracks']['tracks'] if t['id'] == 'graphics')['clips'][0]
+    assert clip['scene'] == expanded['scene'] and not clip.get('asset_id')
+    placed_path = output / 'placed-timeline.mkv'
+    call({'command': 'render.run', 'project': native, 'input_root': str(inputs), 'output_root': str(output), 'output': str(placed_path)})
+    # Independently flatten the compiled transparent oracle over the timeline's black canvas.
+    # Keep the earlier raw-alpha comparisons; timeline delivery itself is opaque.
+    rgba = decoded(reference_path, 'video')
+    assert len(rgba) == 10 * 128 * 72 * 4
+    expected = bytearray(len(rgba))
+    for offset in range(0, len(rgba), 4):
+        alpha = rgba[offset + 3]
+        expected[offset:offset + 4] = bytes([(rgba[offset + c] * alpha + 127) // 255 for c in range(3)] + [255])
+    assert decoded(placed_path, 'video') == expected
+    assert decoded(placed_path, 'audio') == decoded(reference_path, 'audio')
     passed.append('scene_short.project_sized_inline_placement_bound_digest_pixels_and_retry')
 
     for field, value, code in [('safe_area', 36, 'INVALID_SCENE'), ('background', '#badhex', 'INVALID_SCENE'),

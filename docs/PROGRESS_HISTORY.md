@@ -1,5 +1,19 @@
 # Progress history
 
+## 13 October 2026: repair shorthand placement oracle
+
+The 9e048b6 push gate stopped with 21 fixture passes and one `scene_short`
+failure in 172 seconds; nothing was pushed. Its graphics placement check still
+expected a compiled `asset` after the earlier generated-clip migration.
+
+The fixture now requires the saved scene recipe and absence of a compiled movie,
+renders the saved timeline, and compares every output pixel with the separately
+compiled transparent oracle independently flattened onto black. Exact PCM,
+raw-alpha/full-scene, fractional-clock, source-preservation and retry checks remain.
+Windows and Linux focused checks passed in 6/5 seconds; [shorthand evidence](../verification/generated-shorthand-2026-10-13.json)
+records the failure and repair. No production code changed. The caption commit
+and this fix still require a successful ship; no new points or stage exit.
+
 ## 13 October 2026: generated caption edit documents
 
 `captions.render` now accepts `mode: "generated"`: it publishes a JSON proposal

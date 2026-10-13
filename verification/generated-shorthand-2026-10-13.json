@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-13",
+  "kind": "generated_graphic_shorthand_oracle_fix",
+  "parent_commit": "9e048b6badd7c835f61f67c869517dbc7ad2eae8",
+  "test_sha256": "91d990f9f6a2c3f6a2fb97afc6319db1f711a5f5aa6edbb0ebd310a38cc62819",
+  "gate_failure": {
+    "commit": "9e048b6badd7c835f61f67c869517dbc7ad2eae8",
+    "passed_fixtures": 21,
+    "failed": [
+      "scene_short"
+    ],
+    "wall_seconds": 172,
+    "pushed": false,
+    "cause": "The shorthand placement fixture still indexed graphics.place result.asset after the earlier generated-scene migration.",
+    "log_sha256": "129a21c461ee3192d43e73b7373e2ba5cca3b1e93af8c5a34a912e3d7adf7913"
+  },
+  "change": [
+    "Require a generated scene receipt, no compiled movie and a schema-two saved clip with the exact expanded recipe.",
+    "Render the saved timeline and compare every RGBA output byte with the compiled transparent reference independently flattened onto black using integer straight-alpha arithmetic.",
+    "Keep exact PCM comparison, existing raw-alpha/full-scene and queued-clock oracles, source checks and retry assertions. No production code changes."
+  ],
+  "checks": {
+    "windows": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "wall_seconds": 6,
+      "report_sha256": "05b8232fece21ef65c83c0bb38ea0686fa5b7845db1f738b167f6a7bdd4ea163",
+      "log_sha256": "6ffbc09f1194523a50eb5e3e7cf8568c6ebeaaf9acce1d156454a4c59ebec4df"
+    },
+    "linux": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "wall_seconds": 5,
+      "report_sha256": "418ff68c5fb60c3688481c4b5b1fd8947cf541808cb1a4b795ffb4bdae810e00",
+      "log_sha256": "b8097284cb5739cb0cc902d7af5afd2059cb182d6ccbe3d189357bd2a798ac66"
+    }
+  },
+  "scope": "Focused repair of the gate failure. No new stage exit, throughput or progress claim; full caption evidence remains separate."
+}
