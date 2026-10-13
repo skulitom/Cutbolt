@@ -190,8 +190,22 @@ fn read_frame_with_publication(
             &format!("sequential clip {:?}", clip.id),
         ));
     }
-    let path = media::project_file(Path::new(&asset.path), input_root)?;
-    let (source, direct) = if asset.decode.is_some() {
+    let prepared = if matches!(asset.decode, Some(crate::model::Decode::Converted { .. })) {
+        crate::converted::sources(
+            project,
+            input_root,
+            media::source_preparation_allowed(),
+            &media::Uncontrolled,
+        )?
+        .remove(&asset.id)
+    } else {
+        None
+    };
+    let path = match &prepared {
+        Some(source) => source.path.clone(),
+        None => media::project_file(Path::new(&asset.path), input_root)?,
+    };
+    let (mut source, direct) = if asset.direct() {
         let (source, video) = render::inspect_indexed(
             project,
             asset,
@@ -216,6 +230,9 @@ fn read_frame_with_publication(
             None,
         )
     };
+    if let Some(prepared) = prepared {
+        source.conversion = prepared.conversion;
+    }
     crate::registry::verify_source(asset, &source)?;
     let source_end = clip.source_in.plus(clip.duration)?;
     if source_end.units(project.frame_rate)? > source.frames {
@@ -288,8 +305,8 @@ fn read_frame_with_publication(
             "Preview frame size differs",
         ));
     }
-    if (!defer_identity || decode.is_none()) && media::file_hash(&path)? != source.sha256 {
-        return Err(error("MEDIA_CHANGED", "Source changed during preview"));
+    if !defer_identity || decode.is_none() {
+        source.verify(&media::Uncontrolled)?;
     }
     let mut receipt = json!({"project_revision":project.revision,"time":time,"timeline_frame":selected,"clip_id":clip.id,"source_frame":source_frame,"source":source,"width":project.width,"height":project.height,"source_quality":if preview_scale.is_some() {"proxy"} else {"original"},"preview_scale":preview_scale});
     if let Some(decode) = decode {
@@ -333,6 +350,25 @@ pub fn frame(
                     "MEDIA_CHANGED",
                     "Source changed during transition preview publication",
                 ));
+            }
+        }
+    }
+    for source in std::iter::once(&receipt["source"])
+        .chain(receipt["sources"].as_array().into_iter().flatten())
+    {
+        if let Some(dependencies) = source["conversion"]["dependencies"].as_array() {
+            for d in dependencies {
+                let path = Path::new(d["path"].as_str().expect("source proof path"));
+                if path.metadata()?.len()
+                    != d["identity"]["bytes"].as_u64().expect("source proof size")
+                    || media::file_hash(path)?
+                        != d["identity"]["sha256"].as_str().expect("source proof hash")
+                {
+                    return Err(error(
+                        "MEDIA_CHANGED",
+                        "Conversion original or decoder changed before preview publication",
+                    ));
+                }
             }
         }
     }

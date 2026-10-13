@@ -62,6 +62,13 @@ pub fn cancel_ambient() {
         .cancelled
         .store(true, std::sync::atomic::Ordering::SeqCst);
 }
+static PREPARE_SOURCES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) fn allow_source_preparation() {
+    PREPARE_SOURCES.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+pub(crate) fn source_preparation_allowed() -> bool {
+    PREPARE_SOURCES.load(std::sync::atomic::Ordering::Relaxed)
+}
 pub(crate) fn ambient_cancelled() -> bool {
     AMBIENT.cancelled.load(std::sync::atomic::Ordering::SeqCst)
 }

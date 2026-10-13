@@ -233,6 +233,9 @@ pub enum Request {
     },
     #[serde(rename = "media.prepare")]
     MediaPrepare {
+        /// Populate the saved project's conversion cache without delivery copies; requires project and no path/paths/output/transcripts. Default false preserves explicit file preparation.
+        #[serde(default)]
+        cached: bool,
         /// File to prepare: any video FFmpeg decodes, such as a phone or camera MP4, or a PCM16 WAV voice-over or music track (an audio-only WAV asset, for audio tracks). Give this or `paths`.
         #[serde(default)]
         path: Option<PathBuf>,
@@ -1518,6 +1521,7 @@ pub fn handle(request: Request) -> Result<Value> {
             vocabulary: &vocabulary,
         }),
         Request::MediaPrepare {
+            cached,
             path,
             paths,
             input_root,
@@ -1525,27 +1529,46 @@ pub fn handle(request: Request) -> Result<Value> {
             output,
             project,
             transcripts,
-        } => match (path, paths, output) {
-            (Some(path), None, output) => crate::readiness::prepare(
-                &path,
-                &input_root,
-                &output_root,
-                output.as_deref(),
-                project.as_ref(),
-                &transcripts,
-            ),
-            (None, Some(paths), None) => crate::readiness::prepare_many(
-                &paths,
-                &input_root,
-                &output_root,
-                project.as_ref(),
-                &transcripts,
-            ),
-            _ => Err(crate::error(
-                "INVALID_ARGUMENT",
-                "Give path (with an optional output) or paths, not both",
-            )),
-        },
+        } => {
+            if cached {
+                if path.is_some() || paths.is_some() || output.is_some() || !transcripts.is_empty()
+                {
+                    Err(crate::error(
+                        "INVALID_ARGUMENT",
+                        "Cached preparation accepts project, without path/paths/output/transcripts",
+                    ))
+                } else {
+                    crate::converted::prepare(
+                        project.as_ref().ok_or_else(|| {
+                            crate::error("INVALID_ARGUMENT", "Cached preparation requires project")
+                        })?,
+                        &input_root,
+                    )
+                }
+            } else {
+                match (path, paths, output) {
+                    (Some(path), None, output) => crate::readiness::prepare(
+                        &path,
+                        &input_root,
+                        &output_root,
+                        output.as_deref(),
+                        project.as_ref(),
+                        &transcripts,
+                    ),
+                    (None, Some(paths), None) => crate::readiness::prepare_many(
+                        &paths,
+                        &input_root,
+                        &output_root,
+                        project.as_ref(),
+                        &transcripts,
+                    ),
+                    _ => Err(crate::error(
+                        "INVALID_ARGUMENT",
+                        "Give path (with an optional output) or paths, not both",
+                    )),
+                }
+            }
+        }
         Request::MediaSheet {
             path,
             input_root,
@@ -2333,7 +2356,7 @@ fn capabilities(section: Option<&str>) -> Result<Value> {
         .map(rate)
         .collect();
     let essentials = [
-        "Timelines accept the strict FFV1/PCM reference profile and bound indexed H.264/HEVC 8-bit originals at the project size/rate. media.inspect returns eligible original assets; media.prepare converts supported files that need preparation.".to_owned(),
+        "Timelines accept reference media, indexed H.264/HEVC originals and saved converted-source recipes. media.add with input_root chooses the profile; queued export commands prepare missing conversions. Synchronous misses return PREPARATION_REQUIRED with a cached media.prepare request.".to_owned(),
         format!(
             "Timelines (sequential or placed tracks) run at {} fps; scenes, captions and H.264 delivery follow the timeline's rate, while proxies and camera groups stay at 25 fps.",
             rates.join(", ")

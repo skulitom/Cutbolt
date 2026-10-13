@@ -17,7 +17,7 @@ pub enum Interpolation {
     Tetrahedral,
 }
 /// Identity-bound .cube LUT (one 1D or 3D table) applied to encoded working-transfer RGB.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
     /// Table file identity; `.cube` path relative to `input_root`, at most 8 MiB.

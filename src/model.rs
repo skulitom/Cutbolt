@@ -21,17 +21,36 @@ pub struct Asset {
     /// Original content identity set by media.bind or indexed media.add; required for relinking and proxies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<crate::registry::Identity>,
-    /// Indexed original compressed source. Omitted for legacy/native assets; requires identity.
+    /// Original source decoding: indexed directly or normalized with a saved conversion recipe; requires identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decode: Option<Decode>,
+    /// Original identity and, when materialized, the identity of its normalized conversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
     /// Preview proxy attached with media.proxy.attach; omitted when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<crate::proxy::Binding>,
 }
+/// Content lineage; derived conversion files are rebuildable and originals remain authoritative.
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Provenance {
+    /// Complete original media identity.
+    pub original: crate::registry::Identity,
+    /// Complete normalized file identity once prepared; absent while only a recipe is saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversion: Option<crate::registry::Identity>,
+}
 /// How an identity-bound original is decoded; the index is derived data kept outside the project.
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "SourceDecode")]
 pub enum Decode {
+    /// Cached lossless normalization with a saved, identity-bound interpretation.
+    Converted {
+        /// Explicit identity-bound normalization recipe at the project canvas and frame rate.
+        recipe: Box<crate::conform::Recipe>,
+    },
     /// Exact indexed native-YUV decoding. The key binds source, tools, engine and index schema.
     Direct {
         /// Lowercase SHA-256 index key returned by media.inspect or filled by media.add with input_root.
@@ -39,8 +58,10 @@ pub enum Decode {
     },
 }
 impl Asset {
-    /// An audio-only asset: a 48 kHz stereo PCM16 WAV, which audio tracks play directly and no
-    /// picture can use.
+    pub(crate) fn direct(&self) -> bool {
+        matches!(self.decode, Some(Decode::Direct { .. }))
+    }
+    /// A 48 kHz stereo PCM16 WAV that audio tracks play without pictures.
     pub(crate) fn audio_only(&self) -> bool {
         audio_only_path(std::path::Path::new(&self.path))
     }
@@ -230,7 +251,7 @@ pub enum Operation {
     AddMedia {
         /// Asset to add, with an ID not already used by another asset.
         asset: Asset,
-        /// Optional explicit input root: inspect and bind an original compressed source before adding it.
+        /// Optional input root: inspect the original and bind direct decoding or a saved conversion recipe at the project canvas/rate.
         /// Omit to add an already-bound asset or retain the legacy metadata-only behavior.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_root: Option<std::path::PathBuf>,
@@ -458,6 +479,19 @@ impl Project {
                     "Direct decode requires a video asset, bound identity and a lowercase 64-character index key",
                 ));
             }
+            crate::converted::validate(self, asset)?;
+            if let Some(provenance) = &asset.provenance {
+                provenance.original.validate()?;
+                if let Some(identity) = &provenance.conversion {
+                    identity.validate()?;
+                }
+                if asset.decode.is_some() && asset.identity.as_ref() != Some(&provenance.original) {
+                    return Err(error(
+                        "INVALID_IDENTITY",
+                        "Original decode identity and provenance disagree",
+                    ));
+                }
+            }
             if let Some(proxy) = &asset.proxy {
                 proxy.validate(self, asset)?;
             }
@@ -625,7 +659,7 @@ impl Project {
                     input_root,
                 } => {
                     if let Some(root) = input_root {
-                        asset = crate::direct::bind(&next, asset, &root, false)?;
+                        asset = crate::converted::bind(&next, asset, &root)?;
                     }
                     next.assets.push(asset);
                 }
@@ -956,6 +990,7 @@ mod tests {
             identity: None,
             proxy: None,
             decode: None,
+            provenance: None,
             id: "a".into(),
             path: "external.mkv".into(),
             duration: t(12),

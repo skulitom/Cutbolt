@@ -369,6 +369,7 @@ pub fn place(request: &Place) -> Result<Value> {
         }),
         proxy: None,
         decode: None,
+        provenance: None,
     };
     let arrangement = match &request.sequence_id {
         Some(id) => &crate::sequences::get(&request.project, id)?.arrangement,

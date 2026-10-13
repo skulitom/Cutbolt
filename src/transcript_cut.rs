@@ -481,6 +481,7 @@ mod tests {
             identity: Some(document.source.identity.clone()),
             proxy: None,
             decode: None,
+            provenance: None,
         });
         let clips: Vec<_> = ["v", "a"]
             .iter()

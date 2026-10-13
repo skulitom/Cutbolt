@@ -35,6 +35,7 @@ fn sample() -> Project {
         identity: None,
         proxy: None,
         decode: None,
+        provenance: None,
     });
     project.clips.push(Clip {
         id: "c".into(),

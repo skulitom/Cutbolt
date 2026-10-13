@@ -74,7 +74,7 @@ pub(super) fn class(saved: &Value) -> Class {
     .filter_map(Value::as_str)
     .map(normalize)
     .collect();
-    if name == "media.prepare" && command["output"].is_null() {
+    if name == "media.prepare" && command["cached"] != true && command["output"].is_null() {
         claims.extend(
             prepared_outputs(command)
                 .iter()

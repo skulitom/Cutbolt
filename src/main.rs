@@ -96,18 +96,21 @@ fn main() {
             return Ok(Some(cutbolt::doctor::inspect(path.as_deref())));
         }
         let workspace = path.map(|p| Workspace::open(&p)).transpose()?;
-        // A workspace keeps verified source inspections beside its other engine state, unless the
-        // environment names a cache already. Queue workers inherit the setting.
-        if let Some(workspace) = &workspace
-            && std::env::var_os(cutbolt::inspection_cache::DIRECTORY_VARIABLE).is_none()
-        {
-            // SAFETY: still single-threaded; nothing else reads or writes the environment yet.
-            unsafe {
-                std::env::set_var(
+        // Workspace caches stay together even when a request selects a narrower input root.
+        // Explicit environment settings win. Queue workers inherit both locations.
+        if let Some(workspace) = &workspace {
+            for (variable, path) in [
+                (
                     cutbolt::inspection_cache::DIRECTORY_VARIABLE,
-                    workspace.inside(".cutbolt/cache/inspections"),
-                )
-            };
+                    ".cutbolt/cache/inspections",
+                ),
+                ("CUTBOLT_CONFORM_CACHE", ".cutbolt/cache/conform"),
+            ] {
+                if std::env::var_os(variable).is_none() {
+                    // SAFETY: still single-threaded; nothing else accesses the environment yet.
+                    unsafe { std::env::set_var(variable, workspace.inside(path)) };
+                }
+            }
         }
         if args.first().is_some_and(|a| a == "mcp") {
             // Compact by default; a flag overrides CUTBOLT_MCP_TOOLS. Full remains opt-in.

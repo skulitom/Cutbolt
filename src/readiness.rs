@@ -163,8 +163,25 @@ pub fn timeline(path: &Path, relative: &str, metadata: &Value) -> Value {
     let mut result = json!({"ready":false,"reasons":reasons});
     match video.map(|v| conform(relative, v, audio, rate, None)) {
         Some(Ok(recipe)) => {
-            result["conform"] = json!({"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),
-                "next":"check the recipe with media.conform.inspect, run it with job.start run media.conform, then media.add the returned asset"})
+            let size = serde_json::from_value::<Time>(recipe["duration"].clone())
+                .ok()
+                .and_then(|duration| {
+                    let rate = serde_json::from_value::<Time>(recipe["frame_rate"].clone())
+                        .unwrap_or(Time { num: 25, den: 1 });
+                    let frames = duration.units(rate).ok()?;
+                    let pcm = duration
+                        .units(Time { num: 48000, den: 1 })
+                        .ok()?
+                        .checked_mul(4)?;
+                    let video = recipe["width"]
+                        .as_u64()?
+                        .checked_mul(recipe["height"].as_u64()?)?
+                        .checked_mul(4)?
+                        .checked_mul(frames)?;
+                    video.checked_add(pcm)
+                });
+            result["conform"] = json!({"cache":{"expected_bytes":size,"estimate":"uncompressed_reference_payload; encoded size varies and is limited during writing","default_cap_bytes":50_000_000_000u64},"recipe":recipe,"output":format!("{}-conformed.mkv",asset_id(relative)),
+                "next":"Add the original with media.add and input_root to save automatic normalization at the project size/rate; queued exports prepare and cache it. Explicit media.prepare remains available."})
         }
         Some(Err(why)) => result["reasons"]
             .as_array_mut()

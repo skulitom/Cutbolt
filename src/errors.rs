@@ -785,6 +785,11 @@ pub const REGISTRY: &[(&str, Retry, &str)] = &[
         "A resolved path leaves the configured workspace.",
     ),
     (
+        "PREPARATION_REQUIRED",
+        Retry::Changed,
+        "A saved source conversion is absent or corrupt; queue media.prepare with cached true and retry.",
+    ),
+    (
         "PROJECT_EXISTS",
         Retry::Changed,
         "A saved project with this ID already exists.",

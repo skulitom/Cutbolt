@@ -283,6 +283,7 @@ fn bounded_attempts_pin_sources_and_keep_failure_history() {
     let fixture = Fixture::new();
     let (connection, _) = seed(&fixture.0, 3);
     let mut sources = vec![render::Source {
+        conversion: None,
         path: fixture.0.join("source.mkv"),
         sha256: digest(b"original"),
         frames: 1,
@@ -317,6 +318,81 @@ fn bounded_attempts_pin_sources_and_keep_failure_history() {
                 .unwrap();
             begin_attempt(&connection, "one").unwrap();
         }
+    }
+}
+
+#[test]
+fn converted_retries_ignore_materialization_but_pin_content_and_dependencies() {
+    use crate::{
+        conform_cache::{Dependency, Lease},
+        conform_store::Entry,
+        registry::Identity,
+    };
+    let fixture = Fixture::new();
+    let (connection, _) = seed(&fixture.0, 3);
+    let original = Identity {
+        sha256: digest(b"original"),
+        bytes: 8,
+    };
+    let lease = Lease {
+        _guard: std::sync::Arc::new(std::fs::File::create(fixture.0.join("lease")).unwrap()),
+        entry: Entry {
+            path: fixture.0.join("aaa-cache.mkv"),
+            identity: Identity {
+                sha256: digest(b"container-a"),
+                bytes: 100,
+            },
+            metadata: json!({"decoded":{"video_sha256":digest(b"pixels"),"pcm_sha256":digest(b"samples")}}),
+        },
+        key: digest(b"recipe-tools-engine"),
+        hit: false,
+        dependencies: vec![Dependency {
+            path: fixture.0.join("zzz-original.mov"),
+            identity: original,
+        }],
+        payload_bytes: 100,
+    };
+    let native = render::Source {
+        path: fixture.0.join("native.mkv"),
+        sha256: digest(b"native"),
+        frames: 1,
+        samples: 1920,
+        conversion: None,
+    };
+    let mut converted = render::Source {
+        path: lease.entry.path.clone(),
+        sha256: lease.entry.identity.sha256.clone(),
+        frames: 1,
+        samples: 1920,
+        conversion: Some(lease),
+    };
+    pin_sources(&connection, "one", &[converted.clone(), native.clone()]).unwrap();
+    converted.path = fixture.0.join("zzz-cache.mkv");
+    converted.sha256 = digest(b"container-b");
+    let cache = converted.conversion.as_mut().unwrap();
+    cache.entry.path = converted.path.clone();
+    cache.entry.identity = Identity {
+        sha256: converted.sha256.clone(),
+        bytes: 200,
+    };
+    cache.payload_bytes = 200;
+    cache.hit = true;
+    pin_sources(&connection, "one", &[native.clone(), converted.clone()]).unwrap();
+    for change in 0..4 {
+        let mut changed = converted.clone();
+        let cache = changed.conversion.as_mut().unwrap();
+        match change {
+            0 => cache.entry.metadata["decoded"]["video_sha256"] = json!(digest(b"changed pixels")),
+            1 => cache.dependencies[0].identity.sha256 = digest(b"changed original"),
+            2 => cache.key = digest(b"changed recipe"),
+            _ => changed.samples += 1,
+        }
+        assert_eq!(
+            pin_sources(&connection, "one", &[native.clone(), changed])
+                .unwrap_err()
+                .code,
+            "MEDIA_CHANGED"
+        );
     }
 }
 

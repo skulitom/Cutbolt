@@ -58,7 +58,7 @@ pub(crate) fn limits() -> Value {
 }
 
 /// A source file pinned by its SHA-256 and size; source files stay inside the input root, with an OS-font-folder exception only for font fields.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Identity {
     /// Normal-component path relative to input_root. Only font fields additionally accept absolute installed-font paths returned by fonts.find; image/audio fields require relative paths.

@@ -1005,9 +1005,7 @@ pub fn run(request: &Export) -> Result<Value> {
     let (verified, unchanged) = std::thread::scope(|scope| {
         let unchanged = scope.spawn(|| -> Result<()> {
             for source in &c.reference.sources {
-                if media::file_hash(&source.path)? != source.sha256 {
-                    return Err(error("MEDIA_CHANGED", "Source changed during export"));
-                }
+                source.verify(&media::Uncontrolled)?;
             }
             Ok(())
         });

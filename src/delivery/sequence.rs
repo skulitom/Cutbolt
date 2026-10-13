@@ -258,9 +258,7 @@ pub(super) fn run(
     file.sync_all()?;
     drop(file);
     for source in &c.reference.sources {
-        if media::file_hash(&source.path)? != source.sha256 {
-            return Err(error("MEDIA_CHANGED", "Source changed during image export"));
-        }
+        source.verify(&media::Uncontrolled)?;
     }
     let mut result = report(request, c);
     result["manifest"] = json!({"path":"manifest.json","bytes":fs::metadata(&path)?.len(),"sha256":media::file_hash(&path)?});

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Canvas fitting after source display rotation and sample aspect have been interpreted.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Fit {
     /// Preserve display aspect and center the complete picture, padding uncovered pixels.
@@ -16,7 +16,7 @@ pub enum Fit {
 }
 
 /// Explicitly normalize canonical quarter-turn display metadata and positive sample aspect.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Geometry {
     /// Required canvas fit. Sampling is nearest top-left; centering leaves odd excess right/bottom.

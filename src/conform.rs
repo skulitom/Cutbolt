@@ -39,14 +39,14 @@ fn tool_timeout(seconds: f64) -> Duration {
     Duration::from_secs((180.0 + 2.0 * seconds.max(0.0)).min(4.0 * 3600.0) as u64)
 }
 /// Legacy video interpretation: `encoded_rgb` keeps MKV FFV1/bgr0 values as stored; `bt709_limited` converts tagged limited-range BT.709 H.264 yuv420p MP4/MOV to full-range RGB.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Color {
     EncodedRgb,
     Bt709Limited,
 }
 /// Audio policy: `resample` linearly resamples source audio (pitch follows speed); `mute` writes exact silence and is required for reverse or freeze.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Audio {
     Resample,
@@ -54,20 +54,20 @@ pub enum Audio {
 }
 /// Explicit clock normalization: make the first presented video frame time zero, preserving
 /// audio's relative timestamp offset. Audio outside its decoded interval becomes silence.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Clock {
     FirstVideoFrame,
 }
 /// Source alpha association. `straight` declares color channels independent of coverage.
 /// Premultiplied sources are unsupported; omission is required for sources without alpha.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Alpha {
     Straight,
 }
 /// Identity-bound conform source and its declared color interpretation.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     /// Source file identity; path relative to `input_root`, at most 16 GiB (MKV, MP4, MOV or WAV).
@@ -90,7 +90,7 @@ pub struct Source {
     pub geometry: Option<Geometry>,
 }
 /// Media conversion recipe for media.conform: samples a source into a new FFV1/PCM16 editing asset at `frame_rate` (default 25 fps), or a WAV source into an audio-only WAV when `width` and `height` are omitted.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
     /// Output frame rate, one of 24, 25, 30, 50, 60, 24000/1001, 30000/1001 or 60000/1001; default 25. Use the source's own rate to keep every frame, which avoids judder.

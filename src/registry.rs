@@ -364,6 +364,19 @@ pub(crate) fn match_identity(
 
 pub(crate) fn verify_source(asset: &Asset, source: &render::Source) -> Result<()> {
     if let Some(identity) = &asset.identity {
+        if let Some(lease) = &source.conversion {
+            if lease
+                .dependencies
+                .first()
+                .is_some_and(|d| &d.identity == identity)
+            {
+                return Ok(());
+            }
+            return Err(error(
+                "IDENTITY_MISMATCH",
+                "Converted source original identity differs",
+            ));
+        }
         let bytes = source.path.metadata()?.len();
         let mut differs = if identity.bytes != bytes {
             changed_size(&asset.path, identity.bytes, bytes, RELINK_ASSET)

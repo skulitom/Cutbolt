@@ -9,6 +9,7 @@ use crate::{
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeSet,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -122,7 +123,9 @@ pub(crate) struct Store {
     connection: Connection,
     pub(crate) root: PathBuf,
     exclusive: bool,
+    protected: BTreeSet<String>,
 }
+#[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct Entry {
     pub path: PathBuf,
     pub identity: Identity,
@@ -175,6 +178,7 @@ impl Store {
             connection,
             root,
             exclusive,
+            protected: BTreeSet::new(),
         };
         let rows = store.rows()?;
         if rows.len() > MAX_ENTRIES as usize || rows.iter().map(|r| r.3).sum::<u64>() > MAX_BYTES {
@@ -190,6 +194,28 @@ impl Store {
             }
         }
         Ok(store)
+    }
+    /// Pin this request's working set while a writer makes missing entries.
+    pub(crate) fn protect(&mut self, keys: impl IntoIterator<Item = String>) -> Result<()> {
+        self.writer()?;
+        let keys: BTreeSet<_> = keys.into_iter().collect();
+        if keys.iter().any(|key| !key_ok(key)) {
+            return Err(invalid("Malformed protected conform key"));
+        }
+        self.protected = keys;
+        Ok(())
+    }
+    /// Keep the shared filesystem lease after closing the metadata connection.
+    pub(crate) fn into_lease(self) -> File {
+        self._lease
+    }
+    fn budget_error() -> crate::Error {
+        error(
+            "LIMIT_EXCEEDED",
+            "The required conversion working set exceeds its cache policy",
+        )
+        .with_path("policy")
+        .with_hint("Raise the conversion cache byte/entry policy or use fewer source assets.")
     }
     fn writer(&self) -> Result<()> {
         if self.exclusive {
@@ -301,8 +327,9 @@ impl Store {
                 break;
             }
             let (key, ext, _, _) = rows
-                .first()
-                .ok_or_else(|| invalid("Cannot satisfy conform cache budget"))?;
+                .iter()
+                .find(|r| !self.protected.contains(&r.0))
+                .ok_or_else(Self::budget_error)?;
             self.remove(key, ext)?;
             evicted.push(key.clone());
         }
@@ -412,8 +439,8 @@ impl Store {
             }
             let (old, ext, _, _) = rows
                 .iter()
-                .find(|r| r.0 != key && r.2)
-                .ok_or_else(|| invalid("Conform reservation cannot fit its budget"))?;
+                .find(|r| r.0 != key && r.2 && !self.protected.contains(&r.0))
+                .ok_or_else(Self::budget_error)?;
             self.remove(old, ext)?;
         }
         self.connection.execute(

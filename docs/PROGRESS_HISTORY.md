@@ -1,5 +1,39 @@
 # Progress history
 
+## 13 October 2026: automatic preparation of saved converted sources
+
+media.add with input_root now retains supported originals and binds either a direct source
+or an explicit converted-source recipe to the project canvas/rate. Converted assets save
+original provenance; preparation receipts add the verified conversion identity without a
+new project revision. Queued exports and background reference renders prepare missing
+sources in a cancellable preparing-sources phase. Synchronous misses name the actual asset
+and return a runnable preparation ticket, including its created job root and fresh request
+ID. Workspace caches remain together even with a narrower input root; explicit configuration
+wins. Inspection reports an estimated payload and conversion enforces the configured cap.
+
+Preparing the whole referenced working set before taking shared leases prevents sources
+from evicting each other or deadlocking later render chunks. Full original/tool checks still
+precede publication. Retry manifests retain original identity, recipe key and decoded digests,
+while ignoring rebuilt container bytes and ordering by original source paths. No compatibility
+or editing points change; audio-only normalization remains explicitly prepared.
+
+Windows/Linux pass 244/243 Rust tests, strict all-target lint and eight existing fixtures:
+conform_cache, queue_recovery, tracks, overlays, transitions, delivery, agent_costs and
+integration. The final automatic_prepare fixture passes 11 checks on both systems: VFR,
+rotated H.264, HEVC Main10 and ProRes 422 match explicit conform/export decoded frames and
+PCM, with one cold conversion encoder and zero warm ones. Transparent ProRes overlays,
+saved recipes, complete repair requests, two-source leases, precise eviction errors,
+background frame progress, cancellation, workspace defaults and budget/source preservation
+are also checked. Initial fixture/schema mistakes and their corrections are recorded in
+verification/automatic-prepare-2026-10-13.json, alongside exact source/binary/log identities.
+
+The preceding 9aa89a1 shipment completed all 57 deferred fixtures in 2603 seconds with no
+failures, skips or unstarted work, including recording. The new checkpoint still requires
+its ship gate and deferred checks; check their terminal results. Stage 2's full quick run
+remains pending. Full milestone evidence stays at 338e114 and no points are awarded. The
+historical intermittent H.264 mismatch remains unexplained; failure retention stays enabled.
+Comparative measurements precede the expensive remaining stages 3-6.
+
 ## 13 October 2026: explicit file-backed conversion cache
 
 cache.run now accepts a conform task, with immutable MKV/WAV payloads, a small owned

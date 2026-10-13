@@ -1231,6 +1231,7 @@ fn guard(group: libc::pid_t) -> std::io::Result<libc::pid_t> {
 /// line on stdin; any later line, or the end of stdin, cancels it. Progress lines and then one
 /// `{"ok": ...}` line go to stdout.
 pub fn command_process() -> Result<()> {
+    media::allow_source_preparation();
     use std::io::{BufRead, Write};
     use std::sync::mpsc::{RecvTimeoutError, channel};
     let mut input = std::io::BufReader::new(std::io::stdin());
@@ -1831,15 +1832,48 @@ fn execute(connection: &Connection, id: &str) -> Result<()> {
     let temp = request
         .output
         .with_file_name(recovery::partial_name(id, attempt));
-    render::run_controlled(
-        &request.project,
-        &request.input_root,
-        &request.output_root,
-        &request.output,
-        Some(&temp),
-        &control,
-    )
-    .map(|_| ())
+    for _ in 0..4 {
+        match render::run_controlled(
+            &request.project,
+            &request.input_root,
+            &request.output_root,
+            &request.output,
+            Some(&temp),
+            &control,
+        ) {
+            Err(failure) if failure.code == "PREPARATION_REQUIRED" => {
+                // Reuse the command-process containment, cancellation and watchdog boundary.
+                // Preparation must not complete the parent render ticket or publish its output.
+                let preparation = SavedCommand {
+                    command: json!({"command":"media.prepare","cached":true,"project":request.project,
+                        "input_root":request.input_root,"output_root":request.output_root}),
+                    ffmpeg: saved.ffmpeg.clone(),
+                    ffprobe: saved.ffprobe.clone(),
+                    ffmpeg_sha256: media::file_hash(Path::new(&saved.ffmpeg))?,
+                    ffprobe_sha256: media::file_hash(Path::new(&saved.ffprobe))?,
+                };
+                supervise(connection, id, &preparation)?;
+                // The preparation phase counted assets. Restore the render's frame progress.
+                let frames = request
+                    .project
+                    .duration()?
+                    .units(request.project.frame_rate)?;
+                connection.execute(
+                    "UPDATE jobs SET frames=0,total_frames=?2 WHERE id=?1",
+                    params![
+                        id,
+                        i64::try_from(frames)
+                            .map_err(|_| error("LIMIT_EXCEEDED", "Frame count too large"))?
+                    ],
+                )?;
+            }
+            outcome => return outcome.map(|_| ()),
+        }
+    }
+    Err(error(
+        "STORE_BUSY",
+        "Conversions were repeatedly evicted between preparation and rendering",
+    ))
 }
 
 /// Each media subprocess gets a nested lifetime scope before the external tool starts.

@@ -192,7 +192,14 @@ automatic preparation phases, provenance and the stage exit remain pending.
 A 13 October checkpoint adds a hard encoded-output ceiling and a file-backed explicit
 `cache.run` conform task with decoded verification, LRU inspect/prune and reader leases.
 See [conversion caching](../CONFORM.md#explicit-conversion-cache). Automatic media.add preparation,
-provenance and preparing-source phases still remain; this does not satisfy the stage exit.
+provenance and preparing-source phases remained at that checkpoint. A later 13 October
+checkpoint adds saved converted assets, queued-command preparation and synchronous repair
+requests; see [AUTOMATIC_PREPARATION](../AUTOMATIC_PREPARATION.md). The four source-type
+comparisons pass on Windows and Linux, including the older render.start preparation path,
+cancellation, progress restoration and transparent ProRes overlays. Eight existing regression
+fixtures pass on both systems. See verification/automatic-prepare-2026-10-13.json for the
+requirement audit and disclosed fixture corrections. The full quick run remains pending
+before closing the stage.
 
 Goal: an agent never has to call `media.prepare` by hand. Files that cannot be decoded directly are converted once, cached and reused, and the conversion is visible.
 

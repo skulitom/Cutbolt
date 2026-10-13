@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "scope": "Saved original-bound conversion recipes and automatic queued source preparation; stage-2 checkpoint awaiting full quick verification.",
+  "source_base": "9aa89a1012e75011b85ad7d007fdbf0f1b3ebe6e",
+  "source_sha256": {
+    "src/acceleration.rs": "9cab16aca5087a06d267d4cf111044fecdbaff13d8bff245dd179ee1ca510b2a",
+    "src/color.rs": "338309382543d3f1beab131e9a8d521913786f5f07cf45995e318dd977459f2a",
+    "src/commands.rs": "4b1ff0c5236529ed3966f5b997fc7ed18f0183e81eb3edb2fe3ffd9144c57b13",
+    "src/conform.rs": "1d0b57da937e1e4c7dd4778ab9470d8fa12f88015e5aff3c66876f05cf58eb61",
+    "src/conform/geometry.rs": "5d3f6a93649c076a3ddc61c11657f14f2ce58b28df459ce5027268c6722ef661",
+    "src/conform_cache.rs": "0a6d0dc45b3071fdad1513ca46c106e626ceb94068a24288ae2490b334636434",
+    "src/conform_store.rs": "e62133c058f5b2f286a447474d9659b3944ec9db7c022ec4b75aec371742580e",
+    "src/conform_store/tests.rs": "c3c83aa3f3f900066c6a54233bc50f352d1cd389a258a1d6f7fa617dcd164c52",
+    "src/converted.rs": "fb3222280fd7f39677d70308992cab0ece6fcdf5b0c2a2d3f2436a7f9c6dfe41",
+    "src/delivery.rs": "ff88e721d635d7653cc255e497e1eb026d455712392c13ef81110ec2ef0d33f0",
+    "src/delivery/sequence.rs": "56e3390ada7f616ab8edef0479ddf94c91e427e163dc978b5e202339c52b37e0",
+    "src/direct/project.rs": "578c0291755bc47aa5cab5b995a773cda1b6ab9f71d9597627a5dff238a76043",
+    "src/errors.rs": "780cb8480f00f7bec1a0d66f9eb298721c338b856b4ceb6b5c052a378e9c8f56",
+    "src/jobs.rs": "7a6802645299222e4cb6eb12201e51afb134ad1f2b676eb2d7cf483c6b946c25",
+    "src/jobs/pool.rs": "ddc48daa45ac8f567cd6552aa2638d58bb4043a2ec040e00901c5f5203a936b1",
+    "src/jobs/recovery.rs": "6556cc49989ce5d272f0baeb020645b7a8d1c629874a57772798c6a9e7b92f53",
+    "src/jobs/recovery/tests.rs": "de2e3fd9fb3467ccb5369e3c9e9535c5b9ced2db58af123591652d7d7403ef73",
+    "src/lib.rs": "43a8ae259e642b7de4627c7d028a0499da918851982833f108ea241254213c14",
+    "src/lut.rs": "804cdcc7dd351446c4895c14707e4087e76be31ab253aaf843d084f8a85d6326",
+    "src/main.rs": "5c1fe3cb0bd958c11280217794c1c8af0179ede7a473eab9ec122bab9785c4ec",
+    "src/mcp.rs": "e9a2f1be6aac6c559ac9d2418d03654e9153d660e564eeb19a97e8138d34a533",
+    "src/media.rs": "f7fe3e36565675beb345c5d03da1eeb6fbbdfe810fd00c52b1c93d1565d391e1",
+    "src/meters.rs": "045e44f7c4243a3fa373b7539aa18d057087545afb1657613bc7892767fcb113",
+    "src/model.rs": "fc33cb3e1a4d21970c72d8b2d9e357677d8ace840681e49a90e4a655363acec7",
+    "src/normalize.rs": "8bba957897457aef937afb09a52a581eaf1fa2cdeaaa8b2c440598452fe10bb2",
+    "src/preview.rs": "99af8002d0698c890793ec85c18ace0b05a4e26aab442d0a3d82fb914f69608c",
+    "src/proxy.rs": "08f855aeef4a49670fb1fb165bd4fd33d2b928e670b2415966e1200a7aa30b2b",
+    "src/readiness.rs": "e7015209b573ced24e8267f93deccbd54f9bd19c6cbcf6f50685421e43f3b1a3",
+    "src/recording.rs": "712dc85323dadf1af9bb67ed3c169ada97cfc2239459de0dd6a161b20c156929",
+    "src/registry.rs": "ac86c5fb64cbe4fef4e11e98864695453d5eb5d81b1f7dc20b2e252be406babe",
+    "src/remap.rs": "38eaab38bf68d34661b97e39526490d550d39e27d7c2d897e679752075bfc2bb",
+    "src/render.rs": "3d0e470970f4ae35e779b8e70f5e81cd8cc5d8ae176a88de7502a623212b6eac",
+    "src/scene.rs": "63011ba2757351026fef430ae8c96f761cc692b50638ca0c516b2854a23d4e47",
+    "src/schema.rs": "d290c6c2296b5174a26d83e01d28c81e83ffb13ed947ed6bf9353b3f517d9139",
+    "src/store.rs": "4491aadd6bf23c4ab54c7f4bf0e0aa40a84c2e21e75234809f524838323aadba",
+    "src/store/integrity/tests.rs": "2016d26b688c7204bfb22d633aa92000c9274ae338cfbf7e4bd9e7404bd0f657",
+    "src/track_render.rs": "c3f07343ac813cc0065050f885792d4a045cab498b590fdbdd72a52598324e2c",
+    "src/transcript_cut.rs": "d9c9ce6a4be3217c4801faf4157977ff1b57d86eec477376cb69307982c5fba5",
+    "tests/automatic_prepare.py": "f913fbadde75c4dc04a7801663e045d8afe290fcabe39682fb7ee73119572fd9",
+    "tests/conform_count_tool.rs": "3e903e310ccae1057ac90d648554476545fc680184a35aa504f75aa591873689",
+    "tools/verify.py": "4336a898117e52581305df87f5583c20f45f9124f4560a3c87aaabe4923883cb"
+  },
+  "engine_source_inputs_match_windows_linux": 157,
+  "engines": {
+    "windows": {
+      "sha256": "3108624224c1d004396b5d85c173afefff96139d4a020abc20b3dec20d9f7d0c",
+      "version": "cutbolt 0.4.0 (commit 9aa89a1012e75011b85ad7d007fdbf0f1b3ebe6e, sources modified)",
+      "ffmpeg": "7.0 Gyan full_build"
+    },
+    "linux": {
+      "sha256": "226216672f088020c1b2f2901efea827fbec69f7d2d5f292cf1ab5648ba703c6",
+      "build_git_base": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5",
+      "sources_modified": true,
+      "ffmpeg": "7.0.2 conda-forge"
+    }
+  },
+  "checks": {
+    "fixture_checks": 11,
+    "source_types": [
+      "VFR H.264",
+      "rotated H.264",
+      "HEVC Main10",
+      "ProRes 422"
+    ],
+    "each_required_type": {
+      "cold_conversion_encoders": 1,
+      "warm_conversion_encoders": 0,
+      "all_decoded_h264_frames_and_pcm_equal_explicit_recipe": true,
+      "session_asset_round_trip": true
+    },
+    "additional": [
+      "transparent ProRes 4444 alpha-over export equals explicit conversion",
+      "unmodified complete synchronous repair request queues two missing sources",
+      "evicted second source named correctly with new repair request ID",
+      "background reference render prepares two sources and restores 50/50 frame progress; exact RGB/PCM",
+      "cancellation during preparing sources; no render publication; writer reclaims staging",
+      "128-byte cache ceiling; original hashes preserved",
+      "saved recipe/identity rejection and workspace cache default/override"
+    ],
+    "rust_additions": [
+      "working-set members cannot evict each other",
+      "retry manifest permits rebuilt containers, keeps deterministic original ordering and rejects changed decoded content/dependencies/recipe/sample count"
+    ]
+  },
+  "verification": {
+    "windows": {
+      "rust_tests": 244,
+      "strict_clippy": true,
+      "existing_targeted_fixtures_passed": 8,
+      "existing_targeted_run_seconds": 190,
+      "automatic_prepare_final_seconds": 60
+    },
+    "linux": {
+      "rust_tests": 243,
+      "strict_clippy": true,
+      "existing_targeted_fixtures_passed": 8,
+      "existing_targeted_run_seconds": 96,
+      "automatic_prepare_final_seconds": 21
+    },
+    "existing_targeted_fixtures": [
+      "conform_cache",
+      "queue_recovery",
+      "tracks",
+      "overlays",
+      "transitions",
+      "delivery",
+      "agent_costs",
+      "integration"
+    ],
+    "scripted_agent_replay_calls": [
+      15,
+      6,
+      10,
+      8,
+      8
+    ],
+    "scripted_agent_failed_calls": 0,
+    "scripted_agent_schema_lookups": 0
+  },
+  "earlier_checks": {
+    "windows_core_8_passed": true,
+    "linux_core_7_passed_then_automatic_setup_fix_passed": true,
+    "scope": "Preceded the older render.start integration and final workspace/cancellation assertions; final relevant checks above supersede them."
+  },
+  "corrections_disclosed": [
+    "Initial schema size/comment and outline assertion failures fixed with documented shared SourceDecode definition and explicit full schema request.",
+    "Initial automatic fixture session.get wrapper assumption and pre-created output directory assumption corrected.",
+    "Final workspace-default test initially resolved relative receipt paths against the process directory; both platforms rejected that assertion, then passed after resolving from the workspace.",
+    "Added alpha test initially omitted required track locked/enabled fields; both platforms failed before render and passed after correcting test setup."
+  ],
+  "external_log_sha256": {
+    "automatic-prepare-rust-windows-04.log": "a5461f733c3f35bdb5e6322f1a2ff378ab55978c9734cd3a1b53512dca89e38d",
+    "automatic-prepare-clippy-windows-02.log": "444d4e8795dabd682d800a5c065ac74dcb28f105931c2303b991585e9751b2b7",
+    "automatic-prepare-targeted-windows-02.json": "7e14cd1c18f818e9fa9e2b1dbe891b0225f2d9408d07d3fbc65b525f059d2653",
+    "automatic-prepare-targeted-windows-02.log": "1109ea0b226a76897a492d57e68ff47aec14dce91cb9bc1051bc7606656fee78",
+    "automatic-prepare-targeted-windows-03.log": "09083f7430df5bbf306ae0295af91bc22d152424f3cb2221be6582e8ba6ab49a",
+    "automatic-prepare-targeted-windows-04.json": "21e02bae505e523e958a400e68d291c4e2257b55ab1c6a29c08d9bd126ed92dc",
+    "automatic-prepare-targeted-windows-04.log": "1e7a514c28f07bd71bc0a3a02f26943c65ac68586ce58db5a156d7ebe1701753",
+    "automatic-prepare-rust-linux-02.log": "1a47a504196b31f847f31d057985e99842ea4197a16b775b9763e1b890331620",
+    "automatic-prepare-clippy-linux-02.log": "08cf7615b1475c874ff8f8e1f6443200a17a59439e998065e80f620fe9e045d9",
+    "automatic-prepare-targeted-linux-03.json": "517410bac452bb61df3d5d2c2c2c0287d9b5770df1fbd6d9e85451f333c7ae8d",
+    "automatic-prepare-targeted-linux-03.log": "72ecfb4eb1b9ab099458fa7b38d675ca1a94a3872397a63cacc230171261612c",
+    "automatic-prepare-targeted-linux-04.log": "9b226df4b64a7dd9aba84248c6545b919f56f3da92bd2f2d0739219f356894f5",
+    "automatic-prepare-targeted-linux-05.json": "03b0c81a0458c583e5449e32898c66fd8e332a55a96c69b79f404a315dc47071",
+    "automatic-prepare-targeted-linux-05.log": "b22e8b0e26742f0031872e77214ba8217930132bb6125739d0d1ccf7c2173050"
+  },
+  "prior_ship": {
+    "commit": "9aa89a1012e75011b85ad7d007fdbf0f1b3ebe6e",
+    "deferred_passed": 57,
+    "failed": 0,
+    "skipped": 0,
+    "not_started": 0,
+    "seconds": 2603
+  },
+  "requirement_audit": {
+    "matrix": "Numerical color/display/alpha references remain in color/conform fixtures and earlier stage-2 evidence.",
+    "cache": "Existing conform_cache checks plus pinned multi-source production and reader leases.",
+    "automatic_add_and_prepare": "11-check automatic_prepare fixture, both systems.",
+    "provenance": "Saved asset contains original identity/recipe; prepared receipt adds conversion identity without changing saved revisions.",
+    "size": "Inspection reports uncompressed estimate; positive configured encoded-byte cap enforced.",
+    "exit": "All four required originals reach H.264 from media.add and queued export without a manual media.prepare call; warm export has zero conversion encoders.",
+    "full_quick": "Pending; stage not closed."
+  },
+  "limitations": [
+    "Small synthetic sources; no long-form conversion speed or broad codec claim.",
+    "Existing strict SDR conform bounds apply; audio-only normalization remains explicit.",
+    "Default 50 GB policy, up to 1 TiB; decoded scratch/index/delivery copies are separate.",
+    "Historical intermittent native-YUV H.264 comparison remains unexplained; failure retention stays enabled.",
+    "No new editing points, benchmark superiority, release gate change or refreshed full milestone evidence.",
+    "Direct stages 3-6 and comparative measurements remain open."
+  ]
+}

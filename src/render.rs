@@ -21,6 +21,20 @@ pub struct Source {
     pub sha256: String,
     pub frames: u64,
     pub samples: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) conversion: Option<crate::conform_cache::Lease>,
+}
+impl Source {
+    pub(crate) fn verify(&self, control: &dyn media::Control) -> Result<()> {
+        if media::file_hash_controlled(&self.path, control)? != self.sha256 {
+            return Err(error("MEDIA_CHANGED", "Source changed during rendering"));
+        }
+        if let Some(lease) = &self.conversion {
+            control.check()?;
+            crate::conform_cache::verify_dependencies(&lease.dependencies)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -723,6 +737,7 @@ fn inspect_reference_with(
             .and_then(crate::inspection_cache::get)
             .map(|verified| {
                 let source = Source {
+                    conversion: None,
                     path: path.into(),
                     sha256: before.clone(),
                     frames: verified.frames,
@@ -859,6 +874,7 @@ fn inspect_reference_with(
         }
     }
     let source = Source {
+        conversion: None,
         path: path.into(),
         sha256: before,
         frames: verified.frames,
@@ -1029,6 +1045,12 @@ fn plan_controlled(
     if let Some(mapped) = direct_tracks(project)? {
         return plan_controlled(&mapped, input_root, output_root, output, control);
     }
+    let _prepared = crate::converted::sources(
+        project,
+        input_root,
+        media::source_preparation_allowed(),
+        control,
+    )?;
     if let Some(plan) = chunked(
         project,
         output_root,
@@ -1324,6 +1346,12 @@ pub(crate) fn plan_range(
             "Render range must be nonempty and inside the timeline",
         ));
     }
+    let _prepared = crate::converted::sources(
+        project,
+        input_root,
+        media::source_preparation_allowed(),
+        &media::Uncontrolled,
+    )?;
     if let Some(plan) = chunked(
         project,
         output_root,
@@ -1375,6 +1403,12 @@ pub(crate) fn plan_audio_range(
             "Render range must be nonempty and inside the timeline",
         ));
     }
+    let _prepared = crate::converted::sources(
+        project,
+        input_root,
+        media::source_preparation_allowed(),
+        &media::Uncontrolled,
+    )?;
     if let Some(plan) = chunked(
         project,
         output_root,
@@ -1555,9 +1589,7 @@ pub(crate) fn run_audio_range(
         ));
     }
     for source in &plan.sources {
-        if media::file_hash(&source.path)? != source.sha256 {
-            return Err(error("MEDIA_CHANGED", "Source changed during rendering"));
-        }
+        source.verify(&media::Uncontrolled)?;
     }
     media::publish(&temp.0, &plan.output)?;
     let mut receipt = json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,
@@ -1650,9 +1682,7 @@ fn execute(
         ));
     }
     for source in &plan.sources {
-        if media::file_hash_controlled(&source.path, control)? != source.sha256 {
-            return Err(error("MEDIA_CHANGED", "Source changed during rendering"));
-        }
+        source.verify(control)?;
     }
     let mut receipt = json!({"output":plan.output,"profile":plan.profile,"source_quality":plan.source_quality,"frames":plan.frames,"samples":plan.samples,
         "project_revision":plan.project_revision,"frame_rate":project.frame_rate,"sha256":rendered.sha256,"sources":plan.sources,

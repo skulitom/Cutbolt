@@ -105,7 +105,7 @@ pub enum MissingTags {
     UseDeclared,
 }
 /// Declared SDR interpretation of a conform source (`source.sdr`); BT.709 primaries and D65 are implied.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Input {
     /// Sample matrix; must match the stored pixel format.

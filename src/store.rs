@@ -892,6 +892,7 @@ mod tests {
             identity: None,
             proxy: None,
             decode: None,
+            provenance: None,
             id: "a".into(),
             path: "external.mkv".into(),
             duration: t(20),

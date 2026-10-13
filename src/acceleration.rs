@@ -5,14 +5,14 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 /// Policy when the CUDA device fails to initialize: `error` returns DEVICE_UNAVAILABLE; `cpu` decodes in software and reports the reason.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Unavailable {
     Error,
     Cpu,
 }
 /// Source video decode backend, tagged by `backend`; only source decoding moves to the GPU.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(tag = "backend", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Decode {
     /// Software decoding (the default when `decode` is omitted).

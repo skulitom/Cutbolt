@@ -114,9 +114,7 @@ pub(crate) fn measure(
         ));
     }
     for source in &plan.sources {
-        if media::file_hash(&source.path)? != source.sha256 {
-            return Err(error("MEDIA_CHANGED", "Source changed during measurement"));
-        }
+        source.verify(&media::Uncontrolled)?;
     }
     if let Some(over_time) = over_time {
         meters["over_time"] = over_time;

@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, sync::OnceLock};
 
 /// Shared types abbreviated in tool listings, by public lookup name and definition name.
-pub const DEFERRED: [(&str, &str); 8] = [
+pub const DEFERRED: [(&str, &str); 9] = [
     ("project", "Project"),
     ("operation", "Operation"),
     ("scene", "Scene"),
@@ -17,6 +17,7 @@ pub const DEFERRED: [(&str, &str); 8] = [
     ("audio_routing", "Routing"),
     ("transcript", "Document"),
     ("captions", "CaptionDocument"),
+    ("source_decode", "SourceDecode"),
 ];
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -1020,7 +1021,7 @@ mod tests {
     #[test]
     fn workspace_schemas_make_supplied_roots_optional() {
         for op in ["media.add", "media.index"] {
-            let mut schema = lookup("operation", Some(op), false).unwrap()["schema"].clone();
+            let mut schema = lookup("operation", Some(op), true).unwrap()["schema"].clone();
             relax_roots(&mut schema);
             let root = root(&schema);
             assert!(

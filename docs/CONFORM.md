@@ -69,8 +69,8 @@ inputs, source/recipe/LUT/tool invalidation, encoded/metadata/decoded corruption
 limits, concurrent requests, audio-only output and compact-MCP queued work. An original
 counted-launch adapter observes one cold encoder and zero warm encoders. Rust tests cover
 cross-process reader exclusion, interrupted staging recovery and foreign-file preservation.
-This is explicit caching only: automatic `media.add` preparation, provenance, queued source
-phases and `PREPARATION_REQUIRED` remain pending. Explicit `media.prepare` retains its behavior.
+[Saved source preparation](AUTOMATIC_PREPARATION.md) also uses this cache for original-video
+assets. Explicit `media.prepare` retains its behavior unless `cached: true` is requested.
 
 ### Encoded output size limit
 
@@ -97,7 +97,7 @@ The source is rotated counterclockwise, then fitted according to its physical di
 
 Receipts include rotation, source SAR and any assumption, source/oriented/canvas dimensions, virtual fitted dimensions, crop/padding, rounding, sampling and square-pixel output. The virtual fitted picture is never allocated: at most four bytes per output pixel (32 MB under the existing 8-million-pixel cap) store source coordinates. Existing 4096x2160 source/canvas bounds still apply. Omitting `source.geometry` retains legacy resizing and rejects display transforms/non-square stream metadata.
 
-`media.inspect` and explicit `media.prepare` propose `contain` for supported rotated or non-square sources, with the proposed canvas axes oriented before existing size limits are applied. Agents can inspect or change the returned recipe. Automatic timeline conversion remains pending; explicit conversion caching is described above.
+`media.inspect` and explicit `media.prepare` propose `contain` for supported rotated or non-square sources, with the proposed canvas axes oriented before existing size limits are applied. Agents can inspect or change the returned recipe. Saved automatic preparation is described in [AUTOMATIC_PREPARATION](AUTOMATIC_PREPARATION.md); explicit conversion caching is described above.
 
 `tests/color.py` runs the original `tests/support/conform_geometry.py` fixture: independent NumPy quarter turns and Fraction fit coordinates, native YUV/Decimal color references, all four rotations, three SAR values and all three fits, straight ProRes alpha, reverse and blended temporal sampling, unchanged legacy resizing, and explicit preparation. Oblique/reflected matrices and invalid policies fail without changing sources or publishing partial outputs.
 

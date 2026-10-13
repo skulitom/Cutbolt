@@ -230,3 +230,31 @@ fn hard_reservation_refuses_oversize_and_large_policy_is_separate() {
         .is_err()
     );
 }
+
+#[test]
+fn working_set_is_not_evicted_while_another_member_is_produced() {
+    let root = Fixture::new();
+    let mut store = Store::open(&root.0, true, true).unwrap();
+    let policy = Policy {
+        max_bytes: 100,
+        max_entries: 3,
+    };
+    let a = digest(b"needed-a");
+    let b = digest(b"unrelated-b");
+    let c = digest(b"needed-c");
+    put(&store, &a, &[1; 40], &policy);
+    put(&store, &b, &[2; 40], &policy);
+    store.protect([a.clone(), c.clone()]).unwrap();
+    let output = store.begin(&c, "mkv", &policy).unwrap();
+    store.reserve(&c, 50, &policy).unwrap();
+    assert!(store.read(&a).unwrap().is_some());
+    assert!(store.read(&b).unwrap().is_none());
+    assert_eq!(
+        store.reserve(&c, 70, &policy).unwrap_err().code,
+        "LIMIT_EXCEEDED"
+    );
+    assert!(store.read(&a).unwrap().is_some());
+    assert!(!output.exists());
+    store.discard(&c).unwrap();
+    assert_eq!(store.inspect().unwrap()["payload_bytes"], 40);
+}

@@ -1,5 +1,7 @@
 # Cutbolt local engine
 
+For original video that needs normalization, `media.add` with `input_root` saves a conversion recipe. Queued exports prepare it automatically; see [saved source preparation](AUTOMATIC_PREPARATION.md).
+
 The optional [foreground segmentation workflow](SEGMENTATION.md) accepts annotated PNG frames, retains versioned masks and returns ordinary scenes. The native renderer accepts content-bound per-frame binary mattes without the optional worker runtime.
 
 Optional scene [geometry](GEOMETRY.md) provides textured planes with perspective/orthographic cameras, parent transforms and declared lighting through the existing scene inspection/render workflow.
@@ -14,7 +16,7 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `{"command":"schema","name":"scene.render"}` returns a command's argument schema, with a description on every field. Large schemas come back as an outline; `select` returns one variant or definition, and `full` returns everything. It also accepts the shared types `project`, `operation`, `scene`, `template`, `audio_routing` and `transcript`.
 
-`cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
+`cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`, converted sources in `.cutbolt/cache/conform`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
 Compressed-source inspection includes a cached presented-frame and decoded-audio index. Eligible H.264/HEVC originals report `timeline.ready: true` and `direct: true`, with a bound asset for `media.add`; `media.prepare` returns them without conversion. See [direct footage](DIRECT_SOURCES.md) for the exact profiles, audio policy, source preservation and long-source measurements and remaining nested-picture limits.
 

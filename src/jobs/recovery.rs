@@ -70,9 +70,22 @@ pub(super) fn pin_sources(
     id: &str,
     sources: &[render::Source],
 ) -> Result<()> {
-    let mut sources = sources.to_vec();
-    sources.sort_by(|a, b| a.path.cmp(&b.path));
-    let encoded = serde_json::to_string(&sources)?;
+    let mut manifest = serde_json::to_value(sources)?;
+    for source in manifest.as_array_mut().expect("source list") {
+        if let Some(conversion) = source.get("conversion").cloned() {
+            let original = &conversion["dependencies"][0];
+            source["path"] = original["path"].clone();
+            source["sha256"] = original["identity"]["sha256"].clone();
+            source["conversion"] = json!({"key":conversion["key"],"decoded":conversion["entry"]["metadata"]["decoded"],
+                "dependencies":conversion["dependencies"]});
+        }
+    }
+    // Materialization paths can change on a rebuild. Order by the authoritative source path.
+    manifest
+        .as_array_mut()
+        .expect("source list")
+        .sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+    let encoded = serde_json::to_string(&manifest)?;
     let tx = connection.unchecked_transaction()?;
     tx.execute("UPDATE jobs SET source_manifest=?2,source_manifest_hash=?3 WHERE id=?1 AND source_manifest IS NULL",params![id,encoded,digest(encoded.as_bytes())])?;
     let (stored, hash): (String, String) = tx.query_row(

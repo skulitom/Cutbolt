@@ -220,7 +220,7 @@ STAGES = [
     fixture("export_formats"), fixture("gif"),
     fixture("sessions", result="sessions/verification.json", utf8=False),
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
-    fixture("audio_processing"), fixture("conform"), fixture("conform_cache"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
+    fixture("audio_processing"), fixture("conform"), fixture("conform_cache"), fixture("automatic_prepare"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
     fixture("templates"), fixture("builtin_templates"), fixture("fonts"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
     fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),
@@ -634,6 +634,10 @@ report = {
     "direct_sources_evidence": direct_sources,
 }
 report["passed"] += cache_previews["passed"]
+report["passed"] += conform_cache["passed"]
+report["conform_cache_evidence"] = conform_cache
+report["passed"] += automatic_prepare["passed"]
+report["automatic_prepare_evidence"] = automatic_prepare
 report["passed"] += expressions["passed"]
 report["passed"] += temporal["passed"]
 report["passed"] += geometry["passed"]

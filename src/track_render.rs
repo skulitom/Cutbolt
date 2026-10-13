@@ -33,6 +33,7 @@ struct Graph<'a> {
     /// Inspected sources by asset ID.
     sources: BTreeMap<String, Source>,
     indexed: BTreeMap<String, std::sync::Arc<crate::direct::Video>>,
+    converted: BTreeMap<String, Source>,
     direct_runs: Vec<track_composite::DirectRun>,
     direct_audio_bytes: u64,
     /// This graph's FFmpeg input index of each asset it reads.
@@ -85,6 +86,7 @@ impl<'a> Graph<'a> {
             control,
             sources: BTreeMap::new(),
             indexed: BTreeMap::new(),
+            converted: BTreeMap::new(),
             direct_runs: Vec::new(),
             direct_audio_bytes: 0,
             indices: BTreeMap::new(),
@@ -181,8 +183,12 @@ impl<'a> Graph<'a> {
                 .iter()
                 .find(|a| a.id == clip.asset_id)
                 .expect("validated asset");
-            let path = media::project_file(Path::new(&asset.path), self.root)?;
-            let source = if asset.decode.is_some() {
+            let path = if let Some(source) = self.converted.get(&asset.id) {
+                source.path.clone()
+            } else {
+                media::project_file(Path::new(&asset.path), self.root)?
+            };
+            let mut source = if asset.direct() {
                 let (source, video) = render::inspect_indexed(
                     self.project,
                     asset,
@@ -215,12 +221,16 @@ impl<'a> Graph<'a> {
             } else {
                 let wave = crate::pcm_stream::inspect(&path, self.control)?;
                 Source {
+                    conversion: None,
                     path: path.clone(),
                     sha256: wave.sha256,
                     frames: 0,
                     samples: wave.frames,
                 }
             };
+            if let Some(prepared) = self.converted.get(&asset.id) {
+                source.conversion = prepared.conversion.clone();
+            }
             crate::registry::verify_source(asset, &source)?;
             self.sources.insert(asset.id.clone(), source);
         }
@@ -905,7 +915,7 @@ impl<'a> Graph<'a> {
             .project
             .assets
             .iter()
-            .any(|a| a.id == clip.asset_id && a.decode.is_some())
+            .any(|a| a.id == clip.asset_id && a.direct())
         {
             let source = self.inspect(clip, kind, false)?;
             self.span(clip, at, duration, kind, &source)?;
@@ -1243,6 +1253,7 @@ impl<'a> Graph<'a> {
             let mut premix = Graph::new(self.project, self.root, self.control);
             premix.audio_only = true;
             premix.sources = self.sources.clone();
+            premix.converted = self.converted.clone();
             premix.indexed = self.indexed.clone();
             premix.overlay_assets = self.overlay_assets.clone();
             premix.alpha_assets = self.alpha_assets.clone();
@@ -1314,6 +1325,7 @@ impl<'a> Graph<'a> {
     fn branch(&self) -> Graph<'a> {
         let mut next = Graph::new(self.project, self.root, self.control);
         next.sources = self.sources.clone();
+        next.converted = self.converted.clone();
         next.indexed = self.indexed.clone();
         next.overlay_assets = self.overlay_assets.clone();
         next.alpha_assets = self.alpha_assets.clone();
@@ -1713,6 +1725,8 @@ fn compile<'a>(
         ));
     }
     let mut graph = Graph::new(project, root, control);
+    graph.converted =
+        crate::converted::sources(project, root, media::source_preparation_allowed(), control)?;
     graph.audio_only = !video;
     graph.prefetch(a, start, duration, (video, audio));
     if video {
@@ -1796,6 +1810,12 @@ pub(crate) fn premix(
     })?;
     let duration = project.duration()?;
     let mut graph = Graph::new(project, input_root, &media::Uncontrolled);
+    graph.converted = crate::converted::sources(
+        project,
+        input_root,
+        media::source_preparation_allowed(),
+        &media::Uncontrolled,
+    )?;
     graph.audio_only = true;
     graph.prefetch(a, Time::ZERO, duration, (false, true));
     graph.check_arrangement(a, Time::ZERO, duration, Kind::Audio)?;
@@ -1976,12 +1996,7 @@ pub(crate) fn read_frame(
         ));
     }
     for source in &sources {
-        if media::file_hash(&source.path)? != source.sha256 {
-            return Err(error(
-                "MEDIA_CHANGED",
-                "Source changed during transition preview",
-            ));
-        }
+        source.verify(&media::Uncontrolled)?;
     }
     Ok((pixels, sources))
 }

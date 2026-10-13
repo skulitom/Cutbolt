@@ -259,6 +259,7 @@ pub(crate) fn preview_project(project: &Project, root: &Path) -> Result<Project>
                 registry::verify_source(
                     a,
                     &render::Source {
+                        conversion: None,
                         path,
                         sha256: wave.sha256,
                         frames: 0,

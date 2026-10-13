@@ -16,6 +16,18 @@ fn main() {
     log.write_all(if encoded { b"encode\n" } else { b"other\n" })
         .unwrap();
     drop(log);
+    // An original cancellation fixture can hold only the conversion encoder at this boundary.
+    if encoded && let Some(path) = env::var_os("CUTBOLT_CONFORM_COUNT_GATE") {
+        let path = std::path::PathBuf::from(path);
+        std::fs::write(path.with_extension("entered"), b"encoder waiting").unwrap();
+        let start = std::time::Instant::now();
+        while path.exists() {
+            if start.elapsed() > std::time::Duration::from_secs(45) {
+                exit(99);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
     let status = Command::new(env::var("CUTBOLT_CONFORM_COUNT_REAL").unwrap())
         .args(args)
         .status()

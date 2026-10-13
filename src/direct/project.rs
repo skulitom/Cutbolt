@@ -152,6 +152,7 @@ pub(crate) fn bound_video(
     let video = Video::from_index(path, loaded)?;
     matches_project(&video, project, asset)?;
     let source = Source {
+        conversion: None,
         path: video.path.clone(),
         sha256: video.loaded.index.source.sha256.clone(),
         frames: video.frames(),

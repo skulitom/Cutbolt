@@ -191,9 +191,7 @@ impl Anchor {
             lanes,
         )?;
         for source in &sources {
-            if media::file_hash(&source.path)? != source.sha256 {
-                return Err(error("MEDIA_CHANGED", "Source changed during measurement"));
-            }
+            source.verify(&media::Uncontrolled)?;
         }
         Ok(Self { capture, factor })
     }

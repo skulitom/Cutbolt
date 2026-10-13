@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
 /// Video frame choice at each mapped source time: `previous` takes the latest frame at or before it, `nearest` the closer neighbor (midpoint picks later), `linear` blends both neighbors.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Sampling {
     Previous,
@@ -12,14 +12,14 @@ pub enum Sampling {
     Linear,
 }
 /// Remap audio policy: `follow_speed` resamples so pitch follows speed (needs recipe `audio: resample`); `mute` gives silence (needs `audio: mute`; required for reverse or frozen segments).
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioPitch {
     FollowSpeed,
     Mute,
 }
 /// One speed ramp whose speed changes linearly from `start_rate` to `end_rate` over its output duration.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Segment {
     /// Output duration in rational seconds; positive and on the 48 kHz sample clock.
@@ -32,7 +32,7 @@ pub struct Segment {
     pub reverse: bool,
 }
 /// Variable speed map for a conform recipe; needs recipe `rate` 1, `reverse` and `freeze` false.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Remap {
     /// 1 to 64 segments in playback order; durations must sum exactly to the recipe duration.
