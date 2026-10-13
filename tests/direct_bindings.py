@@ -26,10 +26,23 @@ def verify(root, manifest, indexed):
             if name == 'h264-20min':
                 continue
             if not indexed[name]['index']['eligible']:
-                rejected = client.call('project.create', id=name, width=case['size'][0], height=case['size'][1], frame_rate=time(25))
+                path = root/'sources'/case['path']
+                inspected = client.call('media.inspect', path=str(path), input_root=str(root/'sources'))
+                assert inspected['timeline']['direct'] is False
+                proposed = inspected['timeline']['conform']['recipe']
+                rejected = client.call('project.create', id=name, width=case['size'][0], height=case['size'][1], frame_rate=time(F(case['rate'])))
+                asset = {'id':name,'path':case['path'],'duration':proposed['duration']}
+                # Stage 2 makes automatic normalization available. Explicit direct bindings
+                # must still reject these sources; no compressed file bypasses that profile.
                 client.call('timeline.apply', expected_error='UNSUPPORTED_MEDIA', project=rejected, expected_revision=0,
                     operations=[{'op':'media.add','input_root':str(root/'sources'),
-                        'asset':{'id':name,'path':case['path'],'duration':time(1)}}])
+                        'asset':{**asset,'decode':{'mode':'direct','index':inspected['source_index']['key']}}}])
+                converted = client.call('timeline.apply', project=rejected, expected_revision=0,
+                    operations=[{'op':'media.add','input_root':str(root/'sources'),'asset':asset}])
+                bound = converted['assets'][0]
+                assert bound['decode']['mode']=='converted' and bound['identity']==identity(path)
+                assert bound['provenance']['original']==identity(path)
+                cases[name] = {'explicit_direct_rejected':True,'converted_binding_saved':True,'source_preserved':True}
                 continue
             path = root/'sources'/case['path']
             inspected = client.call('media.inspect', path=str(path), input_root=str(root/'sources'))

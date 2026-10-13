@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "kind": "benchmark_auditor_calibration_not_agent_results",
+  "protocol": {
+    "bytes": 5004,
+    "sha256": "19c682c98e48b1739beecfa85dd39e666e95e3a229377f8668288b99407c44c7"
+  },
+  "oracle": {
+    "bytes": 10995,
+    "sha256": "3fac5218f810ccb8af8130af7a1f4d05485e9cb06a418c7da6524281ecae5337"
+  },
+  "runner": {
+    "bytes": 15987,
+    "sha256": "16eccc1c376a6612fcbbd1abc968c21f21c6680fbec0276f94238c0b2106b497"
+  },
+  "engine": {
+    "bytes": 43843072,
+    "sha256": "d580af6d69c2addacd8eeeda49d23c8eb2ce1d7d1510d6328b576a348dd14801"
+  },
+  "engine_version": "cutbolt 0.4.0 (commit 2dbab3c16f963078e7ae43e904e3051d53740510)",
+  "input_manifest": {
+    "bytes": 2816,
+    "sha256": "17f83e6fbecef7932da637e12522565d9a180952618e14532da71f664c0fed3b"
+  },
+  "positives": {
+    "ffmpeg/trim": {
+      "task": "trim",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": true,
+      "frame_count": 75,
+      "expected_frames": 75,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "3",
+      "decoded_audio_samples": 144384,
+      "audio_correlation": 0.9999991420081084,
+      "audio_rms_error": 6.593256234803693,
+      "frame_psnr_min": 44.305338712922335,
+      "frame_psnr_median": 48.26910156965304,
+      "frame_psnr_max": 50.72219870725781,
+      "output_identity": {
+        "bytes": 158138,
+        "sha256": "6aa5e1be30b6c351c70fae40d15ac602f5e91a432ac9cf63ef36d6f7f73b8dd7"
+      },
+      "video_bit_rate": "158653",
+      "audio_bit_rate": "251372"
+    },
+    "ffmpeg/reorder": {
+      "task": "reorder",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": true,
+      "frame_count": 125,
+      "expected_frames": 125,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "5",
+      "decoded_audio_samples": 240640,
+      "audio_correlation": 0.9999986893427537,
+      "audio_rms_error": 8.072720266428163,
+      "frame_psnr_min": 43.53324123736017,
+      "frame_psnr_median": 48.289073949888746,
+      "frame_psnr_max": 51.08904016640154,
+      "output_identity": {
+        "bytes": 259488,
+        "sha256": "84f3f55a09a1cd0d7a0b046a7d670dccb7bd7be02bb39ea4e827912e81044880"
+      },
+      "video_bit_rate": "156099",
+      "audio_bit_rate": "249715"
+    },
+    "ffmpeg/broll-inset": {
+      "task": "broll-inset",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": true,
+      "frame_count": 150,
+      "expected_frames": 150,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "6",
+      "decoded_audio_samples": 288768,
+      "audio_correlation": 0.9999994044789559,
+      "audio_rms_error": 5.494358217501133,
+      "frame_psnr_min": 36.35393424291531,
+      "frame_psnr_median": 41.60526528531304,
+      "frame_psnr_max": 44.73847520503269,
+      "output_identity": {
+        "bytes": 348433,
+        "sha256": "68265c0cd4a172eac86ef7ab0ba708fda30e83274787066ec8a6ee74e8a9a805"
+      },
+      "video_bit_rate": "205950",
+      "audio_bit_rate": "249775"
+    },
+    "cutbolt/trim": {
+      "task": "trim",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": true,
+      "frame_count": 75,
+      "expected_frames": 75,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "3",
+      "decoded_audio_samples": 144384,
+      "audio_correlation": 0.9999991692535588,
+      "audio_rms_error": 6.495918590417627,
+      "frame_psnr_min": 37.49112737634353,
+      "frame_psnr_median": 42.95811897116333,
+      "frame_psnr_max": 45.89329711592324,
+      "output_identity": {
+        "bytes": 169622,
+        "sha256": "6dfb9edd90c1e5c23534b1d7969a16d8bfdbc8653565e304382aaf48216c290c"
+      },
+      "video_bit_rate": "186405",
+      "audio_bit_rate": "254573"
+    },
+    "cutbolt/reorder": {
+      "task": "reorder",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": true,
+      "frame_count": 125,
+      "expected_frames": 125,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "5",
+      "decoded_audio_samples": 240640,
+      "audio_correlation": 0.9999988127553074,
+      "audio_rms_error": 7.702495807637072,
+      "frame_psnr_min": 37.52757269884458,
+      "frame_psnr_median": 43.37110035769426,
+      "frame_psnr_max": 45.4081291546996,
+      "output_identity": {
+        "bytes": 279001,
+        "sha256": "07f017e4e758db567964551ba23e94aa823adb54540034a94430a841f263b607"
+      },
+      "video_bit_rate": "184668",
+      "audio_bit_rate": "252667"
+    },
+    "cutbolt/broll-inset": {
+      "task": "broll-inset",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": true,
+      "frame_count": 150,
+      "expected_frames": 150,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "6",
+      "decoded_audio_samples": 288768,
+      "audio_correlation": 0.9999993298559263,
+      "audio_rms_error": 5.818623566474578,
+      "frame_psnr_min": 35.194584979218156,
+      "frame_psnr_median": 40.61635433804619,
+      "frame_psnr_max": 45.49184139768385,
+      "output_identity": {
+        "bytes": 330584,
+        "sha256": "e582ef44c7263b7eeb193f0382ce2999f0b0e2176d2ef95fb68e7f1aac9efdad"
+      },
+      "video_bit_rate": "179284",
+      "audio_bit_rate": "252947"
+    }
+  },
+  "negatives": {
+    "missing": {
+      "task": "trim",
+      "source_preservation": true,
+      "output_exists": false,
+      "passed": false
+    },
+    "shifted-frame": {
+      "task": "trim",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": false,
+      "frame_count": 75,
+      "expected_frames": 75,
+      "frame_counters": false,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "3",
+      "decoded_audio_samples": 144384,
+      "audio_correlation": 0.9999991420081084,
+      "audio_rms_error": 6.593256234803693,
+      "frame_psnr_min": 17.096655766054177,
+      "frame_psnr_median": 31.641383372321727,
+      "frame_psnr_max": 39.73878097842928,
+      "output_identity": {
+        "bytes": 182001,
+        "sha256": "89cbfb61a6c296a64ee85594ee89010f47a4ddb4948989293b00362bbc69a15d"
+      },
+      "video_bit_rate": "222245",
+      "audio_bit_rate": "251372"
+    },
+    "shifted-audio": {
+      "task": "reorder",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": false,
+      "frame_count": 125,
+      "expected_frames": 125,
+      "frame_counters": true,
+      "inset_counters": true,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "5",
+      "decoded_audio_samples": 240640,
+      "audio_correlation": 0.2187796211579823,
+      "audio_rms_error": 6186.286882911873,
+      "frame_psnr_min": 26.18875527451066,
+      "frame_psnr_median": 36.51899941694542,
+      "frame_psnr_max": 39.64832070008738,
+      "output_identity": {
+        "bytes": 303205,
+        "sha256": "d83933318f8483c7cc7ec3cf1b57cb3a3ad86daa8a4fababaa06db43c568484d"
+      },
+      "video_bit_rate": "221419",
+      "audio_bit_rate": "254233"
+    },
+    "wrong-inset": {
+      "task": "broll-inset",
+      "source_preservation": true,
+      "output_exists": true,
+      "passed": false,
+      "frame_count": 150,
+      "expected_frames": 150,
+      "frame_counters": true,
+      "inset_counters": false,
+      "profile": true,
+      "color": true,
+      "audio_clock": true,
+      "audio_presentation_seconds": "6",
+      "decoded_audio_samples": 288768,
+      "audio_correlation": 0.9999994044789559,
+      "audio_rms_error": 5.494358217501133,
+      "frame_psnr_min": 26.25773141633665,
+      "frame_psnr_median": 32.57351766023268,
+      "frame_psnr_max": 39.61975313777698,
+      "output_identity": {
+        "bytes": 353274,
+        "sha256": "13a0351740370ef0db7e73f0e98170c5a1c5d380339015b964691bbb3965ffd7"
+      },
+      "video_bit_rate": "212362",
+      "audio_bit_rate": "249775"
+    }
+  },
+  "final_oracle_recheck": "All six valid and four invalid outputs retained the expected result after adding missing-input/non-finite-correlation guards.",
+  "matrix_status": "36 fresh trials scheduled; in progress. Outcomes will be reported separately, including failures.",
+  "limits": [
+    "Three short synthetic tasks on Windows, not a G2 lead or reliability claim.",
+    "FFmpeg software RGB decode is the declared source-color reference.",
+    "Requested CRF is matched; bitrate is measured, not matched.",
+    "Model trials overlap verification; CPU load is sampled and timing remains provisional.",
+    "No new points or changes to the active goal or draft roadmap gates."
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "source_commit": "2dbab3c16f963078e7ae43e904e3051d53740510",
+  "kind": "stage2_direct_binding_fixture_update",
+  "engine_unchanged": true,
+  "fixture_sha256": "6245306562cbb3f89d36b25788fa0780a6b3131d5cd6f5f81a9c3aa2dadc3ffd",
+  "background_failure": "The stage-1 fixture expected every non-direct file to fail media.add. Stage 2 intentionally permits automatic conversion; a deliberately wrong one-second duration now fails with INVALID_MEDIA instead.",
+  "revised_requirements": [
+    "Explicit direct bindings still reject every non-eligible profile with UNSUPPORTED_MEDIA.",
+    "Automatic addition binds source identity/provenance and a converted recipe for supported VFR, rotated, non-square-SAR, Main10 and ProRes sources.",
+    "All existing qualified direct-profile, preview, composition, timeline, source identity and lifecycle checks still execute."
+  ],
+  "windows": {
+    "direct_sources_passed": true,
+    "seconds": 907,
+    "report_sha256": "ec9d28c7cec639bc76a0140245c895bc1f795b3e668c286b8509d3bfe70ecbcf",
+    "log_sha256": "18d22bd2ae8e996029a2762b96c9808a1f9bd1cd576d165694fbee37884a7339"
+  },
+  "linux": {
+    "direct_sources_passed": true,
+    "seconds": 462,
+    "report_sha256": "1bb1dad53d62d6d858e699d1c8c3f8fedb4faa4555652dd94d3edfc7c65a26fd",
+    "log_sha256": "7d3e6ea49002808bb708aafd51b9397c96874a2cc3735aefed3b17d667d68a5a"
+  },
+  "limits": [
+    "This fixes an obsolete expectation, not an engine regression.",
+    "Full quick stage-2 verification remains pending.",
+    "No source/delivery equality threshold or supported-profile criterion was relaxed.",
+    "No new points; the earlier intermittent native-YUV H.264 mismatch remains unexplained."
+  ]
+}

@@ -1,5 +1,41 @@
 # Progress history
 
+## 13 October 2026: preserve direct rejection while accepting automatic conversion
+
+The 2dbab3c background run exposed an obsolete direct_sources expectation: its stage-1
+binding fixture rejected every non-direct file at media.add. Stage 2 intentionally accepts
+supported normalization, and the fixture's arbitrary one-second duration instead failed
+with INVALID_MEDIA. The fixture now requests an explicit direct binding and still requires
+UNSUPPORTED_MEDIA, then checks automatic converted binding and original provenance using
+the inspected duration. No engine behavior or comparison tolerance changed.
+
+The complete direct_sources fixture passes on Windows (907 seconds) and Linux (462 seconds),
+including all qualified-profile preview, composition, timeline and lifecycle comparisons.
+See verification/stage2-direct-bindings-2026-10-13.json. The prior background run continues
+its other fixtures; its terminal result and this shipment's checks must still be checked.
+Stage 2's full quick run remains pending. No points or refreshed full milestone evidence.
+
+## 13 October 2026: preregistered footage comparison and independent auditor
+
+The first comparative pilot now has an explicit protocol: three footage tasks, Cutbolt's
+local plugin against ordinary FFmpeg scripting, two model selections and three repetitions
+per pairing (36 fresh trials). Each arm gets identical original MOV inputs and output
+requirements. Input/skill/prompt/engine identities are frozen; model outputs are never repaired
+by the coordinator. All calls, errors, peak context, cumulative provider input, reported cost
+and observed machine load are recorded. Raw profiles, transcripts and media remain external.
+
+The output-only auditor checks every source/frame counter, inset counter, exact video clock,
+AAC presentation duration, audio correspondence and original hashes. It accepts all six
+hand-authored calibration outputs from the two arms and rejects deliberate frame, audio,
+inset and missing-output errors. These ten calibration checks are not model successes.
+See docs/FOOTAGE_BENCHMARK.md and verification/footage-benchmark-calibration-2026-10-13.json.
+
+The fresh-agent matrix is running. It will report failures and per-category observations;
+no comparative lead, rate-distortion lead, statistical reliability or G2 completion is claimed.
+The draft roadmap/gates and all remaining implementation requirements are unchanged. Full
+milestone evidence remains at 338e114; no points are awarded. This documentation/harness
+checkpoint still requires the ship gate and its deferred verification follow-up.
+
 ## 13 October 2026: automatic preparation of saved converted sources
 
 media.add with input_root now retains supported originals and binds either a direct source
