@@ -1,5 +1,33 @@
 # Progress history
 
+## 13 October 2026: explicit file-backed conversion cache
+
+cache.run now accepts a conform task, with immutable MKV/WAV payloads, a small owned
+index, full encoded/decoded verification and cross-process reader leases. Source, recipe,
+LUT, selected tool identities and engine producer bind the key. Asset IDs and locations
+can change without encoding again. Positive explicit policies support up to 1 TiB and
+4096 entries; LRU reservations bound ready plus in-flight encoded bytes. Raw decode
+scratch and delivery copies remain separately bounded. Failed work may already have
+evicted derived entries. cache.inspect/prune kind conform exposes this family; existing
+artifact limits stay unchanged. Workspace defaults and persisted MCP jobs are covered.
+
+Windows/Linux pass 242/241 Rust tests, strict all-target lint and six targeted fixtures.
+The new fixture passes 13 checks, including exact RGB/PCM and hidden straight-alpha RGB,
+source/recipe/LUT/tool changes, corrupted bytes/metadata/decoded digests, concurrent
+processes, LRU/limits, audio-only output and queued compact-MCP work. Counted launches
+show one cold encoder, zero warm encoders and one after a changed tool identity.
+Six storage tests include cross-process lease exclusion and simulated interrupted
+publication recovery. The initial Windows concurrent test exposed a range-lock read;
+reading the ownership marker after acquiring the lock fixes it. Final cache-only reruns
+on both systems verify the last error-path correction. Exact identities and limitations
+are recorded in verification/conform-cache-2026-10-13.json.
+
+This is a stage-2 checkpoint, not its exit: automatic media.add preparation, provenance,
+source-preparation phases and PREPARATION_REQUIRED remain pending. Full milestone evidence
+stays at 338e114; no points are awarded. The preceding 93c9abb background run was still
+active without reported failures when this entry was written. This commit requires the
+ship gate and deferred checks afterward; their terminal results must be checked.
+
 ## 13 October 2026: agent-cost stage 5 acceptance under the approved token metric
 
 The user clarified the 40,000-token target as maximum context per request. Cumulative provider

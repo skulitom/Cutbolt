@@ -24,6 +24,54 @@ The source file must be at most 16 GiB, referenced by a relative path inside an 
 
 Use `source.sdr` and `working_transfer` together to normalize RGB or YUV media before assembling a mixed-source timeline. This adds FFV1/YUV444 MKV, H.264/HEVC 8/10-bit YUV420, and H.264 8/10-bit or ProRes 10-bit YUV422 MP4/MOV/MKV input handling, with strict conflict checks and an explicit policy for absent tags. ProRes 4444 and FFV1/bgra also normalize with an explicit `source.alpha: "straight"` declaration. Output remains RGB8, or straight FFV1/bgra for alpha sources placed on `alpha_over` tracks; optional `source.geometry` normalizes quarter-turn rotation and non-square pixels as described below. Explicit SDR video also accepts AAC, PCM, MP3, FLAC or Opus mono/stereo audio at any positive decoded sample rate. It bypasses external color-scaler defaults by converting native samples in original Rust code. See [COLOR.md](COLOR.md) for all fields, numerical rules and independent chart evidence.
 
+### Explicit conversion cache
+
+`cache.run` accepts `task.type: "conform"`. Its task contains the same inline `recipe` as
+`media.conform`, plus `input_root`, `output_root` and a new unused `output`. The outer request
+supplies `cache_root` and `policy: {"max_bytes": ..., "max_entries": ...}`. CLI/library calls
+block; MCP agents queue `job.start` with `run: "cache.run"`. With a workspace, omitted roots
+resolve there and the conform cache defaults to `.cutbolt/cache/conform`. Explicit cache
+requests require an explicit policy; no default disk allocation is implied.
+
+The conversion family stores immutable published MKV/WAV files beside a small owned index.
+It supports a positive cap up to 1 TiB and 4096 entries. Entries are evicted in least-recently-used
+order as an encoded output needs space. Reservations grow in bounded increments (at most
+8 MiB, reduced for small policies), so eviction can precede the exact final size by one
+increment. A cancelled or failed conversion can already have evicted derived entries. Ready payloads plus reserved encoded work never exceed `policy.max_bytes`.
+Index overhead and the existing bounded raw decode scratch are separate; the explicitly
+requested delivery copy also lives outside the cache. Oversized output fails with
+`LIMIT_EXCEEDED`, path `policy.max_bytes`, and no published delivery.
+
+The key binds source bytes/SHA-256, the serialized recipe, LUT content, selected FFmpeg/ffprobe
+executable identities and the engine producer. Asset ID and file locations are excluded;
+source/LUT suffixes remain because their validation depends on file type. Moving unchanged
+inputs can reuse an entry. Changing bytes with the same path, size and modification time
+cannot bypass the source identity check. Every use checks the encoded file, metadata digest,
+and full recorded decoded RGB/RGBA and PCM digests. Corruption is discarded and regenerated;
+unavailable decoders and invalid inputs still fail. Sources, LUT and tools are fully hashed
+again before publication. Source files and delivery destinations must be outside the cache.
+
+File tasks return a new delivered copy, its identity, an `asset` using the current recipe ID,
+and `cache.hit`, `key`, `producer`, `policy`, `payload_bytes` and `decoded_verified`. A hit
+does no conversion encoding, but full decoded verification and the delivery copy still cost
+I/O. Readers hold a cross-process lease while using a payload; producers/pruners wait for
+readers. Current production is serialized per cache root. Normal cancellation removes the
+owned staged result; an interrupted process leaves an indexed staging entry that the next
+writer reclaims. Foreign control files and unindexed destination collisions are rejected.
+
+Use `cache.inspect` and `cache.prune` with `kind: "conform"` and the same `cache_root`.
+Pruning accepts zero byte/entry limits to empty derived entries; originals and completed
+delivery copies remain intact. Omitting `kind` keeps the original artifact cache and its
+1 GiB ceiling. Do not put user-managed files in the conform cache's reserved namespace.
+
+`tests/conform_cache.py` covers exact pixels/PCM, hidden RGB under straight alpha, relocated
+inputs, source/recipe/LUT/tool invalidation, encoded/metadata/decoded corruption, LRU,
+limits, concurrent requests, audio-only output and compact-MCP queued work. An original
+counted-launch adapter observes one cold encoder and zero warm encoders. Rust tests cover
+cross-process reader exclusion, interrupted staging recovery and foreign-file preservation.
+This is explicit caching only: automatic `media.add` preparation, provenance, queued source
+phases and `PREPARATION_REQUIRED` remain pending. Explicit `media.prepare` retains its behavior.
+
 ### Encoded output size limit
 
 The blocking `media.conform` request, including its `job.start` arguments, accepts optional
@@ -49,7 +97,7 @@ The source is rotated counterclockwise, then fitted according to its physical di
 
 Receipts include rotation, source SAR and any assumption, source/oriented/canvas dimensions, virtual fitted dimensions, crop/padding, rounding, sampling and square-pixel output. The virtual fitted picture is never allocated: at most four bytes per output pixel (32 MB under the existing 8-million-pixel cap) store source coordinates. Existing 4096x2160 source/canvas bounds still apply. Omitting `source.geometry` retains legacy resizing and rejects display transforms/non-square stream metadata.
 
-`media.inspect` and explicit `media.prepare` propose `contain` for supported rotated or non-square sources, with the proposed canvas axes oriented before existing size limits are applied. Agents can inspect or change the returned recipe. Automatic timeline conversion and a persistent conversion cache are still pending.
+`media.inspect` and explicit `media.prepare` propose `contain` for supported rotated or non-square sources, with the proposed canvas axes oriented before existing size limits are applied. Agents can inspect or change the returned recipe. Automatic timeline conversion remains pending; explicit conversion caching is described above.
 
 `tests/color.py` runs the original `tests/support/conform_geometry.py` fixture: independent NumPy quarter turns and Fraction fit coordinates, native YUV/Decimal color references, all four rotations, three SAR values and all three fits, straight ProRes alpha, reverse and blended temporal sampling, unchanged legacy resizing, and explicit preparation. Oblique/reflected matrices and invalid policies fail without changing sources or publishing partial outputs.
 

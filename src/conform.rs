@@ -1200,6 +1200,8 @@ pub fn run(recipe: &Recipe, root: &Path, output_root: &Path, output: &Path) -> R
     run_bounded(recipe, root, output_root, output, None)
 }
 
+pub(crate) type Quota = std::sync::Arc<dyn Fn(u64) -> Result<()> + Send + Sync>;
+
 /// Convert with an optional hard limit on encoded output bytes; temporary decode data is separate.
 pub fn run_bounded(
     recipe: &Recipe,
@@ -1207,6 +1209,17 @@ pub fn run_bounded(
     output_root: &Path,
     output: &Path,
     max_output_bytes: Option<u64>,
+) -> Result<Value> {
+    run_with_quota(recipe, root, output_root, output, max_output_bytes, None)
+}
+
+pub(crate) fn run_with_quota(
+    recipe: &Recipe,
+    root: &Path,
+    output_root: &Path,
+    output: &Path,
+    max_output_bytes: Option<u64>,
+    quota: Option<Quota>,
 ) -> Result<Value> {
     if max_output_bytes == Some(0) {
         return Err(encode::limit(0));
@@ -1221,6 +1234,9 @@ pub fn run_bounded(
             .ok_or_else(|| error("LIMIT_EXCEEDED", "WAV size overflow"))?;
         if let Some(limit) = max_output_bytes.filter(|limit| bytes > *limit) {
             return Err(encode::limit(limit));
+        }
+        if let Some(reserve) = &quota {
+            reserve(bytes)?;
         }
         let mut result = run_audio(recipe, root, output_root, output, started)?;
         if let Some(limit) = max_output_bytes {
@@ -1439,7 +1455,7 @@ pub fn run_bounded(
     let mut silent_hash = None;
     if silent {
         if let Some(limit) = max_output_bytes {
-            encode::bounded(&args, &temp, limit, timeout, |_| Ok(()))?;
+            encode::bounded(&args, &temp, limit, timeout, quota, |_| Ok(()))?;
             silent_hash = Some(crate::digest::zeros_sha256(frame_bytes, count));
         } else {
             let zeros = std::thread::spawn(move || crate::digest::zeros_sha256(frame_bytes, count));
@@ -1570,7 +1586,7 @@ pub fn run_bounded(
             Ok(())
         };
         if let Some(limit) = max_output_bytes {
-            encode::bounded(&args, &temp, limit, timeout, produce)?;
+            encode::bounded(&args, &temp, limit, timeout, quota, produce)?;
         } else {
             media::feed_stdin(&media::tool("ffmpeg"), &args, timeout, produce)?;
         }

@@ -59,11 +59,17 @@ pub enum Request {
     CacheInspect {
         /// Absolute local cache directory used by cache.run.
         cache_root: PathBuf,
+        /// Cache family: artifacts (default) or conform.
+        #[serde(default)]
+        kind: crate::cache::Kind,
     },
     #[serde(rename = "cache.prune")]
     CachePrune {
         /// Absolute local cache directory used by cache.run.
         cache_root: PathBuf,
+        /// Cache family: artifacts (default) or conform.
+        #[serde(default)]
+        kind: crate::cache::Kind,
         /// Byte and entry budgets; least-recently-used derived entries are evicted until both are met.
         policy: crate::cache::Policy,
     },
@@ -1385,8 +1391,12 @@ pub fn handle(request: Request) -> Result<Value> {
         } => crate::interchange::inspect_export(&project, &input_root),
         Request::InterchangeExport(request) => crate::interchange::export(&request),
         Request::CacheRun(request) => crate::cache::run(&request),
-        Request::CacheInspect { cache_root } => crate::cache::inspect(&cache_root),
-        Request::CachePrune { cache_root, policy } => crate::cache::prune(&cache_root, &policy),
+        Request::CacheInspect { cache_root, kind } => crate::cache::inspect_kind(&cache_root, kind),
+        Request::CachePrune {
+            cache_root,
+            policy,
+            kind,
+        } => crate::cache::prune_kind(&cache_root, &policy, kind),
         Request::PreviewSheet {
             project,
             spec,

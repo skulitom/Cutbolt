@@ -31,6 +31,7 @@ pub(super) fn bounded(
     output: &Path,
     max_bytes: u64,
     timeout: Duration,
+    quota: Option<super::Quota>,
     produce: impl FnOnce(&mut dyn Write) -> Result<()>,
 ) -> Result<()> {
     let mut args = args.to_vec();
@@ -50,6 +51,9 @@ pub(super) fn bounded(
                 }
                 if n as u64 > max_bytes.saturating_sub(count) {
                     return Err(limit(max_bytes));
+                }
+                if let Some(reserve) = &quota {
+                    reserve(count + n as u64)?;
                 }
                 file.write_all(&block[..n])?;
                 count += n as u64;

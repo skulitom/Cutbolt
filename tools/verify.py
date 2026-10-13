@@ -220,7 +220,7 @@ STAGES = [
     fixture("export_formats"), fixture("gif"),
     fixture("sessions", result="sessions/verification.json", utf8=False),
     fixture("scenes"), fixture("animation"), fixture("compositing"), fixture("easing"), fixture("editing"), fixture("audio"),
-    fixture("audio_processing"), fixture("conform"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
+    fixture("audio_processing"), fixture("conform"), fixture("conform_cache"), fixture("proxies"), fixture("timeline_edges"), fixture("graphics"),
     fixture("templates"), fixture("builtin_templates"), fixture("fonts"), fixture("captions"), fixture("grading"), fixture("selection"), fixture("keying"), fixture("delivery"),
     fixture("color"), fixture("luts_scopes"), fixture("hdr"), fixture("tracks"), fixture("transitions"), fixture("dynamics"), fixture("track_edits"),
     fixture("sequences"), fixture("multicam"), fixture("synchronization"), fixture("spatial"), fixture("tracking"),

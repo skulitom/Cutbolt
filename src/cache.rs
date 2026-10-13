@@ -25,6 +25,17 @@ include!(concat!(env!("OUT_DIR"), "/engine_sources.rs"));
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Task {
+    /// Verified FFV1/PCM or WAV normalization in the separate file-backed conform cache.
+    Conform {
+        /// Source-bound normalization recipe, identical to media.conform.
+        recipe: Box<crate::conform::Recipe>,
+        /// Existing absolute directory containing the recipe source and LUT.
+        input_root: PathBuf,
+        /// Existing absolute directory containing the new delivered copy.
+        output_root: PathBuf,
+        /// New absolute MKV or WAV path outside the cache; originals are never overwritten.
+        output: PathBuf,
+    },
     /// Probe metadata and content identity of one source file.
     Probe {
         /// Absolute path of a file inside `input_root`.
@@ -260,6 +271,33 @@ pub(crate) fn resolve_tool(selected: &str) -> Result<PathBuf> {
         .ok_or_else(|| error("TOOL_UNAVAILABLE", format!("Cannot resolve {selected}")))?
         .canonicalize()?)
 }
+/// Cache family. Ordinary previews/probes keep their existing SQLite payload store.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    /// Existing small preview, probe and proxy cache (1 GiB maximum).
+    #[default]
+    Artifacts,
+    /// File-backed verified conversions (1 TiB maximum); choose a separate cache root.
+    Conform,
+}
+
+pub fn inspect_kind(root: &Path, kind: Kind) -> Result<Value> {
+    match kind {
+        Kind::Artifacts => inspect(root),
+        Kind::Conform => crate::conform_store::Store::open(root, false, false)?.inspect(),
+    }
+}
+pub fn prune_kind(root: &Path, policy: &Policy, kind: Kind) -> Result<Value> {
+    match kind {
+        Kind::Artifacts => prune(root, policy),
+        Kind::Conform => {
+            crate::conform_store::validate(policy)?;
+            crate::conform_store::Store::open(root, true, false)?.prune(policy)
+        }
+    }
+}
+
 pub fn inspect(root: &Path) -> Result<Value> {
     Store::open(root, false)?.inspect()
 }
@@ -269,9 +307,26 @@ pub fn prune(root: &Path, policy: &Policy) -> Result<Value> {
 }
 
 pub fn run(request: &Request) -> Result<Value> {
+    if let Task::Conform {
+        recipe,
+        input_root,
+        output_root,
+        output,
+    } = &request.task
+    {
+        return crate::conform_cache::run(
+            &request.cache_root,
+            &request.policy,
+            recipe,
+            input_root,
+            output_root,
+            output,
+        );
+    }
     let start = Instant::now();
     request.policy.validate()?;
     let (kind, recipe, sources, destination) = match &request.task {
+        Task::Conform { .. } => unreachable!("conform dispatched above"),
         Task::Probe { path, input_root } => (
             "probe",
             json!({}),
@@ -420,6 +475,7 @@ pub fn run(request: &Request) -> Result<Value> {
         )
     } else {
         let metadata = match &request.task {
+            Task::Conform { .. } => unreachable!("conform dispatched above"),
             Task::Probe { .. } => {
                 let value = media::probe(&sources[0].path)?;
                 let mut file = File::create_new(&temp.0)?;

@@ -188,9 +188,11 @@ Implementation note, 12 October 2026: explicit SDR conform now covers the listed
 4:2:2 and straight-alpha formats, plus exact quarter-turn display rotation and fixed sample
 aspect with declared contain/cover/stretch fitting. See [CONFORM](../CONFORM.md#explicit-display-geometry)
 for behavior and independent geometry checks. This broadens explicit conversion only;
-the conversion cache, automatic preparation phases, provenance and stage exit remain pending.
-A 13 October checkpoint adds a hard encoded-output ceiling to explicit conform, plus verified
-decoded digests for future cache entries. This is a prerequisite, not automatic cached conversion.
+automatic preparation phases, provenance and the stage exit remain pending.
+A 13 October checkpoint adds a hard encoded-output ceiling and a file-backed explicit
+`cache.run` conform task with decoded verification, LRU inspect/prune and reader leases.
+See [conversion caching](../CONFORM.md#explicit-conversion-cache). Automatic media.add preparation,
+provenance and preparing-source phases still remain; this does not satisfy the stage exit.
 
 Goal: an agent never has to call `media.prepare` by hand. Files that cannot be decoded directly are converted once, cached and reused, and the conversion is visible.
 

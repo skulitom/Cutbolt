@@ -72,6 +72,21 @@ impl Workspace {
             for (field, relative) in DEFAULTS {
                 match object.get(field) {
                     None if accepted.iter().any(|p| p == field) => {
+                        let relative = if field == "cache_root"
+                            && (object.get("kind").and_then(Value::as_str) == Some("conform")
+                                || object
+                                    .get("task")
+                                    .and_then(|v| v.get("type"))
+                                    .and_then(Value::as_str)
+                                    == Some("conform"))
+                        {
+                            ".cutbolt/cache/conform"
+                        } else {
+                            relative
+                        };
+                        if field == "cache_root" && relative.ends_with("/conform") {
+                            std::fs::create_dir_all(self.inside(relative))?;
+                        }
                         object.insert(field.into(), json!(self.inside(relative)));
                     }
                     Some(Value::String(path)) => {

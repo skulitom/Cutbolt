@@ -17,6 +17,8 @@ pub mod color_match;
 pub mod commands;
 pub mod composite;
 pub mod conform;
+mod conform_cache;
+mod conform_store;
 pub mod cut_review;
 pub mod delivery;
 mod digest;

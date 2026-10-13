@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "scope": "File-backed explicit conversion cache; automatic source preparation remains pending.",
+  "source_base": "93c9abbbacd8b48503485925acadcaad32215703",
+  "source_sha256": {
+    "src/cache.rs": "99d895e157eb9d8308d8a5662f730d3936f8a2cf0b15ca11c57adc2313b6719e",
+    "src/cache_store.rs": "504afb70dc3163e5295433dd1b4fc3eef2be176855433f11056a9d6cc60a01ec",
+    "src/commands.rs": "ab6179e9882d189a75ad51c696943b19b9968aa3f809e3a820ad16c5296eeee5",
+    "src/conform.rs": "0fdc16a8cc9723ff6563863d5f354d743a6341ee32b2d248b2d38834ce3624c4",
+    "src/conform/encode.rs": "d4da614c81640bc56366c06f0b98bd3cbdd715503522aac1e6c7c5be0e040ad5",
+    "src/conform_cache.rs": "7e732a9a4b75d763a699c389f562024691477f9115c5b25024193b6b4715fe3e",
+    "src/conform_store.rs": "3adf45ae82fd74d74346da4368e03eeb8f20b728f44af12b74ca06e18e518ad4",
+    "src/conform_store/tests.rs": "d9eba001cb6caaa22073602f0ab9bcf7ab2294a661fdeccf9e84c862ea454990",
+    "src/lib.rs": "a3ed067b8dc1b0a6d4a283b2989b4b058b05355e1a2673ee59030ded3e2a6fe3",
+    "src/workspace.rs": "457026dc8b371e75d7f01f548c7129461e6e763cbbf1bc96a549db48a6ed790b",
+    "tests/conform_cache.py": "fdbc1c04c9b3a168d9e9dea0fe468eb07dcd15d45648702d8009f5aafa4004c8",
+    "tests/conform_count_tool.rs": "7144be2e9ab72c3daaf3de2ea58aa54cf07c992dc560e85f90ce94de1b8eeac5",
+    "tools/verify.py": "def529dd94f80202611c21d713547213fc50e0db2ebae7a85565087085c1c1be"
+  },
+  "reference": "Cached output equals explicit conform RGB/PCM; original straight RGBA generator checks hidden RGB. Existing conform fixture independently checks rational mapping/resampling.",
+  "checks": {
+    "fixture_checks": 13,
+    "storage_tests": 6,
+    "video_frames_compared": 100,
+    "sample_frames_compared": 288000,
+    "encoder_launches": {
+      "cold": 1,
+      "warm": 0,
+      "changed_tool": 1
+    },
+    "invalidation": [
+      "source bytes including same path/size/mtime",
+      "recipe",
+      "LUT content",
+      "selected tool executable bytes"
+    ],
+    "integrity": [
+      "encoded bytes",
+      "metadata digest",
+      "recorded decoded RGB/RGBA/PCM digests"
+    ],
+    "concurrency": [
+      "independent same-key producers",
+      "cross-process shared reader prevents exclusive prune"
+    ],
+    "bounds": [
+      "encoded reservation plus ready payload budget",
+      "entry LRU",
+      "zero prune",
+      "foreign files and originals preserved",
+      "indexed interrupted staging and publication-before-ready recovery"
+    ],
+    "queued_compact_mcp_and_workspace_defaults": true
+  },
+  "verification": {
+    "windows": {
+      "rust_tests": 242,
+      "clippy_all_targets_deny_warnings": true,
+      "targeted_fixtures": [
+        "conform_cache",
+        "conform",
+        "cache_previews",
+        "agent_costs",
+        "integration",
+        "agent_ergonomics"
+      ],
+      "targeted_seconds": 209,
+      "final_error_path_change_cache_rerun_seconds": 45
+    },
+    "linux": {
+      "rust_tests": 241,
+      "clippy_all_targets_deny_warnings": true,
+      "targeted_fixtures": [
+        "conform_cache",
+        "conform",
+        "cache_previews",
+        "agent_costs",
+        "integration",
+        "agent_ergonomics"
+      ],
+      "targeted_seconds": 69,
+      "final_error_path_change_cache_rerun_seconds": 13
+    }
+  },
+  "windows_engine": {
+    "bytes": 43503616,
+    "sha256": "7548eb586a92b28f1be375c37a3a89a0f3c4ed5baaa6ba8ad7532d14d0f65b4c"
+  },
+  "linux_engine": {
+    "bytes": 202074936,
+    "sha256": "0896fd5857ad799e43e1776bc42909d679dd9e916fcf7ff081ec8799e6d0f569"
+  },
+  "linux_checkout_note": "Linux checkout reports older base c4064df; tested source file hashes above match Windows. Build identities bind the actual binaries.",
+  "limitations": [
+    "Explicit cache.run conform only: automatic media.add recipes, provenance, preparing-source jobs and PREPARATION_REQUIRED remain pending.",
+    "Raw decode scratch, index metadata and requested delivery copies are separate from encoded cache budget.",
+    "Production serializes per cache root; every hit fully decodes to verify recorded digests.",
+    "Interrupted publication test simulates a process ending at the store boundary; no killed-worker recovery claim.",
+    "Engine producer is bound into the key; runtime changed-producer invalidation is not separately exercised.",
+    "Earlier full suites preceded only the final policy.max_bytes error-path remapping; final cache fixture reruns verify it on both systems.",
+    "No new progress points, milestone refresh, broad performance or comparative lead claim."
+  ]
+}

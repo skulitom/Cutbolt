@@ -1,6 +1,6 @@
 # Local cache and contact-sheet previews
 
-`cache.run` reuses inspected metadata, proxy media, timeline frames, preview intervals and contact sheets by content identity. `preview.sheet` creates a contact sheet directly. Both are blocking JSON CLI/library commands. `cache.inspect` and `cache.prune` are also available over local MCP stdio. No listening service, download or background cache worker is introduced.
+`cache.run` reuses inspected metadata, proxy media, timeline frames, preview intervals and contact sheets by content identity. Its separate `conform` task also caches verified normalization; see [conversion caching](CONFORM.md#explicit-conversion-cache). `preview.sheet` creates a contact sheet directly. Both are blocking JSON CLI/library commands. `cache.inspect` and `cache.prune` are also available over local MCP stdio. No listening service, download or background cache worker is introduced.
 
 Both cache checkpoints and contact-sheet acceptance pass the full verifier completed 4 October 2026. The generated [core tracker](PROGRESS.md) remains authoritative.
 
@@ -15,6 +15,7 @@ Supply an existing absolute `cache_root`, a `policy` with `max_bytes` and `max_e
 | `frame` | `project`, `time`, `input_root`, `output_root`, `output` |
 | `interval` | `project`, `start`, `duration`, `input_root`, `output_root`, `output` |
 | `sheet` | `project`, `spec`, `input_root`, `output_root`, `output` |
+| `conform` | `recipe`, `input_root`, `output_root`, `output`; separate file-backed cache family |
 
 `scale` follows existing half/quarter/eighth proxy generation. Proxy requests require a bound original asset. Frames and sheets publish PNG; proxies and intervals publish the existing lossless MKV profile. Every file request needs a new unused destination. All underlying source, timeline, frame-count, dimension and native 25 fps/48 kHz restrictions still apply. Unsupported inputs reject explicitly.
 
@@ -34,6 +35,11 @@ Supply an existing absolute `cache_root`, a `policy` with `max_bytes` and `max_e
 The response contains `result` and `cache`. A probe returns the current source path, identity and metadata. File tasks return the published path, payload identity and task details. A proxy additionally returns its binding, proposed attachment operations and resulting pure project snapshot; save the operations through the existing session contract. A hit never commits editing state implicitly.
 
 `cache` reports the key, producer fingerprint, hit/miss, storage decision, evicted keys, actually verified source identities and elapsed microseconds. A successful cache hit still verifies sources, selected external tools and cached payload bytes. Repeated calls therefore retain I/O costs; they are not constant-time lookups. Cold/warm figures measure missing/present application cache entries, not cold/warm operating-system file caches.
+
+For `conform`, use the separate [conversion-cache contract](CONFORM.md#explicit-conversion-cache):
+`kind: "conform"` selects its inspect/prune operations, its cap includes encoded work in progress,
+and every use verifies decoded pixels/PCM as well as file identity. The artifact-cache budgets,
+bypass rules and storage details below describe the original task types.
 
 ## Identity and invalidation
 
