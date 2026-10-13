@@ -10,6 +10,11 @@ The ten foundational checks cover local commands, saved editing sessions, render
 
 Explicit SDR conform recipes accept `source.geometry: {"fit":"contain"}` for canonical quarter-turn display rotation and fixed sample aspect. `cover` and `stretch` are also supported; receipts disclose rotation, aspect, fitting and rounding. The existing `media.conform.inspect`, `job.start` and explicit `media.prepare` paths use this policy; no new MCP tool is added. See [display geometry](CONFORM.md#explicit-display-geometry).
 
+Supported original videos added with `media.add` and an explicit `input_root` save a direct
+or converted binding. Export jobs report `preparing sources` while materializing missing
+verified conversions, then resume frame progress. Synchronous misses return a runnable repair
+request in `PREPARATION_REQUIRED.detail.request`; see [saved source preparation](AUTOMATIC_PREPARATION.md).
+
 ## Local background renders
 
 For installation and a read-only setup check before starting MCP, see

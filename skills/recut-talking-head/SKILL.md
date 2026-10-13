@@ -1,6 +1,6 @@
 ---
 name: recut-talking-head
-description: "Edit a talking-head video from original footage through pause and filler cuts, captions, H.264 export and review, or tighten an existing saved cut. This complete workflow needs no other Cutbolt skill."
+description: "Edit a talking-head video from original footage through pause and filler cuts, captions, H.264 export and review, or tighten an existing saved cut. For ready sources this complete workflow needs no other Cutbolt skill."
 ---
 
 # Edit and deliver a talking head
@@ -20,7 +20,8 @@ and ID. Queue blocking work with job.start and continue only after job.wait repo
 
 Inspect the source before choosing the project clock and canvas. $SOURCE is a workspace
 path; use the returned size/rate for $WIDTH, $HEIGHT and $FRAME_RATE unless the user requested
-another delivery. A mismatch requires preparation before editing.
+another delivery. A mismatched or preparation-required original video uses the cutbolt
+skill's automatic-add setup; retain that saved project and continue here.
 
 <!-- example: inspect -->
 ~~~json
@@ -29,10 +30,10 @@ another delivery. A mismatch requires preparation before editing.
 
 When timeline.ready is true and the size/rate fit, use timeline.asset as $ASSET and its
 id/duration as $ASSET_ID/$DURATION. If asset.identity is absent, add the inspection identity's
-bytes and sha256 (not its path). Preserve the returned decode binding. For preparation-required
-sources, queue the returned media.prepare proposal and wait for the ready asset; do not change
-metadata to label an unsupported original ready. $TRANSFER declares the working RGB transfer,
-for example bt709, from the media/project policy.
+bytes and sha256 (not its path). Preserve the returned decode binding. $TRANSFER declares
+the working RGB transfer, for example bt709, from the media/project policy. If no ready
+asset or supported video recipe is returned, follow the reported reason; never relabel an
+unsupported original. Audio-only normalization still needs explicit media.prepare.
 
 For a new project, create its initial linked picture/sound arrangement in one validated
 snapshot. $PROJECT_ID is a new stable name. The clip and link IDs below are new IDs chosen

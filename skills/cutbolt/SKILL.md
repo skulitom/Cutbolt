@@ -34,7 +34,9 @@ identical arguments when retrying an uncertain edit.
 
 Inspect the source before choosing the project clock and canvas. $SOURCE is a workspace
 path; use the returned size/rate for $WIDTH, $HEIGHT and $FRAME_RATE unless the user requested
-another delivery. A mismatch requires preparation before editing.
+another delivery. When timeline.ready is false, use the proposed timeline.conform.recipe
+canvas and clock if they meet the request (an omitted recipe frame_rate means 25 fps). Supported video normalization can be deferred
+until the queued export; use the automatic-add recipe below for that source.
 
 <!-- example: inspect -->
 ~~~json
@@ -43,10 +45,10 @@ another delivery. A mismatch requires preparation before editing.
 
 When timeline.ready is true and the size/rate fit, use timeline.asset as $ASSET and its
 id/duration as $ASSET_ID/$DURATION. If asset.identity is absent, add the inspection identity's
-bytes and sha256 (not its path). Preserve the returned decode binding. For preparation-required
-sources, queue the returned media.prepare proposal and wait for the ready asset; do not change
-metadata to label an unsupported original ready. $TRANSFER declares the working RGB transfer,
-for example bt709, from the media/project policy.
+bytes and sha256 (not its path). Preserve the returned decode binding. $TRANSFER declares
+the working RGB transfer, for example bt709, from the media/project policy. If no ready
+asset or supported video recipe is returned, follow the reported reason; never relabel an
+unsupported original. Audio-only normalization still needs explicit media.prepare.
 
 For a new project, create its initial linked picture/sound arrangement in one validated
 snapshot. $PROJECT_ID is a new stable name. The clip and link IDs below are new IDs chosen
@@ -61,11 +63,65 @@ Keep the returned revision as $REVISION (zero for a new session). The creation r
 its initial assets and tracks. Subsequent changes use session.apply with that revision and a
 new request ID; retry an uncertain creation with identical arguments and the same request ID.
 
+## Original videos that need normalization
+
+For a new project whose original needs a supported conversion, use these two requests
+instead of the populated snapshot above. Choose a new $ASSET_ID; $DURATION is the complete
+proposed prepared duration, not the length of a selected excerpt. With a different project
+clock, a duration error supplies actual_duration; use it after checking the requested edit.
+The explicit input_root opts media.add into inspection and automatic source binding.
+A workspace root is "."; the asset path is relative to that root.
+
+<!-- example: create-empty -->
+~~~json
+{"command":"session.create","request_id":"create","project":{"schema_version":1,"id":"$PROJECT_ID","revision":0,"width":"$WIDTH","height":"$HEIGHT","frame_rate":"$FRAME_RATE","transfer":"$TRANSFER","assets":[],"clips":[]}}
+~~~
+
+<!-- example: attach-original -->
+~~~json
+{"command":"session.apply","project_id":"$PROJECT_ID","expected_revision":"$REVISION","request_id":"add-original","operations":[{"op":"media.add","input_root":".","asset":{"id":"$ASSET_ID","path":"$SOURCE","duration":"$DURATION"}},{"op":"tracks.edit","edit":{"op":"create","duration":"$DURATION"}},{"op":"tracks.edit","edit":{"op":"add","track":{"id":"v","kind":"video","enabled":true,"locked":false,"clips":[]}}},{"op":"tracks.edit","edit":{"op":"place","track_id":"v","clip":{"id":"shot","asset_id":"$ASSET_ID","start":0,"source_in":0,"duration":"$DURATION"},"collision":"reject"}},{"op":"tracks.edit","edit":{"op":"add","track":{"id":"a","kind":"audio","enabled":true,"locked":false,"clips":[]}}},{"op":"tracks.edit","edit":{"op":"place","track_id":"a","clip":{"id":"shot-audio","asset_id":"$ASSET_ID","start":0,"source_in":0,"duration":"$DURATION"},"collision":"reject"}},{"op":"tracks.edit","edit":{"op":"link","id":"shot-link","clip_ids":["shot","shot-audio"]}}]}
+~~~
+
+The receipt records the original identity and conversion recipe. Export jobs prepare it
+once and reuse its verified cache. Synchronous previews or audio analysis may instead return
+PREPARATION_REQUIRED: run detail.request unchanged, wait for completion and retry the command.
+For an existing project, retain its head and use only media.add and the intended placements;
+do not recreate its tracks. Remove the audio track/link steps for footage without sound.
+
+## Simple trim, reorder and delivery
+
+For a new cut, the populated snapshot can contain just the desired intervals: each clip's
+source_in chooses its first source time, start is its timeline position, and duration is the
+kept length. For reordered excerpts, use new clip IDs and one picture/sound link per excerpt,
+with matching anchors. Set tracks.duration to the edited end. Asset duration always remains
+the full source length. Keep times frame-aligned; exact fractions use {"num":1,"den":25}.
+For an existing cut, read its head and revise selected clips with tracks.edit; a remove edit
+requires clip_ids and links ("include" keeps linked picture/sound together).
+
+For a straightforward MP4 delivery, $OUTPUT is a new .mp4 name and $INPUT_TRANSFER matches
+the project. The h264_aac defaults are software H.264 High CRF 18 and stereo 48 kHz AAC
+at a requested 320 kb/s. streams can be video for a silent source. Queued export includes
+any required source preparation and verifies decoded output against the timeline.
+
+<!-- example: export -->
+~~~json
+{"command":"job.start","request_id":"delivery-export","run":"export.run","arguments":{"project":{"project_id":"$PROJECT_ID"},"output":"$OUTPUT","profile":"h264_aac","streams":"audio_video","input_transfer":"$INPUT_TRANSFER"}}
+~~~
+
+<!-- example: wait-export -->
+~~~json
+{"command":"job.wait","job_id":"$JOB_ID","timeout_seconds":120}
+~~~
+
+Set $JOB_ID from job.start. Continue bounded waits while running; a failed job is not a
+completed output. Use deliver-and-review when contact sheets, audio review or interchange
+are needed. Review timing and relevant pictures/sound before claiming editorial correctness.
+
 ## Choose the next recipe
 
 - Talking head through captions and delivery: recut-talking-head is self-contained; load it
   directly for that request. Its setup is only for a new project, so retain an existing head.
-- Screen capture: screen-tutorial, then deliver-and-review.
+- Screen capture, B-roll or picture-in-picture: screen-tutorial, then deliver-and-review.
 - Two synchronized cameras: interview-multicam, then deliver-and-review.
 - Existing captions: captions; retain the same project and current revision.
 - Feedback revision: session.get, make the smallest targeted session.apply, then preview

@@ -1,6 +1,6 @@
 ---
 name: screen-tutorial
-description: Trim and revise a saved screen tutorial, add a project-sized title and normalize its narration using Cutbolt's linked track edits.
+description: Edit screen tutorials or add B-roll and picture-in-picture over footage, with optional linked trims, titles and narration loudness.
 ---
 
 # Edit a screen tutorial
@@ -62,6 +62,38 @@ returned operations as $LEVEL_OPERATIONS.
 ~~~json
 {"command":"session.apply","project_id":"$PROJECT_ID","expected_revision":"$REVISION","request_id":"tutorial-levels","operations":"$LEVEL_OPERATIONS"}
 ~~~
+
+## B-roll and picture-in-picture when requested
+
+Use only this section for supplementary footage; title and loudness steps above are optional.
+Inspect $BROLL_SOURCE and use its full ready duration, or timeline.conform.recipe.duration,
+as $BROLL_DURATION. $BROLL_ID is a new stable asset ID. The source stays at its original path;
+media.add with input_root selects direct decoding or saves a supported conversion recipe.
+
+<!-- example: inspect-broll -->
+~~~json
+{"command":"media.inspect","path":"$BROLL_SOURCE"}
+~~~
+
+The following batch adds picture-only tracks above the existing picture and leaves narration
+unchanged. $BROLL_START/$INSET_START are timeline times; $BROLL_IN/$INSET_IN are source times.
+The two lengths must fit their source and the current timeline. Omit the corresponding add/place pair
+when that view is not requested. New IDs below must be unused; edit existing tracks if present.
+
+<!-- example: attach-broll -->
+~~~json
+{"command":"session.apply","project_id":"$PROJECT_ID","expected_revision":"$REVISION","request_id":"tutorial-broll","operations":[{"op":"media.add","input_root":".","asset":{"id":"$BROLL_ID","path":"$BROLL_SOURCE","duration":"$BROLL_DURATION"}},{"op":"tracks.edit","edit":{"op":"add","track":{"id":"broll","kind":"video","composite":"alpha_over","enabled":true,"locked":false,"clips":[]}}},{"op":"tracks.edit","edit":{"op":"place","track_id":"broll","clip":{"id":"broll-shot","asset_id":"$BROLL_ID","start":"$BROLL_START","source_in":"$BROLL_IN","duration":"$BROLL_LENGTH"},"collision":"reject"}},{"op":"tracks.edit","edit":{"op":"add","track":{"id":"inset","kind":"video","composite":"alpha_over","enabled":true,"locked":false,"clips":[]}}},{"op":"tracks.edit","edit":{"op":"place","track_id":"inset","clip":{"id":"inset-shot","asset_id":"$BROLL_ID","start":"$INSET_START","source_in":"$INSET_IN","duration":"$INSET_LENGTH","transform":{"crop":"$INSET_CROP","divisor":"$INSET_DIVISOR","opacity":255,"position":"$INSET_POSITION"}},"collision":"reject"}}]}
+~~~
+
+Both supplementary tracks use alpha_over. A full-frame opaque clip replaces the picture
+where active; a transformed clip composites an inset. Keep both uses as overlays: the current
+renderer rejects one asset used on both a normal base track and an alpha_over track. $INSET_CROP is [x,y,width,height] on the project-sized prepared source;
+$INSET_DIVISOR is an integer from 1 to 8. Crop width and height must be divisible by it.
+Each opaque output pixel is the floor of its source block mean. $INSET_POSITION is the inset's
+top-left canvas [x,y]; choose it and the crop from the requested composition. Cropping precedes
+shrinking. Full opacity is 255. This bounded transform does not support arbitrary resizing.
+Add supplementary tracks before title/caption overlays, or explicitly restore the intended
+bottom-to-top order with tracks.edit order. A queued export prepares missing conversions.
 
 Use deliver-and-review next. Test important instructional clicks and speech around each cut;
 the original may be long, but a cut that changes the demonstrated sequence is still wrong.

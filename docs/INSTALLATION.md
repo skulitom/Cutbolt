@@ -108,6 +108,6 @@ installation does not need the override. The tested Windows client is Claude Cod
 other client builds and Linux plugin installation have not yet been verified.
 
 `python -X utf8 tools/verify.py --only skills` executes every JSON request in the skills
-against original synthetic sources. It verifies the four complete recipes, outputs and source
+against original synthetic sources. It verifies eight bounded workflows, including automatic preparation and insets, plus outputs and source
 preservation on Windows and Linux. This is scripted documentation verification: fresh-model
 workflow success and model token usage are separately tracked in [AGENT_COSTS.md](AGENT_COSTS.md).

@@ -1,5 +1,27 @@
 # Progress history
 
+## 13 October 2026: teach automatic preparation and complete simple footage recipes
+
+The frozen comparative pilot exposed schema discovery and explicit-conversion detours in
+ordinary footage tasks. Current skills now explain automatic media.add binding, show a complete
+queued MP4 export, and include B-roll/inset placement without changing narration. The original
+ready-source talking-head path remains intact. README and agent/installation docs describe the
+current behavior. The pilot continues against its earlier frozen copies; these changes do not
+replace any failed trial or establish improved fresh-model performance yet.
+
+All 41 JSON examples pass through the compact MCP catalog in eight bounded workflows on
+Windows and Linux, with original files preserved. New normalization and B-roll/inset recipes
+use five and six scripted calls respectively. Their pre-encoding frame/PCM hashes match an
+independently assembled explicit-conversion reference. Initial recipe/fixture errors (default
+rate, empty-track creation and dual base/overlay use) were corrected and all cases rerun.
+See verification/skills-stage2-2026-10-13.json. All 244 Windows Rust tests pass. Fresh-model
+retests remain pending; this commit's shipping gate/deferred result must still be checked.
+
+The earlier 2dbab3c shipment is terminal: 27 passed, one obsolete direct_sources expectation
+failed, 28 were superseded, none unstarted. The corrected complete fixture passes on both
+platforms and in 546cac4's deferred run. That shipment's other checks and the queued full
+stage-2 run still need terminal review. No points or refreshed milestone evidence.
+
 ## 13 October 2026: preserve direct rejection while accepting automatic conversion
 
 The 2dbab3c background run exposed an obsolete direct_sources expectation: its stage-1

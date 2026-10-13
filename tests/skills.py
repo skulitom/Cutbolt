@@ -91,13 +91,17 @@ def run(root):
     executed = set()
     reports = {}
     passed = ['skills.six_small_original_recipes_with_consistent_command_argument_keys']
+    setup = ['inspect','create']
+    tutorial = ['current','trim','title','wait','normalize','apply-levels']
     cases = {
         'talking-head': [('recut-talking-head', None)],
         'talking-head-direct': [('recut-talking-head', None)],
-        'caption-reuse': [('cutbolt', None), ('recut-talking-head', ['pauses','apply-pauses','fillers','apply-fillers']), ('captions', None), ('deliver-and-review', 4)],
-        'tutorial': [('cutbolt', None), ('screen-tutorial', None), ('deliver-and-review', 2)],
-        'interview': [('cutbolt', None), ('interview-multicam', None), ('deliver-and-review', 2)],
-        'handoff': [('cutbolt', None), ('deliver-and-review', None)],
+        'caption-reuse': [('cutbolt', setup), ('recut-talking-head', ['pauses','apply-pauses','fillers','apply-fillers']), ('captions', None), ('deliver-and-review', 4)],
+        'tutorial': [('cutbolt', setup), ('screen-tutorial', tutorial), ('deliver-and-review', 2)],
+        'interview': [('cutbolt', setup), ('interview-multicam', None), ('deliver-and-review', 2)],
+        'normalized-source': [('cutbolt', ['inspect','create-empty','attach-original','export','wait-export'])],
+        'broll-inset': [('cutbolt', setup), ('screen-tutorial', ['inspect-broll','attach-broll']), ('cutbolt', ['export','wait-export'])],
+        'handoff': [('cutbolt', setup), ('deliver-and-review', None)],
     }
     for case, sequence in cases.items():
         workspace = root / case
@@ -105,6 +109,8 @@ def run(root):
         assets = []
         for n in range(2):
             encoding = {'codec':'h264','pix_fmt':'yuv420p','container':'mkv','audio_codec':'pcm_s16le'} if case == 'talking-head-direct' else {'codec':'ffv1','pix_fmt':'bgr0'}
+            if case == 'normalized-source' or (case == 'broll-inset' and n == 1):
+                encoding = {'codec':'hevc','pix_fmt':'yuv420p10le','container':'mov','audio_codec':'pcm_s16le'}
             source = encode(workspace, f'camera{n}', rate=Fraction(25), count=150, phase=n*61, **encoding)
             assets.append({'id': f'camera{n}', 'path': source['path'], 'duration': 6,
                            'identity': {k: source[k] for k in ('bytes', 'sha256')}})
@@ -117,7 +123,9 @@ def run(root):
                    'LEAD': 0.4, 'MISTAKE_START': 2, 'MISTAKE_DURATION': 0.8, 'TITLE': 'A',
                    'TITLE_DURATION': 1, 'TARGET_LKFS': -18, 'SWITCH': 3,
                    'OUTPUT': 'delivery.mp4', 'REVIEW_OUTPUT': 'review', 'INPUT_TRANSFER': 'bt709',
-                   'HANDOFF_OUTPUT': 'handoff.otio'}
+                   'HANDOFF_OUTPUT': 'handoff.otio', 'BROLL_SOURCE':assets[1]['path'], 'BROLL_ID':'supplement',
+                   'BROLL_START':1, 'BROLL_IN':1, 'BROLL_LENGTH':1, 'INSET_START':3, 'INSET_IN':3,
+                   'INSET_LENGTH':1, 'INSET_CROP':[0,0,160,88], 'INSET_DIVISOR':4, 'INSET_POSITION':[110,65]}
         environment = {k:v for k,v in os.environ.items() if k != 'CUTBOLT_MCP_TOOLS'}
         client = Client(ENGINE, env=environment, args=('--workspace', str(workspace), 'mcp'))
         calls = []
@@ -152,16 +160,25 @@ def run(root):
                         context['REVISION'] = result['revision']
                     if command == 'media.inspect':
                         timeline = result['timeline']
-                        assert timeline['ready'] and timeline['width'] == 160 and timeline['height'] == 90
-                        assert timeline['frame_rate'] == {'num':25, 'den':1}
-                        asset = copy.deepcopy(timeline['asset'])
-                        if case == 'talking-head-direct':
-                            assert timeline['direct'] and asset['decode']['mode'] == 'direct'
-                        asset.setdefault('identity', {k:result['identity'][k] for k in ('bytes','sha256')})
-                        if skill in ('cutbolt','recut-talking-head'):
-                            context.update(ASSET=asset, ASSET_ID=asset['id'], ASSET_A_ID=asset['id'], DURATION=asset['duration'])
+                        if label == 'inspect-broll' or case == 'normalized-source':
+                            assert not timeline['ready']
+                            recipe = timeline['conform']['recipe']
+                            assert (recipe['width'],recipe['height'],recipe.get('frame_rate',{'num':25,'den':1})) == (160,90,{'num':25,'den':1})
+                            if label == 'inspect-broll':
+                                context['BROLL_DURATION'] = recipe['duration']
+                            else:
+                                context.update(ASSET_ID=assets[0]['id'],DURATION=recipe['duration'])
                         else:
-                            context.update(ASSET_B=asset, ASSET_B_ID=asset['id'])
+                            assert timeline['ready'] and timeline['width'] == 160 and timeline['height'] == 90
+                            assert timeline['frame_rate'] == {'num':25, 'den':1}
+                            asset = copy.deepcopy(timeline['asset'])
+                            if case == 'talking-head-direct':
+                                assert timeline['direct'] and asset['decode']['mode'] == 'direct'
+                            asset.setdefault('identity', {k:result['identity'][k] for k in ('bytes','sha256')})
+                            if skill in ('cutbolt','recut-talking-head'):
+                                context.update(ASSET=asset, ASSET_ID=asset['id'], ASSET_A_ID=asset['id'], DURATION=asset['duration'])
+                            else:
+                                context.update(ASSET_B=asset, ASSET_B_ID=asset['id'])
                     if command == 'session.get':
                         clips = [c['id'] for t in result['tracks']['tracks'] for c in t['clips']]
                         context['OLD_CLIP_IDS'] = clips
@@ -192,8 +209,9 @@ def run(root):
             client.close()
         assert 'schema' not in calls
         deliver_skill = 'recut-talking-head' if case in ('talking-head','talking-head-direct') else 'deliver-and-review'
+        if case in ('normalized-source','broll-inset'):deliver_skill = 'cutbolt'
         export = results[deliver_skill + '/wait-export']['result']
-        wanted = {'talking-head':124,'talking-head-direct':124,'caption-reuse':124,'tutorial':120,'interview':150,'handoff':150}[case]
+        wanted = {'talking-head':124,'talking-head-direct':124,'caption-reuse':124,'tutorial':120,'interview':150,'handoff':150,'normalized-source':150,'broll-inset':150}[case]
         assert export['timeline_frames'] == wanted, (case, export['timeline_frames'])
         assert (workspace / 'delivery.mp4').is_file()
         if case in ('talking-head','talking-head-direct','caption-reuse','handoff'):
@@ -230,11 +248,32 @@ def run(root):
             cut = 75*160*90*3
             assert export['verification']['timeline_video_sha256'] == hashlib.sha256(a[:cut]+b[cut:]).hexdigest()
             assert export['verification']['timeline_audio_sha256'] == hashlib.sha256(decoded(workspace / assets[0]['path'],True)).hexdigest()
+        if case in ('normalized-source','broll-inset'):
+            saved = cli(workspace, {'command':'session.get','project_id':case})
+            converted, = [a for a in saved['assets'] if a.get('decode',{}).get('mode') == 'converted']
+            assert converted['path'] == assets[0 if case == 'normalized-source' else 1]['path']
+            assert converted['provenance']['original'] == identity(workspace/converted['path'])
+            # Explicit conversion is the stage-2 reference; assemble placement and block
+            # averaging independently and compare the renderer's pre-encoding digests.
+            cli(workspace, {'command':'media.conform','recipe':converted['decode']['recipe'],'output':'oracle.mkv'})
+            reference = np.frombuffer(decoded(workspace/'oracle.mkv'),dtype=np.uint8).reshape(150,90,160,3)
+            if case == 'normalized-source':
+                expected_rgb = reference
+                expected_pcm = decoded(workspace/'oracle.mkv',True)
+            else:
+                expected_rgb = np.frombuffer(decoded(workspace/assets[0]['path']),dtype=np.uint8).reshape(150,90,160,3).copy()
+                expected_rgb[25:50] = reference[25:50]
+                crop = reference[75:100,:88].astype(np.uint32).reshape(25,22,4,40,4,3)
+                inset = (crop.sum(axis=(2,4))//16).astype(np.uint8)
+                expected_rgb[75:100,65:87,110:150] = inset
+                expected_pcm = decoded(workspace/assets[0]['path'],True)
+            assert export['verification']['timeline_video_sha256'] == hashlib.sha256(expected_rgb.tobytes()).hexdigest()
+            assert export['verification']['timeline_audio_sha256'] == hashlib.sha256(expected_pcm).hexdigest()
         if case == 'handoff':
             assert results['deliver-and-review/handoff']['ready'] and (workspace/'handoff.otio').is_file()
         assert originals == {name:identity(workspace/name) for name in originals}
         assert cli(workspace, {'command':'session.check'})
-        assert len(calls) == {'talking-head':14,'talking-head-direct':14,'caption-reuse':14,'tutorial':10,'interview':7,'handoff':8}[case]
+        assert len(calls) == {'talking-head':14,'talking-head-direct':14,'caption-reuse':14,'tutorial':10,'interview':7,'handoff':8,'normalized-source':5,'broll-inset':6}[case]
         reports[case] = {'calls':len(calls), 'schema_lookups':0, 'failed_calls':0, 'commands':calls, 'frames':wanted, 'revision':context['REVISION']}
         (workspace/'recipe-results.json').write_text(json.dumps(results,indent=2)+'\n',encoding='utf-8')
         passed.append('skills.'+case.replace('-','_')+'_recipe_outputs_and_source_preservation')

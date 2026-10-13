@@ -1,0 +1,792 @@
+{
+  "date": "2026-10-13",
+  "kind": "scripted_skill_examples",
+  "engine_source_commit": "2dbab3c16f963078e7ae43e904e3051d53740510",
+  "engine_behavior_unchanged_at": "546cac4ae6e5d32f5b4a22f6223f19b48c1df878",
+  "platform_reports": {
+    "windows": {
+      "passed": [
+        "skills.six_small_original_recipes_with_consistent_command_argument_keys",
+        "skills.talking_head_recipe_outputs_and_source_preservation",
+        "skills.talking_head_direct_recipe_outputs_and_source_preservation",
+        "skills.caption_reuse_recipe_outputs_and_source_preservation",
+        "skills.tutorial_recipe_outputs_and_source_preservation",
+        "skills.interview_recipe_outputs_and_source_preservation",
+        "skills.normalized_source_recipe_outputs_and_source_preservation",
+        "skills.broll_inset_recipe_outputs_and_source_preservation",
+        "skills.handoff_recipe_outputs_and_source_preservation"
+      ],
+      "kind": "scripted_skill_examples",
+      "example_count": 41,
+      "contracts": {
+        "captions.draft": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "transcripts"
+            ],
+            []
+          ],
+          "first": "captions/draft"
+        },
+        "job.start:captions.render": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "document",
+              "layouts",
+              "output",
+              "project"
+            ]
+          ],
+          "first": "captions/render"
+        },
+        "job.wait": {
+          "keys": [
+            [
+              "command",
+              "job_id",
+              "timeout_seconds"
+            ],
+            []
+          ],
+          "first": "captions/wait"
+        },
+        "session.apply": {
+          "keys": [
+            [
+              "command",
+              "expected_revision",
+              "operations",
+              "project_id",
+              "request_id"
+            ],
+            []
+          ],
+          "first": "captions/attach"
+        },
+        "media.inspect": {
+          "keys": [
+            [
+              "command",
+              "path"
+            ],
+            []
+          ],
+          "first": "cutbolt/inspect"
+        },
+        "session.create": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "request_id"
+            ],
+            []
+          ],
+          "first": "cutbolt/create"
+        },
+        "job.start:export.run": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "input_transfer",
+              "output",
+              "profile",
+              "project",
+              "streams"
+            ]
+          ],
+          "first": "cutbolt/export"
+        },
+        "job.start:export.review": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "frames",
+              "output",
+              "path",
+              "project",
+              "rendition_height"
+            ]
+          ],
+          "first": "deliver-and-review/review"
+        },
+        "interchange.export.inspect": {
+          "keys": [
+            [
+              "command",
+              "project"
+            ],
+            []
+          ],
+          "first": "deliver-and-review/inspect-handoff"
+        },
+        "interchange.export": {
+          "keys": [
+            [
+              "acknowledged_losses",
+              "command",
+              "output",
+              "project"
+            ],
+            []
+          ],
+          "first": "deliver-and-review/handoff"
+        },
+        "session.get": {
+          "keys": [
+            [
+              "command",
+              "project_id"
+            ],
+            []
+          ],
+          "first": "interview-multicam/current"
+        },
+        "audio.tighten": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "voice_track_id"
+            ],
+            []
+          ],
+          "first": "recut-talking-head/pauses"
+        },
+        "transcript.fillers": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "transcripts"
+            ],
+            []
+          ],
+          "first": "recut-talking-head/fillers"
+        },
+        "job.start:graphics.place": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "expected_revision",
+              "instance_id",
+              "project_id",
+              "request_id",
+              "template_id",
+              "track_id",
+              "values"
+            ]
+          ],
+          "first": "screen-tutorial/title"
+        },
+        "audio.normalize": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "target_lkfs"
+            ],
+            []
+          ],
+          "first": "screen-tutorial/normalize"
+        }
+      },
+      "workflows": {
+        "talking-head": {
+          "calls": 14,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "audio.tighten",
+            "session.apply",
+            "transcript.fillers",
+            "session.apply",
+            "captions.draft",
+            "job.start",
+            "job.wait",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 124,
+          "revision": 3
+        },
+        "talking-head-direct": {
+          "calls": 14,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "audio.tighten",
+            "session.apply",
+            "transcript.fillers",
+            "session.apply",
+            "captions.draft",
+            "job.start",
+            "job.wait",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 124,
+          "revision": 3
+        },
+        "caption-reuse": {
+          "calls": 14,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "audio.tighten",
+            "session.apply",
+            "transcript.fillers",
+            "session.apply",
+            "captions.draft",
+            "job.start",
+            "job.wait",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 124,
+          "revision": 3
+        },
+        "tutorial": {
+          "calls": 10,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "session.get",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "audio.normalize",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 120,
+          "revision": 3
+        },
+        "interview": {
+          "calls": 7,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "session.get",
+            "media.inspect",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 150,
+          "revision": 1
+        },
+        "normalized-source": {
+          "calls": 5,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 150,
+          "revision": 1
+        },
+        "broll-inset": {
+          "calls": 6,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "media.inspect",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 150,
+          "revision": 1
+        },
+        "handoff": {
+          "calls": 8,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait",
+            "interchange.export.inspect",
+            "interchange.export"
+          ],
+          "frames": 150,
+          "revision": 0
+        }
+      },
+      "sources_preserved": true
+    },
+    "linux": {
+      "passed": [
+        "skills.six_small_original_recipes_with_consistent_command_argument_keys",
+        "skills.talking_head_recipe_outputs_and_source_preservation",
+        "skills.talking_head_direct_recipe_outputs_and_source_preservation",
+        "skills.caption_reuse_recipe_outputs_and_source_preservation",
+        "skills.tutorial_recipe_outputs_and_source_preservation",
+        "skills.interview_recipe_outputs_and_source_preservation",
+        "skills.normalized_source_recipe_outputs_and_source_preservation",
+        "skills.broll_inset_recipe_outputs_and_source_preservation",
+        "skills.handoff_recipe_outputs_and_source_preservation"
+      ],
+      "kind": "scripted_skill_examples",
+      "example_count": 41,
+      "contracts": {
+        "captions.draft": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "transcripts"
+            ],
+            []
+          ],
+          "first": "captions/draft"
+        },
+        "job.start:captions.render": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "document",
+              "layouts",
+              "output",
+              "project"
+            ]
+          ],
+          "first": "captions/render"
+        },
+        "job.wait": {
+          "keys": [
+            [
+              "command",
+              "job_id",
+              "timeout_seconds"
+            ],
+            []
+          ],
+          "first": "captions/wait"
+        },
+        "session.apply": {
+          "keys": [
+            [
+              "command",
+              "expected_revision",
+              "operations",
+              "project_id",
+              "request_id"
+            ],
+            []
+          ],
+          "first": "captions/attach"
+        },
+        "media.inspect": {
+          "keys": [
+            [
+              "command",
+              "path"
+            ],
+            []
+          ],
+          "first": "cutbolt/inspect"
+        },
+        "session.create": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "request_id"
+            ],
+            []
+          ],
+          "first": "cutbolt/create"
+        },
+        "job.start:export.run": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "input_transfer",
+              "output",
+              "profile",
+              "project",
+              "streams"
+            ]
+          ],
+          "first": "cutbolt/export"
+        },
+        "job.start:export.review": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "frames",
+              "output",
+              "path",
+              "project",
+              "rendition_height"
+            ]
+          ],
+          "first": "deliver-and-review/review"
+        },
+        "interchange.export.inspect": {
+          "keys": [
+            [
+              "command",
+              "project"
+            ],
+            []
+          ],
+          "first": "deliver-and-review/inspect-handoff"
+        },
+        "interchange.export": {
+          "keys": [
+            [
+              "acknowledged_losses",
+              "command",
+              "output",
+              "project"
+            ],
+            []
+          ],
+          "first": "deliver-and-review/handoff"
+        },
+        "session.get": {
+          "keys": [
+            [
+              "command",
+              "project_id"
+            ],
+            []
+          ],
+          "first": "interview-multicam/current"
+        },
+        "audio.tighten": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "voice_track_id"
+            ],
+            []
+          ],
+          "first": "recut-talking-head/pauses"
+        },
+        "transcript.fillers": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "transcripts"
+            ],
+            []
+          ],
+          "first": "recut-talking-head/fillers"
+        },
+        "job.start:graphics.place": {
+          "keys": [
+            [
+              "arguments",
+              "command",
+              "request_id",
+              "run"
+            ],
+            [
+              "expected_revision",
+              "instance_id",
+              "project_id",
+              "request_id",
+              "template_id",
+              "track_id",
+              "values"
+            ]
+          ],
+          "first": "screen-tutorial/title"
+        },
+        "audio.normalize": {
+          "keys": [
+            [
+              "command",
+              "project",
+              "target_lkfs"
+            ],
+            []
+          ],
+          "first": "screen-tutorial/normalize"
+        }
+      },
+      "workflows": {
+        "talking-head": {
+          "calls": 14,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "audio.tighten",
+            "session.apply",
+            "transcript.fillers",
+            "session.apply",
+            "captions.draft",
+            "job.start",
+            "job.wait",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 124,
+          "revision": 3
+        },
+        "talking-head-direct": {
+          "calls": 14,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "audio.tighten",
+            "session.apply",
+            "transcript.fillers",
+            "session.apply",
+            "captions.draft",
+            "job.start",
+            "job.wait",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 124,
+          "revision": 3
+        },
+        "caption-reuse": {
+          "calls": 14,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "audio.tighten",
+            "session.apply",
+            "transcript.fillers",
+            "session.apply",
+            "captions.draft",
+            "job.start",
+            "job.wait",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 124,
+          "revision": 3
+        },
+        "tutorial": {
+          "calls": 10,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "session.get",
+            "session.apply",
+            "job.start",
+            "job.wait",
+            "audio.normalize",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 120,
+          "revision": 3
+        },
+        "interview": {
+          "calls": 7,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "session.get",
+            "media.inspect",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 150,
+          "revision": 1
+        },
+        "normalized-source": {
+          "calls": 5,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 150,
+          "revision": 1
+        },
+        "broll-inset": {
+          "calls": 6,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "media.inspect",
+            "session.apply",
+            "job.start",
+            "job.wait"
+          ],
+          "frames": 150,
+          "revision": 1
+        },
+        "handoff": {
+          "calls": 8,
+          "schema_lookups": 0,
+          "failed_calls": 0,
+          "commands": [
+            "media.inspect",
+            "session.create",
+            "job.start",
+            "job.wait",
+            "job.start",
+            "job.wait",
+            "interchange.export.inspect",
+            "interchange.export"
+          ],
+          "frames": 150,
+          "revision": 0
+        }
+      },
+      "sources_preserved": true
+    }
+  },
+  "external_evidence": {
+    "windows": "C:\\DEV\\CutboltData\\plan-fixes-20261011\\skills-stage2-windows-04\\verification.json",
+    "linux": "/home/skulitom/skills-stage2-linux-04/verification.json"
+  },
+  "skills": {
+    "captions": {
+      "bytes": 3567,
+      "sha256": "55ec0d0ea02d22ce10334aad8729280def7893d0f3ef0a80962104802f326987"
+    },
+    "cutbolt": {
+      "bytes": 9929,
+      "sha256": "23ee8608646b021eb040dd6f6ef71c7fe1fb25f12863b0b8c1b7dc332cf29473"
+    },
+    "deliver-and-review": {
+      "bytes": 3991,
+      "sha256": "5e01ec80c64d903fd457c88427378f5b07891aeecc8302796580fada33bf4651"
+    },
+    "interview-multicam": {
+      "bytes": 5166,
+      "sha256": "03e34d296041cdcc0ff5f489b0e820a397d6a8eeb44af0dfd12892d91b5a03ac"
+    },
+    "recut-talking-head": {
+      "bytes": 11265,
+      "sha256": "181fd1444ccddffcee0b851b615f8dc4b7b65b905abe6fbc0d71a87bb27235ea"
+    },
+    "screen-tutorial": {
+      "bytes": 7388,
+      "sha256": "ae3116f9a065348e72a612c05fba66a154af406573feb001511bbdcbade968f6"
+    }
+  },
+  "fixture": {
+    "bytes": 19664,
+    "sha256": "0ea3dddf97b2a890ce447d1afc0050194d25ff3c8697ff40b3b520de884876ac"
+  },
+  "checks": [
+    "All 41 JSON examples executed through the compact MCP catalog.",
+    "Eight workflows and source preservation pass on both platforms.",
+    "Normalized-source and B-roll/inset pre-encoding video/PCM digests equal an independently assembled explicit-conversion reference.",
+    "Automatic preparation and B-roll/inset use five and six scripted MCP calls, with no schema lookups."
+  ],
+  "corrections": [
+    "The new fixture initially assumed every recipe serialized frame_rate; omitted means 25 fps.",
+    "Draft examples attempted populated tracks in tracks.edit add; corrected to empty add followed by explicit place.",
+    "Draft B-roll example used one asset as both opaque base and overlay; corrected to full-frame and inset alpha_over placements."
+  ],
+  "limits": [
+    "Scripted documentation checks, not new independent model successes.",
+    "Frozen 36-trial comparison keeps earlier skills and engine unchanged; it includes discovery calls and failures.",
+    "Independent model retests of revised skills remain pending.",
+    "No new editing points or full milestone evidence."
+  ],
+  "rust_tests": {
+    "platform": "windows",
+    "passed": 244,
+    "failed": 0
+  }
+}
