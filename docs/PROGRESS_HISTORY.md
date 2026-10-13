@@ -1,5 +1,29 @@
 # Progress history
 
+## 13 October 2026: place graphics as saved scene clips
+
+`graphics.place` now instantiates and pins a scene, then saves its native clip in
+one optimistic edit. No codec process or intermediate movie is required. Request
+serialization stays stable so actual older compiled receipts replay exactly,
+including after undo; their existing files remain part of saved history.
+
+Windows passed 254 Rust tests and Linux 253, with formatting and warnings-denied
+lint. Eight targeted suites pass on each platform (125 and 83 seconds), including
+graphics placement, generated sources, templates, skills, integration/MCP and
+the agent-cost replay. Explicit previous-engine receipt tests pass on both systems.
+Every picture and stereo sample matches the separately compiled reference, with
+70 frames and 112,016 stereo sample frames across integer/fractional clocks.
+Cancellation with a write-locked store, concurrent edits, source failures, bounds
+and history checks preserve their contracts. The title still takes two calls and
+775 SDK sent bytes, with no schema lookup. [Evidence](../verification/generated-graphics-2026-10-13.json)
+records the identities, measurements and corrected test-launch configuration.
+
+The 73e2b2a background finished with 20 passes, zero failures and 39 superseded
+skips. Its frozen full stage-4 quick check is now running. The 4bf1191 shipment
+pushed successfully; its background and this commit's shipment/background still
+require their terminal audits. Caption and production-title migration remain in
+stage 5. No points, new thorough claim or stage exit; PROGRESS.md retains 338e114.
+
 ## 13 October 2026: generated scene sources in the native timeline
 
 Track clips now save a scene as their third exclusive source. Workspace document

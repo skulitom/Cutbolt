@@ -1,8 +1,9 @@
-//! Instantiate and compile a graphic, then attach it through one optimistic saved edit.
+//! Instantiate a graphic as a pinned scene source, then attach it through one optimistic saved edit.
 use crate::{
     At, Result, error,
-    model::{Asset, Operation, Project},
-    scene::{self, Scene},
+    generated::SceneRef,
+    model::{Operation, Project},
+    scene::Scene,
     store::{self, prepared::Begin},
     templates::{self, ParameterValue, Template},
     time::Time,
@@ -10,12 +11,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
 fn zero() -> Time {
     Time::ZERO
@@ -24,7 +20,7 @@ fn graphics_track() -> String {
     "graphics".into()
 }
 
-/// A revision-checked graphics placement request; compilation precedes the atomic saved edit.
+/// A revision-checked graphics placement request; the pinned scene is saved without compiling a movie.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Place {
@@ -34,13 +30,13 @@ pub struct Place {
     pub project_id: String,
     /// Stable edit request ID, unique in this project. Identical retries return its saved receipt.
     pub request_id: String,
-    /// Required saved head; checked before rendering and again at commit.
+    /// Required saved head; checked before instantiation and again at commit.
     pub expected_revision: u64,
     /// Original built-in template ID; give exactly one of template_id or template.
     pub template_id: Option<String>,
     /// Inline original template, as for graphics.instantiate.
     pub template: Option<Template>,
-    /// ID for the generated asset and placed clip, unused in both namespaces.
+    /// ID for the generated scene and placed clip; must not collide with an existing clip or media asset.
     pub instance_id: String,
     /// Typed template values. Output canvas, scale 1 and frame clock default from the project.
     #[serde(default)]
@@ -51,78 +47,39 @@ pub struct Place {
     /// Destination video alpha_over track; defaults to graphics. Created above existing tracks if absent.
     #[serde(default = "graphics_track")]
     pub track_id: String,
-    /// Existing absolute root containing scene inputs and the generated asset directory.
+    /// Existing absolute root containing scene inputs.
     pub input_root: PathBuf,
-    /// Existing absolute directory inside input_root. A uniquely owned graphic folder is created here.
+    /// Existing absolute directory inside input_root, retained for request/replay compatibility. No graphic movie is written.
     pub output_root: PathBuf,
-}
-
-/// A successful edit owns this directory durably. Before commit, only our file and empty
-/// directory are removed on failure; unrelated files and completed project assets are never swept.
-struct Artifact {
-    directory: PathBuf,
-    keep: bool,
-}
-impl Artifact {
-    fn new(root: &Path) -> Result<Self> {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        for _ in 0..128 {
-            let nonce = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|_| error("IO_ERROR", "System clock precedes the epoch"))?
-                .as_nanos();
-            let directory = root.join(format!(
-                ".cutbolt-graphic-{}-{nonce}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            match fs::create_dir(&directory) {
-                Ok(()) => {
-                    return Ok(Self {
-                        directory,
-                        keep: false,
-                    });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Err(error(
-            "IO_ERROR",
-            "Could not allocate a unique generated-graphic directory",
-        ))
-    }
-    fn file(&self) -> PathBuf {
-        self.directory.join("graphic.mkv")
-    }
-}
-impl Drop for Artifact {
-    fn drop(&mut self) {
-        if !self.keep {
-            let _ = fs::remove_file(self.file());
-            let _ = fs::remove_dir(&self.directory);
-        }
-    }
 }
 
 fn edit(edit: Edit) -> Operation {
     Operation::Tracks { edit }
 }
 
-fn operations(request: &Place, project: &Project, asset: Asset) -> Result<Vec<Operation>> {
+fn operations(request: &Place, project: &Project, scene: Scene) -> Result<Vec<Operation>> {
     request
         .start
         .units(project.frame_rate)
         .at(|| "start".into())?;
-    let end = request.start.plus(asset.duration)?;
+    let source_duration = scene.duration;
+    let end = request.start.plus(source_duration)?;
     let duration = project.duration()?;
     if duration != Time::ZERO && end.compare(duration)?.is_gt() {
         return Err(error("INVALID_RANGE", "Graphic ends after the existing timeline; shorten its template duration or extend the timeline explicitly").with_path("values.duration"));
     }
-    let mut operations = vec![Operation::AddMedia {
-        asset: asset.clone(),
-        input_root: None,
-    }];
+    if project
+        .assets
+        .iter()
+        .any(|asset| asset.id == request.instance_id)
+    {
+        return Err(error(
+            "DUPLICATE_ID",
+            "Graphic instance_id already names a media asset",
+        )
+        .with_path("instance_id"));
+    }
+    let mut operations = Vec::new();
     if project.tracks.is_none() {
         operations.push(if duration == Time::ZERO {
             edit(Edit::Create { duration: end })
@@ -164,12 +121,12 @@ fn operations(request: &Place, project: &Project, asset: Asset) -> Result<Vec<Op
         collision: Collision::Reject,
         clip: TrackClip {
             id: request.instance_id.clone(),
-            asset_id: asset.id,
+            asset_id: String::new(),
             sequence_id: None,
-            scene: None,
+            scene: Some(SceneRef(Box::new(scene))),
             start: request.start,
             source_in: Time::ZERO,
-            duration: asset.duration,
+            duration: source_duration,
             gain_milli: 1000,
             fade_in: Time::ZERO,
             fade_out: Time::ZERO,
@@ -188,6 +145,21 @@ fn response(request: &Place, receipt: store::Receipt) -> Result<Value> {
         &request.project_id,
         Some(receipt.revision),
     )?;
+    if let Some(clip) = project
+        .tracks
+        .as_ref()
+        .and_then(|a| a.tracks.iter().find(|t| t.id == request.track_id))
+        .and_then(|t| t.clips.iter().find(|c| c.id == request.instance_id))
+        && let Some(scene) = &clip.scene
+    {
+        return Ok(
+            json!({"project_id":request.project_id,"revision":receipt.revision,"request_id":request.request_id,
+            "scene_id":scene.0.id,"scene_sha256":scene.key()?,"compiled":false,
+            "track_id":request.track_id,"clip_id":clip.id,"start":clip.start,"duration":clip.duration,"session":receipt}),
+        );
+    }
+    // A retry of an older compiled placement returns that revision's original response.
+    // Keep the prepared request serialization unchanged so its request-ID hash still matches.
     let asset = project.asset(&request.instance_id)?;
     Ok(
         json!({"project_id":request.project_id,"revision":receipt.revision,"request_id":request.request_id,
@@ -231,7 +203,7 @@ pub fn run(request: &Place) -> Result<Value> {
     if !output_root.starts_with(&input_root) {
         return Err(error(
             "PATH_OUTSIDE_ROOT",
-            "Generated graphics must stay inside input_root so the saved timeline can render them",
+            "The compatible graphic output_root must stay inside input_root",
         )
         .with_path("output_root"));
     }
@@ -266,28 +238,7 @@ pub fn run(request: &Place) -> Result<Value> {
         )
         .with_path("values"));
     }
-    let mut asset: Asset = serde_json::from_value(json!({"id":request.instance_id,
-        "path":output_root.join("graphic.mkv"),"duration":scene.duration}))?;
-    asset.metadata.fields.insert(
-        "graphics.scene_sha256".into(),
-        expanded["scene_sha256"].as_str().unwrap().into(),
-    );
-    asset.metadata.fields.insert(
-        "graphics.template_sha256".into(),
-        expanded["template_sha256"].as_str().unwrap().into(),
-    );
-    // A pure dry run catches collisions, locks, clock errors and bounds before creating a file.
-    pending.project.apply(
-        pending.project.revision,
-        operations(request, &pending.project, asset.clone())?,
-    )?;
-    let mut artifact = Artifact::new(&output_root)?;
-    let compiled = scene::run(&scene, &input_root, &artifact.directory, &artifact.file())?;
-    asset.path = artifact.file().to_string_lossy().into_owned();
-    asset.identity = Some(serde_json::from_value(
-        compiled["asset"]["identity"].clone(),
-    )?);
-    let operations = operations(request, &pending.project, asset)?;
-    let receipt = pending.commit(operations, || artifact.keep = true)?;
+    let operations = operations(request, &pending.project, scene)?;
+    let receipt = pending.commit(operations, || {})?;
     response(request, receipt)
 }

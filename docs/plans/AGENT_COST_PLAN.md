@@ -187,7 +187,7 @@ Today errors are `{code, message, detail?}` (`lib.rs:107-125`). Field paths exis
 2. Let bindings set `width`, `height`, `output_scale`, `frame_rate` and `transparent` (`templates.rs:203-227` today forbids it). Default these from the target project when an instance is created against a project, so the default output is the project's size and rate.
 3. New read-only command `templates.list`: id, one-line purpose, parameters with types and defaults, and output size. Change `graphics.instantiate` to accept `template_id` (built-in) as an alternative to an inline `template` object.
 4. Add `graphics.place`: instantiate, compile and place on an `alpha_over` track in one queued job, returning the session revision. This saves about four calls per title.
-   - If the direct-footage plan's stage 5 (generated clips) has landed, place the scene as a clip instead and skip the compile.
+   - If the direct-footage plan's stage 5 (generated clips) has landed, place the scene as a clip instead and skip the compile. This conditional is implemented and verified on Windows/Linux in the [13 October generated-placement update](../../verification/generated-graphics-2026-10-13.json).
 
 ### 4.2 Fonts without hunting
 

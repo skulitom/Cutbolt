@@ -199,6 +199,19 @@ bytes. The five scripted workflows remain at 15/6/12/8/8 calls with zero failure
 lookups; received bytes on this checkpoint are 209,534/46,613/62,670/40,806/185,667 on Windows
 and 209,408/46,489/62,544/40,682/185,541 on Linux. These remain scripted byte measurements.
 
+## Generated graphics placement update, 13 October 2026
+
+New `graphics.place` requests save a scene source directly and create no movie.
+Actual older compiled placements retain their exact receipt replay, including
+after undo. Both platforms pass the placement oracle, cancellation and concurrent
+edit checks. See [evidence](../verification/generated-graphics-2026-10-13.json).
+
+The scripted tutorial remains 10 calls and 3,619 sent bytes,
+with 53,724 / 53,598 received bytes on Windows / Linux.
+Its title portion remains two calls / 775 sent bytes with no schema
+lookup. The default tool listing is 22,367 bytes. This updates the
+placement behavior; the dated measurements below describe earlier checkpoints.
+
 ## Stage 4 queued graphic placement, 12 October 2026
 
 `graphics.place` takes the built-in template, typed values and saved revision in one queued

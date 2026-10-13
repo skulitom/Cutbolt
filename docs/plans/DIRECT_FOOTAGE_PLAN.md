@@ -307,8 +307,10 @@ Partial implementation, 13 October: native clips save scene recipes and stream t
 pictures without a compiled movie. Exact scene-asset, audio, dependency, saved-history
 and preview/export comparisons pass on Windows and Linux. See [the contract](../GENERATED_CLIPS.md)
 and [core evidence](../../verification/generated-clips-core-2026-10-13.json).
-Caption, graphics-placement and production-title migration, plus the complete stage-5
-quick gate, remain open. This checkpoint does not close the stage.
+A following checkpoint switches graphics.place to generated scenes and verifies
+actual older compiled receipt replay; see [graphics evidence](../../verification/generated-graphics-2026-10-13.json).
+Caption and production-title migration, plus the complete stage-5 quick gate,
+remain open. These checkpoints do not close the stage.
 
 Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame inside the timeline pass with no `scene.render` step.
 

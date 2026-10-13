@@ -61,6 +61,7 @@ The generated-clip fixture compares native video and exact PCM with separately
 compiled scene assets, including source windows, transparent layering, child
 sequences, previews, proxies, queued export, document loading, saved-history
 recovery, multiple render chunks and changed cache dependencies. Standalone scene
-rendering remains available. Switching the caption, graphics-placement and
-production-title workflows to generated clips, and the complete stage-5 quick
-gate, remain follow-up work in the active plan.
+rendering remains available. [Graphics placement](TEMPLATES.md#place-a-graphic-in-one-job)
+now saves a generated clip in one edit, with no movie; actual older compiled
+receipts retain their replay behavior. Caption and production-title migration,
+and the complete stage-5 quick gate, remain follow-up work in the active plan.

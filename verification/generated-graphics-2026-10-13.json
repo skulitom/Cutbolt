@@ -1,0 +1,214 @@
+{
+  "date": "2026-10-13",
+  "kind": "generated_graphics_placement_partial_direct_stage5",
+  "base_commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/graphics_place.rs": {
+      "bytes": 9057,
+      "sha256": "f89f21bd058161bf08249f35265615d80406cdca3226bbc31a719284687d5aaf"
+    },
+    "src/mcp.rs": {
+      "bytes": 66564,
+      "sha256": "c2fb9fdb4b39641dea4a99f946b01d786440847bfb3ef2ae9af6297ac4cb7675"
+    },
+    "src/templates.rs": {
+      "bytes": 24523,
+      "sha256": "bd28703cde9bc66acff3b4e16af51c3c828deeb94db544dcd84ce1ba7af1b0b5"
+    },
+    "tests/graphics_place.py": {
+      "bytes": 18922,
+      "sha256": "039b9b535582cfd59507755df120d92f134870c2dca0166c12753e8e88b7a7b5"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 287,
+    "manifest_sha256": "facdd58ab21050849ef92bf38881e568d970abd8f9c354c9595d8b17f1e8740f",
+    "manifest_format": "Sorted source/test/tool/build path + NUL + lowercase content SHA-256 + LF; build source identities, not checkout labels."
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 254,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "targeted": {
+        "stages": [
+          "agent_costs",
+          "agent_ergonomics",
+          "builtin_templates",
+          "generated_clips",
+          "graphics_place",
+          "integration",
+          "skills",
+          "templates"
+        ],
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 125,
+        "report": {
+          "bytes": 9960,
+          "sha256": "498d3581b60ba059bc47b45fc8b904b50dc34476209a216cb71df89a0e2780b9"
+        },
+        "log": {
+          "bytes": 25518,
+          "sha256": "707db8d50d7ad9c0678cc2ea770dca09476dec22791e49f5f6d7d820b6b25cc3"
+        }
+      },
+      "exact_placement_and_legacy_replay": {
+        "passed": [
+          "graphics_place.two_call_queued_placement_matches_explicit_picture_and_sound",
+          "graphics_place.inline_template_empty_timeline_opaque_output_and_fractional_clock",
+          "graphics_place.atomic_saved_batch_retry_undo_restore_and_history_integrity",
+          "graphics_place.preflight_bounds_roots_ids_collision_and_lock_preserve_state",
+          "graphics_place.no_codec_process_or_intermediate_movie",
+          "graphics_place.concurrent_replay_and_revision_race_commit_once",
+          "graphics_place.failed_preparation_preserves_session_and_files",
+          "graphics_place.cancelled_job_cannot_commit_through_locked_store",
+          "graphics_place.actual_legacy_compiled_receipt_replay_before_and_after_undo"
+        ],
+        "title_cost": {
+          "calls": 2,
+          "sent_bytes": 833,
+          "schema_lookups": 0
+        },
+        "compared_frames": 70,
+        "compared_stereo_sample_frames": 112016,
+        "sources_preserved": true,
+        "legacy_receipt_replay": true,
+        "report_identity": {
+          "bytes": 948,
+          "sha256": "7475e44a94627bd72c5e30a80e7251ba14aa2a24b87d90fcd33ea3f7f99731aa"
+        }
+      },
+      "legacy_engine": {
+        "source_commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+        "sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f"
+      },
+      "tutorial_replay": {
+        "calls": 10,
+        "sent_bytes": 3619,
+        "received_bytes": 53724,
+        "schema_lookups": 0,
+        "failed_calls": 0,
+        "title": {
+          "calls": 2,
+          "sent_bytes": 775
+        },
+        "tools_list_bytes": 22367
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 253,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "targeted": {
+        "stages": [
+          "agent_costs",
+          "agent_ergonomics",
+          "builtin_templates",
+          "generated_clips",
+          "graphics_place",
+          "integration",
+          "skills",
+          "templates"
+        ],
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 83,
+        "report": {
+          "bytes": 9489,
+          "sha256": "758a972129749a8aee2419869b802d3a91008de6e6b1224226172471b3dcced8"
+        },
+        "log": {
+          "bytes": 24463,
+          "sha256": "c2de481f56d3e69fb65277685f4283d79f7702fda10ca9eaeef6ec402b827dbc"
+        }
+      },
+      "exact_placement_and_legacy_replay": {
+        "passed": [
+          "graphics_place.two_call_queued_placement_matches_explicit_picture_and_sound",
+          "graphics_place.inline_template_empty_timeline_opaque_output_and_fractional_clock",
+          "graphics_place.atomic_saved_batch_retry_undo_restore_and_history_integrity",
+          "graphics_place.preflight_bounds_roots_ids_collision_and_lock_preserve_state",
+          "graphics_place.no_codec_process_or_intermediate_movie",
+          "graphics_place.concurrent_replay_and_revision_race_commit_once",
+          "graphics_place.failed_preparation_preserves_session_and_files",
+          "graphics_place.cancelled_job_cannot_commit_through_locked_store",
+          "graphics_place.actual_legacy_compiled_receipt_replay_before_and_after_undo"
+        ],
+        "title_cost": {
+          "calls": 2,
+          "sent_bytes": 830,
+          "schema_lookups": 0
+        },
+        "compared_frames": 70,
+        "compared_stereo_sample_frames": 112016,
+        "sources_preserved": true,
+        "legacy_receipt_replay": true,
+        "report_identity": {
+          "bytes": 926,
+          "sha256": "b04ef2c74fcf6b92295a135b52684502a057f7d123771fbb63a8f96f1e50444b"
+        }
+      },
+      "legacy_engine": {
+        "source_commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+        "sha256": "bc196069fe100410e4ccc62c8aa202952a6df3f92e2fdf64dbb9a7b790779a53"
+      },
+      "tutorial_replay": {
+        "calls": 10,
+        "sent_bytes": 3619,
+        "received_bytes": 53598,
+        "schema_lookups": 0,
+        "failed_calls": 0,
+        "title": {
+          "calls": 2,
+          "sent_bytes": 775
+        },
+        "tools_list_bytes": 22367
+      }
+    }
+  },
+  "requirement_audit": {
+    "native_graphic_placement": "graphics.place instantiates a pinned scene, validates the target, and atomically places it as TrackClip.scene. No AddMedia, encoder or intermediate movie.",
+    "compatibility": "Place serialization and prepared-apply-v1 request hash stay unchanged. Actual previous-engine compiled placements replay their exact original response before and after undo.",
+    "saved_edit": "Scene source is in schema2 and its immutable receipt revision. New responses expose scene/clip IDs, digest, duration and revision; old responses retain their asset shape.",
+    "oracle": "Every RGB byte and stereo sample matches the explicit compiled-scene placement, including fractional-rate opaque output and native timeline promotion.",
+    "failures": "Bounds, roots, duplicate clip/media IDs, collisions, locks, bad font identity, concurrent identical/different intents and cancellation while the store is write-locked leave the expected saved state and no movie.",
+    "agent_cost": "Title still fits two calls and 1.5KB sent, no schema lookup. Existing skill recipes and all five scripted replay budgets pass on both systems.",
+    "remaining": "Caption overlays, production titles and complete stage5 quick verification remain open. This is not stage5 exit."
+  },
+  "prior_completed_background": {
+    "commit": "73e2b2ae7ccd12c32183534538bb20b639b15e7c",
+    "passed": 20,
+    "failed": 0,
+    "superseded_skips": 39,
+    "not_started": 0,
+    "wall_seconds": 3521
+  },
+  "prior_shipment": {
+    "commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+    "pushed": true,
+    "fixture_passes": 9,
+    "rust": "passed",
+    "reused": 11,
+    "deferred": 58,
+    "wall_seconds": 196,
+    "background": "still running at checkpoint"
+  },
+  "development_failures": [
+    "Two check-launch attempts preceded completion of source preparation and ran no tests; repeated only after preparation returned success.",
+    "The Windows post-suite standalone test selected a stale default binary and failed with UNSUPPORTED_JOB. All eight primary fixtures had passed using the selected new engine. The standalone compatibility test was rerun successfully with CUTBOLT_EXE explicitly selecting that engine."
+  ],
+  "limitations": [
+    "Scripted call/byte measurements are not new autonomous agent trials.",
+    "No speed, new points, full-stage exit or thorough milestone claim.",
+    "output_root stays required and validated for backwards request hashing; new placements do not write to it.",
+    "Existing compiled graphic files remain in saved history and are not automatically removed."
+  ]
+}

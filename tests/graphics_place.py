@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
+import sqlite3
 import subprocess
 import time
 
@@ -15,21 +15,11 @@ from graphics import make_font
 from scenes import identity
 
 ROOT = Path(__file__).resolve().parents[1]
-HOLD = r'''
-use std::{env,fs,process::{Command,exit},thread,time::{Duration,Instant}};
+DENY_CODECS = r'''
+use std::{env,fs,process::exit};
 fn main() {
- let args:Vec<_>=env::args_os().skip(1).collect();
- if args.iter().any(|a| a=="pipe:0") && args.iter().any(|a| a=="rawvideo") {
-  let root=std::path::PathBuf::from(env::var_os("GRAPHIC_HOLD_ROOT").unwrap());
-  fs::write(root.join(format!("held-{}",std::process::id())),b"ready").unwrap();
-  if env::var("GRAPHIC_HOLD_MODE").unwrap_or_default()=="fail" {exit(9)}
-  let began=Instant::now();
-  while !root.join("release").exists() {
-   if began.elapsed()>Duration::from_secs(90) {exit(8)}
-   thread::sleep(Duration::from_millis(10));
-  }
- }
- exit(Command::new(env::var_os("GRAPHIC_REAL_FFMPEG").unwrap()).args(args).status().unwrap().code().unwrap_or(1));
+ fs::write(env::var_os("GRAPHIC_CODEC_MARKER").unwrap(),b"unexpected codec launch").unwrap();
+ exit(9);
 }
 '''
 
@@ -38,7 +28,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(root):
+def run(root, legacy_engine=None):
     root = root.resolve()
     assert root != ROOT and ROOT not in root.parents
     root.mkdir(parents=True, exist_ok=True)
@@ -61,8 +51,8 @@ def run(root):
     source_hashes = {p.name: digest(p) for p in sources.iterdir()}
     passed = []
 
-    def call(request, error=None, env=None):
-        process = subprocess.run([str(ENGINE)], input=json.dumps(request).encode(), capture_output=True, env=env, timeout=180)
+    def call(request, error=None, env=None, engine=ENGINE):
+        process = subprocess.run([str(engine)], input=json.dumps(request).encode(), capture_output=True, env=env, timeout=180)
         result = json.loads(process.stdout)
         assert process.returncode == (1 if error else 0), (result, process.stderr)
         if error:
@@ -118,10 +108,11 @@ def run(root):
     # The queued request was rooted/identity-completed; retry its resolved CLI equivalent.
     request['values']['fonts']['value'] = fonts
     saved = call({'command': 'session.get', 'store_root': str(store), 'project_id': base['id']})
-    assert saved['revision'] == 1 and len(saved['assets']) == 2 and saved['clips'] == []
-    generated = next(a for a in saved['assets'] if a['id'] == 'title')
-    assert generated['identity']['sha256'] == digest(Path(generated['path']))
-    assert len(list(output.glob('.cutbolt-graphic-*'))) == 1
+    assert saved['revision'] == 1 and saved['schema_version'] == 2 and len(saved['assets']) == 1 and saved['clips'] == []
+    generated = next(t for t in saved['tracks']['tracks'] if t['id']=='graphics')['clips'][0]
+    assert generated['scene']['id']=='title' and not generated.get('asset_id')
+    assert result['compiled'] is False and result['scene_id']=='title' and 'asset' not in result
+    assert list(output.iterdir()) == []
     assert call({'command': 'session.check', 'store_root': str(store)})
 
     project = copy.deepcopy(base)
@@ -171,8 +162,10 @@ def run(root):
     rendered = empty_root / 'timeline.mkv'
     call({'command': 'render.run', 'project': native, 'input_root': str(root),
           'output_root': str(empty_root), 'output': str(rendered)})
+    native_reference = empty_root/'compiled-reference.mkv'
+    call({'command':'scene.render','scene':inline_scene,'input_root':str(root),'output_root':str(empty_root),'output':str(native_reference)})
     native_rgb = [subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(path), '-map', '0:v',
-                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']) for path in (rendered, placed['asset']['path'])]
+                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']) for path in (rendered, native_reference)]
     assert native_rgb[0] == native_rgb[1] and len(native_rgb[0]) == width * height * 3 * 10
     assert subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(rendered), '-map', '0:a', '-f', 's16le', '-']) == bytes(16016 * 4)
     passed.append('graphics_place.inline_template_empty_timeline_opaque_output_and_fractional_clock')
@@ -186,7 +179,7 @@ def run(root):
     undone = call({'command': 'session.get', 'store_root': str(store), 'project_id': base['id']})
     expected = copy.deepcopy(base); expected['revision'] = 2
     assert undone == expected
-    assert call(request) == first and len(list(output.iterdir())) == 1
+    assert call(request) == first and list(output.iterdir()) == []
     call({'command': 'session.restore', 'store_root': str(store), 'project_id': base['id'], 'request_id': 'restore',
           'expected_revision': 2, 'target_revision': 1})
     assert call({'command': 'session.check', 'store_root': str(store)})
@@ -195,7 +188,8 @@ def run(root):
     workspace, store, output, request = fixture('preflight')
     for replacement, error in [({'expected_revision': 7}, 'REVISION_CONFLICT'),
                                ({'start': 2}, 'INVALID_RANGE'), ({'start': 0.01}, 'UNALIGNED_TIME'),
-                               ({'output_root': str(root.parent)}, 'PATH_OUTSIDE_ROOT')]:
+                               ({'output_root': str(root.parent)}, 'PATH_OUTSIDE_ROOT'),
+                               ({'instance_id': 'original'}, 'DUPLICATE_ID')]:
         call({**request, **replacement}, error)
         assert list(output.iterdir()) == []
     first = call(request)
@@ -219,61 +213,79 @@ def run(root):
     passed.append('graphics_place.preflight_bounds_roots_ids_collision_and_lock_preserve_state')
 
     helpers = root / 'helpers'; helpers.mkdir()
-    source = helpers / 'hold.rs'; source.write_text(HOLD)
-    shim = helpers / ('hold.exe' if os.name == 'nt' else 'hold')
-    subprocess.run(['rustc', '--edition=2024', str(source), '-o', str(shim)], check=True, capture_output=True)
-    for name, mode in [('revision-conflict', 'wait'), ('same-request-race', 'wait'), ('render-failure', 'fail')]:
-        workspace, store, output, request = fixture(name)
-        environment = {**os.environ, 'CUTBOLT_FFMPEG': str(shim), 'GRAPHIC_REAL_FFMPEG': shutil.which('ffmpeg'),
-                       'GRAPHIC_HOLD_ROOT': str(workspace), 'GRAPHIC_HOLD_MODE': mode}
-        count = 2 if name == 'same-request-race' else 1
-        children = [subprocess.Popen([str(ENGINE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
-                    for _ in range(count)]
-        for child in children:
-            child.stdin.write(json.dumps(request).encode()); child.stdin.close(); child.stdin = None
-        deadline = time.monotonic() + 60
-        while len(list(workspace.glob('held-*'))) < count:
-            assert time.monotonic() < deadline and all(c.poll() is None for c in children), name
-            time.sleep(0.01)
-        if name == 'revision-conflict':
-            call({'command': 'session.apply', 'store_root': str(store), 'project_id': base['id'], 'request_id': 'other',
-                  'expected_revision': 0, 'operations': [{'op': 'project.transfer', 'transfer': 'srgb'}]})
-        (workspace / 'release').write_text('continue')
-        results = [json.loads(child.communicate(timeout=120)[0]) for child in children]
-        head = call({'command': 'session.get', 'store_root': str(store), 'project_id': base['id']})
-        if name == 'same-request-race':
-            assert results[0] == results[1] and results[0]['ok'], results
-            assert head['revision'] == 1 and len(list(output.iterdir())) == 1
-        else:
-            assert not results[0]['ok'], results
-            if name == 'revision-conflict':
-                assert results[0]['error']['code'] == 'REVISION_CONFLICT' and head['revision'] == 1, results
-            else:
-                assert head['revision'] == 0
-            assert len(head['assets']) == 1 and list(output.iterdir()) == []
-        assert call({'command': 'session.check', 'store_root': str(store)})
-    passed.append('graphics_place.concurrent_replay_revision_conflict_and_render_failure')
+    source = helpers/'deny.rs'; source.write_text(DENY_CODECS)
+    shim = helpers/('deny.exe' if os.name == 'nt' else 'deny')
+    subprocess.run(['rustc','--edition=2024',str(source),'-o',str(shim)],check=True,capture_output=True)
+    workspace, store, output, request = fixture('no-compile')
+    marker = workspace/'codec-launched'
+    environment = {**os.environ,'CUTBOLT_FFMPEG':str(shim),'CUTBOLT_FFPROBE':str(shim),'GRAPHIC_CODEC_MARKER':str(marker)}
+    no_compile = call(request,env=environment)
+    assert not marker.exists() and list(output.iterdir()) == [] and not no_compile['compiled']
+    passed.append('graphics_place.no_codec_process_or_intermediate_movie')
 
+    # A reserved write lock prevents either child from committing before both have been started.
+    # Both real processes must succeed for identical intents, or exactly one wins differing intents.
+    for same in [True,False]:
+        workspace, store, output, request = fixture('same-request-race' if same else 'revision-race')
+        requests = [request,request if same else {**request,'request_id':'other','instance_id':'other','start':0.6}]
+        with sqlite3.connect(store/'projects.sqlite3') as lock:
+            lock.execute('BEGIN IMMEDIATE')
+            children = [subprocess.Popen([str(ENGINE)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE) for _ in requests]
+            for child,value in zip(children,requests):
+                child.stdin.write(json.dumps(value).encode());child.stdin.close();child.stdin=None
+            assert all(c.poll() is None for c in children)
+            lock.rollback()
+        results = [json.loads(child.communicate(timeout=120)[0]) for child in children]
+        if same:
+            assert results[0] == results[1] and results[0]['ok'],results
+        else:
+            assert sum(r['ok'] for r in results)==1 and next(r for r in results if not r['ok'])['error']['code']=='REVISION_CONFLICT',results
+        head = call({'command':'session.get','store_root':str(store),'project_id':base['id']})
+        assert head['revision']==1 and len(head['assets'])==1 and list(output.iterdir())==[]
+        assert call({'command':'session.check','store_root':str(store)})
+    passed.append('graphics_place.concurrent_replay_and_revision_race_commit_once')
+
+    workspace, store, output, request = fixture('source-failure')
+    invalid = copy.deepcopy(request); invalid['values']['fonts']['value'][0]['sha256']='0'*64
+    call(invalid,'MEDIA_CHANGED')
+    assert call({'command':'session.get','store_root':str(store),'project_id':base['id']})['revision']==0
+    assert list(output.iterdir())==[]
+    passed.append('graphics_place.failed_preparation_preserves_session_and_files')
+
+    # Keep the project write-locked through cancellation: the worker cannot save an edit.
     workspace, store, output, request = fixture('cancel')
-    job_root = workspace / 'jobs'; job_root.mkdir()
-    environment = {**os.environ, 'CUTBOLT_FFMPEG': str(shim), 'GRAPHIC_REAL_FFMPEG': shutil.which('ffmpeg'),
-                   'GRAPHIC_HOLD_ROOT': str(workspace), 'GRAPHIC_HOLD_MODE': 'wait'}
-    ticket = call({'command': 'job.start', 'job_root': str(job_root), 'request_id': 'cancel-graphic',
-                   'run': 'graphics.place', 'arguments': {k: v for k, v in request.items() if k != 'command'}}, env=environment)
-    deadline = time.monotonic() + 60
-    while not list(workspace.glob('held-*')):
-        assert time.monotonic() < deadline
-        time.sleep(0.01)
-    call({'command': 'job.cancel', 'job_root': str(job_root), 'job_id': ticket['job_id']})
-    stopped = call({'command': 'job.wait', 'job_root': str(job_root), 'job_id': ticket['job_id'], 'timeout_seconds': 120})
-    assert stopped['status'] == 'cancelled', stopped
-    assert stopped['error']['detail']['session_receipt']['request_id'] == request['request_id'], stopped
-    assert list(output.iterdir()) == []
-    assert call({'command': 'session.get', 'store_root': str(store), 'project_id': base['id']})['revision'] == 0
-    passed.append('graphics_place.cancelled_job_keeps_session_unchanged_and_cleans_owned_asset')
+    job_root = workspace/'jobs';job_root.mkdir()
+    with sqlite3.connect(store/'projects.sqlite3') as lock:
+        lock.execute('BEGIN IMMEDIATE')
+        ticket = call({'command':'job.start','job_root':str(job_root),'request_id':'cancel-graphic',
+            'run':'graphics.place','arguments':{k:v for k,v in request.items() if k!='command'}})
+        deadline=time.monotonic()+30
+        while True:
+            status=call({'command':'job.status','job_root':str(job_root),'job_id':ticket['job_id']})
+            if status['status']=='running':break
+            assert status['status']=='queued' and time.monotonic()<deadline,status
+            time.sleep(0.01)
+        call({'command':'job.cancel','job_root':str(job_root),'job_id':ticket['job_id']})
+        stopped=call({'command':'job.wait','job_root':str(job_root),'job_id':ticket['job_id'],'timeout_seconds':120})
+        assert stopped['status']=='cancelled',stopped
+        assert stopped['error']['detail']['session_receipt']['request_id']==request['request_id'],stopped
+        lock.rollback()
+    assert list(output.iterdir())==[]
+    assert call({'command':'session.get','store_root':str(store),'project_id':base['id']})['revision']==0
+    passed.append('graphics_place.cancelled_job_cannot_commit_through_locked_store')
+
+    if legacy_engine is not None:
+        workspace, store, output, request = fixture('legacy-replay')
+        old = call(request,engine=legacy_engine)
+        assert Path(old['asset']['path']).is_file()
+        assert call(request)==old
+        call({'command':'session.undo','store_root':str(store),'project_id':base['id'],'request_id':'undo','expected_revision':1})
+        assert call(request)==old
+        assert call({'command':'session.check','store_root':str(store)})
+        passed.append('graphics_place.actual_legacy_compiled_receipt_replay_before_and_after_undo')
     assert source_hashes == {p.name: digest(p) for p in sources.iterdir()}
     report = {'passed': passed, 'title_cost': title_cost, 'compared_frames': frames + 10,
-              'compared_stereo_sample_frames': 96000 + 16016, 'sources_preserved': True}
+              'compared_stereo_sample_frames': 96000 + 16016, 'sources_preserved': True, 'legacy_receipt_replay': legacy_engine is not None}
     (root / 'verification.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report))
 
@@ -281,4 +293,6 @@ def run(root):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    run(parser.parse_args().output)
+    parser.add_argument('--legacy-engine', type=Path)
+    args=parser.parse_args()
+    run(args.output, args.legacy_engine)

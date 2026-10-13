@@ -1,6 +1,6 @@
 # Reusable scene templates
 
-`graphics.instantiate` expands a portable original template with typed parameters, validates the complete resulting scene and external source identities, and returns an editable scene recipe. It is available through the CLI, Rust library and MCP stdio. The operation writes no files or saved sessions. Use `scene.render` to compile the returned recipe to a new asset, then add it to an ordinary timeline or saved session.
+`graphics.instantiate` expands a portable original template with typed parameters, validates the complete resulting scene and external source identities, and returns an editable scene recipe. It is available through the CLI, Rust library and MCP stdio. The operation writes no files or saved sessions. Place the returned recipe as a [generated scene clip](GENERATED_CLIPS.md), or use `graphics.place` for one saved edit. `scene.render` remains available for a standalone compiled asset.
 
 The binary includes 20 original designs, discoverable with `templates.list`. Original reusable examples are [lower-third-template.json](../examples/lower-third-template.json) and [title-card-template.json](../examples/title-card-template.json). Each exposes text, supplied fonts, text/panel colors, font size, duration and a shared fade curve. The lower-third also exposes a horizontal offset; the title card exposes a shared vertical entrance curve. Both use a 160 by 90 logical canvas, output scale 4, and a three-second default duration. Fonts are required external inputs. These recipes contain no typeface, media asset or third-party template.
 
@@ -17,7 +17,7 @@ The binary includes 20 original designs, discoverable with `templates.list`. Ori
 
 The result contains `scene`, `inspection`, resolved `parameters`, sorted `defaulted_parameters`, `template_id`, `template_sha256` and `scene_sha256`. The scene digest agrees with a subsequent `scene.render` receipt. Digests cover native serialized recipes, not rendered pixel bytes. Whitespace and JSON object-key order do not alter them. Ordered arrays remain significant; rearranging parameter declarations can change the template digest even when the expanded scene is unchanged. Source identities in `inspection` identify the actual external files.
 
-Each call clones the base scene and sets its ID to `instance_id`. Reusing a template, changing later values or failing validation cannot mutate an earlier returned scene. Instances have no hidden link to the template: changing a template later requires explicit re-instantiation and recompilation. Store both the editable template/values and concrete recipe when continued editing is required. The compiled timeline asset remains flattened.
+Each call clones the base scene and sets its ID to `instance_id`. Reusing a template, changing later values or failing validation cannot mutate an earlier returned scene. Instances have no hidden link to the template: changing a template later requires explicit re-instantiation and replacing its saved clip or compiled asset. Store both the editable template/values and concrete recipe when continued editing is required. The compiled timeline asset remains flattened.
 
 ## Built-in catalog and output fitting
 
@@ -59,8 +59,9 @@ The font name and directory above are placeholders to replace with local inputs.
 
 ## Place a graphic in one job
 
-`graphics.place` expands a built-in or inline template against a saved project, compiles it and
-adds its asset and video clip in one saved edit. Through MCP, queue it with `job.start` and read
+`graphics.place` expands a built-in or inline template against a saved project and saves its
+pinned scene as a [generated video clip](GENERATED_CLIPS.md) in one edit. Pictures render
+directly in the timeline, with no intermediate movie. Through MCP, queue it with `job.start` and read
 its result with `job.wait`. For an existing project and font file in a bound workspace:
 
 ```json
@@ -85,35 +86,37 @@ its result with `job.wait`. For an existing project and font file in a bound wor
 ```
 
 Replace the project, revision and font with actual local values. Pass the returned `job_id` to
-`job.wait` with `timeout_seconds: 120`. The result includes the new `revision`, a bound `asset`,
-its scene digest and the ordinary session receipt. The original synthetic title fixture uses
+`job.wait` with `timeout_seconds: 120`. The result includes the new `revision`, `scene_id`,
+`scene_sha256`, `clip_id`, `duration`, `compiled: false` and the ordinary session receipt.
+The saved recipe is in the project; no media asset or output movie is created. The original synthetic title fixture uses
 two MCP calls, 833 sent bytes on Windows / 830 on Linux including JSON-RPC envelopes, and no schema lookup.
 This is a scripted workflow measurement, not a fresh-model trial.
 
 `start` defaults to zero. `track_id` defaults to `graphics`; an absent track is added above the
 existing tracks as enabled video `alpha_over`. An existing destination must have that type,
-be enabled and unlocked, and have no overlapping clip. `instance_id` names both the new asset
-and clip. A sequential timeline is promoted with linked video/audio unchanged; an empty project
+be enabled and unlocked, and have no overlapping clip. `instance_id` names the saved scene
+and clip, and must not collide with an existing media asset ID. A sequential timeline is promoted with linked video/audio unchanged; an empty project
 gets a timeline ending at the graphic's end. A nonempty timeline is never extended implicitly.
 The template keeps its transparency choice, and scene soundtracks are rejected because this
 command places video only. Dimensions and native frame rate must match the project.
 
-Outside a workspace, provide `store_root`, `input_root` and `output_root`. The latter must be an
-existing directory inside `input_root`, so the saved project can read its generated asset.
-The command creates a unique `.cutbolt-graphic-*` folder containing `graphic.mkv`. This is a
-durable project asset, not an evictable preview cache. Undo retains it for saved-history restore.
+Outside a workspace, provide `store_root`, `input_root` and `output_root`. The last field
+remains an existing directory inside `input_root` for compatibility with earlier requests;
+new placements leave it empty. A workspace supplies these roots. Fonts and other scene inputs
+remain content-pinned external files. Saving the generated clip upgrades the new revision to
+schema 2. Undo retains the recorded recipe for restoration.
 
-Rendering holds no database write lock. The final short transaction rechecks the head revision
-and saves the asset, track and clip together. Normal rendering, collision, revision-conflict
-and cancellation failures remove the command's uncommitted asset. Identical edit retries return
-the committed receipt even after later edits or undo; changed arguments with that request ID
-fail. Concurrent identical requests commit once and discard the losing prepared asset.
+Instantiation and source validation hold no database write lock. The final short transaction
+rechecks the head revision and saves the track and clip together. Failed preparation,
+collisions, revision conflicts and cancellation before commit leave the project unchanged.
+Identical edit retries return the committed receipt even after later edits or undo; changed
+arguments with that request ID fail. Concurrent identical requests commit once.
 
-After a process crash or ambiguous commit I/O error, an unreferenced generated folder may
-remain. The command retains a possibly committed asset rather than risk breaking history.
-Use `session.receipt` with the **inner edit request ID** to learn whether the edit committed;
-job errors include that lookup. A new job may retry the same inner request safely. This does
-not add automatic job retry or a new store/snapshot schema.
+Retries of placements made by an older engine return their original compiled `asset` response,
+including after undo. Their media is preserved for saved history. New generated placements
+return the scene response above. Use `session.receipt` with the **inner edit request ID** to
+resolve an interrupted job or ambiguous commit; job errors include that lookup. A new job may
+retry the same inner request safely. This does not add automatic job retry or a new store format.
 
 ## Template schema
 

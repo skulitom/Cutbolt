@@ -40,8 +40,10 @@ Create an existing absolute local `job_root` outside the repository. It contains
 
 These jobs share the queue's request IDs, ticket replay, output reservation and 32-job limit. Each runs in its own process, inside a Windows job object or its own Linux process group, so it can be stopped as a whole:
 
-`graphics.place` also carries an inner edit request ID for its atomic session change. Its result
-includes the new revision; interrupted-job errors include a `session.receipt` lookup to determine
+`graphics.place` saves a pinned generated scene clip without compiling a movie. It also carries
+an inner edit request ID for its atomic session change. Its result includes the new revision,
+scene/clip IDs and digest; older compiled requests retain their original asset response on replay.
+Interrupted-job errors include a `session.receipt` lookup to determine
 whether that edit committed. See [graphic placement](TEMPLATES.md#place-a-graphic-in-one-job).
 
 - **Cancellation.** `job.cancel` stops a queued job at once and a running one within seconds. The command is told to stop: its tools are killed and its partial files removed. Anything still running 20 s later is terminated. The job ends `cancelled` with `JOB_CANCELLED`, unless its output was already published.
