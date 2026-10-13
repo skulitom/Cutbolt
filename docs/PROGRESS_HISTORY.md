@@ -1,5 +1,30 @@
 # Progress history
 
+## 13 October 2026: remove the former timeline video graphs
+
+The root and nested timeline paths now always use the ordered native frame stack.
+The old FFmpeg video graph compiler, legacy decoder scheduler and private A/B
+selector are deleted. Audio graphs, exact audio transitions and bounded decoder/
+encoder transport remain. The independent overlay reference test now exercises
+the production transform/opacity sugar. Plan reports contain the native stack;
+obsolete empty base/layer fields are removed.
+
+Before removal, the legacy overlay/track/transition/sequence fixtures passed on
+Windows (104 seconds) and Linux (56 seconds), against the same independent
+references as the native path. After removal, 254 Windows and 253 Linux Rust
+tests, formatting and warnings-denied lint pass. Eleven targeted media suites
+pass on each system, alongside the scene, spatial, compositing and tracking
+fixtures covering the plan's named compatibility requirements. This is bounded
+correctness evidence, with no speed claim. [Evidence](../verification/native-only-timeline-2026-10-13.json)
+records source identities, test results and the stage-4 requirement audit.
+
+The 3f853c0 background finished with eight passes, zero failures and 56 explicit
+superseded skips. The 1486cd7 background and this commit's shipment/background
+must still be checked. Stage 4 awaits the full frozen quick gate. Documentation
+also now acknowledges the already completed f13453d full gate for stage 2;
+the historical automatic-preparation checkpoint is preserved. No points or new
+thorough claim; PROGRESS.md retains the 338e114 milestone evidence.
+
 ## 13 October 2026: saved spatial properties on native clips
 
 Native video clips and sequence instances now save transform, opacity, rectangle

@@ -12,11 +12,6 @@ use std::{
     time::Duration,
 };
 
-/// Temporary A/B switch for the former video graphs while stage-4 acceptance is in progress.
-pub(crate) fn legacy_oracle() -> bool {
-    std::env::var_os("CUTBOLT_LEGACY_TRACK_COMPOSITOR").is_some_and(|v| v == "1")
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum Input {

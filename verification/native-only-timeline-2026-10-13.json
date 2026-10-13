@@ -1,0 +1,225 @@
+{
+  "date": "2026-10-13",
+  "kind": "native_timeline_renderer_removal_of_legacy_video_graphs",
+  "base_commit": "1486cd703b8210621d91fbfe6aeffedcf21ee72e",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/cache.rs": {
+      "bytes": 25150,
+      "sha256": "55143ade8beef10057d79db3b1bc8fdf067a1254dd52ab21c8ff4a24cde8edd4"
+    },
+    "src/clip_effects.rs": {
+      "bytes": 6704,
+      "sha256": "98435fb5c5f03abec0464f0fe3277d4dec59bea3ce458eb185422067a66db0e5"
+    },
+    "src/clip_properties.rs": {
+      "bytes": 16136,
+      "sha256": "aa23a0f56eacb1124af34e0272a58d9d56a9fdde1710d31200ad2d11a3967eac"
+    },
+    "src/delivery/stream.rs": {
+      "bytes": 18385,
+      "sha256": "a8b19051deae5d7124e3cb15d72afbebe39bc4bb1e45ac10e2372aefff088716"
+    },
+    "src/track_composite.rs": {
+      "bytes": 24289,
+      "sha256": "c7c533a988aabbc1943440c4c40af2879a117a33366bc0086fea85b8c9d13007"
+    },
+    "src/track_render.rs": {
+      "bytes": 62803,
+      "sha256": "354e975ee663e090a1556f48ba6b5be80a9b7936680725998a5e8de0d9f14b84"
+    },
+    "src/track_stack.rs": {
+      "bytes": 17622,
+      "sha256": "50c0b959cd10ae6e964ed999a7e882f0d2ca46d6e812a3e8ec5dc04cd96901d1"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 285,
+    "manifest_sha256": "9cd7b234fca71cddff4391e1e1b0e573550ca0f1c71f78a33c7cf370cbe9f9f0",
+    "manifest_format": "Sorted tracked source/test/tool/build paths + NUL + lowercase content SHA-256 + LF; checkout HEAD labels are not implementation identities."
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 254,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "delivery",
+          "dynamics",
+          "native_layers",
+          "overlays",
+          "proxies",
+          "render_failures",
+          "sequences",
+          "track_edits",
+          "tracks",
+          "transitions"
+        ],
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 340,
+        "report": {
+          "bytes": 403,
+          "sha256": "f689cbb3dda6a06ceb0fd3870a7b15beb548dad35879640c38cf69e16ffab716"
+        },
+        "log": {
+          "bytes": 23418,
+          "sha256": "deaf685682de5965f4d0573da4cecc425fa44ce29c829660c8af9d523e1c3524"
+        }
+      },
+      "named_compatibility_quick": {
+        "stages": [
+          "compositing",
+          "scenes",
+          "spatial",
+          "tracking"
+        ],
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 110,
+        "report": {
+          "bytes": 278,
+          "sha256": "c79893874ddbeb50f1609fcc5b666708e9848091f1ab71a4610e68b5af33af63"
+        },
+        "log": {
+          "bytes": 490,
+          "sha256": "537b0e0dbe33e67bd0f76ce0d2ff78300c5ee4b12831f7ccec2e931509626a1b"
+        }
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 253,
+      "format_check": "passed",
+      "clippy_all_targets_warnings_denied": "passed",
+      "targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "delivery",
+          "dynamics",
+          "native_layers",
+          "overlays",
+          "proxies",
+          "render_failures",
+          "sequences",
+          "track_edits",
+          "tracks",
+          "transitions"
+        ],
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 176,
+        "report": {
+          "bytes": 380,
+          "sha256": "826fadc0ebdada136e0c4938151a40ca50ef16d259b0d6f9eb10a0f8c1337de7"
+        },
+        "log": {
+          "bytes": 23042,
+          "sha256": "39e1f0fc6992aa2f1cddea1da3ab6e8da418c5751c0375107600bc8b21dc8434"
+        }
+      },
+      "named_compatibility_quick": {
+        "stages": [
+          "compositing",
+          "scenes",
+          "spatial",
+          "tracking"
+        ],
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 73,
+        "report": {
+          "bytes": 262,
+          "sha256": "4bbe294d995081c8c36b6115858a16b64199598eda8949df1bb0c9fceac9273c"
+        },
+        "log": {
+          "bytes": 445,
+          "sha256": "01950afa3aea13af06d0042450204ed40f3697f11a3448d4a299942ec363b808"
+        }
+      }
+    }
+  },
+  "legacy_ab_before_removal": {
+    "windows": {
+      "stages": [
+        "overlays",
+        "sequences",
+        "tracks",
+        "transitions"
+      ],
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 104,
+      "report": {
+        "bytes": 280,
+        "sha256": "3d05b64badbe46c4b44b7ee16344e0a71322f4d4c4aedc87a4b1758487e87a98"
+      },
+      "log": {
+        "bytes": 494,
+        "sha256": "1b178e06209e9551618972b648959a515a2fed8f6375c784042d6d77ca31506f"
+      }
+    },
+    "linux": {
+      "stages": [
+        "overlays",
+        "sequences",
+        "tracks",
+        "transitions"
+      ],
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 56,
+      "report": {
+        "bytes": 264,
+        "sha256": "266116a092c550cd17c62030ab9a6035b5437e81e9abd7934f278afc4b382cee"
+      },
+      "log": {
+        "bytes": 878,
+        "sha256": "0f56a208cc44db91b815146da65e4e77f375f27eab12ba8c70973d0778a9f22e"
+      }
+    }
+  },
+  "requirement_audit": {
+    "saved_properties": "Transform, opacity, feathered rectangle mask and blend mode: clip-properties-2026-10-13.json; production definitions unchanged by this removal.",
+    "overlay_sugar": "Existing OverlayTransform normalizes to box-floor transform and byte-alpha opacity. The retained independent overlay unit reference now calls this production path.",
+    "ordered_layers": "Native root/child stack, black base and conservative recipe opacity proofs; native_layers verifies keyed lower-track visibility and omitted hidden decoder windows.",
+    "nested_graph_removal": "Old geq/blend video compiler, parallel legacy decoder scheduler and private environment selector deleted after both paths passed overlays/tracks/transitions/sequences on both systems. Audio graph and decoder/encoder transports retained.",
+    "oracles": "Saved direct-source PIP, keyed PIP and feathered reveal require no scene compilation; exact scene and integer references remain in native_layers/clip_properties, plus pre-removal old-path comparisons.",
+    "named_regressions": "T08 tracks; V01 scenes/spatial; V02 scenes/compositing; V05 compositing/tracking. All pass on Windows and Linux after removal.",
+    "restriction_audit": "Ordinary video track properties support nested instances, transitions and proxy previews. Existing alpha_over-only restrictions and source-role inspection errors remain explicit; they do not limit the new ordinary-track recipes required by stage 4.",
+    "full_quick": "Pending on the frozen cleanup commit. Stage 4 is not closed by targeted results."
+  },
+  "prior_completed_background": {
+    "commit": "3f853c00d7fa89bc7a4461a11fd0040a6fce12b4",
+    "passed": 8,
+    "failed": 0,
+    "superseded_skips": 56,
+    "not_started": 0,
+    "wall_seconds": 2191
+  },
+  "limitations": [
+    "No speed claim; A/B results establish bounded correctness only.",
+    "The full stage-4 quick gate and this commit shipment/background remain to be checked.",
+    "No new editing points or thorough milestone claim; PROGRESS.md retains 338e114 evidence.",
+    "Generated scene clips and optional precise working color remain separate stages."
+  ]
+}

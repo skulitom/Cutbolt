@@ -198,8 +198,11 @@ requests; see [AUTOMATIC_PREPARATION](../AUTOMATIC_PREPARATION.md). The four sou
 comparisons pass on Windows and Linux, including the older render.start preparation path,
 cancellation, progress restoration and transparent ProRes overlays. Eight existing regression
 fixtures pass on both systems. See verification/automatic-prepare-2026-10-13.json for the
-requirement audit and disclosed fixture corrections. The full quick run remains pending
-before closing the stage.
+requirement audit and disclosed fixture corrections. The later frozen f13453d
+[full quick gate](../../verification/stage3-full-quick-2026-10-13.json) passed
+all 76 fixtures, including automatic preparation and conversion caching, with
+no failures, skips or reused checks. That closes the remaining stage-2 gate;
+the earlier evidence file retains its accurate checkpoint status.
 
 Goal: an agent never has to call `media.prepare` by hand. Files that cannot be decoded directly are converted once, cached and reused, and the conversion is visible.
 
@@ -272,8 +275,12 @@ sequence instances, with source-clock, saved-history and LUT dependency checks.
 Saved transform/opacity/mask/blend properties and exact overlay sugar now pass
 scene, independent-integer, source-clock and preview/export checks on Windows and
 Linux; see [property evidence](../../verification/clip-properties-2026-10-13.json).
-The old nested graphs remain as A/B oracles pending the remaining restriction audit,
-comparison cleanup and complete quick gate. See [layer evidence](../../verification/native-layers-2026-10-13.json)
+The old nested video graphs and private A/B selector are now removed after their
+shared fixtures agreed on both systems. The native-only renderer passes 11
+targeted suites plus the scene/spatial/compositing/tracking regressions on both
+systems; the restriction audit is recorded in
+[removal evidence](../../verification/native-only-timeline-2026-10-13.json).
+The complete quick gate on the cleanup commit remains pending. See [layer evidence](../../verification/native-layers-2026-10-13.json)
 and [nested-effect evidence](../../verification/nested-effects-2026-10-13.json).
 This is not the stage exit.
 

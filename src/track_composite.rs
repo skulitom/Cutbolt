@@ -1,12 +1,4 @@
-//! Composite a placed-track timeline's top-level transitions and `alpha_over` tracks in the engine.
-//!
-//! FFmpeg decodes the opaque base picture (one graph), the incoming side of each visible
-//! transition and each visible overlay clip (one small graph each, overlays cropped) to raw planar
-//! RGB on pipes. Where a transition shows, the base picture holds its outgoing side, and the
-//! engine mixes in the incoming side by the exact equations of `transitions.md`. It then applies
-//! each overlay clip's shrink, opacity and position and the exact straight-alpha "over" of
-//! `tracks.md`. Both run in parallel row bands, and the result streams to the encoder. Every
-//! decoder reads its input once, in order.
+//! Native timeline decoder streams, exact transitions and bounded encoder transport.
 use crate::{
     Result, error,
     media::{self, Control, StreamReader, Watch},
@@ -14,7 +6,6 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
-    collections::VecDeque,
     process::Command,
     sync::{
         Arc,
@@ -24,102 +15,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// One overlay clip: its decoder and how its frames land on the canvas.
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct Layer {
-    /// The clip's track in the arrangement; it shows where it lies above the visible base track.
-    pub track: usize,
-    pub track_id: String,
-    pub clip_id: String,
-    /// Window frames `[first, end)` the decoder supplies, one per frame, in order.
-    pub first: u64,
-    pub end: u64,
-    /// Decoded (cropped) size; frames are planar G, B, R, plus A for straight-alpha sources.
-    pub width: u32,
-    pub height: u32,
-    pub alpha: bool,
-    pub divisor: u32,
-    pub opacity: u8,
-    pub position: [i32; 2],
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effects: Option<crate::clip_effects::Stack>,
-    pub arguments: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub direct: Option<crate::direct::Picture>,
-}
-impl Layer {
-    fn frame_bytes(&self) -> usize {
-        self.width as usize * self.height as usize * if self.alpha { 4 } else { 3 }
-    }
-}
-
-/// A top-level transition over consecutive window frames where its track is the visible one: the
-/// base picture holds the outgoing side there, and a decoder supplies the incoming side.
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct Mix {
-    pub track_id: String,
-    pub transition_id: String,
-    /// Window frames `[first, end)` the decoder supplies, one per frame, in order.
-    pub first: u64,
-    pub end: u64,
-    pub kind: TransitionKind,
-    /// Frames in the whole effect interval, and the effect frame of window frame `first`.
-    pub count: u64,
-    pub offset: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effects: Option<crate::clip_effects::Stack>,
-    /// Decoder of the incoming side: planar G, B, R frames of the canvas size on stdout.
-    pub arguments: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub direct: Option<crate::direct::Picture>,
-}
-
-/// An indexed original replacing the base graph's black placeholder during this run.
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct DirectRun {
-    pub first: u64,
-    pub end: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub picture: Option<crate::direct::Picture>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub arguments: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effects: Option<crate::clip_effects::Stack>,
-}
-
-/// The base picture's decoder plus the transitions mixed into it and the overlay clips
-/// composited over it.
+/// The ordered native picture stream and its shared rendering resources.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Compositor {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stack: Option<crate::track_stack::Plan>,
+    pub stack: crate::track_stack::Plan,
     pub width: u32,
     pub height: u32,
     pub frames: u64,
-    /// Decoder of the opaque base picture: planar G, B, R frames on stdout.
-    pub base: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub direct: Vec<DirectRun>,
-    /// Window frame runs `[start, end)` and the index of the visible opaque track (None: black).
-    #[serde(skip)]
-    pub runs: Vec<(u64, u64, Option<usize>)>,
-    /// Transitions in window order; they never overlap, and apply before any layer.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub transitions: Vec<Mix>,
-    pub layers: Vec<Layer>,
     #[serde(skip)]
     pub effect_resources: crate::clip_effects::Resources,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect_report: Option<serde_json::Value>,
 }
-
 impl Compositor {
-    fn base_index(&self, frame: u64) -> Option<usize> {
-        self.runs
-            .iter()
-            .find(|(start, end, _)| (*start..*end).contains(&frame))
-            .and_then(|(_, _, index)| *index)
-    }
     fn plane(&self) -> usize {
         self.width as usize * self.height as usize
     }
@@ -212,290 +120,6 @@ impl Ahead {
         self.next().map(|_| ())
     }
 }
-
-/// Transition and layer decoders start up to this many frames before their first one, at most
-/// `EARLY` at a time, so that their startup overlaps the frames before.
-const AHEAD: u64 = 25;
-const EARLY: usize = 2;
-
-/// Decoders of one composition and the frame they are on.
-struct LegacyDecoders<'a> {
-    compositor: &'a Compositor,
-    base: Ahead,
-    /// Transition decoders not yet started, in window order, then the started ones; the first
-    /// supplies frames during its run.
-    mixes: VecDeque<(usize, PreparedReader)>,
-    mixing: VecDeque<(usize, Ahead)>,
-    /// Layer decoders not yet started, by first frame, then the started ones by track.
-    pending: VecDeque<(usize, PreparedReader)>,
-    direct: VecDeque<(usize, PreparedReader)>,
-    direct_active: Option<(usize, Ahead)>,
-    active: Vec<(usize, Ahead)>,
-    direct_effects: Vec<Option<crate::clip_effects::Prepared>>,
-    mix_effects: Vec<Option<crate::clip_effects::Prepared>>,
-    layer_effects: Vec<Option<crate::clip_effects::Prepared>>,
-    program: String,
-    timeout: Duration,
-    abort: Arc<AtomicBool>,
-}
-impl LegacyDecoders<'_> {
-    /// Start a decoder of `count` frames of `size` bytes.
-    fn start(&self, command: PreparedReader, size: usize, count: u64) -> Result<Ahead> {
-        let reader = command.start(
-            &self.program,
-            self.timeout,
-            Watch {
-                abort: Some(self.abort.clone()),
-            },
-        )?;
-        Ok(Ahead::start(reader, size, count))
-    }
-    /// Start the decoders due by frame `n`, then the next ones early, in order of first frame.
-    fn start_due(&mut self, n: u64) -> Result<()> {
-        let c = self.compositor;
-        loop {
-            let mix = (self.mixes.front()).map(|(index, _)| c.transitions[*index].first);
-            let layer = (self.pending.front()).map(|(index, _)| c.layers[*index].first);
-            let Some(first) = mix.into_iter().chain(layer).min() else {
-                return Ok(());
-            };
-            let early = (self.mixing.iter())
-                .filter(|(index, _)| c.transitions[*index].first > n)
-                .count()
-                + (self.active.iter())
-                    .filter(|(index, _)| c.layers[*index].first > n)
-                    .count();
-            if first > n && (first > n + AHEAD || early >= EARLY) {
-                return Ok(());
-            }
-            if mix == Some(first) {
-                let (index, command) = self.mixes.pop_front().expect("pending transition");
-                let m = &c.transitions[index];
-                let decoder = self.start(command, c.plane() * 3, m.end - m.first)?;
-                self.mixing.push_back((index, decoder));
-            } else {
-                let (index, command) = self.pending.pop_front().expect("pending layer");
-                let layer = &c.layers[index];
-                let decoder = self.start(command, layer.frame_bytes(), layer.end - layer.first)?;
-                self.active.push((index, decoder));
-                self.active.sort_by_key(|(index, _)| c.layers[*index].track);
-            }
-        }
-    }
-    /// The composited frame `n` as planar G, B, R.
-    fn next(&mut self, n: u64) -> Result<Vec<u8>> {
-        let c = self.compositor;
-        self.start_due(n)?;
-        let mut frame = self.base.next()?;
-        if self
-            .direct
-            .front()
-            .is_some_and(|(i, _)| c.direct[*i].first == n)
-        {
-            let (index, prepared) = self.direct.pop_front().expect("direct run");
-            let run = &c.direct[index];
-            self.direct_active = Some((
-                index,
-                self.start(prepared, c.plane() * 3, run.end - run.first)?,
-            ));
-        }
-        if let Some((index, decoder)) = &self.direct_active {
-            let replacement = decoder.next()?;
-            self.base.recycle(frame);
-            frame = replacement;
-            let run = &c.direct[*index];
-            if let (Some(stack), Some(prepared)) = (&run.effects, &self.direct_effects[*index]) {
-                prepared.apply(
-                    stack,
-                    &c.effect_resources,
-                    n - run.first,
-                    [c.width, c.height],
-                    false,
-                    &mut frame,
-                )?;
-            }
-            if c.direct[*index].end == n + 1 {
-                self.direct_active
-                    .take()
-                    .expect("direct decoder")
-                    .1
-                    .finish()?;
-            }
-        }
-        if let Some((index, decoder)) = self.mixing.front()
-            && c.transitions[*index].first <= n
-        {
-            let m = &c.transitions[*index];
-            let mut incoming = decoder.next()?;
-            if let (Some(stack), Some(prepared)) = (&m.effects, &self.mix_effects[*index]) {
-                prepared.apply(
-                    stack,
-                    &c.effect_resources,
-                    n - m.first,
-                    [c.width, c.height],
-                    false,
-                    &mut incoming,
-                )?;
-            }
-            let effect = Effect::new(m.kind, c.width, m.count, m.offset + (n - m.first));
-            effect.apply(&mut frame, &incoming, c.width as usize);
-            decoder.recycle(incoming);
-            if m.end == n + 1 {
-                let (_, decoder) = self.mixing.pop_front().expect("transition decoder");
-                decoder.finish()?;
-            }
-        }
-        let base = c.base_index(n);
-        for (index, decoder) in &self.active {
-            let layer = &c.layers[*index];
-            if layer.first > n {
-                continue;
-            }
-            let mut pixels = decoder.next()?;
-            if let (Some(stack), Some(prepared)) = (&layer.effects, &self.layer_effects[*index]) {
-                prepared.apply(
-                    stack,
-                    &c.effect_resources,
-                    n - layer.first,
-                    [layer.width, layer.height],
-                    layer.alpha,
-                    &mut pixels,
-                )?;
-            }
-            if base.is_none_or(|b| layer.track > b) {
-                over(&mut frame, c.width, c.height, layer, &pixels);
-            }
-            decoder.recycle(pixels);
-        }
-        let mut still = Vec::with_capacity(self.active.len());
-        for (index, decoder) in self.active.drain(..) {
-            if c.layers[index].end == n + 1 {
-                decoder.finish()?;
-            } else {
-                still.push((index, decoder));
-            }
-        }
-        self.active = still;
-        Ok(frame)
-    }
-}
-
-fn legacy_decoders<'a>(
-    compositor: &'a Compositor,
-    timeout: Duration,
-    control: &dyn Control,
-    abort: &Arc<AtomicBool>,
-) -> Result<LegacyDecoders<'a>> {
-    let program = control.tool("ffmpeg");
-    let base = Ahead::start(
-        Reader::Tool(StreamReader::spawn_with(
-            control.command(&program, &compositor.base)?,
-            &program,
-            timeout,
-            Watch {
-                abort: Some(abort.clone()),
-            },
-        )?),
-        compositor.plane() * 3,
-        compositor.frames,
-    );
-    let mixes = (compositor.transitions.iter().enumerate())
-        .map(|(index, mix)| {
-            Ok((
-                index,
-                PreparedReader::prepare(&mix.arguments, mix.direct.as_ref(), &program, control)?,
-            ))
-        })
-        .collect::<Result<VecDeque<_>>>()?;
-    let mut layers: Vec<usize> = (0..compositor.layers.len()).collect();
-    layers.sort_by_key(|&index| compositor.layers[index].first);
-    let pending = (layers.into_iter())
-        .map(|index| {
-            let layer = &compositor.layers[index];
-            Ok((
-                index,
-                PreparedReader::prepare(
-                    &layer.arguments,
-                    layer.direct.as_ref(),
-                    &program,
-                    control,
-                )?,
-            ))
-        })
-        .collect::<Result<VecDeque<_>>>()?;
-    Ok(LegacyDecoders {
-        compositor,
-        base,
-        mixes,
-        mixing: VecDeque::new(),
-        pending,
-        direct: compositor
-            .direct
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                Ok((
-                    i,
-                    PreparedReader::prepare(&r.arguments, r.picture.as_ref(), &program, control)?,
-                ))
-            })
-            .collect::<Result<_>>()?,
-        direct_active: None,
-        direct_effects: compositor
-            .direct
-            .iter()
-            .map(|r| r.effects.as_ref().map(|s| s.prepare()).transpose())
-            .collect::<Result<_>>()?,
-        mix_effects: compositor
-            .transitions
-            .iter()
-            .map(|r| r.effects.as_ref().map(|s| s.prepare()).transpose())
-            .collect::<Result<_>>()?,
-        layer_effects: compositor
-            .layers
-            .iter()
-            .map(|r| r.effects.as_ref().map(|s| s.prepare()).transpose())
-            .collect::<Result<_>>()?,
-        active: Vec::new(),
-        program,
-        timeout,
-        abort: abort.clone(),
-    })
-}
-
-enum Decoders<'a> {
-    Legacy(Box<LegacyDecoders<'a>>),
-    Stack(crate::track_stack::Frames<'a>),
-}
-impl Decoders<'_> {
-    fn next(&mut self, n: u64) -> Result<Vec<u8>> {
-        match self {
-            Self::Legacy(frames) => frames.next(n),
-            Self::Stack(frames) => frames.next(n),
-        }
-    }
-    fn finish(self) -> Result<()> {
-        match self {
-            Self::Legacy(frames) => frames.base.finish(),
-            Self::Stack(frames) => frames.finish(),
-        }
-    }
-}
-fn decoders<'a>(
-    compositor: &'a Compositor,
-    timeout: Duration,
-    control: &dyn Control,
-    abort: &Arc<AtomicBool>,
-) -> Result<Decoders<'a>> {
-    match &compositor.stack {
-        Some(plan) => {
-            crate::track_stack::Frames::prepare(plan, timeout, control, abort).map(Decoders::Stack)
-        }
-        None => legacy_decoders(compositor, timeout, control, abort)
-            .map(|frames| Decoders::Legacy(Box::new(frames))),
-    }
-}
-
 /// Decode, composite and write every frame to an encoder reading raw planar G, B, R on stdin.
 /// Decoding and compositing run on one thread while this one feeds the encoder and reports
 /// progress (after `done` earlier frames), so the decoders, the compositor and the encoder work at
@@ -525,7 +149,8 @@ pub(crate) fn encode_consuming<T: Send + 'static>(
 ) -> Result<T> {
     let program = control.tool("ffmpeg");
     let abort = Arc::new(AtomicBool::new(false));
-    let mut decoders = decoders(compositor, timeout, control, &abort)?;
+    let mut decoders =
+        crate::track_stack::Frames::prepare(&compositor.stack, timeout, control, &abort)?;
     let mut composition_error = None;
     let stopped = media::feed_stdin_consuming(
         control.command(&program, encoder)?,
@@ -607,7 +232,8 @@ pub(crate) fn frame_rgb(
 ) -> Result<Vec<u8>> {
     let abort = Arc::new(AtomicBool::new(false));
     let outcome = (|| -> Result<Vec<u8>> {
-        let mut decoders = decoders(compositor, timeout, control, &abort)?;
+        let mut decoders =
+            crate::track_stack::Frames::prepare(&compositor.stack, timeout, control, &abort)?;
         let planar = decoders.next(0)?;
         decoders.finish()?;
         Ok(planar)
@@ -622,145 +248,6 @@ pub(crate) fn frame_rgb(
         rgb.extend_from_slice(&[r[i], g[i], b[i]]);
     }
     Ok(rgb)
-}
-
-/// Straight-alpha over in encoded RGB with exact integer rounding:
-/// `floor((2*(s*a + d*(255-a)) + 255) / 510)`, the nearest integer (255 is odd, so no ties).
-#[inline]
-fn blend(s: u8, d: u8, a: u32) -> u8 {
-    ((2 * (s as u32 * a + d as u32 * (255 - a)) + 255) / 510) as u8
-}
-
-/// Composite one decoded overlay frame onto planar G, B, R `frame`: shrink by the floor of each
-/// block's mean, scale alpha by the opacity rounded to nearest, place, clip and blend.
-fn over(frame: &mut [u8], width: u32, height: u32, layer: &Layer, pixels: &[u8]) {
-    let (w, h) = (width as i64, height as i64);
-    let k = layer.divisor.max(1) as i64;
-    let (placed_w, placed_h) = (layer.width as i64 / k, layer.height as i64 / k);
-    let [x, y] = layer.position.map(i64::from);
-    let (left, top) = (x.max(0), y.max(0));
-    let (right, bottom) = ((x + placed_w).min(w), (y + placed_h).min(h));
-    if left >= right || top >= bottom {
-        return;
-    }
-    let mut opacity = [0u8; 256];
-    for (a, scaled) in opacity.iter_mut().enumerate() {
-        *scaled = ((a as u32 * layer.opacity as u32 + 127) / 255) as u8;
-    }
-    let plane = (width * height) as usize;
-    let rows = top as usize * width as usize..bottom as usize * width as usize;
-    let (g, rest) = frame.split_at_mut(plane);
-    let (b, r) = rest.split_at_mut(plane);
-    let (g, b, r) = (&mut g[rows.clone()], &mut b[rows.clone()], &mut r[rows]);
-    let area = (right - left) * (bottom - top);
-    let workers = if area < 1 << 18 {
-        1
-    } else {
-        std::thread::available_parallelism()
-            .map_or(1, |n| n.get())
-            .clamp(1, 16)
-    };
-    let band = ((bottom - top) as usize).div_ceil(workers) * width as usize;
-    let span = Span {
-        width: width as usize,
-        left: left as usize,
-        right: right as usize,
-        x,
-        y,
-        k: k as usize,
-    };
-    let opacity = &opacity;
-    if workers == 1 {
-        span.rows(g, b, r, top as usize, layer, pixels, opacity);
-        return;
-    }
-    std::thread::scope(|scope| {
-        for (i, ((g, b), r)) in g
-            .chunks_mut(band)
-            .zip(b.chunks_mut(band))
-            .zip(r.chunks_mut(band))
-            .enumerate()
-        {
-            let first = top as usize + i * band / width as usize;
-            scope.spawn(move || span.rows(g, b, r, first, layer, pixels, opacity));
-        }
-    });
-}
-
-/// The visible columns of a placed overlay and its placement.
-#[derive(Clone, Copy)]
-struct Span {
-    width: usize,
-    left: usize,
-    right: usize,
-    x: i64,
-    y: i64,
-    k: usize,
-}
-impl Span {
-    #[allow(clippy::too_many_arguments)]
-    fn rows(
-        &self,
-        g: &mut [u8],
-        b: &mut [u8],
-        r: &mut [u8],
-        first: usize,
-        layer: &Layer,
-        pixels: &[u8],
-        opacity: &[u8; 256],
-    ) {
-        let (lw, lh) = (layer.width as usize, layer.height as usize);
-        let plane = lw * lh;
-        let (sg, rest) = pixels.split_at(plane);
-        let (sb, rest) = rest.split_at(plane);
-        let (sr, sa) = rest.split_at(plane);
-        let k = self.k;
-        let count = (k * k) as u32;
-        for row in 0..g.len() / self.width {
-            let cy = first + row;
-            let py = (cy as i64 - self.y) as usize;
-            let line = row * self.width;
-            for cx in self.left..self.right {
-                let px = (cx as i64 - self.x) as usize;
-                let (s, a) = if k == 1 {
-                    let i = py * lw + px;
-                    let a = if layer.alpha {
-                        opacity[sa[i] as usize]
-                    } else {
-                        opacity[255]
-                    };
-                    ([sg[i], sb[i], sr[i]], a)
-                } else {
-                    // Only opaque sources shrink: every alpha in the block is 255.
-                    let mut sum = [0u32; 3];
-                    for dy in 0..k {
-                        let start = (py * k + dy) * lw + px * k;
-                        for i in start..start + k {
-                            sum[0] += sg[i] as u32;
-                            sum[1] += sb[i] as u32;
-                            sum[2] += sr[i] as u32;
-                        }
-                    }
-                    (sum.map(|v| (v / count) as u8), opacity[255])
-                };
-                let d = line + cx;
-                match a {
-                    0 => {}
-                    255 => {
-                        g[d] = s[0];
-                        b[d] = s[1];
-                        r[d] = s[2];
-                    }
-                    a => {
-                        let a = a as u32;
-                        g[d] = blend(s[0], g[d], a);
-                        b[d] = blend(s[1], b[d], a);
-                        r[d] = blend(s[2], r[d], a);
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// One frame of a transition by the equations of `transitions.md`, at p = (2i + 1) / (2n) for
@@ -908,6 +395,14 @@ pub(crate) fn raw_input(width: u32, height: u32, rate: crate::time::Time) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct Layer {
+        width: u32,
+        height: u32,
+        alpha: bool,
+        divisor: u32,
+        opacity: u8,
+        position: [i32; 2],
+    }
 
     fn layer(
         width: u32,
@@ -918,20 +413,12 @@ mod tests {
         position: [i32; 2],
     ) -> Layer {
         Layer {
-            track: 1,
-            track_id: "o".into(),
-            clip_id: "c".into(),
-            first: 0,
-            end: 1,
             width,
             height,
             alpha,
             divisor,
             opacity,
             position,
-            effects: None,
-            arguments: Vec::new(),
-            direct: None,
         }
     }
 
@@ -969,14 +456,6 @@ mod tests {
         out
     }
 
-    fn planar(rgb: &[[u8; 3]]) -> Vec<u8> {
-        let mut out = Vec::new();
-        for c in [1, 2, 0] {
-            out.extend(rgb.iter().map(|p| p[c]));
-        }
-        out
-    }
-
     fn check(w: usize, h: usize, l: Layer, seed: u32) {
         let mut state = seed;
         let mut next = || {
@@ -995,15 +474,54 @@ mod tests {
                 [next(), next(), next(), a]
             })
             .collect();
-        let mut pixels = Vec::new();
-        for c in [1, 2, 0, 3] {
-            if c < 3 || l.alpha {
-                pixels.extend(src.iter().map(|p| p[c]));
+        let canvas = [
+            w.max(l.width as usize) as u32,
+            h.max(l.height as usize) as u32,
+        ];
+        let plane = canvas[0] as usize * canvas[1] as usize;
+        let mut image = crate::scene::Pixels {
+            width: canvas[0],
+            height: canvas[1],
+            rgba: vec![0; plane * 4],
+        };
+        let mut frame = vec![0; plane * 3];
+        for y in 0..l.height as usize {
+            for x in 0..l.width as usize {
+                let dst = (y * canvas[0] as usize + x) * 4;
+                image.rgba[dst..dst + 4].copy_from_slice(&src[y * l.width as usize + x]);
             }
         }
-        let mut frame = planar(&base);
-        over(&mut frame, w as u32, h as u32, &l, &pixels);
-        assert_eq!(frame, planar(&reference(&base, w, h, &l, &src)));
+        for y in 0..h {
+            for x in 0..w {
+                let dst = (y * canvas[0] as usize + x) * 3;
+                frame[dst..dst + 3].copy_from_slice(&base[y * w + x]);
+            }
+        }
+        let old = crate::tracks::OverlayTransform {
+            crop: Some([0, 0, l.width, l.height]),
+            divisor: l.divisor,
+            opacity: l.opacity,
+            position: l.position,
+        };
+        let duration = crate::time::Time::new(1, 1).unwrap();
+        let properties = crate::clip_properties::normalize(&[], Some(&old), canvas, duration)
+            .unwrap()
+            .unwrap();
+        let sampler = properties.recipe().prepare(duration).unwrap();
+        properties
+            .draw(&sampler, crate::time::Time::ZERO, &mut image, &mut frame, 1)
+            .unwrap();
+        let actual = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (y * canvas[0] as usize + x) * 3))
+            .flat_map(|i| frame[i..i + 3].iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            reference(&base, w, h, &l, &src)
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1118,7 +636,17 @@ mod tests {
             for d in [0u8, 3, 128, 255] {
                 for a in 0..=255u32 {
                     let exact = (s as f64 * a as f64 + d as f64 * (255 - a) as f64) / 255.0;
-                    assert_eq!(blend(s, d, a), exact.round() as u8);
+                    assert_eq!(
+                        crate::composite::channel(
+                            d,
+                            s,
+                            a as u8,
+                            255,
+                            crate::composite::BlendMode::Normal,
+                            crate::composite::AlphaMode::Straight
+                        ),
+                        exact.round() as u8
+                    );
                 }
             }
         }

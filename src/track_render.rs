@@ -7,7 +7,7 @@ use crate::{
     render::{self, Plan, Source, clock},
     time::Time,
     track_composite::{self, Compositor},
-    tracks::{Kind, OverlayTransform, Track, TrackClip, Transition, TransitionKind},
+    tracks::{Kind, Track, TrackClip, Transition, TransitionKind},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -34,18 +34,11 @@ struct Graph<'a> {
     sources: BTreeMap<String, Source>,
     indexed: BTreeMap<String, std::sync::Arc<crate::direct::Video>>,
     converted: BTreeMap<String, Source>,
-    direct_runs: Vec<track_composite::DirectRun>,
     effect_resources: crate::clip_effects::Resources,
     effect_sources: BTreeMap<PathBuf, Source>,
     direct_audio_bytes: u64,
     /// This graph's FFmpeg input index of each asset it reads.
     indices: BTreeMap<String, usize>,
-    /// Where each media input's options start in `args`, by input index.
-    starts: BTreeMap<usize, usize>,
-    /// Inputs whose sound the graph reads.
-    sounds: BTreeSet<usize>,
-    /// Pictures the graph reads, placed on their inputs when it is finished (`arguments`).
-    reads: Vec<Read>,
     args: Vec<String>,
     filters: Vec<String>,
     serial: usize,
@@ -66,19 +59,6 @@ struct Graph<'a> {
     generated: Vec<render::Generated>,
     /// Distinguishes this graph's generated file names.
     nonce: u128,
-    /// When the top-level overlays are composited by the engine: the base picture's frame runs
-    /// and the index of their visible opaque track.
-    runs: Vec<(u64, u64, Option<usize>)>,
-    /// The runs among those where a transition shows, which the engine mixes, as the indices of
-    /// its track and of the transition on it, then the window frames `[first, end)`.
-    mixed: Vec<(usize, usize, u64, u64)>,
-}
-/// Source frames `[first, end)` of an asset's pictures, trimmed at the head of filter `slot`.
-struct Read {
-    slot: usize,
-    asset: String,
-    first: u64,
-    end: u64,
 }
 impl<'a> Graph<'a> {
     fn new(project: &'a Project, root: &'a Path, control: &'a dyn media::Control) -> Self {
@@ -89,16 +69,10 @@ impl<'a> Graph<'a> {
             sources: BTreeMap::new(),
             indexed: BTreeMap::new(),
             converted: BTreeMap::new(),
-            direct_runs: Vec::new(),
             effect_resources: Default::default(),
             effect_sources: BTreeMap::new(),
             direct_audio_bytes: 0,
             indices: BTreeMap::new(),
-            starts: BTreeMap::new(),
-            sounds: BTreeSet::new(),
-            reads: Vec::new(),
-            runs: Vec::new(),
-            mixed: Vec::new(),
             args: ["-hide_banner", "-v", "error", "-nostdin", "-n"]
                 .map(str::to_owned)
                 .to_vec(),
@@ -126,17 +100,7 @@ impl<'a> Graph<'a> {
         duration: Time,
         kind: Kind,
     ) -> Result<(usize, u64, u64)> {
-        self.input_with(clip, at, duration, kind, false)
-    }
-    fn input_with(
-        &mut self,
-        clip: &TrackClip,
-        at: Time,
-        duration: Time,
-        kind: Kind,
-        overlay: bool,
-    ) -> Result<(usize, u64, u64)> {
-        let source = self.inspect(clip, kind, overlay)?;
+        let source = self.inspect(clip, kind, false)?;
         let (first, end) = self.span(clip, at, duration, kind, &source)?;
         if self.indexed.contains_key(&clip.asset_id) {
             return Err(error(
@@ -153,7 +117,6 @@ impl<'a> Graph<'a> {
             ));
         }
         if !self.indices.contains_key(&clip.asset_id) {
-            self.starts.insert(self.inputs, self.args.len());
             self.args.extend([
                 "-protocol_whitelist".into(),
                 "file,pipe".into(),
@@ -466,289 +429,27 @@ impl<'a> Graph<'a> {
             coordinate_scale: self.project.effect_coordinate_scale.unwrap_or(1),
         }))
     }
-    /// Direct pictures and effected clips replace a black base placeholder in Rust.
-    fn base_source(
-        &mut self,
-        clip: &TrackClip,
-        at: Time,
-        duration: Time,
-        label: &str,
-        first: u64,
-    ) -> Result<()> {
-        let crop = [0, 0, self.project.width, self.project.height];
-        let picture = self.direct_picture(clip, at, duration, crop)?;
-        let effects = self.clip_effects(clip, at, [0, 0])?;
-        if picture.is_some() || effects.is_some() {
-            let count = duration.units(self.project.frame_rate)?;
-            let arguments = if picture.is_some() {
-                Vec::new()
-            } else {
-                let mut decoder = self.branch();
-                decoder.video_source(clip, at, duration, "effected")?;
-                decoder.arguments_with(
-                    &[
-                        "-map",
-                        "[effected]",
-                        "-an",
-                        "-fps_mode",
-                        "passthrough",
-                        "-f",
-                        "rawvideo",
-                        "-pix_fmt",
-                        "gbrp",
-                        "pipe:1",
-                    ]
-                    .map(str::to_owned),
-                )?
-            };
-            self.direct_runs.push(track_composite::DirectRun {
-                first,
-                end: first + count,
-                picture,
-                arguments,
-                effects,
-            });
-            let rate = self.project.frame_rate;
-            self.filters.push(format!("color=c=black:s={}x{}:r={}/{},format=pix_fmts=gbrp,trim=end_frame={count},settb=expr={},setpts=N[{label}]", self.project.width, self.project.height, rate.num, rate.den, timebase(rate)));
-            Ok(())
-        } else {
-            self.video_source(clip, at, duration, label)
-        }
-    }
-    fn video_source(
-        &mut self,
-        clip: &TrackClip,
-        at: Time,
-        duration: Time,
-        label: &str,
-    ) -> Result<()> {
-        if let Some(id) = &clip.sequence_id {
-            let a = crate::sequences::get(self.project, id)?.arrangement.clone();
-            return self.compose(
-                &a,
-                clip.source_in.plus(at)?.minus(clip.start)?,
-                duration,
-                Kind::Video,
-                label,
-            );
-        }
-        let (_, first, end) = self.input(clip, at, duration, Kind::Video)?;
-        let tb = timebase(self.project.frame_rate);
-        self.read(
-            &clip.asset_id,
-            (first, end),
-            format!(",settb=expr={tb},setpts=N,format=pix_fmts=gbrp[{label}]"),
-        );
-        Ok(())
-    }
-    /// A filter that reads source frames `[first, end)` of an asset's pictures and continues with
-    /// `rest`; its input and trim are chosen when the graph is finished (`arguments`).
-    fn read(&mut self, asset: &str, (first, end): (u64, u64), rest: String) {
-        self.reads.push(Read {
-            slot: self.filters.len(),
-            asset: asset.to_owned(),
-            first,
-            end,
-        });
-        self.filters.push(rest);
-    }
-    /// The graph's FFmpeg arguments: its inputs and filters. With `seek`, each asset's picture
-    /// input starts at the first frame read from it (`clock::seek_input`) and every read is trimmed
-    /// from there; an input whose sound the graph also reads stays at its start for the sound, and
-    /// the pictures get an input of their own. Without, every input is read from its start.
-    fn arguments(&self, seek: bool) -> Vec<String> {
-        let rate = self.project.frame_rate;
-        let mut seeks: BTreeMap<&str, u64> = BTreeMap::new();
-        for read in &self.reads {
-            let first = if seek { read.first } else { 0 };
-            let at = seeks.entry(&read.asset).or_insert(first);
-            *at = (*at).min(first);
-        }
+    /// Audio graph inputs and filters; native video frames arrive separately on stdin.
+    fn arguments(&self) -> Vec<String> {
         let mut args = self.args.clone();
-        let mut pictures = BTreeMap::new();
-        let mut options = Vec::new();
-        let (mut added, mut next) = (Vec::new(), self.inputs);
-        for (&asset, &first) in &seeks {
-            let input = self.indices[asset];
-            let index = if first == 0 {
-                input
-            } else if self.sounds.contains(&input) {
-                added.extend(clock::seek_input(rate, first));
-                added.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
-                added.push(self.sources[asset].path.to_string_lossy().into_owned());
-                next += 1;
-                next - 1
-            } else {
-                options.push((self.starts[&input], clock::seek_input(rate, first)));
-                input
-            };
-            pictures.insert(asset, index);
-        }
-        args.extend(added);
-        // Later positions first, so earlier ones stay valid.
-        options.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
-        for (at, option) in options {
-            args.splice(at..at, option);
-        }
-        let mut filters = self.filters.clone();
-        for read in &self.reads {
-            let asset = read.asset.as_str();
-            let trim = clock::seek_trim(rate, seeks[asset], read.first, read.end);
-            let rest = &self.filters[read.slot];
-            filters[read.slot] = format!("[{}:v:0]{trim}{rest}", pictures[asset]);
-        }
         args.extend([
             "-filter_complex_threads".into(),
             "1".into(),
             "-filter_complex".into(),
-            filters.join(";"),
+            self.filters.join(";"),
         ]);
         args
     }
-    /// `arguments` followed by `tail`, sought unless that alone takes them past the limit.
     fn arguments_with(&self, tail: &[String]) -> Result<Vec<String>> {
-        for seek in [true, false] {
-            let mut args = self.arguments(seek);
-            args.extend_from_slice(tail);
-            if !too_long(&args) {
-                return Ok(args);
-            }
-        }
-        Err(error(
-            "LIMIT_EXCEEDED",
-            "Track render arguments exceed supported size",
-        ))
-    }
-    /// A clip on an alpha_over track, keeping its straight alpha plane (opaque sources read as 255).
-    fn overlay_source(
-        &mut self,
-        clip: &TrackClip,
-        at: Time,
-        duration: Time,
-        label: &str,
-    ) -> Result<()> {
-        let (_, first, end) = self.input_with(clip, at, duration, Kind::Video, true)?;
-        let tb = timebase(self.project.frame_rate);
-        let timed = format!(",settb=expr={tb},setpts=N");
-        if let Some(transform) = &clip.transform {
-            return self.transformed_overlay(clip, transform, (first, end), &timed, label);
-        }
-        let rest = if self.alpha_assets.contains(&clip.asset_id) {
-            // Planar conversion of packed alpha through the scaler is not value-exact, so split the
-            // decoded bgra planes and reassemble them as gbrap (G, B, R, A) without any arithmetic.
-            format!(
-                "{timed},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{label}]"
-            )
-        } else {
-            // Opaque bgr0 overlays: exact RGB conversion with a constant 255 alpha plane.
-            format!("{timed},format=pix_fmts=gbrap[{label}]")
-        };
-        self.read(&clip.asset_id, (first, end), rest);
-        Ok(())
-    }
-    /// A picture-in-picture overlay on a transparent full canvas: crop, shrink by the floor of
-    /// each block's mean (`pixelize`, then exact neighbor decimation of the constant blocks), scale
-    /// alpha by the opacity through a lookup table, then crop to the visible part and pad. `frames`
-    /// are the source frames read, retimed by `timed`.
-    fn transformed_overlay(
-        &mut self,
-        clip: &TrackClip,
-        transform: &OverlayTransform,
-        frames: (u64, u64),
-        timed: &str,
-        label: &str,
-    ) -> Result<()> {
-        let (width, height) = (self.project.width, self.project.height);
-        let alpha = self.alpha_assets.contains(&clip.asset_id);
-        let k = transform.divisor;
-        if alpha && k > 1 {
+        let mut args = self.arguments();
+        args.extend_from_slice(tail);
+        if too_long(&args) {
             return Err(error(
-                "UNSUPPORTED_MEDIA",
-                format!(
-                    "Clip {:?}: only opaque overlay sources can be shrunk; straight-alpha sources may be cropped, faded and placed",
-                    clip.id
-                ),
+                "LIMIT_EXCEEDED",
+                "Track render arguments exceed supported size",
             ));
         }
-        let planes = format!("{label}m");
-        let rest = if alpha {
-            format!(
-                "{timed},extractplanes=r+g+b+a[{label}r][{label}g][{label}b][{label}a];[{label}r][{label}g][{label}b][{label}a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap[{planes}]"
-            )
-        } else {
-            format!("{timed},format=pix_fmts=gbrp[{planes}]")
-        };
-        self.read(&clip.asset_id, frames, rest);
-        let [cx, cy, cw, ch] = transform.crop.unwrap_or([0, 0, width, height]);
-        let mut chain = Vec::new();
-        if [cx, cy, cw, ch] != [0, 0, width, height] {
-            chain.push(format!("crop={cw}:{ch}:{cx}:{cy}"));
-        }
-        if k > 1 {
-            chain.push(format!(
-                "pixelize=w={k}:h={k}:m=avg,scale={}:{}:flags=neighbor",
-                cw / k,
-                ch / k
-            ));
-        }
-        if !alpha {
-            chain.push("format=pix_fmts=gbrap".into());
-        }
-        if transform.opacity < 255 {
-            chain.push(format!(
-                "lutrgb=a='floor((val*{}+127)/255)'",
-                transform.opacity
-            ));
-        }
-        // The shrunk image occupies [x, x + w) x [y, y + h) on the canvas; keep what is visible.
-        let (w, h) = (i64::from(cw / k), i64::from(ch / k));
-        let [x, y] = transform.position.map(i64::from);
-        let (left, top) = (x.max(0), y.max(0));
-        let (right, bottom) = ((x + w).min(width.into()), (y + h).min(height.into()));
-        if left >= right || top >= bottom {
-            chain.push("crop=1:1:0:0,lutrgb=a=0".into());
-            chain.push(format!("pad={width}:{height}:0:0:color=black@0"));
-        } else {
-            if (left, top, right, bottom) != (x, y, x + w, y + h) {
-                chain.push(format!(
-                    "crop={}:{}:{}:{}",
-                    right - left,
-                    bottom - top,
-                    left - x,
-                    top - y
-                ));
-            }
-            if (left, top, right, bottom) != (0, 0, width.into(), height.into()) {
-                chain.push(format!("pad={width}:{height}:{left}:{top}:color=black@0"));
-            }
-        }
-        if chain.is_empty() {
-            chain.push("null".into());
-        }
-        self.filters
-            .push(format!("[{planes}]{}[{label}]", chain.join(",")));
-        Ok(())
-    }
-    /// Straight-alpha "over" in encoded RGB with exact integer rounding (ties up):
-    /// out = floor((2*(s*a + d*(255-a)) + 255) / 510). Base and overlay are stacked side by side
-    /// so the per-pixel expression can read both; values stay exact in double precision. The stack
-    /// ends with the shorter input, so a picture that came up short is never padded by a repeat.
-    fn over(&mut self, base: &str, overlay: &str, output: &str) -> Result<()> {
-        let width = self.project.width;
-        let channel = |c: &str| {
-            format!(
-                "floor((2*({c}(X+{width},Y)*alpha(X+{width},Y)+{c}(X,Y)*(255-alpha(X+{width},Y)))+255)/510)"
-            )
-        };
-        let stacked = self.label()?;
-        self.filters.push(format!(
-            "[{base}]format=pix_fmts=gbrap[{stacked}b];[{stacked}b][{overlay}]hstack=inputs=2:shortest=1,geq=r='{}':g='{}':b='{}':a='255':interpolation=nearest,crop={width}:{}:0:0,format=pix_fmts=gbrp,settb=expr=1/25,setpts=N[{output}]",
-            channel("r"),
-            channel("g"),
-            channel("b"),
-            self.project.height
-        ));
-        Ok(())
+        Ok(args)
     }
     fn audio_source(
         &mut self,
@@ -764,11 +465,10 @@ impl<'a> Graph<'a> {
         };
         if let Some(id) = &clip.sequence_id {
             let a = crate::sequences::get(self.project, id)?.arrangement.clone();
-            self.compose(
+            self.compose_audio(
                 &a,
                 clip.source_in.plus(at)?.minus(clip.start)?,
                 duration,
-                Kind::Audio,
                 &raw,
             )?;
         } else {
@@ -812,7 +512,6 @@ impl<'a> Graph<'a> {
             } else {
                 self.input(clip, at, duration, Kind::Audio)?
             };
-            self.sounds.insert(input);
             self.filters.push(format!("[{input}:a:0]atrim=start_sample={first}:end_sample={end},asetpts=N/SR/TB,aformat=sample_fmts=dblp:channel_layouts=stereo[{raw}]"));
         }
         if clip.adjusts_audio() {
@@ -900,7 +599,7 @@ impl<'a> Graph<'a> {
     ) -> Result<()> {
         let (left, right) = track.endpoints(effect)?;
         let (start, end) = track.interval(effect)?;
-        let units = track.kind.clock(self.project.frame_rate);
+        let units = SAMPLES;
         let count = end.minus(start)?.units(units)?;
         let offset = at.minus(start)?.units(units)?;
         let d = count.checked_mul(2).ok_or_else(|| {
@@ -911,41 +610,22 @@ impl<'a> Graph<'a> {
         })?;
         let l = format!("{label}l");
         let r = format!("{label}r");
-        if track.kind == Kind::Video {
-            self.video_source(left, at, duration, &l)?;
-            self.video_source(right, at, duration, &r)?;
-            // Sample the transition at each frame center. Timestamp rounding recovers
-            // the exact local frame index from the filter's rational clock.
-            let rate = self.project.frame_rate;
-            let k = format!("(2*(round(T*{}/{})+{offset})+1)", rate.num, rate.den);
-            let expr = match effect.kind {
-                TransitionKind::Dissolve => format!("floor((A*({d}-{k})+B*{k}+{count})/{d})"),
-                TransitionKind::DipBlack => {
-                    format!("floor((A*max({d}-2*{k},0)+B*max(2*{k}-{d},0)+{count})/{d})")
-                }
-                TransitionKind::WipeLeft => format!("if(lte((2*X+1)*{count},W*{k}),B,A)"),
-                TransitionKind::WipeRight => format!("if(lte((2*(W-X)-1)*{count},W*{k}),B,A)"),
-            };
-            self.filters.push(format!(
-                "[{l}][{r}]blend=all_expr='{expr}':shortest=1[{label}]"
-            ));
+        debug_assert_eq!(track.kind, Kind::Audio);
+        self.audio_source(left, at, duration, &l)?;
+        self.audio_source(right, at, duration, &r)?;
+        let k = format!("(2*(n+{offset})+1)");
+        let (a, b) = if effect.kind == TransitionKind::DipBlack {
+            (format!("max({d}-2*{k},0)"), format!("max(2*{k}-{d},0)"))
         } else {
-            self.audio_source(left, at, duration, &l)?;
-            self.audio_source(right, at, duration, &r)?;
-            let k = format!("(2*(n+{offset})+1)");
-            let (a, b) = if effect.kind == TransitionKind::DipBlack {
-                (format!("max({d}-2*{k},0)"), format!("max(2*{k}-{d},0)"))
-            } else {
-                (format!("({d}-{k})"), k)
-            };
-            let channel = |c| {
-                format!(
-                    "st(0,val({c})*32768*{a}+val({})*32768*{b});if(lt(ld(0),0),-floor((-ld(0)+{count})/{d}),floor((ld(0)+{count})/{d}))/32768",
-                    c + 2
-                )
-            };
-            self.filters.push(format!("[{l}][{r}]join=inputs=2:channel_layout=quad:map=0.0-FL|0.1-FR|1.0-BL|1.1-BR,aeval=exprs='{}|{}':channel_layout=stereo[{label}]",channel(0),channel(1)));
-        }
+            (format!("({d}-{k})"), k)
+        };
+        let channel = |c| {
+            format!(
+                "st(0,val({c})*32768*{a}+val({})*32768*{b});if(lt(ld(0),0),-floor((-ld(0)+{count})/{d}),floor((ld(0)+{count})/{d}))/32768",
+                c + 2
+            )
+        };
+        self.filters.push(format!("[{l}][{r}]join=inputs=2:channel_layout=quad:map=0.0-FL|0.1-FR|1.0-BL|1.1-BR,aeval=exprs='{}|{}':channel_layout=stereo[{label}]",channel(0),channel(1)));
         Ok(())
     }
     fn label(&mut self) -> Result<String> {
@@ -975,16 +655,9 @@ impl<'a> Graph<'a> {
                 duration,
                 kind,
             )?;
-        } else if self
-            .project
-            .assets
-            .iter()
-            .any(|a| a.id == clip.asset_id && a.direct())
-        {
+        } else {
             let source = self.inspect(clip, kind, false)?;
             self.span(clip, at, duration, kind, &source)?;
-        } else {
-            self.input(clip, at, duration, kind)?;
         }
         Ok(())
     }
@@ -1036,149 +709,28 @@ impl<'a> Graph<'a> {
         }
         Ok(())
     }
-    fn compose(
+    fn compose_audio(
         &mut self,
         a: &crate::tracks::Arrangement,
         start: Time,
         duration: Time,
-        kind: Kind,
         output: &str,
-    ) -> Result<()> {
-        self.compose_with(a, start, duration, kind, output, false)
-    }
-    /// `deferred` leaves this arrangement's `alpha_over` tracks and the incoming sides of its
-    /// transitions to the engine compositor: the picture is cut only where the visible opaque
-    /// content changes, its runs are recorded, and it shows each transition's outgoing side.
-    fn compose_with(
-        &mut self,
-        a: &crate::tracks::Arrangement,
-        start: Time,
-        duration: Time,
-        kind: Kind,
-        output: &str,
-        deferred: bool,
     ) -> Result<()> {
         self.control.check()?;
         let end = start.plus(duration)?;
-        let rate = self.project.frame_rate;
-        let clock = kind.clock(rate);
-        start.units(clock)?;
-        let count = duration.units(clock)?;
+        start.units(SAMPLES)?;
+        let count = duration.units(SAMPLES)?;
         if count == 0 || end.compare(a.duration)?.is_gt() {
             return Err(error(
                 "INVALID_RANGE",
                 "Composition requires a positive in-bounds child window",
             ));
         }
-        if kind == Kind::Video {
-            let first = start.units(rate)?;
-            let mut edges = BTreeSet::from([first, end.units(rate)?]);
-            for t in a
-                .tracks
-                .iter()
-                .filter(|t| t.enabled && t.kind == Kind::Video)
-                .filter(|t| !deferred || t.composite.is_opaque())
-            {
-                edges.extend(boundaries(t, start, end, rate)?);
-            }
-            let edges: Vec<_> = edges.into_iter().collect();
-            let mut labels = String::new();
-            for part in edges.windows(2) {
-                let n = part[1] - part[0];
-                let at = Time::new(part[0] * rate.den, rate.num)?;
-                let length = Time::new(n * rate.den, rate.num)?;
-                let label = self.label()?;
-                labels.push_str(&format!("[{label}]"));
-                let visible = a.visible(at)?;
-                let base_index = visible.map(|(track, _)| {
-                    a.tracks
-                        .iter()
-                        .position(|t| std::ptr::eq(t, track))
-                        .expect("visible track")
-                });
-                if deferred {
-                    self.runs
-                        .push((part[0] - first, part[1] - first, base_index));
-                }
-                let mut overlays = Vec::new();
-                for (index, track) in a.tracks.iter().enumerate() {
-                    if !deferred
-                        && track.kind == Kind::Video
-                        && track.enabled
-                        && !track.composite.is_opaque()
-                        && base_index.is_none_or(|b| index > b)
-                        && let Some(clip) = track.clips.iter().find(|c| {
-                            !at.compare(c.start).expect("validated").is_lt()
-                                && at
-                                    .compare(c.end().expect("validated"))
-                                    .expect("validated")
-                                    .is_lt()
-                        })
-                    {
-                        overlays.push(clip);
-                    }
-                }
-                let base = if overlays.is_empty() {
-                    label.clone()
-                } else {
-                    self.label()?
-                };
-                if let Some((track, clip)) = visible {
-                    if let Some(fx) = track.transition_at(at)? {
-                        if deferred {
-                            self.base_source(
-                                track.endpoints(fx)?.0,
-                                at,
-                                length,
-                                &base,
-                                part[0] - first,
-                            )?;
-                            let index = (track.transitions.iter())
-                                .position(|t| std::ptr::eq(t, fx))
-                                .expect("track transition");
-                            self.mixed.push((
-                                base_index.expect("visible track"),
-                                index,
-                                part[0] - first,
-                                part[1] - first,
-                            ));
-                        } else {
-                            self.effect(track, fx, at, length, &base)?;
-                        }
-                    } else if deferred {
-                        self.base_source(clip, at, length, &base, part[0] - first)?;
-                    } else {
-                        self.video_source(clip, at, length, &base)?;
-                    }
-                } else {
-                    self.filters.push(format!("color=c=black:s={}x{}:r={}/{},format=pix_fmts=gbrp,trim=end_frame={n},settb=expr={},setpts=N[{base}]", self.project.width, self.project.height, rate.num, rate.den, timebase(rate)));
-                }
-                let mut below = base;
-                for (i, clip) in overlays.iter().enumerate() {
-                    let source = self.label()?;
-                    self.overlay_source(clip, at, length, &source)?;
-                    let output = if i + 1 == overlays.len() {
-                        label.clone()
-                    } else {
-                        self.label()?
-                    };
-                    self.over(&below, &source, &output)?;
-                    below = output;
-                }
-            }
-            self.filters.push(format!(
-                "{labels}concat=n={}:v=1:a=0,settb=expr={},setpts=N[{output}]",
-                edges.len() - 1,
-                timebase(rate)
-            ));
-        } else {
-            let tracks: Vec<usize> = (0..a.tracks.len())
-                .filter(|&i| a.tracks[i].enabled && a.tracks[i].kind == Kind::Audio)
-                .collect();
-            // A child is a reusable PCM16 sequence, so saturate at its own mix boundary.
-            self.mix(a, &tracks, start, duration, output, true)?;
-        }
-        Ok(())
+        let tracks: Vec<usize> = (0..a.tracks.len())
+            .filter(|&i| a.tracks[i].enabled && a.tracks[i].kind == Kind::Audio)
+            .collect();
+        // A child is a reusable PCM16 sequence, so saturate at its own mix boundary.
+        self.mix(a, &tracks, start, duration, output, true)
     }
     /// The voices of the listed audio tracks of `a` over `[start, start + duration)`, summed into
     /// `output` (silence when none plays); `saturate` rounds the sum to PCM16, as at a mix
@@ -1248,7 +800,7 @@ impl<'a> Graph<'a> {
                 .iter()
                 .any(|t| t.enabled && t.kind == Kind::Audio && t.dynamics.is_some());
         if !limited {
-            return self.compose(a, start, duration, Kind::Audio, "aout");
+            return self.compose_audio(a, start, duration, "aout");
         }
         let index = self.inputs;
         self.inputs += 1;
@@ -1414,201 +966,6 @@ impl<'a> Graph<'a> {
         next.inputs = 1;
         next.prefetched = std::mem::take(&mut self.prefetched);
         next
-    }
-    /// The shown clips of `a`'s `alpha_over` tracks over `[start, start + duration)`, each with a
-    /// decoder of its cropped frames, using the runs of a deferred composition of the same window.
-    fn layers(
-        &mut self,
-        a: &crate::tracks::Arrangement,
-        start: Time,
-        duration: Time,
-    ) -> Result<Vec<track_composite::Layer>> {
-        let rate = self.project.frame_rate;
-        let (width, height) = (self.project.width, self.project.height);
-        let (window, frames) = (start.units(rate)?, duration.units(rate)?);
-        let tb = timebase(rate);
-        let mut layers = Vec::new();
-        for (index, track) in a.tracks.iter().enumerate() {
-            if track.kind != Kind::Video || !track.enabled || track.composite.is_opaque() {
-                continue;
-            }
-            for clip in &track.clips {
-                let (begin, finish) = (clip.start.units(rate)?, clip.end()?.units(rate)?);
-                if finish <= window || begin >= window + frames {
-                    continue;
-                }
-                let (from, to) = (
-                    begin.max(window) - window,
-                    finish.min(window + frames) - window,
-                );
-                // Frames where no opaque track above the clip hides it.
-                let mut shown: Option<(u64, u64)> = None;
-                for &(run_start, run_end, base) in &self.runs {
-                    let (s, e) = (run_start.max(from), run_end.min(to));
-                    if s < e && base.is_none_or(|b| index > b) {
-                        shown = Some(shown.map_or((s, e), |(a, b)| (a.min(s), b.max(e))));
-                    }
-                }
-                let Some((first, end)) = shown else {
-                    continue;
-                };
-                let at = Time::new((window + first) * rate.den, rate.num)?;
-                let length = Time::new((end - first) * rate.den, rate.num)?;
-                let source = self.inspect(clip, Kind::Video, true)?;
-                let (source_first, source_end) =
-                    self.span(clip, at, length, Kind::Video, &source)?;
-                let alpha = self.alpha_assets.contains(&clip.asset_id);
-                let (crop, divisor, opacity, position) = match &clip.transform {
-                    Some(t) => (t.crop, t.divisor, t.opacity, t.position),
-                    None => (None, 1, 255, [0, 0]),
-                };
-                if alpha && divisor > 1 {
-                    return Err(error(
-                        "UNSUPPORTED_MEDIA",
-                        format!(
-                            "Clip {:?}: only opaque overlay sources can be shrunk; straight-alpha sources may be cropped, faded and placed",
-                            clip.id
-                        ),
-                    ));
-                }
-                let [cx, cy, cw, ch] = crop.unwrap_or([0, 0, width, height]);
-                // Planar conversion of packed alpha through the scaler is not value-exact, so the
-                // decoded bgra planes are split and reassembled as gbrap without arithmetic.
-                let convert = if alpha {
-                    "extractplanes=r+g+b+a[r][g][b][a];[r][g][b][a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap"
-                } else {
-                    "format=pix_fmts=gbrp"
-                };
-                let cropped = if [cx, cy, cw, ch] == [0, 0, width, height] {
-                    String::new()
-                } else {
-                    format!(",crop={cw}:{ch}:{cx}:{cy}")
-                };
-                let mut arguments: Vec<String> = ["-hide_banner", "-v", "error", "-nostdin"]
-                    .map(str::to_owned)
-                    .to_vec();
-                // The decoder starts at the clip's first shown frame.
-                arguments.extend(clock::seek_input(rate, source_first));
-                arguments.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
-                arguments.push(source.path.to_string_lossy().into_owned());
-                let trim = clock::seek_trim(rate, source_first, source_first, source_end);
-                arguments.extend([
-                    "-filter_complex_threads".into(),
-                    "1".into(),
-                    "-filter_complex".into(),
-                    format!("[0:v:0]{trim},settb=expr={tb},setpts=N,{convert}{cropped}[out]"),
-                ]);
-                arguments.extend(
-                    [
-                        "-map",
-                        "[out]",
-                        "-an",
-                        "-fps_mode",
-                        "passthrough",
-                        "-f",
-                        "rawvideo",
-                        "-pix_fmt",
-                        if alpha { "gbrap" } else { "gbrp" },
-                        "pipe:1",
-                    ]
-                    .map(str::to_owned),
-                );
-                let direct = self.direct_picture(clip, at, length, [cx, cy, cw, ch])?;
-                if direct.is_some() {
-                    arguments.clear();
-                }
-                let effects = self.clip_effects(clip, at, [cx, cy])?;
-                layers.push(track_composite::Layer {
-                    effects,
-                    track: index,
-                    track_id: track.id.clone(),
-                    clip_id: clip.id.clone(),
-                    first,
-                    end,
-                    width: cw,
-                    height: ch,
-                    alpha,
-                    divisor,
-                    opacity,
-                    position,
-                    arguments,
-                    direct,
-                });
-            }
-        }
-        Ok(layers)
-    }
-    /// The transitions a deferred composition of `a` from `start` left to the engine, each with a
-    /// decoder of its incoming side; consecutive runs of one transition share a decoder.
-    fn mixes(
-        &mut self,
-        a: &crate::tracks::Arrangement,
-        start: Time,
-    ) -> Result<Vec<track_composite::Mix>> {
-        let rate = self.project.frame_rate;
-        let window = start.units(rate)?;
-        let mut runs: Vec<(usize, usize, u64, u64)> = Vec::new();
-        for &(track, index, first, end) in &self.mixed {
-            match runs.last_mut() {
-                Some(last) if (last.0, last.1, last.3) == (track, index, first) => last.3 = end,
-                _ => runs.push((track, index, first, end)),
-            }
-        }
-        let mut mixes = Vec::new();
-        for (track, index, first, end) in runs {
-            let track = &a.tracks[track];
-            let effect = &track.transitions[index];
-            let (begin, finish) = track.interval(effect)?;
-            let at = Time::new((window + first) * rate.den, rate.num)?;
-            let length = Time::new((end - first) * rate.den, rate.num)?;
-            let direct = self.direct_picture(
-                track.endpoints(effect)?.1,
-                at,
-                length,
-                [0, 0, self.project.width, self.project.height],
-            )?;
-            let arguments = if direct.is_some() {
-                Vec::new()
-            } else {
-                let mut incoming = self.branch();
-                incoming.video_source(track.endpoints(effect)?.1, at, length, "incoming")?;
-                for (id, source) in &incoming.sources {
-                    self.sources
-                        .entry(id.clone())
-                        .or_insert_with(|| source.clone());
-                }
-                (self.serial, self.inspected) = (incoming.serial, incoming.inspected);
-                incoming.arguments_with(
-                    &[
-                        "-map",
-                        "[incoming]",
-                        "-an",
-                        "-fps_mode",
-                        "passthrough",
-                        "-f",
-                        "rawvideo",
-                        "-pix_fmt",
-                        "gbrp",
-                        "pipe:1",
-                    ]
-                    .map(str::to_owned),
-                )?
-            };
-            let effects = self.clip_effects(track.endpoints(effect)?.1, at, [0, 0])?;
-            mixes.push(track_composite::Mix {
-                effects,
-                track_id: track.id.clone(),
-                transition_id: effect.id.clone(),
-                first,
-                end,
-                kind: effect.kind,
-                count: finish.minus(begin)?.units(rate)?,
-                offset: at.minus(begin)?.units(rate)?,
-                arguments,
-                direct,
-            });
-        }
-        Ok(mixes)
     }
     /// Render all visible video tracks through ordered Rust layers, including child sequences.
     fn stack_plan<'c>(
@@ -1832,7 +1189,7 @@ impl<'a> Graph<'a> {
     }
     /// Arguments, sources and generated inputs of a graph that reads no pictures.
     fn finish(self) -> (Vec<String>, Vec<Source>, Vec<render::Generated>) {
-        (self.arguments(false), self.sources(), self.generated)
+        (self.arguments(), self.sources(), self.generated)
     }
 }
 fn too_long(args: &[String]) -> bool {
@@ -1932,84 +1289,24 @@ fn audio_windows(a: &crate::tracks::Arrangement, first: u64, end: u64) -> Result
     }
     Ok(windows)
 }
-/// A compiled window: one FFmpeg graph, or, when top-level transitions or `alpha_over` clips
-/// show, the base picture's graph, the transitions and the overlay clips for the engine
-/// compositor beside the encoder's graph.
+/// A compiled window: native video streams plus the exact audio/encoding graph.
 struct Compiled<'a> {
     stack: Option<crate::track_stack::Plan>,
-    /// The single graph, or the encoder's graph (audio, with the composited picture as input 0).
     graph: Graph<'a>,
-    picture: Option<(
-        Graph<'a>,
-        Vec<track_composite::Mix>,
-        Vec<track_composite::Layer>,
-    )>,
 }
 impl Compiled<'_> {
-    /// The engine compositor of this window, with the base decoder writing raw planar RGB.
     fn compositor(&mut self, frames: u64) -> Result<Option<Compositor>> {
-        if let Some(stack) = self.stack.take() {
-            let resources = stack.resources.clone();
-            return Ok(Some(Compositor {
-                width: stack.width,
-                height: stack.height,
-                frames,
-                base: vec![],
-                direct: vec![],
-                runs: vec![],
-                transitions: vec![],
-                layers: vec![],
-                effect_report: resources.report()?,
-                effect_resources: resources,
-                stack: Some(stack),
-            }));
-        }
-        let Some((picture, transitions, layers)) = self.picture.take() else {
+        let Some(stack) = self.stack.take() else {
             return Ok(None);
         };
-        let project = picture.project;
-        let runs = picture.runs.clone();
-        let direct = picture.direct_runs.clone();
-        let effect_resources = picture.effect_resources.clone();
-        let effect_report = effect_resources.report()?;
-        let base = picture.arguments_with(
-            &[
-                "-map",
-                "[vout]",
-                "-an",
-                "-fps_mode",
-                "passthrough",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "gbrp",
-                "pipe:1",
-            ]
-            .map(str::to_owned),
-        )?;
-        for arguments in (transitions.iter().map(|m| &m.arguments))
-            .chain(layers.iter().map(|l| &l.arguments))
-            .chain(direct.iter().map(|r| &r.arguments))
-        {
-            if too_long(arguments) {
-                return Err(error(
-                    "LIMIT_EXCEEDED",
-                    "Track render arguments exceed supported size",
-                ));
-            }
-        }
+        let resources = stack.resources.clone();
         Ok(Some(Compositor {
-            stack: None,
-            width: project.width,
-            height: project.height,
+            width: stack.width,
+            height: stack.height,
             frames,
-            base,
-            direct,
-            effect_resources,
-            effect_report,
-            runs,
-            transitions,
-            layers,
+            effect_report: resources.report()?,
+            effect_resources: resources,
+            stack,
         }))
     }
 }
@@ -2047,80 +1344,21 @@ fn compile<'a>(
     graph.prefetch(a, start, duration, (video, audio));
     if video {
         graph.check_arrangement(a, start, duration, Kind::Video)?;
-        if !crate::track_stack::legacy_oracle() {
-            let stack = graph.stack_plan(a, start, duration)?;
-            let mut encoder = graph.successor();
-            if audio {
-                encoder.audio(a, start, duration)?;
-            }
-            return Ok(Compiled {
-                graph: encoder,
-                picture: None,
-                stack: Some(stack),
-            });
+        let stack = graph.stack_plan(a, start, duration)?;
+        let mut encoder = graph.successor();
+        if audio {
+            encoder.audio(a, start, duration)?;
         }
-        if project.sequences.iter().any(|s| {
-            s.arrangement
-                .tracks
-                .iter()
-                .flat_map(|t| &t.clips)
-                .any(|c| !c.effects.is_empty())
-        }) || a.tracks.iter().flat_map(|t| &t.clips).any(|c| {
-            (c.sequence_id.is_some() && !c.effects.is_empty())
-                || c.effects.iter().any(crate::tracks::ClipEffect::structural)
-        }) {
-            return Err(error(
-                "UNSUPPORTED_TIMELINE",
-                "The legacy A/B compositor does not support nested effects or structural properties; use the default native compositor",
-            ));
-        }
-        let video_tracks = || (a.tracks.iter()).filter(|t| t.kind == Kind::Video && t.enabled);
-        let overlays = video_tracks()
-            .filter(|t| !t.composite.is_opaque())
-            .flat_map(|t| &t.clips)
-            .map(|c| Ok(c.start.compare(end)?.is_lt() && c.end()?.compare(start)?.is_gt()))
-            .collect::<Result<Vec<_>>>()?
-            .contains(&true);
-        let transitions = video_tracks()
-            .flat_map(|t| t.transitions.iter().map(move |fx| t.interval(fx)))
-            .map(|interval| {
-                let (x, y) = interval?;
-                Ok(x.compare(end)?.is_lt() && y.compare(start)?.is_gt())
-            })
-            .collect::<Result<Vec<_>>>()?
-            .contains(&true);
-        let effects = video_tracks()
-            .flat_map(|t| &t.clips)
-            .any(|c| !c.effects.is_empty());
-        if overlays || transitions || !graph.indexed.is_empty() || effects {
-            // Top-level transitions and overlays are composited by the engine; nested ones stay
-            // in the graph.
-            graph.compose_with(a, start, duration, Kind::Video, "vout", true)?;
-            let layers = graph.layers(a, start, duration)?;
-            let mixes = graph.mixes(a, start)?;
-            if !mixes.is_empty() || !layers.is_empty() || !graph.direct_runs.is_empty() {
-                let mut encoder = graph.successor();
-                if audio {
-                    encoder.audio(a, start, duration)?;
-                }
-                return Ok(Compiled {
-                    stack: None,
-                    graph: encoder,
-                    picture: Some((graph, mixes, layers)),
-                });
-            }
-        } else {
-            graph.compose(a, start, duration, Kind::Video, "vout")?;
-        }
+        return Ok(Compiled {
+            graph: encoder,
+            stack: Some(stack),
+        });
     }
+
     if audio {
         graph.audio(a, start, duration)?;
     }
-    Ok(Compiled {
-        stack: None,
-        graph,
-        picture: None,
-    })
+    Ok(Compiled { stack: None, graph })
 }
 pub(crate) fn plan(
     project: &Project,
@@ -2252,11 +1490,7 @@ pub(crate) fn plan_window(
         [
             "-map",
             // The engine-composited picture arrives raw on stdin as input 0.
-            if compositor.is_some() {
-                "0:v:0"
-            } else {
-                "[vout]"
-            },
+            "0:v:0",
             "-map",
             "[aout]",
             "-c:v",
@@ -2328,26 +1562,9 @@ pub(crate) fn read_frame(
         &media::Uncontrolled,
         &crate::clip_effects::Resources::default(),
     )?;
-    let pixels = if let Some(compositor) = compiled.compositor(1)? {
-        track_composite::frame_rgb(&compositor, Duration::from_secs(120), &media::Uncontrolled)?
-    } else {
-        let args = compiled.graph.arguments_with(
-            &[
-                "-map",
-                "[vout]",
-                "-frames:v",
-                "1",
-                "-an",
-                "-pix_fmt",
-                "rgb24",
-                "-f",
-                "rawvideo",
-                "pipe:1",
-            ]
-            .map(str::to_owned),
-        )?;
-        media::capture(&media::tool("ffmpeg"), &args, Duration::from_secs(120))?
-    };
+    let compositor = compiled.compositor(1)?.expect("compiled video stream");
+    let pixels =
+        track_composite::frame_rgb(&compositor, Duration::from_secs(120), &media::Uncontrolled)?;
     let sources = compiled.graph.sources();
     if pixels.len() != project.width as usize * project.height as usize * 3 {
         return Err(error(

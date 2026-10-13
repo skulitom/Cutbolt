@@ -103,16 +103,6 @@ impl ClipEffect {
             _ => return None,
         })
     }
-    pub(crate) fn structural(&self) -> bool {
-        self.pixel_kind().is_none()
-    }
-    fn pixel_kind(&self) -> Option<()> {
-        matches!(
-            self,
-            Self::Grade(_) | Self::SelectiveGrade(_) | Self::ChromaKey(_) | Self::Lut(_)
-        )
-        .then_some(())
-    }
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -363,15 +363,22 @@ mod tests {
         composited.arguments[12] = "0:v:0".into();
         assert!(layout(&composited).is_none());
         composited.compositor = Some(crate::track_composite::Compositor {
-            stack: None,
+            stack: crate::track_stack::Plan {
+                width: 64,
+                height: 36,
+                frames: 50,
+                clips: Vec::new(),
+                segments: vec![crate::track_stack::Segment {
+                    first: 0,
+                    end: 50,
+                    layers: Vec::new(),
+                }],
+                resources: Default::default(),
+                frame_buffer_bytes: 64 * 36 * 16,
+            },
             width: 64,
             height: 36,
             frames: 50,
-            base: Vec::new(),
-            direct: Vec::new(),
-            runs: Vec::new(),
-            transitions: Vec::new(),
-            layers: Vec::new(),
             effect_resources: Default::default(),
             effect_report: None,
         });

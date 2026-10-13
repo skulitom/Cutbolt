@@ -121,7 +121,10 @@ The renderer charges the temporary original-size RGB/RGBA buffers against the
 same 1 GiB frame-memory bound. Full-quality exports always use original media.
 Existing `alpha_over` track restrictions on proxy selection, transitions and
 sequence instances remain; the new properties on ordinary tracks cover those
-workflows. The private legacy A/B renderer explicitly rejects new properties.
+workflows. The former nested video graphs and private A/B selector have been removed
+after both paths passed their shared Windows/Linux fixtures.
+[Removal evidence](../verification/native-only-timeline-2026-10-13.json) records
+the comparisons and subsequent native-only checks.
 
 ## Snapshots, receipts and verification
 
