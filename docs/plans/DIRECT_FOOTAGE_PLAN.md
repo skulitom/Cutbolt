@@ -326,7 +326,10 @@ Production titles and captions now use generated sources. Windows/Linux fixture
 checks and actual older-coordinator/engine migrations pass: 357 frames and 685,440
 stereo sample frames match per platform, with stage reuse and saved history intact.
 See [production evidence](../../verification/generated-production-2026-10-13.json).
-The complete stage-5 quick gate remains open; these checkpoints do not close the stage.
+The [complete stage-5 quick gate](../../verification/generated-scenes-stage5-gate-2026-10-13.json)
+passes at frozen commit `1b7f269`: all 78 registered fixtures, no skips or reuse,
+plus 255 Rust tests. This closes the stage's correctness gate; it does not claim
+the final placed-track performance audit or a new thorough milestone.
 
 Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame inside the timeline pass with no `scene.render` step.
 
@@ -349,6 +352,10 @@ HSL selection, LUTs and key coverage retain precision through the stack. Exact
 rational property sampling can retain fractional controls and scale opacity before
 rounding. [Component references and nine default-path regressions](../../verification/working-effects-components-2026-10-13.json)
 pass on Windows and Linux; the scene and timeline integration exit remains unchanged.
+The working-layer component now retains wide pixels through source masks, integer
+and filtered spatial transforms, fractional opacity and transparent blending. Its
+independent frame oracle is part of the verifier; saved scene/track mode integration
+is still required before the precise path is available to agent commands.
 
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.

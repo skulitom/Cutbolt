@@ -109,6 +109,18 @@ impl<'a> Recipe<'a> {
 }
 
 impl Sampler<'_> {
+    /// Sample coverage before the byte round, retaining the exact eased source clock.
+    pub(crate) fn opacity_precise(&self, time: Time, override_value: Option<u16>) -> Result<u16> {
+        time.validate()?;
+        if let Some(value) = override_value {
+            return Ok(value);
+        }
+        self.opacity
+            .as_ref()
+            .map_or(Ok(u16::from(self.transform.opacity) * 257), |curve| {
+                curve.sample_scaled(time, 257).map(|value| value as u16)
+            })
+    }
     /// Evaluate one exact owner-clock time, without allocating a duration-sized sample table.
     pub(crate) fn sample(
         &self,

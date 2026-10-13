@@ -442,24 +442,13 @@ fn normal_full(pixel: &mut [u8], color: [u64; 3], alpha: u64, opacity: u8) {
     }
 }
 
-/// Tap colors are encoded RGB with their declared alpha representation. Accumulate
-/// premultiplied channels without intermediate RGBA quantization; round only at the backdrop.
-/// With `threads` above one, a large layer draws in parallel row bands: each pixel reads only its
-/// own taps and backdrop value, so the bands give the same values.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn draw(
-    rgb: &mut [u8],
-    dimensions: [u32; 2],
+/// Shared conservative destination bounds for encoded and precise layer rendering.
+pub(crate) fn destination_bounds(
     mapping: &Mapping,
     spec: &Transform,
     crop: [u32; 4],
-    opacity: u8,
-    blend: BlendMode,
-    threads: usize,
-    plain: Option<Plain<'_>>,
-    pixel: impl Fn(i64, i64) -> Option<([u8; 4], AlphaMode, u32)> + Sync,
-) {
-    let [a, b, c, d, e, f] = mapping.scene_to_source;
+    dimensions: [u32; 2],
+) -> [i64; 4] {
     let [cx, cy, cw, ch] = crop.map(i64::from);
     // Visit only destination pixels whose centers can map near the crop: forward-map the crop
     // grown by one source pixel (bilinear taps reach half a pixel outside) and add a two-pixel
@@ -499,6 +488,88 @@ pub(crate) fn draw(
         (x0, x1) = (x0.max(vx), x1.min(vx + vw));
         (y0, y1) = (y0.max(vy), y1.min(vy + vh));
     }
+    [x0, y0, x1, y1]
+}
+
+/// Fixed-point geometric taps only: working color and coverage never pass through bytes.
+pub(crate) fn working_taps(
+    mapping: &Mapping,
+    spec: &Transform,
+    crop: [u32; 4],
+    [x, y]: [i64; 2],
+) -> Option<[(i64, i64, u64); 4]> {
+    let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+    let q = |m: [f64; 6]| {
+        [
+            ((m[0] * px + m[1] * py + m[2]) * Q as f64).round() as i64,
+            ((m[3] * px + m[4] * py + m[5]) * Q as f64).round() as i64,
+        ]
+    };
+    if let (Some(m), Some(sample)) = (mapping.scene_to_compensated, &mapping.compensation) {
+        let [u, v] = q(m);
+        let [vx, vy, vw, vh] = sample.viewport.map(i64::from);
+        if u < vx * Q || u >= (vx + vw) * Q || v < vy * Q || v >= (vy + vh) * Q {
+            return None;
+        }
+    }
+    let [qx, qy] = q(mapping.scene_to_source);
+    let [cx, cy, cw, ch] = crop.map(i64::from);
+    let clamp = matches!(spec.edge, Edge::Clamp);
+    if clamp && (qx < cx * Q || qx >= (cx + cw) * Q || qy < cy * Q || qy >= (cy + ch) * Q) {
+        return None;
+    }
+    let mut taps = match spec.sampling {
+        Sampling::Nearest => [
+            (qx.div_euclid(Q), qy.div_euclid(Q), WEIGHT as u64),
+            (0, 0, 0),
+            (0, 0, 0),
+            (0, 0, 0),
+        ],
+        Sampling::Bilinear => {
+            let (xx, yy) = (qx - Q / 2, qy - Q / 2);
+            let (lo, top, u, v) = (
+                xx.div_euclid(Q),
+                yy.div_euclid(Q),
+                xx.rem_euclid(Q),
+                yy.rem_euclid(Q),
+            );
+            [
+                (lo, top, ((Q - u) * (Q - v)) as u64),
+                (lo + 1, top, (u * (Q - v)) as u64),
+                (lo, top + 1, ((Q - u) * v) as u64),
+                (lo + 1, top + 1, (u * v) as u64),
+            ]
+        }
+    };
+    if clamp {
+        for (sx, sy, _) in &mut taps {
+            *sx = (*sx).clamp(cx, cx + cw - 1);
+            *sy = (*sy).clamp(cy, cy + ch - 1);
+        }
+    }
+    Some(taps)
+}
+
+/// Tap colors are encoded RGB with their declared alpha representation. Accumulate
+/// premultiplied channels without intermediate RGBA quantization; round only at the backdrop.
+/// With `threads` above one, a large layer draws in parallel row bands: each pixel reads only its
+/// own taps and backdrop value, so the bands give the same values.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw(
+    rgb: &mut [u8],
+    dimensions: [u32; 2],
+    mapping: &Mapping,
+    spec: &Transform,
+    crop: [u32; 4],
+    opacity: u8,
+    blend: BlendMode,
+    threads: usize,
+    plain: Option<Plain<'_>>,
+    pixel: impl Fn(i64, i64) -> Option<([u8; 4], AlphaMode, u32)> + Sync,
+) {
+    let [a, b, c, d, e, f] = mapping.scene_to_source;
+    let [cx, cy, cw, ch] = crop.map(i64::from);
+    let [x0, y0, x1, y1] = destination_bounds(mapping, spec, crop, dimensions);
     if x0 >= x1 || y0 >= y1 {
         return;
     }

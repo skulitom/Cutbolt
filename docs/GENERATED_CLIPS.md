@@ -76,7 +76,10 @@ caption windows and trimming the final placed clip to exact coverage; see
 and captions now use generated sources too, with Windows/Linux fixture checks and
 actual older-cut migration, exact output, reuse and history checks; see
 [production evidence](../verification/generated-production-2026-10-13.json).
-The complete stage-5 quick gate remains open. The caption and talking-head
+The [complete stage-5 quick gate](../verification/generated-scenes-stage5-gate-2026-10-13.json)
+passes at frozen commit `1b7f269`: all 78 registered fixtures and 255 Rust tests,
+without skipped or reused fixtures. This is a correctness gate, not a new throughput
+or thorough milestone. The caption and talking-head
 skills now use generated scene operations, with Windows/Linux schema-validated examples
 and a fresh-model rerun meeting 15 calls and 33,441 peak input tokens; see
 [workflow evidence](../verification/generated-caption-skills-2026-10-13.json).

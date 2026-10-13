@@ -1,0 +1,402 @@
+{
+  "date": "2026-10-13",
+  "kind": "precise_layer_frame_component",
+  "parent_commit": "e82ca71067f3084b0c6b41e68d0cf1420180c178",
+  "source_sha256": {
+    "src/color/working.rs": "c9c95053277294dd1ddc7f451ab8b2c899d97b9c78f9595d4349210109f4a5c5",
+    "src/color/working/layer.rs": "47fdcac9eb09f003b38b676e15447fa9b021b4c51c09aa471f7e6605ab1ba714",
+    "src/layer_composite.rs": "2a969e3f6902ba6f070e1d0e6b047ccdcbdc6e8a20c66a58e79834fb638e6782",
+    "src/spatial.rs": "b50f14a5b913fa095eae8b5ebfd63a0bf9685ad11d22d5a3b9df484efee8fb67",
+    "examples/working_layers_fixture.rs": "286e2bdc961194fa960dea67c5f36a9a39e29d31320f97ae259b616661374f00",
+    "tests/working_layers.py": "c6baeb72b747b28448cace4cff8223cfe34361a64bf68e875a02eaf2907aa747",
+    "tools/verify.py": "8cba5b7a13afbc028e0116948dda0e9e2630db223b3509efe3922210f93a354b"
+  },
+  "linux_copied_source_hashes_match": true,
+  "source_note": "Checks compiled the modified sources identified by these hashes. The Windows report labels the parent commit; Linux keeps its older checkout Git identity.",
+  "checks": {
+    "windows": {
+      "rust_tests": 259,
+      "all_targets_clippy": true,
+      "strict_quick": [
+        "clip_effects",
+        "compositing",
+        "generated_clips",
+        "native_layers",
+        "spatial",
+        "stabilization",
+        "tracking",
+        "working_effects",
+        "working_layers"
+      ],
+      "wall_seconds": 257,
+      "report_sha256": "68683106a26fca8cdf65c81dd195233c1e118ef66f37c1b0764ae51596c26b72",
+      "log_sha256": "130d3ba10e2608150ede01df211e361b6a0b7325983843db4dcecf633ce09d73",
+      "reported_checkout_commit": "e82ca71067f3084b0c6b41e68d0cf1420180c178"
+    },
+    "linux": {
+      "rust_tests": 258,
+      "all_targets_clippy": true,
+      "strict_quick": [
+        "clip_effects",
+        "compositing",
+        "generated_clips",
+        "native_layers",
+        "spatial",
+        "stabilization",
+        "tracking",
+        "working_effects",
+        "working_layers"
+      ],
+      "wall_seconds": 168,
+      "report_sha256": "ecd95324e36ab1e6bc1dfda11bededc9326e00e6e14a739445a8fefc82429c7f",
+      "log_sha256": "e9c43755b36a58e950fe19f3349eaf21f2aaeb61dbf68be14ed24cc678470015",
+      "reported_checkout_commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5"
+    }
+  },
+  "oracle": {
+    "passed": [
+      "working_layers.integer_and_spatial_geometry",
+      "working_layers.associated_masks_and_transparency",
+      "working_layers.animated_effects_and_fractional_opacity",
+      "working_layers.ordered_layer_blends",
+      "working_layers.monotonic_graded_gradient",
+      "working_layers.bounds_validation"
+    ],
+    "cases": [
+      {
+        "name": "integer_0_1",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_0_3",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_1_1",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_1_3",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_2_1",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_2_3",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_3_1",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "integer_3_3",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_0_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_0_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_0_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_1_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_1_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_1_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_2_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_2_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_2_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_3_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_3_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_3_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_4_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_4_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_4_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_5_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_5_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_5_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_6_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_6_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_6_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_7_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_7_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_7_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_8_normal",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_8_multiply",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "spatial_8_screen",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "mask_inner_False",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "mask_inner_True",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "mask_centered_False",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "mask_centered_True",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "mask_outer_False",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "mask_outer_True",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "stabilized_viewport",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "animated_effects_1/30000",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "animated_effects_1/1000",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "animated_effects_733/997",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "animated_effects_299/100",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "three_transparent_layers",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 3
+      },
+      {
+        "name": "off_canvas_no_change",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "hidden_rgb_no_change",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "zero_opacity_no_change",
+        "pixels": 391,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "graded_gradient_fractional_fade",
+        "pixels": 4096,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      },
+      {
+        "name": "monotonic_graded_gradient_fractional_fade",
+        "pixels": 4096,
+        "maximum_unorm16_error": 0,
+        "tolerance": 1
+      }
+    ],
+    "pixel_samples": 27742,
+    "maximum_unorm16_error": 0,
+    "numerical_response_sha256": "83fb188fed00c855a22f38b35e1ef0cf3ee23b77d87559a1befb6438a2a9f5d0",
+    "rejected_cases": 5,
+    "gradient_levels": 4096,
+    "fractional_fade_alpha": 5,
+    "reference": "Independent Decimal geometry and Fraction masks/taps; f64 source-over and separate effect equations",
+    "limits": "Library layer frames only; saved working_space, scene/generated/nested/track integration, full rendered gradient/fade gate and stage-six exit remain open"
+  },
+  "platform_reports_identical": true,
+  "formatting": true,
+  "windows_oracle_sha256": "8a5072695556be7050531cb23ac91b2201ebdbf17ce336f8c8c260c2861b8181",
+  "linux_oracle_sha256": "80861dcd6cf7a1f0a5ef3b461787881868af3372eab7f2dff114198679ab0b9b",
+  "not_claimed": [
+    "saved working_space selection",
+    "scene/generated/nested/track integration",
+    "full saved-timeline grade/fade and delivery gate",
+    "3D working compositor",
+    "stage-six exit",
+    "performance",
+    "thorough milestone",
+    "points"
+  ]
+}

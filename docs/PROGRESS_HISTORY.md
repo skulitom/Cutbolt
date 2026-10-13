@@ -1,5 +1,50 @@
 # Progress history
 
+## 13 October 2026: precise working-layer frames
+
+The library layer compositor now draws straight-linear working images through
+source masks, integer transforms, filtered spatial mapping and animated opacity
+onto transparent or opaque working canvases. Filtered taps retain associated
+color and coverage through blending, with one final UNORM16 store. It shares
+validated geometry, clocks and destination bounds with the existing renderer;
+the encoded default keeps its byte arithmetic. Image offsets, anchors, fitting,
+mirroring, viewports and stabilization compensation retain their established meanings.
+
+An independent Decimal/Fraction/f64 oracle covers 52 frame cases and 27,742 pixels
+per platform. Observed differences are zero, and Windows/Linux reports match.
+A 4,096-level graded layer gradient retains every level with alpha 5/65535, below
+one byte; this is a component check, not the final saved-timeline banding gate.
+Nine strict quick regressions pass on Windows/Linux (257/168 seconds), alongside
+259/258 Rust tests, all-target lint and formatting. [Evidence](../verification/working-layer-frames-2026-10-13.json)
+records the source hashes, cases, bounds and reports. Source/destination pixel
+buffers share a 1 GiB bound; full render-plan accounting remains with the caller.
+
+This checkpoint needs its ship gate. Agent commands still use the existing render
+path. Saved settings, complete scenes and 3D planes, generated/nested/track frames,
+delivery-only conversion, stage-six acceptance and final performance/requirements
+audits remain open. No new points, throughput or thorough milestone claim.
+
+## 13 October 2026: generated-scene stage-five full gate
+
+The frozen 1b7f269 checkout passed every one of its 78 registered quick fixtures
+in 2,792 seconds, with no failures, skips, reuse or deferrals. Its isolated build
+and 255 Rust tests also pass. The report's fixture set matches the verifier in that
+commit and the tested executable reports that unchanged source commit. Recording
+passed its quick capture run on the first attempt. [Evidence](../verification/generated-scenes-stage5-gate-2026-10-13.json)
+records the report/log/build hashes, exact fixture set and supporting migration,
+caption, resource and fresh-agent evidence. The temporary verification checkout
+was archived after its report and logs were preserved externally.
+
+This closes the stage-five correctness gate. It does not refresh sustained
+long-form or thorough evidence, measure the final placed-track A/B, or complete
+stage six. No points change; PROGRESS.md keeps its 338e114 thorough milestone.
+
+The preceding effect component and README cleanup shipped through e82ca71: 17 gate
+fixtures plus Rust passed, 13 passes were reused and 50 fixtures deferred, in
+169 seconds. Remote main was verified at that commit. Background verification
+continues; status reports no unresolved failure. The README remains a concise
+workflow overview with licensing and provenance records intact.
+
 ## 13 October 2026: concise product overview
 
 The README now introduces Cutbolt through footage-editing workflows, a source

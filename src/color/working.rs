@@ -4,6 +4,7 @@
 //! linear-light UNORM16; alpha is linear coverage. Every compositing operation rounds once
 //! to this representation. Encoded delivery and its spatially fixed dither are separate.
 use super::Transfer;
+pub mod layer;
 use crate::{
     Result,
     composite::{AlphaMode, BlendMode},

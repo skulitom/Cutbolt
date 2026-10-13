@@ -36,7 +36,7 @@ can move an encoded half-code tie to either side; it does not promise byte ident
 with an unquantized floating-point pipeline. The existing default path remains
 separate and keeps its byte-identity contract.
 
-## Verification and remaining work
+## Effect and layer components
 
 The next component, `effects::working::Effects`, validates an ordered stack and
 loads its identity-bound LUTs under an explicit input root. Its sampled `Frame`
@@ -61,6 +61,26 @@ identities, neutral/transparent pixels, and coverage levels within a byte interv
 These are component checks: project settings and renderer integration are still
 required before the feature is usable through scene or timeline commands.
 
+`color::working::layer::Layer` now validates the same source-canvas transform,
+animation and mask contract as native clip properties. A prepared layer draws
+borrowed straight-linear pixels onto a possibly transparent working canvas.
+Decoded image offsets and per-frame anchors remain source-canvas coordinates.
+The layer reuses the existing exact clocks and spatial mappings, including
+fitting, mirroring, viewports and stabilization compensation. Integer transforms
+use the working source-over primitive. Filtered spatial transforms accumulate
+associated color, alpha, mask coverage and fixed bilinear weights before the final
+blend and UNORM16 store. No filtered tap or layer opacity passes through a byte.
+Source and destination buffers together are bounded to 1 GiB; the caller owns
+decoding, delivery and its full render-plan memory accounting.
+
+The independent `working_layers` fixture uses Decimal geometry, Fraction taps and
+mask coverage, and f64 compositing equations. It checks complete layer frames,
+transparent layer stacks, animated pixel effects and bounds. Its 4,096-level graded
+gradient retains distinct levels at sub-byte opacity. This validates the layer
+component; it is not the plan's final saved-timeline grade/fade and delivery gate.
+
+## Verification and remaining work
+
 `tests/working_color.py` builds a bounded adapter to the actual library primitives
 and compares them with independent Python f64 equations. It covers all legal
 premultiplied byte-channel/alpha pairs for both transfers, transparent source-over,
@@ -69,8 +89,8 @@ is one UNORM16 code per working operation and exact encoded delivery. A 1,024-le
 ramp requires strictly increasing tile means and an error of at most 1/128 delivery
 code. This arithmetic fixture is registered in the ordinary verifier.
 
-Renderer integration remains open: saved project settings and history, wiring the
-precise effect chains and opacity into mask and spatial sampling, transitions, generated and nested pictures,
+Renderer integration remains open: saved project settings and history, wiring
+working layer frames into scenes and tracks, transitions, generated and nested pictures,
 memory accounting, previews, proxies and delivery. A final conversion must happen
 only at delivery; a child sequence or generated source cannot be rounded through
 the old compositor first. The source interpretation and all supported combinations
