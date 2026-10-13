@@ -1,5 +1,33 @@
 # Progress history
 
+## 13 October 2026: ordered native layers and retained key transparency
+
+Native track pictures now use an ordered Rust frame stream, including recursively
+rendered child sequences. Chroma-key alpha reveals lower tracks. Opaque full-frame
+clips retain a direct frame path and omit hidden lower render windows. Transitions
+combine endpoint views over the same lower backdrop with the existing integer
+equations. Legacy crop, shrink and opacity rounding remain unchanged; keyed shrink
+uses associated-color box averaging. The former nested FFmpeg video graphs remain
+available as an internal A/B oracle during stage-4 implementation.
+
+[Targeted evidence](../verification/native-layers-2026-10-13.json): 251 Windows and
+250 Linux Rust tests and warnings-denied lint pass. The final default implementation
+passes five Windows and seven Linux suites. An earlier opt-in run also passed the
+five Windows track, overlay, transition, sequence and clip-effect suites; it preceded
+the default switch and grade-table acceleration. All 259 compared source, fixture,
+build-input and verifier files are byte-identical between the final working trees.
+The new original fixture checks eight cases and 96 frames with zero RGB tolerance,
+multi-layer scene and independent integer references, previews, ranges, nested
+direct pictures and complete/partial occlusion of render decoder windows.
+
+This is partial stage 4. Saved spatial/opacity/mask/blend properties, legacy overlay
+sugar and nested effect editing remain open, as do stages 5-6. Source inspection and
+publication identity checks still include hidden media. No points, speed claim or
+full-thorough evidence change. The preceding 4020bf1 shipment finished all 60 deferred
+checks with no failures or skips, including recording. The frozen f13453d stage-3
+complete quick check has started. This checkpoint's own shipment gate and deferred
+checks must be audited after commit and failures fixed forward.
+
 ## 13 October 2026: shared single-frame layer compositor prerequisite
 
 Scene property sampling and pixel composition now live in `layer_composite`, with

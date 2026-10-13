@@ -73,6 +73,59 @@ impl Stack {
     }
 }
 impl Prepared {
+    /// Keep the processor's straight alpha for the ordered native layer stack.
+    pub(crate) fn apply_rgba(
+        &self,
+        stack: &Stack,
+        resources: &Resources,
+        frame: u64,
+        dimensions: [u32; 2],
+        pixels: &mut [u8],
+    ) -> Result<()> {
+        let [width, height] = dimensions;
+        if pixels.len() != width as usize * height as usize * 4 {
+            return Err(error(
+                "RENDER_VALIDATION_FAILED",
+                "Native RGBA effect frame size differs",
+            ));
+        }
+        let time = stack.source_start.plus(Time::new(
+            frame
+                .checked_mul(stack.rate.den)
+                .ok_or_else(|| error("INVALID_TIME", "Clip effect frame time overflow"))?,
+            stack.rate.num,
+        )?)?;
+        let samples = self
+            .samplers
+            .iter()
+            .map(|s| s.sample(time))
+            .collect::<Result<Vec<_>>>()?;
+        let pool = resources.lock()?;
+        let Some(processor) = effects::Processor::new(&stack.effects, &samples, &pool) else {
+            return Ok(());
+        };
+        let scale = i64::from(stack.coordinate_scale);
+        if let Some(tables) = processor.tables() {
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                if pixel[3] != 0 {
+                    for c in 0..3 {
+                        pixel[c] = tables[c][pixel[c] as usize];
+                    }
+                }
+            }
+            return Ok(());
+        }
+        for (i, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let position = [
+                (i as i64 % i64::from(width) + i64::from(stack.origin[0])) * scale + scale / 2,
+                (i as i64 / i64::from(width) + i64::from(stack.origin[1])) * scale + scale / 2,
+            ];
+            if let Some(value) = processor.pixel(pixel, AlphaMode::Straight, position) {
+                *pixel = value;
+            }
+        }
+        Ok(())
+    }
     /// Process planar G,B,R[,A] in place. Stage 3 preserves the original coverage: key
     /// coverage is composited onto black here, before the existing opaque/overlay rule.
     /// The generalized clip compositor will retain the resulting alpha in stage 4.

@@ -363,6 +363,7 @@ mod tests {
         composited.arguments[12] = "0:v:0".into();
         assert!(layout(&composited).is_none());
         composited.compositor = Some(crate::track_composite::Compositor {
+            stack: None,
             width: 64,
             height: 36,
             frames: 50,

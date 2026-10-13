@@ -1,6 +1,6 @@
 # Cutbolt local engine
 
-Native video clips accept [saved pixel effects](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Stage 3 keys flatten onto black; transparency over lower tracks follows in stage 4.
+Native video clips accept [saved pixel effects](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Keys retain alpha and reveal lower video tracks. Saved spatial clip properties remain in progress.
 
 For original video that needs normalization, `media.add` with `input_root` saves a conversion recipe. Queued exports prepare it automatically; see [saved source preparation](AUTOMATIC_PREPARATION.md).
 
@@ -20,7 +20,7 @@ Snapshot/media commands: `capabilities`, `schema`, `project.create`, `project.va
 
 `cutbolt --workspace DIR ...`, or the `CUTBOLT_WORKSPACE` environment variable, fixes one directory as the boundary for requests. Omitted roots then default inside it (sessions in `.cutbolt/store`, jobs in `.cutbolt/jobs`, verified source inspections in `.cutbolt/cache/inspections`, converted sources in `.cutbolt/cache/conform`), relative paths resolve against it, explicit roots must lie inside it, and paths the engine reports come back relative to it. Every command that takes a `project` also accepts `{"project_id": "...", "revision": N}` and loads that saved revision. See [the workspace and reference rules](AGENT_INTERFACE.md#workspace).
 
-Compressed-source inspection includes a cached presented-frame and decoded-audio index. Eligible H.264/HEVC originals report `timeline.ready: true` and `direct: true`, with a bound asset for `media.add`; `media.prepare` returns them without conversion. See [direct footage](DIRECT_SOURCES.md) for the exact profiles, audio policy, source preservation and long-source measurements and remaining nested-picture limits.
+Compressed-source inspection includes a cached presented-frame and decoded-audio index. Eligible H.264/HEVC originals report `timeline.ready: true` and `direct: true`, with a bound asset for `media.add`; `media.prepare` returns them without conversion. See [direct footage](DIRECT_SOURCES.md) for the exact profiles, audio policy, source preservation and long-source measurements and recursive direct-picture support.
 
 `cutbolt doctor` checks local media-tool discovery and required features before an edit. Add
 `--workspace DIR` before `doctor` to inspect workspace structure without creating state. See

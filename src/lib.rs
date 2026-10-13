@@ -94,6 +94,7 @@ pub mod time;
 mod track_composite;
 pub mod track_edit;
 mod track_render;
+mod track_stack;
 pub mod tracking;
 pub mod tracks;
 pub mod transcribe;

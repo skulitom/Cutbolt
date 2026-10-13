@@ -263,6 +263,12 @@ stage-1 exit or long-source latency result is claimed yet.
 
 ## Direct pictures in the track compositor
 
+13 October update: the ordered Rust compositor now also reads direct pictures in
+child sequences. It retains keyed alpha over lower tracks and uses the same
+recursive stream path for native references. The earlier flat-compositor details
+and measurements below describe their recorded checkpoints; current layering is
+specified in [tracks](TRACKS.md) and [clip effects](CLIP_EFFECTS.md).
+
 Placed tracks can use bound compressed originals as their opaque base, transition endpoints
 and opaque `alpha_over` sources. The same indexed reader supplies native YUV and converts it
 in Rust before any composition. Native assets keep the existing base graph. A direct base
@@ -277,8 +283,8 @@ and a clean decoder exit. Preview/render publication still fully verifies every 
 The public library reader shares this implementation and retains its final full-hash receipt check.
 
 The picture compositor also participates in complete direct audio/video renders, described
-below. Nested direct pictures still fail explicitly. The long-source performance gate remains
-pending; this checkpoint does not complete all of stage 1.
+below. At this checkpoint nested direct pictures still failed explicitly and the
+long-source performance gate was pending; later checkpoints supersede those limits.
 
 The composition fixture compares 28 twenty-frame renders (560 frames) and 140 PNG previews
 against complete explicit-conform sources across the 21 eligible files on Windows and Linux.

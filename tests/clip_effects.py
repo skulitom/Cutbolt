@@ -274,7 +274,7 @@ def run(root):
     assert all(hashlib.sha256(p.read_bytes()).hexdigest()==value for p,value in source_hashes.items())
     passed.append('clip_effects.original_sources_preserved')
     report = {'passed':passed,'cases':cases,'rgb_tolerance':0,'oracle':'Existing scene processor on explicit-conform source frames; independent integer transition mix',
-              'scope':'Stage 3 pixel effects; key coverage flattened onto black, with existing track visibility retained'}
+              'scope':'Pixel effects against a single-layer scene on black; lower-track key coverage is covered by native_layers'}
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report))
 

@@ -1,6 +1,6 @@
 # Reusable nested sequences
 
-A native track clip can reference a named child sequence instead of a media asset. Every instance uses the same editable definition. Changing that definition updates all direct and indirect instances through the existing snapshot and local saved-session contract. Rendering evaluates child timelines directly; it does not replace their definitions with generated media assets.
+A native track clip can reference a named child sequence instead of a media asset. Every instance uses the same editable definition. Changing that definition updates all direct and indirect instances through the existing snapshot and local saved-session contract. Rendering evaluates child timelines directly; it does not replace their definitions with generated media assets. Root and child pictures use the same ordered Rust compositor, including indexed compressed originals. Child gaps retain their opaque black behavior; audio still uses the established sample-exact graph.
 
 ## Definitions and references
 
@@ -72,7 +72,7 @@ Every enabled clip used by the requested window is inspected, including covered 
 
 ## Independent acceptance
 
-`tests/sequences.py` generates original frames and signed stereo signals. Its reference constructs complete RGB/PCM buffers for every child using independent integer equations, then selects source windows from those buffers for parent composition. This differs from the engine's interval/filter graph and verifies exact per-child saturation, transition rounding and rational offsets. All output comparisons use zero pixel or PCM tolerance.
+`tests/sequences.py` generates original frames and signed stereo signals. Its reference constructs complete RGB/PCM buffers for every child using independent integer equations, then selects source windows from those buffers for parent composition. This differs from the engine's streamed video stack and audio filter graph and verifies exact per-child saturation, transition rounding and rational offsets. All output comparisons use zero pixel or PCM tolerance.
 
 The fixture covers repeated and multilevel reuse, effects in both parent and child, individual-sample offsets, shared source/effect/mix edits, splitting instances inside effects, opaque child gaps, explicit source namespaces, eight levels, cycle/depth/expansion rejection, direct/transitive/disabled locks, missing references, insufficient handles, saved diffs/retries/rollback/undo/restoration, all three operation schemas, exact frame/range/proxy previews, exports, queued original quality and source-preservation failures. Run `python -X utf8 tests/sequences.py --output C:\DEV\CutboltData\new-sequence-test` with a fresh external directory. The complete verifier supplies the evidence for T09 basic and extended; this feature adds no points for multicam, cache acceleration or broader rate/synchronization work.
 

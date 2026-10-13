@@ -91,6 +91,8 @@ pub(crate) struct DirectRun {
 /// composited over it.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Compositor {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stack: Option<crate::track_stack::Plan>,
     pub width: u32,
     pub height: u32,
     pub frames: u64,
@@ -124,12 +126,12 @@ impl Compositor {
 }
 
 /// All commands are prepared on the controlling thread; only decoding moves to workers.
-enum PreparedReader {
+pub(crate) enum PreparedReader {
     Tool(Command),
     Direct(crate::direct::PreparedPicture),
 }
 impl PreparedReader {
-    fn prepare(
+    pub(crate) fn prepare(
         arguments: &[String],
         direct: Option<&crate::direct::Picture>,
         program: &str,
@@ -140,7 +142,7 @@ impl PreparedReader {
             None => Ok(Self::Tool(control.command(program, arguments)?)),
         }
     }
-    fn start(self, program: &str, timeout: Duration, watch: Watch) -> Result<Reader> {
+    pub(crate) fn start(self, program: &str, timeout: Duration, watch: Watch) -> Result<Reader> {
         match self {
             Self::Tool(command) => Ok(Reader::Tool(StreamReader::spawn_with(
                 command, program, timeout, watch,
@@ -149,7 +151,7 @@ impl PreparedReader {
         }
     }
 }
-enum Reader {
+pub(crate) enum Reader {
     Tool(StreamReader),
     Direct(crate::direct::PlanarFrames),
 }
@@ -171,14 +173,14 @@ impl Reader {
 /// A decoder whose frames are read on their own thread, up to two ahead, so the pipe transfers
 /// of all decoders overlap one another and the composition. Read frames can be handed back for
 /// reuse.
-struct Ahead {
+pub(crate) struct Ahead {
     frames: mpsc::Receiver<Result<Vec<u8>>>,
     spare: mpsc::Sender<Vec<u8>>,
 }
 impl Ahead {
     /// Read `count` frames of `size` bytes, then require the decoder to end cleanly; its result
     /// is the last message. The thread stops when the receiver is dropped, and the decoder with it.
-    fn start(mut reader: Reader, size: usize, count: u64) -> Self {
+    pub(crate) fn start(mut reader: Reader, size: usize, count: u64) -> Self {
         let (sender, frames) = mpsc::sync_channel(2);
         let (spare, spares) = mpsc::channel::<Vec<u8>>();
         std::thread::spawn(move || {
@@ -194,7 +196,7 @@ impl Ahead {
         });
         Self { frames, spare }
     }
-    fn next(&self) -> Result<Vec<u8>> {
+    pub(crate) fn next(&self) -> Result<Vec<u8>> {
         self.frames.recv().map_err(|_| {
             error(
                 "RENDER_VALIDATION_FAILED",
@@ -202,11 +204,11 @@ impl Ahead {
             )
         })?
     }
-    fn recycle(&self, frame: Vec<u8>) {
+    pub(crate) fn recycle(&self, frame: Vec<u8>) {
         let _ = self.spare.send(frame);
     }
     /// The decoder's own end, after its last frame.
-    fn finish(self) -> Result<()> {
+    pub(crate) fn finish(self) -> Result<()> {
         self.next().map(|_| ())
     }
 }
@@ -217,7 +219,7 @@ const AHEAD: u64 = 25;
 const EARLY: usize = 2;
 
 /// Decoders of one composition and the frame they are on.
-struct Decoders<'a> {
+struct LegacyDecoders<'a> {
     compositor: &'a Compositor,
     base: Ahead,
     /// Transition decoders not yet started, in window order, then the started ones; the first
@@ -236,7 +238,7 @@ struct Decoders<'a> {
     timeout: Duration,
     abort: Arc<AtomicBool>,
 }
-impl Decoders<'_> {
+impl LegacyDecoders<'_> {
     /// Start a decoder of `count` frames of `size` bytes.
     fn start(&self, command: PreparedReader, size: usize, count: u64) -> Result<Ahead> {
         let reader = command.start(
@@ -378,12 +380,12 @@ impl Decoders<'_> {
     }
 }
 
-fn decoders<'a>(
+fn legacy_decoders<'a>(
     compositor: &'a Compositor,
     timeout: Duration,
     control: &dyn Control,
     abort: &Arc<AtomicBool>,
-) -> Result<Decoders<'a>> {
+) -> Result<LegacyDecoders<'a>> {
     let program = control.tool("ffmpeg");
     let base = Ahead::start(
         Reader::Tool(StreamReader::spawn_with(
@@ -421,7 +423,7 @@ fn decoders<'a>(
             ))
         })
         .collect::<Result<VecDeque<_>>>()?;
-    Ok(Decoders {
+    Ok(LegacyDecoders {
         compositor,
         base,
         mixes,
@@ -459,6 +461,39 @@ fn decoders<'a>(
         timeout,
         abort: abort.clone(),
     })
+}
+
+enum Decoders<'a> {
+    Legacy(Box<LegacyDecoders<'a>>),
+    Stack(crate::track_stack::Frames<'a>),
+}
+impl Decoders<'_> {
+    fn next(&mut self, n: u64) -> Result<Vec<u8>> {
+        match self {
+            Self::Legacy(frames) => frames.next(n),
+            Self::Stack(frames) => frames.next(n),
+        }
+    }
+    fn finish(self) -> Result<()> {
+        match self {
+            Self::Legacy(frames) => frames.base.finish(),
+            Self::Stack(frames) => frames.finish(),
+        }
+    }
+}
+fn decoders<'a>(
+    compositor: &'a Compositor,
+    timeout: Duration,
+    control: &dyn Control,
+    abort: &Arc<AtomicBool>,
+) -> Result<Decoders<'a>> {
+    match &compositor.stack {
+        Some(plan) => {
+            crate::track_stack::Frames::prepare(plan, timeout, control, abort).map(Decoders::Stack)
+        }
+        None => legacy_decoders(compositor, timeout, control, abort)
+            .map(|frames| Decoders::Legacy(Box::new(frames))),
+    }
 }
 
 /// Decode, composite and write every frame to an encoder reading raw planar G, B, R on stdin.
@@ -512,7 +547,7 @@ pub(crate) fn encode_consuming<T: Send + 'static>(
                             return;
                         }
                     }
-                    let finished = decoders.base.finish();
+                    let finished = decoders.finish();
                     if finished.is_err() {
                         let _ = sender.send(finished.map(|()| Vec::new()));
                     }
@@ -574,7 +609,7 @@ pub(crate) fn frame_rgb(
     let outcome = (|| -> Result<Vec<u8>> {
         let mut decoders = decoders(compositor, timeout, control, &abort)?;
         let planar = decoders.next(0)?;
-        decoders.base.finish()?;
+        decoders.finish()?;
         Ok(planar)
     })();
     abort.store(true, Ordering::SeqCst);
@@ -731,7 +766,7 @@ impl Span {
 /// One frame of a transition by the equations of `transitions.md`, at p = (2i + 1) / (2n) for
 /// effect frame i of n, applied alike to every plane of the outgoing (base) frame. With d = 2n and
 /// k = 2i + 1, the weighted sums are rounded to nearest with ties up as `floor((x + n) / d)`.
-enum Effect {
+pub(crate) enum Effect {
     /// `floor((L(d - k) + Rk + n) / d)`, which is `L + steps[R - L + 255]` with
     /// `steps[s + 255] = floor((sk + n) / d)`.
     Dissolve(Box<[i16; 511]>),
@@ -745,7 +780,7 @@ enum Effect {
     Columns(std::ops::Range<usize>),
 }
 impl Effect {
-    fn new(kind: TransitionKind, width: u32, count: u64, index: u64) -> Self {
+    pub(crate) fn new(kind: TransitionKind, width: u32, count: u64, index: u64) -> Self {
         let (n, k, w) = (
             i128::from(count),
             2 * i128::from(index) + 1,
@@ -807,6 +842,19 @@ impl Effect {
                 scope.spawn(move || self.rows(frame, incoming, width));
             }
         });
+    }
+    pub(crate) fn apply_packed(&self, frame: &mut [u8], incoming: &[u8], width: usize) {
+        if let Effect::Columns(columns) = self {
+            let span = columns.start * 3..columns.end * 3;
+            for (left, right) in frame
+                .chunks_exact_mut(width * 3)
+                .zip(incoming.chunks_exact(width * 3))
+            {
+                left[span.clone()].copy_from_slice(&right[span.clone()]);
+            }
+        } else {
+            self.apply(frame, incoming, width * 3);
+        }
     }
     fn rows(&self, frame: &mut [u8], incoming: &[u8], width: usize) {
         match self {

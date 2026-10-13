@@ -56,11 +56,16 @@ interpolation methods. Each file is bounded to 8 MiB; all stacks and decoder
 branches share a 128 MiB retained-table budget. Repeated identical declarations
 reuse the loaded table. Conflicting identities for the same path fail.
 
-Stage 3 preserves the existing opaque/`alpha_over` track visibility rule. A key's
-reduced coverage is flattened onto black within its clip; the clip retains its
-original coverage when placed over other tracks. Thus a key on an opaque clip
-does **not yet reveal lower tracks**. Retaining key transparency, generalized
-layering, spatial effects and effects inside nested sequences are stage 4 work.
+The ordered native compositor retains the key's resulting straight alpha. A keyed
+clip on an opaque or `alpha_over` video track reveals the active tracks below it;
+black lies below the lowest track. Pixel effects run before placement and blending.
+Legacy overlay opacity still rounds alpha to a byte before blending. Its opaque
+box shrink remains the floor of the channel mean; when a key introduces alpha,
+the box uses alpha-weighted color and the floor of mean alpha.
+
+Saved spatial/opacity/mask/blend properties and effects inside child sequences or
+on sequence instances remain stage 4 work. Child sequences already use the ordered
+compositor, including direct compressed pictures, while retaining opaque black gaps.
 
 ## Snapshots, receipts and verification
 
@@ -87,4 +92,6 @@ of the same extracted source frames, with zero RGB tolerance. It also checks
 source-clock slips/splits, both transition inputs, cropped overlays, previews,
 proxies, range and queued exports, final H.264 output, and LUT cache dependencies.
 The fixture's direct-source reference uses the existing explicit conform path.
-This is stage-3 evidence, not evidence for the later transparency or linear-light modes.
+`tests/native_layers.py` adds lower-track key coverage against multi-layer scenes and
+an independent integer alpha equation, exact source-window occlusion and direct
+child-sequence pictures. Spatial properties and linear-light modes remain separate work.

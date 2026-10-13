@@ -260,6 +260,14 @@ Goal: grade, selective grade, LUT and chroma key are properties of any video cli
 
 ## Stage 4: spatial and transparency effects, and real layering
 
+**Partial implementation, 13 October:** the ordered native frame stack retains key
+alpha over lower tracks, skips provably hidden render windows and recursively renders
+child pictures, including direct sources. The new multi-layer scene/integer fixture
+passes on Windows and Linux. Saved spatial/opacity/mask/blend properties, overlay
+sugar and nested effect editing remain open; the old nested graphs remain as A/B
+oracles. See [checkpoint evidence](../../verification/native-layers-2026-10-13.json).
+This is not the stage exit.
+
 Goal: transform, opacity, mask, blend mode and chroma key transparency are clip properties. A clip that becomes partly transparent shows the tracks below it.
 
 1. Add `transform` (scene `Transform` plus `spatial::Transform` with `animation`), `opacity`, `mask` (`RectMask` with feather) and `blend_mode` to `ClipEffect`.

@@ -1,0 +1,165 @@
+{
+  "date": "2026-10-13",
+  "kind": "stage_4_ordered_native_layers_checkpoint",
+  "base_commit": "4020bf11c85f448cf2f42fee408e15c5a88e5e39",
+  "tested_working_changes": true,
+  "source_hashes": {
+    "src/cache.rs": {
+      "bytes": 24716,
+      "sha256": "e89d207cddbb34833134c7069b135cfa098db0cad988738ed5ba7b5df3eb4817"
+    },
+    "src/clip_effects.rs": {
+      "bytes": 9361,
+      "sha256": "78c701f62619f4bdba7667193d4e2fed10009a925411069e037f81e17be1fbae"
+    },
+    "src/delivery/stream.rs": {
+      "bytes": 18115,
+      "sha256": "9871d42e4e66a00351f6b53d4f00d59a614cdf839feb505ee8a7e33a1ddba083"
+    },
+    "src/lib.rs": {
+      "bytes": 12960,
+      "sha256": "c4a74878b2de95be7deb05812da21bcbc29279b50ee656ed812e5de4e10b25b9"
+    },
+    "src/mcp.rs": {
+      "bytes": 66239,
+      "sha256": "2baf2dab2b483d9e6ee2862ba1b7d715dbd4e69f7b5d18f75d192d73c8eb185b"
+    },
+    "src/track_composite.rs": {
+      "bytes": 41613,
+      "sha256": "28c69bbf94c889b72c7b1314e774f25bd6eb873c6275ef942b27b9ca9267700a"
+    },
+    "src/track_render.rs": {
+      "bytes": 95451,
+      "sha256": "09ec301545ed5032a69afe71356f7ce9226feb0b0cd22974d653677a281cbf3e"
+    },
+    "src/track_stack.rs": {
+      "bytes": 14760,
+      "sha256": "7dd66f676167403129a4e35927134018182d03e8f5b2437d98dd78fe6516624a"
+    },
+    "src/tracks.rs": {
+      "bytes": 65377,
+      "sha256": "514bf6387b1c3b7f8063e1e4a96377cb0256f665bdb6e02a7afea26d36bcb651"
+    },
+    "tests/clip_effects.py": {
+      "bytes": 18126,
+      "sha256": "0f7657c05f61d9b469dc2150bce5b0183ab8b5a8ecdd61b72bababd4bf9cd0cf"
+    },
+    "tests/native_layers.py": {
+      "bytes": 9927,
+      "sha256": "a12120ea0f11598f18451c6eee6caedf63bed980962ae0004dda8f0089c42867"
+    },
+    "tools/verify.py": {
+      "bytes": 45956,
+      "sha256": "f81034677369e5c21df0e76f764eb63639e42aea7470331f004a0bffc920e7ce"
+    }
+  },
+  "cross_platform_inputs": {
+    "byte_identical_files": 259,
+    "manifest_sha256": "25c31fdb6b2a906c2dc09066a79a642b1e54f57c79f00248a6d9600f7fa8dae7",
+    "manifest_format": "sorted git-tracked src, tests, Cargo.toml, Cargo.lock, build.rs, tools/verify.py plus new src/track_stack.rs and tests/native_layers.py; each UTF-8 path + NUL + lowercase content SHA-256 + LF",
+    "linux_checkout_commit_is_not_the_implementation_identity": true
+  },
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 251,
+      "clippy_all_targets_warnings_denied": "passed",
+      "format_check": "passed",
+      "rust_evidence": "Observed terminal exit 0 for cargo fmt --all --check, cargo clippy --all-targets -- -D warnings, cargo test, cargo build --all-targets; no separate retained Rust log for final default build.",
+      "final_default_targeted_quick": {
+        "stages": [
+          "cache_previews",
+          "clip_effects",
+          "native_layers",
+          "native_timing",
+          "render_failures"
+        ],
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 150,
+        "report_sha256": "27b5fdada99bfe82640b0937ee2070663c7b1e96f3917588f4497d497a623c75",
+        "log_sha256": "cab2c0dfc9f54906c47f04e7608d6b407031a4f81d5da6a08a9339ad6ebf17e7"
+      },
+      "initial_opt_in_targeted_quick": {
+        "stages": [
+          "clip_effects",
+          "overlays",
+          "sequences",
+          "tracks",
+          "transitions"
+        ],
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 215,
+        "report_sha256": "be4f02117b6e773629e8acff5d590a9b09538ae17e1907abc55f31f1473cb81b",
+        "log_sha256": "cf2a4a065d29dce0abb3e1880f2870dad22d1d132ebc43557e7ba26ef2868737"
+      },
+      "initial_run_scope": "Same stack implementation before enabling it by default and restoring grade table acceleration; not an exact-final-source run."
+    },
+    "linux": {
+      "rust_tests_passed": 250,
+      "clippy_all_targets_warnings_denied": "passed",
+      "final_default_targeted_quick": {
+        "stages": [
+          "cache_previews",
+          "clip_effects",
+          "native_layers",
+          "overlays",
+          "sequences",
+          "tracks",
+          "transitions"
+        ],
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "reused": 0,
+        "not_started": 0,
+        "wall_seconds": 121,
+        "report_sha256": "1b15de92babfa15aefadf5eae9752908df87dde05868bd5f397ce7e707048a32",
+        "log_sha256": "e75decff11017cc2ea611141a81fef6bd288dadcaaf8720f9db88d008d334a42"
+      },
+      "combined_build_test_log_sha256": "e75decff11017cc2ea611141a81fef6bd288dadcaaf8720f9db88d008d334a42"
+    }
+  },
+  "new_fixture": {
+    "name": "native_layers",
+    "rendered_cases": 8,
+    "total_frames": 96,
+    "rgb_tolerance": 0,
+    "sources": [
+      "original synthetic FFV1",
+      "original synthetic H.264 with explicit conform scene oracle"
+    ],
+    "assertions": [
+      "Full and half-strength keyed top track reveals lower B-roll, matching multi-layer scene output",
+      "Independent integer alpha reference for lossless source cases",
+      "Frame preview and range export equality",
+      "Fully opaque cover omits the lower render decoder window",
+      "Partial cover splits lower render windows around the hidden interval",
+      "Nested direct and native pictures preserve opaque black child-sequence gaps",
+      "Source bytes remain unchanged"
+    ]
+  },
+  "prior_shipment_audit": {
+    "commit": "4020bf11c85f448cf2f42fee408e15c5a88e5e39",
+    "background_passed": 60,
+    "background_failed": 0,
+    "background_skipped": 0,
+    "background_not_started": 0,
+    "wall_seconds": 2425,
+    "recording": "passed"
+  },
+  "limits": [
+    "Stage 4 remains open: saved spatial/opacity/mask/blend clip properties, overlay sugar and nested effect editing are not implemented by this checkpoint",
+    "Old nested FFmpeg video graphs remain behind an internal A/B switch pending complete stage-4 acceptance",
+    "Opaque-cover omission concerns render decoder windows; source inspection and identity validation still occur",
+    "The 1 GiB bound estimates engine frames and decoder queues, excluding external codec state and separately bounded LUT resources",
+    "Targeted quick checks do not replace the pending frozen stage-3 full quick run or a milestone thorough run",
+    "No performance, cross-platform encoded-file identity or new progress-point claim"
+  ]
+}

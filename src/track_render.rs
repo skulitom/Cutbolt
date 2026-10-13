@@ -1597,6 +1597,225 @@ impl<'a> Graph<'a> {
         }
         Ok(mixes)
     }
+    /// Render all visible video tracks through ordered Rust layers, including child sequences.
+    fn stack_plan<'c>(
+        &mut self,
+        a: &'c crate::tracks::Arrangement,
+        start: Time,
+        duration: Time,
+    ) -> Result<crate::track_stack::Plan> {
+        use crate::track_stack::{Clip, Input, Layer, Mix, Plan, Segment};
+        struct Window<'c> {
+            clip: &'c TrackClip,
+            first: u64,
+            end: u64,
+        }
+        let rate = self.project.frame_rate;
+        let window = start.units(rate)?;
+        let frames = duration.units(rate)?;
+        let end = start.plus(duration)?;
+        let mut edges = BTreeSet::from([window, window + frames]);
+        for track in a
+            .tracks
+            .iter()
+            .filter(|t| t.enabled && t.kind == Kind::Video)
+        {
+            edges.extend(boundaries(track, start, end, rate)?);
+        }
+        let mut windows: Vec<Window<'_>> = vec![];
+        let mut latest: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut segments = vec![];
+        let edges: Vec<_> = edges.into_iter().collect();
+        for pair in edges.windows(2) {
+            self.control.check()?;
+            let at = Time::new(pair[0] * rate.den, rate.num)?;
+            let (first, end) = (pair[0] - window, pair[1] - window);
+            let mut visible = vec![];
+            for (index, track) in a
+                .tracks
+                .iter()
+                .enumerate()
+                .rev()
+                .filter(|(_, t)| t.enabled && t.kind == Kind::Video)
+            {
+                let transition = track.transition_at(at)?;
+                let (left, right) = if let Some(fx) = transition {
+                    let (left, right) = track.endpoints(fx)?;
+                    (left, Some(right))
+                } else if let Some(clip) = track.clips.iter().find(|c| {
+                    c.start.compare(at).expect("validated").is_le()
+                        && c.end()
+                            .expect("validated")
+                            .compare(at)
+                            .expect("validated")
+                            .is_gt()
+                }) {
+                    (clip, None)
+                } else {
+                    continue;
+                };
+                if right.is_none() && left.transform.as_ref().is_some_and(|t| t.opacity == 0) {
+                    continue;
+                }
+                let opaque = |clip: &TrackClip| {
+                    !self.alpha_assets.contains(&clip.asset_id)
+                        && !clip
+                            .effects
+                            .iter()
+                            .any(|e| matches!(e, crate::effects::Effect::ChromaKey(_)))
+                        && clip.transform.as_ref().is_none_or(|t| {
+                            t.opacity == 255
+                                && t.divisor == 1
+                                && t.position == [0, 0]
+                                && t.crop.is_none_or(|c| {
+                                    c == [0, 0, self.project.width, self.project.height]
+                                })
+                        })
+                };
+                let covers = opaque(left) && right.is_none_or(opaque);
+                visible.push((index, left, right, transition));
+                if covers {
+                    break;
+                }
+            }
+            let mut layers = vec![];
+            for (track, left, right, transition) in visible.into_iter().rev() {
+                let mut schedule = |clip: &'c TrackClip| {
+                    if let Some(&index) = latest.get(clip.id.as_str())
+                        && windows[index].end == first
+                    {
+                        windows[index].end = end;
+                        return index;
+                    }
+                    let index = windows.len();
+                    windows.push(Window { clip, first, end });
+                    latest.insert(&clip.id, index);
+                    index
+                };
+                let outgoing = schedule(left);
+                let mix = match (right, transition) {
+                    (Some(right), Some(fx)) => {
+                        let (begin, finish) = a.tracks[track].interval(fx)?;
+                        Some(Mix {
+                            incoming: schedule(right),
+                            kind: fx.kind,
+                            count: finish.minus(begin)?.units(rate)?,
+                            offset: at.minus(begin)?.units(rate)?,
+                        })
+                    }
+                    _ => None,
+                };
+                layers.push(Layer {
+                    track,
+                    outgoing,
+                    mix,
+                });
+            }
+            segments.push(Segment { first, end, layers });
+        }
+        let mut clips = Vec::with_capacity(windows.len());
+        for Window { clip, first, end } in windows {
+            let at = Time::new((window + first) * rate.den, rate.num)?;
+            let length = Time::new((end - first) * rate.den, rate.num)?;
+            let alpha = self.alpha_assets.contains(&clip.asset_id);
+            if alpha && clip.transform.as_ref().is_some_and(|t| t.divisor > 1) {
+                return Err(error(
+                    "UNSUPPORTED_MEDIA",
+                    format!(
+                        "Clip {:?}: only opaque overlay sources can be shrunk; straight-alpha sources may be cropped, faded and placed",
+                        clip.id
+                    ),
+                ));
+            }
+            let input = if let Some(sequence_id) = &clip.sequence_id {
+                let arrangement = crate::sequences::get(self.project, sequence_id)?
+                    .arrangement
+                    .clone();
+                let source_start = clip.source_in.plus(at)?.minus(clip.start)?;
+                Input::Sequence {
+                    sequence_id: sequence_id.clone(),
+                    plan: Box::new(self.stack_plan(&arrangement, source_start, length)?),
+                }
+            } else {
+                let direct = self.direct_picture(
+                    clip,
+                    at,
+                    length,
+                    [0, 0, self.project.width, self.project.height],
+                )?;
+                let arguments = if direct.is_some() {
+                    vec![]
+                } else {
+                    let source = &self.sources[&clip.asset_id];
+                    let (from, to) = self.span(clip, at, length, Kind::Video, source)?;
+                    let mut arguments: Vec<String> = ["-hide_banner", "-v", "error", "-nostdin"]
+                        .map(str::to_owned)
+                        .to_vec();
+                    arguments.extend(clock::seek_input(rate, from));
+                    arguments.extend(["-protocol_whitelist", "file,pipe", "-i"].map(str::to_owned));
+                    arguments.push(source.path.to_string_lossy().into_owned());
+                    let trim = clock::seek_trim(rate, from, from, to);
+                    let convert = if alpha {
+                        "extractplanes=r+g+b+a[r][g][b][a];[r][g][b][a]mergeplanes=map0s=1:map0p=0:map1s=2:map1p=0:map2s=0:map2p=0:map3s=3:map3p=0:format=gbrap"
+                    } else {
+                        "format=pix_fmts=gbrp"
+                    };
+                    arguments.extend([
+                        "-filter_complex_threads".into(),
+                        "1".into(),
+                        "-filter_complex".into(),
+                        format!(
+                            "[0:v:0]{trim},settb=expr={},setpts=N,{convert}[out]",
+                            timebase(rate)
+                        ),
+                    ]);
+                    arguments.extend(
+                        [
+                            "-map",
+                            "[out]",
+                            "-an",
+                            "-fps_mode",
+                            "passthrough",
+                            "-f",
+                            "rawvideo",
+                            "-pix_fmt",
+                            if alpha { "gbrap" } else { "gbrp" },
+                            "pipe:1",
+                        ]
+                        .map(str::to_owned),
+                    );
+                    if too_long(&arguments) {
+                        return Err(error(
+                            "LIMIT_EXCEEDED",
+                            "Native layer decoder arguments exceed supported size",
+                        ));
+                    }
+                    arguments
+                };
+                Input::Media { arguments, direct }
+            };
+            clips.push(Clip {
+                clip_id: clip.id.clone(),
+                first,
+                end,
+                alpha,
+                input,
+                transform: clip.transform.clone(),
+                effects: self.clip_effects(clip, at, [0, 0])?,
+            });
+        }
+        let mut plan = Plan {
+            width: self.project.width,
+            height: self.project.height,
+            frames,
+            clips,
+            segments,
+            resources: self.effect_resources.clone(),
+            frame_buffer_bytes: 0,
+        };
+        plan.check_memory()?;
+        Ok(plan)
+    }
     /// Arguments, sources and generated inputs of a graph that reads no pictures.
     fn finish(self) -> (Vec<String>, Vec<Source>, Vec<render::Generated>) {
         (self.arguments(false), self.sources(), self.generated)
@@ -1703,6 +1922,7 @@ fn audio_windows(a: &crate::tracks::Arrangement, first: u64, end: u64) -> Result
 /// show, the base picture's graph, the transitions and the overlay clips for the engine
 /// compositor beside the encoder's graph.
 struct Compiled<'a> {
+    stack: Option<crate::track_stack::Plan>,
     /// The single graph, or the encoder's graph (audio, with the composited picture as input 0).
     graph: Graph<'a>,
     picture: Option<(
@@ -1714,6 +1934,22 @@ struct Compiled<'a> {
 impl Compiled<'_> {
     /// The engine compositor of this window, with the base decoder writing raw planar RGB.
     fn compositor(&mut self, frames: u64) -> Result<Option<Compositor>> {
+        if let Some(stack) = self.stack.take() {
+            let resources = stack.resources.clone();
+            return Ok(Some(Compositor {
+                width: stack.width,
+                height: stack.height,
+                frames,
+                base: vec![],
+                direct: vec![],
+                runs: vec![],
+                transitions: vec![],
+                layers: vec![],
+                effect_report: resources.report()?,
+                effect_resources: resources,
+                stack: Some(stack),
+            }));
+        }
         let Some((picture, transitions, layers)) = self.picture.take() else {
             return Ok(None);
         };
@@ -1749,6 +1985,7 @@ impl Compiled<'_> {
             }
         }
         Ok(Some(Compositor {
+            stack: None,
             width: project.width,
             height: project.height,
             frames,
@@ -1794,6 +2031,18 @@ fn compile<'a>(
     graph.prefetch(a, start, duration, (video, audio));
     if video {
         graph.check_arrangement(a, start, duration, Kind::Video)?;
+        if !crate::track_stack::legacy_oracle() {
+            let stack = graph.stack_plan(a, start, duration)?;
+            let mut encoder = graph.successor();
+            if audio {
+                encoder.audio(a, start, duration)?;
+            }
+            return Ok(Compiled {
+                graph: encoder,
+                picture: None,
+                stack: Some(stack),
+            });
+        }
         let video_tracks = || (a.tracks.iter()).filter(|t| t.kind == Kind::Video && t.enabled);
         let overlays = video_tracks()
             .filter(|t| !t.composite.is_opaque())
@@ -1824,6 +2073,7 @@ fn compile<'a>(
                     encoder.audio(a, start, duration)?;
                 }
                 return Ok(Compiled {
+                    stack: None,
                     graph: encoder,
                     picture: Some((graph, mixes, layers)),
                 });
@@ -1836,6 +2086,7 @@ fn compile<'a>(
         graph.audio(a, start, duration)?;
     }
     Ok(Compiled {
+        stack: None,
         graph,
         picture: None,
     })

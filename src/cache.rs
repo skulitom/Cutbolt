@@ -220,6 +220,10 @@ fn project_sources(p: &Project, root: &Path, proxy_only: Option<&str>) -> Result
 }
 fn normalized_project(project: &Project) -> Result<Value> {
     let mut value = serde_json::to_value(project)?;
+    // Development A/B renders must not share pixels across the two compositor semantics.
+    if crate::track_stack::legacy_oracle() {
+        value["_legacy_track_compositor_oracle"] = serde_json::Value::Bool(true);
+    }
     for asset in value["assets"].as_array_mut().expect("project assets") {
         asset.as_object_mut().expect("asset").remove("path");
         if let Some(proxy) = asset.get_mut("proxy").and_then(Value::as_object_mut) {
