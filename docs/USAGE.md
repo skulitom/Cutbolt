@@ -1,5 +1,7 @@
 # Cutbolt local engine
 
+Native video clips accept [saved pixel effects](CLIP_EFFECTS.md) through `tracks.edit clip_effects`: ordered grade, selective grade, LUT and chroma key. Curves use source time. Adding effects upgrades only the new snapshot to schema 2; undo and older revisions retain their recorded schema. Stage 3 keys flatten onto black; transparency over lower tracks follows in stage 4.
+
 For original video that needs normalization, `media.add` with `input_root` saves a conversion recipe. Queued exports prepare it automatically; see [saved source preparation](AUTOMATIC_PREPARATION.md).
 
 The optional [foreground segmentation workflow](SEGMENTATION.md) accepts annotated PNG frames, retains versioned masks and returns ordinary scenes. The native renderer accepts content-bound per-frame binary mattes without the optional worker runtime.

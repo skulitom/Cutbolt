@@ -1,5 +1,7 @@
 # Validated media import and retiming
 
+[Native clip pixel effects](CLIP_EFFECTS.md) run after direct or prepared source decoding. Applying a grade or LUT does not require another conform or scene compilation step.
+
 `media.conform.inspect` validates a source and reports the exact source frames selected by a recipe. `media.conform` writes a new lossless editing asset using that recipe. Both use explicit local roots and require the original source's SHA-256 and byte count. Sources are never rewritten. The output can enter ordinary saved sessions through `media.add` and can then be trimmed, assembled, previewed or queued for reference export.
 
 Rendering is a blocking CLI/library operation. MCP exposes inspection as `cutbolt_media_conform_inspect`; queue conversion with `job.start`, `run: "media.conform"`, or use `media.prepare`. The completed asset enters the existing session contract. Keep the source, recipe and receipt outside the repository to revise or reproduce the conversion. Session undo changes timeline edits; it does not regenerate an earlier conversion recipe.

@@ -1,5 +1,7 @@
 # Cutbolt agent interface (v0.4)
 
+For a grade or LUT on footage, use `tracks.edit` with `{"op":"clip_effects","clip_id":"...","effects":[...]}` inside the existing apply command. This saves an ordered source-clock stack and requires no scene compilation. The first nonempty stack upgrades the new snapshot to schema 2. See [clip effects](CLIP_EFFECTS.md) for recipes, bounds and the current key/transparency distinction.
+
 Optional [foreground masks](SEGMENTATION.md) use a separate local CLI producer. Its scene results, including per-frame matte identities, are accepted by typed `scene.inspect`; no network service or additional MCP tool is introduced.
 
 The existing `scene.inspect` tool accepts optional typed [geometry](GEOMETRY.md), reporting sampled cameras/lights, world matrices and bounded work. Rendering remains the blocking local scene command.
