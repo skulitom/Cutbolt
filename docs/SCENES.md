@@ -15,7 +15,7 @@ Scenes may carry an optional [typed property graph](EXPRESSIONS.md). Position/op
 
 Optional [shutter sampling](TEMPORAL.md) evaluates bounded exact subframe times and averages complete RGB samples, with explicit phase, scene-boundary, source-hold and effect limitations. Output frame rate and audio clocks remain unchanged.
 
-Cutbolt can compile an editable, bounded scene with PNG animation, text/shapes and a separate WAV or audio mix into its existing lossless FFV1/PCM asset profile. The returned `asset` can be added with `media.add` and edited through ordinary saved sessions. Keep the scene JSON and original external image/audio/font files: the compiled asset is flattened, and scene-layer edits currently require explicitly recompiling to a new output. Scene recipes are separate from version-1 timeline snapshots and the planned production manifest.
+Cutbolt can compile an editable, bounded scene with PNG animation, text/shapes and a separate WAV or audio mix into its existing lossless FFV1/PCM asset profile. The returned `asset` can be added with `media.add` and edited through ordinary saved sessions. Keep the scene JSON and original external image/audio/font files: the compiled asset is flattened, so changing its source recipe requires compiling a new output. Generated timeline clips retain the recipe and render it directly. Scene recipes have their own schema; generated clips require timeline schema 2.
 
 ## Commands
 
@@ -170,7 +170,7 @@ The scene's optional `frame_rate` is one of the eight [native rates](NATIVE_TIMI
 
 ### Audio
 
-The current input matrix is classic PCM16 WAV, mono or stereo, at 24,000, 44,100 or 48,000 Hz. Extensible channel masks, float audio and other layouts/rates fail. Mono must explicitly request duplication to left/right; stereo must request preservation. There is one independent narration input, with no mix bus, gain, fades or audio-only timeline editing yet.
+The legacy `audio.file` input accepts classic PCM16 WAV, mono or stereo, at 24,000, 44,100 or 48,000 Hz. Extensible channel masks, float audio and other layouts/rates fail in that field. Mono must explicitly request duplication to left/right; stereo must request preservation. For multiple scene sources and mix processing, use `audio_mix` with stereo output. Timeline audio editing is covered separately in [AUDIO](AUDIO.md).
 
 Output is 48 kHz stereo. Linear interpolation evaluates each exact destination sample position in the source; the last source sample extends to the final converted sample. Sample values round to nearest, half ties away from zero. Converted sample count is `round-half-up(source_count * 48000 / source_rate)`. Receipts retain both exact durations and counts. This simple upsampler is deterministic and tested for impulses/endpoints, but is not a high-quality band-limited resampler.
 

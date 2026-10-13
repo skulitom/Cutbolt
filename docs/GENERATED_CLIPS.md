@@ -48,8 +48,14 @@ Repeated identical recipes share one prepared source across video, audio, nested
 branches and render chunks. The complete export caps retained scene payload at
 1 GiB, charged for decoded images, PCM, LUT tables and sampled/recipe data; this is
 separate from the native compositor's frame-buffer bound. Render plans report
-`scene_resources` with the shared recipe count and payload charge. Scene audio
-windows use owned temporary WAV inputs, cleaned up with other generated audio.
+`scene_resources` with the shared recipe count and payload charge. Uniform cached
+color/matte planes retain one RGB value each. A silent soundtrack retains its exact
+sample count and produces zero PCM in bounded blocks; even a silent source file
+keeps its identity checks. These are storage optimizations: source clocks, pixels,
+samples, cached-layer work accounting and the 1 GiB bound remain unchanged.
+The charge measures retained prepared payload, not total process memory or temporary
+preparation/frame buffers. Scene audio windows use owned temporary WAV inputs,
+cleaned up with other generated audio.
 No generated video file is written.
 
 Every external scene dependency is fully hashed before publication. `timeline.check`

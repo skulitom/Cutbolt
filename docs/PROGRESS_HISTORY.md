@@ -1,5 +1,34 @@
 # Progress history
 
+## 13 October 2026: bound prepared caption-scene memory
+
+Generated sources now retain one RGB value for uniform cached planes and an exact
+sample count for silent PCM. Dense pictures and nonzero audio keep their original
+buffers. Source pins, cached-layer work charges, clocks, scene caps and the 1 GiB
+shared retained-payload bound are unchanged. Zero-valued external WAV dependencies
+still invalidate cache hits when changed.
+
+Windows/Linux passed 255/254 Rust tests, formatting, warnings-denied lint,
+all-target builds and all 14 affected strict quick fixtures (301/154 seconds,
+zero failures or skips). Each platform also matched the older 4bf1191 scene
+renderer on 110 frames and 211,200 stereo sample frames, including trimmed windows,
+uniform alpha, dense pictures and silence. [Resource evidence](../verification/generated-scene-resources-2026-10-13.json)
+records source hashes, both old-engine identities and external report hashes.
+
+On the same ten-minute HD caption project, retained payload fell from 893,800,160
+to 32,104,520 bytes; sampled engine peak RSS fell from 799,469,568 to 64,557,056
+bytes. The twenty-minute plan previously exceeded the 1 GiB bound; it now passes
+with 64,209,520 retained bytes and 94,769,152 bytes peak RSS. These are planning
+measurements under uncontrolled concurrent load, not a full twenty-minute export
+or a speed benchmark. No general scene eviction cache is claimed.
+
+The preceding 61b5397 shipment passed its gate and was independently confirmed on
+remote main. Older d04a362/c25f308 backgrounds are terminal with 4/5 passes, zero
+failures and 60/58 superseded skips; the 61b5397 background is still pending.
+Caption and production-title migration, the complete stage-five quick gate,
+stage six and final requirement/performance audits remain open. No new points or
+thorough claim; PROGRESS.md retains the 338e114 milestone evidence.
+
 ## 13 October 2026: complete stage-four correctness gate
 
 A frozen, clean 73e2b2a checkout completed all 77 strict quick fixtures in 2,930

@@ -312,6 +312,10 @@ and preview/export comparisons pass on Windows and Linux. See [the contract](../
 and [core evidence](../../verification/generated-clips-core-2026-10-13.json).
 A following checkpoint switches graphics.place to generated scenes and verifies
 actual older compiled receipt replay; see [graphics evidence](../../verification/generated-graphics-2026-10-13.json).
+A resource checkpoint stores uniform cached planes and silent PCM compactly.
+A twenty-minute HD caption plan now fits the unchanged 1 GiB bound; short renders
+match the old engine on Windows/Linux. [Resource evidence](../../verification/generated-scene-resources-2026-10-13.json)
+separates retained payload from sampled process memory and makes no long-export claim.
 Caption and production-title migration, plus the complete stage-5 quick gate,
 remain open. These checkpoints do not close the stage.
 

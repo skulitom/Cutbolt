@@ -1,0 +1,243 @@
+{
+  "date": "2026-10-13",
+  "kind": "generated_scene_resource_checkpoint",
+  "parent_commit": "61b5397cec21cb7a068c29e0580e87640b555243",
+  "source_sha256": {
+    "src/scene.rs": "420a786b9711eb989f60c074181dcc8a8444e4cb208b5e821845cca433b612c3",
+    "tests/generated_clips.py": "75c17c74d373c36b1ef3abc1791c2b0d1650308cd40b9c4135aced255f1dd67a",
+    "tests/generated_resources.py": "8f20dcd1e240d14bef2594a97edc9236032b5575a289a65498cb2e39517a0aa4"
+  },
+  "matching_windows_linux_input_files": 288,
+  "input_manifest_sha256": "61416cf76db39ff120b33585f3c7814e51fa806849a914592d9915a97ada4fca",
+  "implementation": [
+    "Uniform cached color and matte planes retain one RGB value; dense planes remain dense.",
+    "Silent prepared PCM retains exact sample count and emits bounded zero blocks; source dependencies remain pinned.",
+    "Cached-layer work accounting, source clocks, scene caps and 1 GiB shared retained-payload bound remain unchanged."
+  ],
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 255,
+      "format_and_clippy": "passed",
+      "all_targets_build": "passed",
+      "fixture_count": 14,
+      "fixtures": [
+        "agent_costs",
+        "captions",
+        "compositing",
+        "generated_clips",
+        "geometry",
+        "graphics",
+        "graphics_place",
+        "scene_luts",
+        "scenes",
+        "sequences",
+        "skills",
+        "spatial",
+        "temporal",
+        "tracks"
+      ],
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 301,
+      "report_sha256": "8f33b9655c65d7b9edd12f48da00edee638fe658d9f4bb26fda5635a157dec8b",
+      "log_sha256": "1d06ab3fca7bba45a793bf571c78e08063a02b1821c5270f0172e23910132054",
+      "old_engine_oracle": {
+        "passed": [
+          "generated.compact_uniform_planes_dense_pixels_and_exact_silence",
+          "generated.compact_silent_audio_keeps_pinned_dependencies",
+          "generated.twenty_minute_hd_caption_plan_has_bounded_retained_payload"
+        ],
+        "frames_compared": 110,
+        "stereo_sample_frames_compared": 211200,
+        "reference_engine_sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f",
+        "caption_plan": {
+          "seconds": 1200,
+          "width": 1920,
+          "height": 1080,
+          "windows": 120,
+          "chunks": 2,
+          "resources": {
+            "maximum_payload_bytes": 1073741824,
+            "retained_payload_bytes": 64244080,
+            "scene_count": 120,
+            "scope": "whole_render_shared"
+          }
+        },
+        "source_preservation": true,
+        "long_caption_export_claimed": false
+      },
+      "oracle_report_sha256": "650e345c6f7317ba3bb69ffab50349d2997faa5af2cfaa1630b9f9b9b452aaf0",
+      "rust_result_source": "Interactive cargo test output: 255 passed, 0 failed, 28.88 seconds; command completed successfully with all-target build. It is not included in the fixture log."
+    },
+    "linux": {
+      "rust_tests_passed": 254,
+      "format_and_clippy": "passed",
+      "all_targets_build": "passed",
+      "fixture_count": 14,
+      "fixtures": [
+        "agent_costs",
+        "captions",
+        "compositing",
+        "generated_clips",
+        "geometry",
+        "graphics",
+        "graphics_place",
+        "scene_luts",
+        "scenes",
+        "sequences",
+        "skills",
+        "spatial",
+        "temporal",
+        "tracks"
+      ],
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 154,
+      "report_sha256": "43d6d5cc0ad1802e5df621d8a140fbf4813f8e2b291a8f5b12c31100eae42536",
+      "log_sha256": "d9852883cb0c44c05da594cdda5c436570e0a9f43662e035ac1d02d8fd4787d6",
+      "old_engine_oracle": {
+        "passed": [
+          "generated.compact_uniform_planes_dense_pixels_and_exact_silence",
+          "generated.compact_silent_audio_keeps_pinned_dependencies",
+          "generated.twenty_minute_hd_caption_plan_has_bounded_retained_payload"
+        ],
+        "frames_compared": 110,
+        "stereo_sample_frames_compared": 211200,
+        "reference_engine_sha256": "bc196069fe100410e4ccc62c8aa202952a6df3f92e2fdf64dbb9a7b790779a53",
+        "caption_plan": {
+          "seconds": 1200,
+          "width": 1920,
+          "height": 1080,
+          "windows": 120,
+          "chunks": 2,
+          "resources": {
+            "maximum_payload_bytes": 1073741824,
+            "retained_payload_bytes": 64205680,
+            "scene_count": 120,
+            "scope": "whole_render_shared"
+          }
+        },
+        "source_preservation": true,
+        "long_caption_export_claimed": false
+      },
+      "oracle_report_sha256": "c7adaa781d133be783ce02bc0922e09311dbcbddf85cbc8cee79ff36f0f242ae",
+      "rust_result_source": "Retained Linux log: 254 passed, 0 failed, 27.32 seconds, followed by successful build, fixture report and final old-engine comparison."
+    }
+  },
+  "memory_probe": {
+    "records": [
+      {
+        "engine": "before",
+        "engine_sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f",
+        "windows": 60,
+        "timeline_seconds": 600,
+        "source_project_sha256": "0b19f00748226d85f129ec5eb4f6d6d20732b282dc98f84fea18d21334ea62ab",
+        "returncode": 0,
+        "ok": true,
+        "engine_peak_rss_bytes": 799469568,
+        "rss_samples": 614,
+        "rss_requested_sample_interval_ms": 10,
+        "wall_seconds": 6.421999999991385,
+        "resources": {
+          "maximum_payload_bytes": 1073741824,
+          "retained_payload_bytes": 893800160,
+          "scene_count": 60,
+          "scope": "whole_render_shared"
+        }
+      },
+      {
+        "engine": "after",
+        "engine_sha256": "38fa40cd098981e2415b6dfcfcdeca09763290d20acbc37881bda83fd9df45ba",
+        "windows": 60,
+        "timeline_seconds": 600,
+        "source_project_sha256": "0b19f00748226d85f129ec5eb4f6d6d20732b282dc98f84fea18d21334ea62ab",
+        "returncode": 0,
+        "ok": true,
+        "engine_peak_rss_bytes": 64557056,
+        "rss_samples": 778,
+        "rss_requested_sample_interval_ms": 10,
+        "wall_seconds": 8.125,
+        "resources": {
+          "maximum_payload_bytes": 1073741824,
+          "retained_payload_bytes": 32104520,
+          "scene_count": 60,
+          "scope": "whole_render_shared"
+        }
+      },
+      {
+        "engine": "before",
+        "engine_sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f",
+        "windows": 120,
+        "timeline_seconds": 1200,
+        "source_project_sha256": "2d0b6b92384ef08b0352415795d541bb643c81200f1c1e7094e096745277610f",
+        "returncode": 1,
+        "ok": false,
+        "engine_peak_rss_bytes": 964272128,
+        "rss_samples": 835,
+        "rss_requested_sample_interval_ms": 10,
+        "wall_seconds": 8.73399999999674,
+        "error": {
+          "code": "LIMIT_EXCEEDED",
+          "message": "Prepared generated-scene payload exceeds the 1 GiB whole-render bound; shorten scenes or reuse recipes",
+          "retry": "changed"
+        }
+      },
+      {
+        "engine": "after",
+        "engine_sha256": "38fa40cd098981e2415b6dfcfcdeca09763290d20acbc37881bda83fd9df45ba",
+        "windows": 120,
+        "timeline_seconds": 1200,
+        "source_project_sha256": "2d0b6b92384ef08b0352415795d541bb643c81200f1c1e7094e096745277610f",
+        "returncode": 0,
+        "ok": true,
+        "engine_peak_rss_bytes": 94769152,
+        "rss_samples": 1688,
+        "rss_requested_sample_interval_ms": 10,
+        "wall_seconds": 17.59299999999348,
+        "resources": {
+          "maximum_payload_bytes": 1073741824,
+          "retained_payload_bytes": 64209520,
+          "scene_count": 120,
+          "scope": "whole_render_shared"
+        }
+      }
+    ],
+    "source_preservation": true,
+    "scope": "Planning only, no export. RSS samples cover the engine process, not subprocesses; concurrent load is not controlled and timings are not a speed benchmark."
+  },
+  "memory_report_sha256": "eda628d0721b81e4a6c821b63b143a3e36d725bb8f3b385ee90a527271b004c9",
+  "reference_commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+  "fixture_development": [
+    "Two Windows reference-harness attempts rejected legacy transparent movie assets used as audio inputs. The final harness places legacy alpha assets on video only, compares decoded original PCM independently, and retains native scene audio clips. No production error acceptance was relaxed."
+  ],
+  "background_audit": [
+    {
+      "commit": "d04a3626f64a4254f3e500999ed45c8b0826f7ee",
+      "passed": 4,
+      "failed": 0,
+      "superseded_skips": 60,
+      "not_started": 0,
+      "wall_seconds": 2392
+    },
+    {
+      "commit": "c25f30860ebb0a9d2a91d74d9a5c1464c565e009",
+      "passed": 5,
+      "failed": 0,
+      "superseded_skips": 58,
+      "not_started": 0,
+      "wall_seconds": 952
+    }
+  ],
+  "limits": [
+    "Planning memory only; no twenty-minute export or throughput improvement claimed.",
+    "The ten-minute paired case succeeds on both engines; the old twenty-minute plan fails before completion and is not equal completed work.",
+    "RSS is sampled engine process memory; retained payload is a different logical accounting measure.",
+    "No general scene eviction cache. No caption or production-title command migration in this checkpoint.",
+    "Targeted quick checks do not close stage five, refresh thorough evidence or award progress points.",
+    "Reports identify the parent commit plus modified sources; implementation hashes above identify the tested changes."
+  ]
+}

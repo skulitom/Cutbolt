@@ -17,7 +17,7 @@ from sequences import nested, seqedit
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(root):
+def run(root, reference_engine=None):
     root = root.resolve()
     assert root != ROOT and ROOT not in root.parents
     sources, outputs = root/'sources', root/'outputs'
@@ -250,7 +250,10 @@ def run(root):
     passed.append('generated.exclusive_source_version_and_geometry_validation')
 
     assert originals == {name:hashlib.sha256((sources/name).read_bytes()).hexdigest() for name in originals}
-    report = dict(passed=passed,profile='quick',source_preservation=True)
+    from generated_resources import run as resource_checks
+    resources=resource_checks(root/'resources',reference_engine)
+    passed.extend(resources['passed'])
+    report = dict(passed=passed,profile='quick',source_preservation=True,resource_checks=resources)
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
 
@@ -258,5 +261,6 @@ def run(root):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--root','--output',dest='root',type=Path,required=True)
+    parser.add_argument('--reference-engine',type=Path)
     args=parser.parse_args()
-    print(json.dumps(run(args.root),indent=2))
+    print(json.dumps(run(args.root,args.reference_engine),indent=2))

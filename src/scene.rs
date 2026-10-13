@@ -419,8 +419,55 @@ struct Prepared {
 /// matte pass.
 struct Base {
     layers: usize,
-    color: Vec<u8>,
-    matte: Option<Vec<u8>>,
+    color: BasePlane,
+    matte: Option<BasePlane>,
+}
+
+/// Uniform cached planes need one pixel, not another full canvas per scene.
+/// The cached layer count and its work accounting stay the same.
+enum BasePlane {
+    Solid([u8; 3]),
+    Pixels(Vec<u8>),
+}
+impl BasePlane {
+    fn new(pixels: Vec<u8>) -> Self {
+        let (triples, remainder) = pixels.as_chunks::<3>();
+        if let Some(first) = triples.first()
+            && remainder.is_empty()
+            && triples.iter().all(|pixel| pixel == first)
+        {
+            Self::Solid(*first)
+        } else {
+            Self::Pixels(pixels)
+        }
+    }
+    fn copy_into(&self, mut rgb: Vec<u8>, pixels: usize) -> Vec<u8> {
+        match self {
+            Self::Solid(color) => {
+                if rgb.len() == pixels * 3 {
+                    fill(&mut rgb, *color);
+                    rgb
+                } else {
+                    color.repeat(pixels)
+                }
+            }
+            Self::Pixels(source) => {
+                debug_assert_eq!(source.len(), pixels * 3);
+                if rgb.len() == source.len() {
+                    rgb.copy_from_slice(source);
+                    rgb
+                } else {
+                    source.clone()
+                }
+            }
+        }
+    }
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Solid(_) => 3,
+            Self::Pixels(pixels) => pixels.len(),
+        }
+    }
 }
 
 impl Prepared {
@@ -1433,11 +1480,7 @@ fn compose_sample(
             } else {
                 &base.color
             };
-            if reuse {
-                rgb.copy_from_slice(start);
-            } else {
-                rgb = start.clone();
-            }
+            rgb = start.copy_into(rgb, pixels);
         }
         None if reuse => fill(&mut rgb, backdrop),
         None => rgb = backdrop.repeat(pixels),
@@ -1750,8 +1793,8 @@ fn static_base(scene: &Scene, prepared: &Prepared) -> Result<Option<Base>> {
     };
     Ok(Some(Base {
         layers,
-        color,
-        matte,
+        color: BasePlane::new(color),
+        matte: matte.map(BasePlane::new),
     }))
 }
 
@@ -1985,6 +2028,8 @@ pub(crate) struct FrameSource {
     scene: Scene,
     prepared: Prepared,
     retained: u64,
+    audio_samples: u64,
+    silent: bool,
 }
 impl std::fmt::Debug for FrameSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2002,6 +2047,13 @@ impl FrameSource {
             .clamp(1, 16);
         prepared.base = static_base(scene, &prepared)?;
         approved_base(scene, &prepared)?;
+        let audio_samples = prepared.pcm.len() as u64 / 2;
+        let silent = prepared.pcm.iter().all(|&value| value == 0);
+        if silent {
+            // Keep dependencies and the exact sample count, but release the repeated zero
+            // payload. Audio tracks materialize silence in bounded blocks when requested.
+            prepared.pcm = Vec::new();
+        }
         // Keep generated clips' retained payload bounded; per-frame effects reuse these inputs.
         // Constant processed copies are an optional standalone-render optimization, not needed
         // for exact pixels and deliberately omitted from this shared pool.
@@ -2016,10 +2068,9 @@ impl FrameSource {
                 .values()
                 .map(|(p, _)| p.rgba.len())
                 .sum::<usize>();
-        let base_bytes = prepared
-            .base
-            .as_ref()
-            .map_or(0, |b| b.color.len() + b.matte.as_ref().map_or(0, Vec::len));
+        let base_bytes = prepared.base.as_ref().map_or(0, |b| {
+            b.color.retained_bytes() + b.matte.as_ref().map_or(0, BasePlane::retained_bytes)
+        });
         let tables = prepared
             .effect_resources
             .report()
@@ -2038,6 +2089,8 @@ impl FrameSource {
             scene: scene.clone(),
             prepared,
             retained,
+            audio_samples,
+            silent,
         })
     }
     pub(crate) fn retained_bytes(&self) -> u64 {
@@ -2117,15 +2170,23 @@ impl FrameSource {
         control: &dyn media::Control,
         wave: &mut crate::pcm_stream::Writer<std::fs::File>,
     ) -> Result<()> {
-        let first = usize::try_from(first).ok().and_then(|n| n.checked_mul(2));
-        let end = usize::try_from(samples)
-            .ok()
-            .and_then(|n| n.checked_mul(2))
-            .and_then(|n| first?.checked_add(n));
-        let values = first
-            .zip(end)
-            .and_then(|(a, b)| self.prepared.pcm.get(a..b))
+        let end = first
+            .checked_add(samples)
+            .filter(|&end| end <= self.audio_samples)
             .ok_or_else(|| error("INVALID_RANGE", "Generated scene audio exceeds its source"))?;
+        if self.silent {
+            let zeros = [0u8; 16384];
+            let mut remaining = samples;
+            while remaining > 0 {
+                control.check()?;
+                let count = remaining.min(4096);
+                wave.push(&zeros[..count as usize * 4])?;
+                remaining -= count;
+            }
+            return Ok(());
+        }
+        // audio_samples came from this Vec's length, so the checked range also fits usize.
+        let values = &self.prepared.pcm[first as usize * 2..end as usize * 2];
         for chunk in values.chunks(8192) {
             control.check()?;
             let bytes: Vec<_> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -2454,6 +2515,23 @@ fn write_png_channels(
 mod tests {
     use super::*;
     use crate::layer_composite::REFERENCE_PATHS;
+
+    #[test]
+    fn uniform_cached_planes_preserve_pixels_and_sample_buffer_reuse() {
+        for color in [[0, 0, 0], [19, 73, 151], [127, 127, 127], [255, 255, 255]] {
+            let original = color.repeat(240);
+            let compact = BasePlane::new(original.clone());
+            assert_eq!(compact.retained_bytes(), 3);
+            assert_eq!(compact.copy_into(Vec::new(), 240), original);
+            assert_eq!(compact.copy_into(vec![37; 720], 240), original);
+        }
+        let mut varied = [19, 73, 151].repeat(240);
+        varied[719] = 152;
+        let dense = BasePlane::new(varied.clone());
+        assert_eq!(dense.retained_bytes(), varied.len());
+        assert_eq!(dense.copy_into(Vec::new(), 240), varied);
+        assert_eq!(dense.copy_into(vec![37; 720], 240), varied);
+    }
 
     #[test]
     fn lut_cache_matches_unoptimized_frames_and_rehashes_tables() {
