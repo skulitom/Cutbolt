@@ -1,5 +1,33 @@
 # Progress history
 
+## 13 October 2026: precise prepared scene frames
+
+The library now prepares complete scene frames in straight-linear UNORM16,
+sharing original input validation, exact scene clocks, expressions, geometry and
+PCM soundtracks with the default path. Held images, binary mattes, graphics,
+tiles, fractional opacity, ordered effects, spatial masks and shutter samples
+retain wide pixels. 3D planes share the existing intersection/depth code and
+preserve the declared encoded-color Lambert response continuously. Static
+prefix caching does not mistake matching byte controls for identical wide frames.
+
+Independent Fraction/Decimal/f64 references cover 36 cases, 214 frames
+and 91,050 pixels on each platform, with zero observed differences and matching
+Windows/Linux numerical reports. The declared final-channel tolerance is two
+UNORM16 codes. Nine strict quick fixtures pass on Windows/Linux
+(432/284 seconds), plus 260/259 Rust tests, all-target lint and formatting.
+A mutation test confirms prepared image/LUT/PCM data stay pinned while full
+publication verification rejects changed content. [Evidence](../verification/working-scene-frames-2026-10-13.json)
+records the exact sources, checks and bounds. Payload and frame-buffer estimates
+remain separate from process RSS and a future complete render-plan charge.
+
+The previous `bd51b0c` checkpoint shipped to main: its gate passed five fixtures
+plus Rust, reused 26 unchanged passes and deferred 50 fixtures to the background
+in 194 seconds, with no failures/skips. This checkpoint still needs its own ship
+gate. Ordinary agent commands retain the existing renderer; saved precision
+settings, generated/nested track wiring, final output conversion, the complete
+stage-six gate and final two-plan performance/requirements audit remain open.
+No points, throughput improvement or new thorough milestone is claimed.
+
 ## 13 October 2026: precise working-layer frames
 
 The library layer compositor now draws straight-linear working images through

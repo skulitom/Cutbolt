@@ -12,6 +12,7 @@ use crate::{
     time::Time,
 };
 use serde::{Deserialize, Serialize};
+pub mod working;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -413,6 +414,8 @@ struct Prepared {
     /// Threads one frame may use to draw a large spatial layer in row bands: 1 inside the frame
     /// pool, more when a single frame is composed.
     threads: usize,
+    /// Wide opacity only for the precise path; ordinary preparation allocates no table.
+    working_opacity: Option<Vec<Vec<u16>>>,
 }
 
 /// The first `layers` layers composited over the backdrop: color, and for transparent scenes the
@@ -903,6 +906,10 @@ pub(crate) fn decode_png_bounded(bytes: &[u8], max_side: u32) -> Result<Pixels> 
 }
 
 fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
+    prepare_with_precision(scene, root, false)
+}
+
+fn prepare_with_precision(scene: &Scene, root: &Path, precise: bool) -> Result<Prepared> {
     let frames = scene.validate()?;
     let exposure = crate::temporal::Plan::new(scene, frames)?;
     let geometry = crate::geometry::prepare(scene, &exposure.times)?;
@@ -936,6 +943,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
     let mut selections = Vec::new();
     let mut tile_selections = Vec::new();
     let mut alpha_checked = HashSet::new();
+    let mut working_opacity = precise.then(Vec::new);
     for (li, layer) in scene.layers.iter().enumerate() {
         let selected = exposure
             .times
@@ -953,6 +961,14 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
             expression_samples.as_deref(),
         )
         .under(|| format!("layers[{li}] ({})", layer.id))?;
+        if let Some(opacity) = &mut working_opacity {
+            opacity.push(working::sample_opacity(
+                layer,
+                &selected,
+                &exposure.times,
+                expression_samples.as_deref(),
+            )?);
+        }
         effect_resources
             .add(&layer.effects, root)
             .under(|| format!("layers[{li}] ({})", layer.id))?;
@@ -1302,6 +1318,7 @@ fn prepare(scene: &Scene, root: &Path) -> Result<Prepared> {
         base: None,
         processed: HashMap::new(),
         threads: 1,
+        working_opacity,
     })
 }
 

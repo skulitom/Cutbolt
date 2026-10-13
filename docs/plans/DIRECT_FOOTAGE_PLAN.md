@@ -356,6 +356,15 @@ The working-layer component now retains wide pixels through source masks, intege
 and filtered spatial transforms, fractional opacity and transparent blending. Its
 independent frame oracle is part of the verifier; saved scene/track mode integration
 is still required before the precise path is available to agent commands.
+The library now prepares complete precise scene frames, including held images,
+graphics, tiles, exact expression opacity, 3D planes, temporal samples, proxy sizes
+and unchanged PCM windows. Its source checks and default geometry are shared;
+the new full-frame oracle covers linear pixels independently. Saved project
+selection, generated/nested/track integration and the final delivery/banding gate
+remain open; ordinary commands still use the existing path.
+[Scene evidence](../../verification/working-scene-frames-2026-10-13.json) records
+36 cases and 214 complete frames per platform with zero observed differences,
+plus nine strict quick regressions on Windows and Linux.
 
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.

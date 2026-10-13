@@ -84,9 +84,10 @@ def barycentric(point,triangle):
     return weights if all(0<=v<=1 for v in weights) else None
 
 
-def reference_sample(scene,sources,t):
-    w,h=scene['width'],scene['height'];pixels=[list(scene['background']) for _ in range(w*h)]
-    if not 0<=t<frac(scene['duration']):return bytes(v for p in pixels for v in p)
+def reference_sample(scene,sources,t,working=None):
+    # Optional precise color oracle; the independent forward projection stays the same.
+    w,h=scene['width'],scene['height'];pixels=[working.background(scene) if working else list(scene['background']) for _ in range(w*h)]
+    if not 0<=t<frac(scene['duration']):return pixels if working else bytes(v for p in pixels for v in p)
     g=scene['geometry'];nodes={n['id']:n for n in g['nodes']};c=g['camera'];parent=c.get('parent')
     def point(v,p=parent):return forward(nodes,p,tuple(D(x)/1000 for x in vector_at(v,t)),t)
     camera=point(c['position_milli']);target=point(c['target_milli']);forward_axis=unit(sub(target,camera))
@@ -112,10 +113,12 @@ def reference_sample(scene,sources,t):
         if 'plane' not in n:continue
         p=n['plane'];layer=layers[p['layer']];local=t-frac(layer['start'])
         if not 0<=local<frac(layer['duration']):continue
-        index=selected(layer,t*25)
+        index=0 if working and layer.get('graphics') else selected(layer,t*25)
         if index is None:continue
-        frame=layer['frames'][index]
-        with Image.open(sources/frame['image']['path']) as image:source=image.convert('RGBA')
+        frame={'offset':[0,0]} if working and layer.get('graphics') else layer['frames'][index]
+        if working:source=working.image(layer,frame)
+        else:
+            with Image.open(sources/frame['image']['path']) as image:source=image.convert('RGBA')
         ex,ey=[D(v)/1000 for v in p['size_milli']]
         corners=[forward(nodes,n['id'],v,t) for v in [(-ex/2,ey/2,0),(ex/2,ey/2,0),(ex/2,-ey/2,0),(-ex/2,-ey/2,0)]]
         normal=unit(cross(sub(corners[1],corners[0]),sub(corners[0],corners[3])))
@@ -137,6 +140,7 @@ def reference_sample(scene,sources,t):
             q=255-100*t
             if layer['id']=='B':q/=2
             opacity=int(q+F(1,2))
+        if working:opacity=working.opacity(layer,t)
         chain=json.dumps(resolve_chain(layer.get('effects',[]),local),sort_keys=True)
         mask=rect_at(layer,t*25);cx,cy,cw,ch=layer['transform']['crop'];cache={}
         for y in range(h):
@@ -154,12 +158,13 @@ def reference_sample(scene,sources,t):
                 if not near<=depth<far or not 0<=u<1 or not 0<=v<1:continue
                 sx,sy=int(u*layer['canvas'][0]),int(v*layer['canvas'][1])
                 if not cx<=sx<cx+cw or not cy<=sy<cy+ch:continue
-                if mask:
+                if mask and not working:
                     mx,my,mw,mh=mask;inside=mx<=sx<mx+mw and my<=sy<my+mh
                     if inside==layer['mask'].get('inverted',False):continue
                 ix,iy=sx-frame['offset'][0],sy-frame['offset'][1]
                 if not 0<=ix<source.width or not 0<=iy<source.height:continue
-                if (sx,sy) not in cache:cache[sx,sy]=pixel_reference(source.getpixel((ix,iy)),layer.get('alpha_mode','straight'),(sx,sy),chain)
+                if (sx,sy) not in cache:
+                    cache[sx,sy]=working.texture(source.getpixel((ix,iy)),layer,(sx,sy),local) if working else pixel_reference(source.getpixel((ix,iy)),layer.get('alpha_mode','straight'),(sx,sy),chain)
                 colors,alpha=cache[sx,sy]
                 if p['material']=='lambert' and alpha:
                     gain=[D(0)]*3
@@ -171,15 +176,18 @@ def reference_sample(scene,sources,t):
                             if not squared:continue
                             factor=max(D(0),dot(normal,delta)/squared.sqrt())*(distance*distance/squared if falloff=='inverse_square' else 1)
                         gain=[a+b*factor for a,b in zip(gain,color)]
-                    colors=tuple(F(int(max(D(0),min(D(255),dec(v)*255*q)).to_integral_value(rounding=ROUND_HALF_UP)),255) for v,q in zip(colors,gain))
-                hits[y*w+x].append((depth,n['id'],colors,F(alpha*opacity,255*255),layer.get('blend_mode','normal')))
+                    colors=working.light(colors,gain) if working else tuple(F(int(max(D(0),min(D(255),dec(v)*255*q)).to_integral_value(rounding=ROUND_HALF_UP)),255) for v,q in zip(colors,gain))
+                amount=working.coverage(layer,mask,sx,sy,alpha,opacity) if working else F(alpha*opacity,255*255)
+                hits[y*w+x].append((depth,n['id'],colors,amount,layer.get('blend_mode','normal')))
     for i,items in enumerate(hits):
         for depth,name,colors,coverage,mode in sorted(items,key=lambda hit:(-hit[0],hit[1])):
+            if working:
+                pixels[i]=working.over(colors,coverage,mode,pixels[i]);continue
             for c,color in enumerate(colors):
                 back=F(pixels[i][c],255)
                 blended=color if mode=='normal' else color*back if mode=='multiply' else 1-(1-color)*(1-back)
                 pixels[i][c]=int(255*(coverage*blended+(1-coverage)*back)+F(1,2))
-    return bytes(v for p in pixels for v in p)
+    return pixels if working else bytes(v for p in pixels for v in p)
 
 
 def reference(scene,sources,n):

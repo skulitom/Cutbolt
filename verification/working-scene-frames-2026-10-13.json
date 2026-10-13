@@ -1,0 +1,343 @@
+{
+  "date": "2026-10-13",
+  "kind": "precise_prepared_scene_frames",
+  "parent_commit": "bd51b0c67453b72c75da3529d92a87b24408acba",
+  "source_sha256": {
+    "src/color.rs": "04923362bb6bfc4e55f40a907d0deec1950348a0705019025ae4de6b59b293e4",
+    "src/geometry.rs": "304c115b3f56c0c1cbefa50982ceabd44be949ae278dcef8c7c062982aa076a0",
+    "src/scene.rs": "284f0f5b47f6d6ed5ed8adf772df2020d903f28bef9419a25594b0684a5db253",
+    "src/scene/working.rs": "de749aed996682ae2c90ea3b8be44cd71ffaa9f10d275fab12cab01e583820aa",
+    "examples/working_scenes_fixture.rs": "4a1d2dd8a436f834e8c0247b29526422ff7e9fb15b8092cf047a2c65af512405",
+    "tests/geometry.py": "5bcbb65a7417d9bf52f68aeaa79a61dea88a7fce1391d599f99ef19798289c90",
+    "tests/working_scenes.py": "08ba5b2fb28c545ba7afb475344aad23fcf678f91731b0b30cf75dc8ad5ecf99",
+    "tools/verify.py": "70127055b273e3f6c8e14d7b5b43e43ce559d68bb9650f918e0d7d66997b542c"
+  },
+  "linux_copied_source_hashes_match": true,
+  "source_note": "Checks compiled the modified sources identified by these hashes. Windows report labels the parent commit; Linux retains its older checkout Git identity.",
+  "checks": {
+    "windows": {
+      "rust_tests": 260,
+      "all_targets_clippy": true,
+      "strict_quick": [
+        "expressions",
+        "generated_clips",
+        "geometry",
+        "graphics",
+        "native_scenes",
+        "scene_luts",
+        "temporal",
+        "working_layers",
+        "working_scenes"
+      ],
+      "wall_seconds": 432,
+      "report_sha256": "129f4b302ca75a1ce6ada7a7918bca414acbd0d44ac40c08c40e9ac8ae412c4b",
+      "log_sha256": "c0316996b8d1ce076894aefe77404108eea3d3dd299f218a3dafe5e266114615",
+      "reported_checkout_commit": "bd51b0c67453b72c75da3529d92a87b24408acba"
+    },
+    "linux": {
+      "rust_tests": 259,
+      "all_targets_clippy": true,
+      "strict_quick": [
+        "expressions",
+        "generated_clips",
+        "geometry",
+        "graphics",
+        "native_scenes",
+        "scene_luts",
+        "temporal",
+        "working_layers",
+        "working_scenes"
+      ],
+      "wall_seconds": 284,
+      "report_sha256": "db9481e53f5193208545b2ea098f9a6499dde017b737fdb4757e8608f3ebbb77",
+      "log_sha256": "ea4ced4ccd585d78ce60ab84bc700899c14b215f3822c8390e4e46440973a520",
+      "reported_checkout_commit": "c4064df0f3c7959e4fd5a7f861d3f3f59dc1f4d5"
+    }
+  },
+  "oracle": {
+    "passed": [
+      "working_scenes.complete_2d_frames_and_source_interpretation",
+      "working_scenes.exact_opacity_curves_and_expressions",
+      "working_scenes.temporal_proxy_and_native_clocks",
+      "working_scenes.generated_graphics_tiles_and_static_prefix",
+      "working_scenes.independent_forward_3d_and_lighting",
+      "working_scenes.audio_identity_and_bounds"
+    ],
+    "cases": [
+      {
+        "name": "held_sources",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "hold_last",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "transparent",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "offset_anchor_crop_turn_scale",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "encoded_premultiplied_sources",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "binary_matte_before_decode",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "grade_key_fade_normal",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "grade_key_fade_multiply",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "grade_key_fade_screen",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "transparent_scene",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "transparent_shutter_edges",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "filtered_mask_grade",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "scaled_and_proxy_frames",
+        "frames": 12,
+        "pixels": 13770,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "exact_expression_subbyte_opacity",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "fractional_fade_changes_within_one_byte",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "large_expression_rational",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "static_prefix_cache",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "trimmed_generated_graphics",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "empty_graphics",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "held_tile_canvas",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "original_pcm_windows",
+        "frames": 1,
+        "pixels": 384,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "perspective_intersecting_depth",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_equal_depth",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_equal_depth_reordered",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_feathered_mask",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_graphics_texture",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_subbyte_expression_opacity",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_animated_hierarchy_camera",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "orthographic_depth",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "continuous_encoded_material_lighting",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "point_light",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "lit_shutter",
+        "frames": 3,
+        "pixels": 864,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_near_far_clipping",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_backface",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "3d_double_sided",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      },
+      {
+        "name": "native_60fps_shutter",
+        "frames": 6,
+        "pixels": 2304,
+        "maximum_unorm16_error": 0,
+        "tolerance": 2
+      }
+    ],
+    "frames": 214,
+    "pixel_samples": 91050,
+    "maximum_unorm16_error": 0,
+    "numerical_response_sha256": "11989f581249c6badd764b8490a83765deea87d6a2fe56682af5072de20ac096",
+    "rejected_cases": 5,
+    "source_hashes_preserved": true,
+    "reference": "Independent exact Fraction clocks/coverage, Decimal forward 3D polygons, and f64 color/effect equations; at most two UNORM16 codes per final channel",
+    "limits": "Prepared precise scene library source; project setting, generated/nested track integration and final timeline delivery remain open"
+  },
+  "platform_reports_identical": true,
+  "formatting": true,
+  "source_change_test": "Images, LUTs and WAV data stay pinned for frame/PCM reads; full verification rejects each same-size content mutation after preparation.",
+  "windows_oracle_sha256": "0b2079b06483d603099e3ee3fc8c8bf5f149490bb7bb4e7b346ce03d62853738",
+  "linux_oracle_sha256": "3fbd754c9f0eee953cf429d1dedd652f372edf5b5c94406cf51bc27c413bd927",
+  "not_claimed": [
+    "saved working_space selection",
+    "generated/nested track integration",
+    "full saved-timeline grade/fade and delivery gate",
+    "stage-six exit",
+    "performance",
+    "thorough milestone",
+    "points"
+  ]
+}

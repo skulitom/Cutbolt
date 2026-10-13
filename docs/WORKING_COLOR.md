@@ -1,7 +1,7 @@
-# Working color: arithmetic foundation
+# Working color: precise rendering components
 
-Stage six is in development. Project snapshots, scenes, previews and exports still
-use their existing rendering path. There is no `working_space` setting yet.
+Stage six is in development. Agent commands, saved projects, previews and exports
+still use their existing rendering path. There is no `working_space` setting yet.
 
 The Rust library's `color::working::Pixel` stores straight linear SDR RGB and alpha
 as four unsigned 16-bit values. This is the foundation for retaining precision
@@ -79,6 +79,46 @@ transparent layer stacks, animated pixel effects and bounds. Its 4,096-level gra
 gradient retains distinct levels at sub-byte opacity. This validates the layer
 component; it is not the plan's final saved-timeline grade/fade and delivery gate.
 
+## Prepared scene frames
+
+`scene::working::Source` accepts the existing full scene recipe and prepares its
+original inputs for linear UNORM16 frames. It shares source validation, exact
+clocks, expression evaluation, geometry and soundtracks with the default path.
+PNG and rasterized graphics are decoded into working pixels once; binary mattes
+are exact zero/keep operations before this decode. A shared picture has a separate
+cached interpretation when layers declare different alpha modes. Held frames,
+offsets, anchors, tiles and generated graphics retain their source semantics.
+
+Opacity curves and graph bindings reach UNORM16 without a byte-sized control in
+between. Geometry and position still follow their existing bounded contracts.
+Only the conservatively proven static layer prefix is cached; comparing rounded
+byte controls could wrongly freeze a changing precise fade. Effects and filtered
+layers use the working components described above, with shared identity-bound LUTs.
+
+The 3D path shares ray intersections, clipping, texture coordinates and stable
+depth order with the default renderer. Its declared Lambert material keeps its
+encoded-color lighting response continuously, then stores linear UNORM16 without
+an intervening byte. Source-over blends in linear light. Shutter samples average
+associated linear color and coverage, with one nearest UNORM16 store. Integer
+enlargement preserves pixels exactly; reduced proxies use associated box means.
+Hidden RGB never contributes to those means. All supported native scene clocks
+use exact rational exposure times.
+
+This source returns working pixels and bounded PCM windows. It neither encodes
+nor publishes media. The caller must invoke its full source verification before
+publication. Prepared image, LUT and audio data stay pinned even if an input
+changes; verification rejects changed content. Reports distinguish actual wide
+opacity from the retained legacy byte controls and identify linear integration.
+Retained payload, conversion overlap, and frame buffers have separate 1 GiB bounds;
+these are conservative payload estimates, not a process-memory guarantee. A parent
+render still has to charge its whole generated-source pool and concurrent buffers.
+
+`working_scenes` compares complete prepared frames against independent Fraction
+clocks/coverage, Decimal forward polygon projection and f64 color equations. It
+covers source alpha, binary mattes, geometry, lighting, expressions, fades, temporal
+samples, proxies, tiles, graphics and audio windows, with a declared tolerance of
+two UNORM16 codes per final channel. It does not render through a saved timeline.
+
 ## Verification and remaining work
 
 `tests/working_color.py` builds a bounded adapter to the actual library primitives
@@ -90,8 +130,8 @@ ramp requires strictly increasing tile means and an error of at most 1/128 deliv
 code. This arithmetic fixture is registered in the ordinary verifier.
 
 Renderer integration remains open: saved project settings and history, wiring
-working layer frames into scenes and tracks, transitions, generated and nested pictures,
-memory accounting, previews, proxies and delivery. A final conversion must happen
+prepared scene and footage frames into tracks, transitions, generated and nested
+pictures, full-plan memory accounting, preview commands and delivery. A final conversion must happen
 only at delivery; a child sequence or generated source cannot be rounded through
 the old compositor first. The source interpretation and all supported combinations
 of depth and light must be explicit. The plan's gradient-through-grade-and-opacity

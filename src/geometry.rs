@@ -573,14 +573,14 @@ fn lighting(lights: &[LightState], position: V, normal: V) -> V {
     result
 }
 
-pub(crate) fn compose(
+// Both color paths share ray intersection, clipping, texture coordinates and stable depth order.
+// The caller owns color arithmetic, so the default compositor keeps its original byte rounding.
+fn visit<T, E>(
     scene: &Scene,
     state: &State,
-    mut texture: impl FnMut(usize, u32, u32) -> Option<Texel>,
-) -> Vec<u8> {
-    let mut rgb = scene
-        .background
-        .repeat((scene.width * scene.height) as usize);
+    mut texture: impl FnMut(usize, u32, u32) -> std::result::Result<Option<T>, E>,
+    mut draw: impl FnMut(u32, u32, T, Option<V>) -> std::result::Result<(), E>,
+) -> std::result::Result<(), E> {
     let c = &state.camera;
     // A perspective camera casts every ray from its position, so each plane's local ray origin
     // is the same for the whole frame; the hit list is reused from pixel to pixel.
@@ -637,7 +637,7 @@ pub(crate) fn compose(
                 let sx = (u * canvas[0] as f64).floor() as u32;
                 let sy = (v * canvas[1] as f64).floor() as u32;
                 if let Some(texel) =
-                    texture(plane.layer, sx.min(canvas[0] - 1), sy.min(canvas[1] - 1))
+                    texture(plane.layer, sx.min(canvas[0] - 1), sy.min(canvas[1] - 1))?
                 {
                     hits.push((i, depth, facing, texel));
                 }
@@ -646,43 +646,110 @@ pub(crate) fn compose(
                 b.1.total_cmp(&a.1)
                     .then_with(|| state.planes[a.0].id.cmp(&state.planes[b.0].id))
             });
-            for (i, depth, facing, mut texel) in hits.drain(..) {
+            for (i, depth, facing, texel) in hits.drain(..) {
                 let plane = &state.planes[i];
-                if plane.lambert && texel.rgba[3] > 0 {
+                let gain = if plane.lambert {
                     let normal = if facing > 0.0 {
                         mul(plane.normal, -1.0)
                     } else {
                         plane.normal
                     };
-                    let gain = lighting(&state.lights, add(origin, mul(direction, depth)), normal);
-                    let alpha = if matches!(texel.alpha_mode, AlphaMode::Premultiplied) {
-                        255.0 / texel.rgba[3] as f64
-                    } else {
-                        1.0
-                    };
-                    for (channel, gain) in gain.into_iter().enumerate() {
-                        texel.rgba[channel] = (texel.rgba[channel] as f64 * alpha * gain)
-                            .round()
-                            .clamp(0.0, 255.0) as u8;
-                    }
-                    texel.alpha_mode = AlphaMode::Straight;
-                }
-                let position = ((y * scene.width + x) * 3) as usize;
-                for channel in 0..3 {
-                    rgb[position + channel] = composite::masked_channel(
-                        rgb[position + channel],
-                        texel.rgba[channel],
-                        texel.rgba[3],
-                        texel.opacity,
-                        texel.blend,
-                        texel.alpha_mode,
-                        texel.coverage,
-                    );
-                }
+                    Some(lighting(
+                        &state.lights,
+                        add(origin, mul(direction, depth)),
+                        normal,
+                    ))
+                } else {
+                    None
+                };
+                draw(x, y, texel, gain)?;
             }
         }
     }
+    Ok(())
+}
+
+pub(crate) fn compose(
+    scene: &Scene,
+    state: &State,
+    mut texture: impl FnMut(usize, u32, u32) -> Option<Texel>,
+) -> Vec<u8> {
+    let mut rgb = scene
+        .background
+        .repeat((scene.width * scene.height) as usize);
+    let result: std::result::Result<(), std::convert::Infallible> = visit(
+        scene,
+        state,
+        |i, x, y| Ok(texture(i, x, y)),
+        |x, y, mut texel, gain| {
+            if let Some(gain) = gain.filter(|_| texel.rgba[3] > 0) {
+                let alpha = if matches!(texel.alpha_mode, AlphaMode::Premultiplied) {
+                    255.0 / texel.rgba[3] as f64
+                } else {
+                    1.0
+                };
+                for (channel, gain) in gain.into_iter().enumerate() {
+                    texel.rgba[channel] = (texel.rgba[channel] as f64 * alpha * gain)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                texel.alpha_mode = AlphaMode::Straight;
+            }
+            let position = ((y * scene.width + x) * 3) as usize;
+            for channel in 0..3 {
+                rgb[position + channel] = composite::masked_channel(
+                    rgb[position + channel],
+                    texel.rgba[channel],
+                    texel.rgba[3],
+                    texel.opacity,
+                    texel.blend,
+                    texel.alpha_mode,
+                    texel.coverage,
+                );
+            }
+            Ok(())
+        },
+    );
+    if let Err(never) = result {
+        match never {}
+    }
     rgb
+}
+
+pub(crate) struct WorkingTexel {
+    pub pixel: crate::color::working::Pixel,
+    pub opacity: u16,
+    pub coverage: u32,
+    pub blend: BlendMode,
+}
+
+pub(crate) fn compose_working(
+    scene: &Scene,
+    state: &State,
+    backdrop: crate::color::working::Pixel,
+    texture: impl FnMut(usize, u32, u32) -> Result<Option<WorkingTexel>>,
+) -> Result<Vec<crate::color::working::Pixel>> {
+    use crate::color::{Transfer, working::Pixel};
+    let mut pixels = vec![backdrop; (scene.width * scene.height) as usize];
+    visit(scene, state, texture, |x, y, mut texel, gain| {
+        if let Some(gain) = gain.filter(|_| texel.pixel.0[3] > 0) {
+            // Preserve the existing material's encoded-color Lambert response continuously.
+            // Lighting is not another source decode and must not quantize through RGBA8.
+            let mut value = texel.pixel.linear();
+            for (channel, gain) in gain.into_iter().enumerate() {
+                value[channel] = Transfer::Srgb
+                    .decode((Transfer::Srgb.encode(value[channel]) * gain).clamp(0.0, 1.0));
+            }
+            texel.pixel = Pixel::from_linear(value)?;
+        }
+        let position = (y * scene.width + x) as usize;
+        pixels[position] =
+            texel
+                .pixel
+                .over(pixels[position], texel.opacity, texel.coverage, texel.blend)?;
+        Ok(())
+    })?;
+    Ok(pixels)
 }
 
 pub fn capabilities() -> Value {

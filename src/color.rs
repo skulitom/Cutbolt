@@ -47,7 +47,7 @@ impl Transfer {
             Self::Bt709 => "bt709",
         }
     }
-    fn decode(self, v: f64) -> f64 {
+    pub(crate) fn decode(self, v: f64) -> f64 {
         match self {
             Self::Srgb => {
                 if v <= 0.04045 {
@@ -65,7 +65,7 @@ impl Transfer {
             }
         }
     }
-    fn encode(self, v: f64) -> f64 {
+    pub(crate) fn encode(self, v: f64) -> f64 {
         match self {
             Self::Srgb => {
                 if v <= 0.0031308 {
