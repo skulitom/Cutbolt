@@ -124,7 +124,7 @@ Optional `decode` selects [local hardware source decoding](ACCELERATION.md), wit
 
 ## Timed captions
 
-For captions, use [the caption workflow](CAPTIONS.md): `captions.draft` (cues from transcripts of the timeline's sources), `captions.render` (a whole track burned into one transparent overlay, through `job.start`), `captions.import`, `captions.inspect`, `captions.apply`, `captions.encode`, `captions.export` and `captions.scene`. Caption documents retain exact rational cue times, styles and explicit overlap policy. They are immutable snapshots saved by the caller. Sidecar export previews and reports formatting losses before writing a new SRT/WebVTT file; scene conversion samples a bounded caption window using explicit external fonts and layout boxes. The returned scene compiles to an ordinary asset for the saved-session commands below.
+For captions, use [the caption workflow](CAPTIONS.md): `captions.draft` (cues from transcripts of the timeline's sources), `captions.render` (generated scene edit file with `mode: "generated"`, or a compiled transparent overlay by default, through `job.start`), `captions.import`, `captions.inspect`, `captions.apply`, `captions.encode`, `captions.export` and `captions.scene`. Caption documents retain exact rational cue times, styles and explicit overlap policy. They are immutable snapshots saved by the caller. Sidecar export previews and reports formatting losses before writing a new SRT/WebVTT file; scene conversion samples a bounded caption window using explicit external fonts and layout boxes. Generated caption edits apply through `session.apply` at the returned revision; standalone scenes can also be saved as native clip sources or compiled assets.
 
 ## Saved editing sessions
 

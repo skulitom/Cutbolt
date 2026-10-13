@@ -109,6 +109,8 @@ Publication and cancellation serialize through the job-store writer transaction.
 
 Rust embedders can call `commands::handle` or the library modules. Background jobs need the Cutbolt executable: set `CUTBOLT_EXECUTABLE` to its absolute path when embedding in a different executable. The CLI defaults to itself. No hosted API or network dependency is required.
 
+Generated captions: queue `captions.render` with `mode: "generated"` and a new `.json` output. Its small receipt points to `operations` for `session.apply` at `expected_revision`; recipes stay in the edit file and saved snapshot. The default compiled `.mkv` mode keeps existing jobs compatible. See [CAPTIONS](CAPTIONS.md#generated-captions-without-a-compiled-movie).
+
 ## MCP over stdio
 
 Launch `cutbolt.exe mcp`. The native adapter reads one JSON-RPC message per line and reserves stdout for protocol messages. EOF shuts down the adapter; submitted jobs continue. It negotiates `2025-11-25` or `2025-06-18`, supports initialize/initialized, ping, tools/list and tools/call, and advertises only tools. No resources, prompts, sampling, HTTP listener or MCP Tasks extension is advertised.

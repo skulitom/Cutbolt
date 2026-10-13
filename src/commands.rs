@@ -654,7 +654,7 @@ pub enum Request {
         input_root: PathBuf,
         /// Existing absolute directory; the output must lie inside it.
         output_root: PathBuf,
-        /// Absolute path of a new .mkv overlay inside output_root; existing files are never overwritten.
+        /// Absolute new output: .mkv in compiled mode, .json edit proposal in generated mode. Never overwritten.
         output: PathBuf,
         /// Timeline time the overlay starts at, on a frame boundary; default zero. Captions at that time appear on its first frame.
         #[serde(default)]
@@ -662,9 +662,18 @@ pub enum Request {
         /// Length to cover, whole frames; default to the timeline end. The asset may run a few frames longer to keep windows sample- and millisecond-exact.
         #[serde(default)]
         duration: Option<Time>,
-        /// ID of the returned asset; default the document ID.
+        /// Compiled asset ID or generated clip ID prefix; default the document ID.
         #[serde(default)]
         asset_id: Option<String>,
+        /// compiled (default) writes overlay media; generated writes scene edits for session.apply, with no movie.
+        #[serde(
+            default,
+            skip_serializing_if = "crate::caption_overlay::Mode::is_compiled"
+        )]
+        mode: crate::caption_overlay::Mode,
+        /// Generated mode's enabled alpha_over video track; created if absent. Defaults to asset_id/document ID.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track_id: Option<String>,
     },
     #[serde(rename = "captions.scene")]
     CaptionsScene(crate::captions::SceneRequest),
@@ -2118,6 +2127,8 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             duration,
             asset_id,
+            mode,
+            track_id,
         } => crate::caption_overlay::render(&crate::caption_overlay::Request {
             document: &document,
             layouts: &layouts,
@@ -2128,6 +2139,8 @@ pub fn handle(request: Request) -> Result<Value> {
             start,
             duration,
             asset_id: asset_id.as_deref(),
+            mode,
+            track_id: track_id.as_deref(),
         }),
         Request::AudioTighten {
             project,

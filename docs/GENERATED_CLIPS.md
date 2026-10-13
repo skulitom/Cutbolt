@@ -69,5 +69,8 @@ sequences, previews, proxies, queued export, document loading, saved-history
 recovery, multiple render chunks and changed cache dependencies. Standalone scene
 rendering remains available. [Graphics placement](TEMPLATES.md#place-a-graphic-in-one-job)
 now saves a generated clip in one edit, with no movie; actual older compiled
-receipts retain their replay behavior. Caption and production-title migration,
-and the complete stage-5 quick gate, remain follow-up work in the active plan.
+receipts retain their replay behavior. `captions.render` with `mode: "generated"`
+writes revision-checked scene operations to a JSON file, using the same bounded
+caption windows and trimming the final placed clip to exact coverage; see
+[CAPTIONS](CAPTIONS.md#generated-captions-without-a-compiled-movie). Production-title
+and default workflow migration and the complete stage-5 quick gate remain open.

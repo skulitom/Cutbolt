@@ -30,7 +30,7 @@ def packets(path):
     return values
 
 
-def run(root):
+def run(root, reference_engine=None):
     root=root.resolve();assert root!=ROOT and ROOT not in root.parents
     root.mkdir(parents=True,exist_ok=True)
     sources,output,oracle,store=[root/n for n in ('sources','output','oracle','store')]
@@ -314,10 +314,14 @@ def run(root):
     assert before_outputs=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir()}
     assert not list(output.glob('.cutbolt-scene-*'))
     passed.append('captions.validation_and_source_output_preservation')
+    from generated_captions import run as generated_checks
+    generated=generated_checks(root/'generated',exe,sources,track,layouts,timeline,reference_engine)
+    passed.extend(generated['passed'])
     report={'passed':passed,'decoded_frames':decoded,'silent_stereo_sample_frames':decoded*1920,'rejected_cases':len(invalid)+3,
             'external_subtitle_checks':'FFprobe 7.0 packet text and exact PTS/duration across SRT/WebVTT exports, Unicode and reported-loss export',
             'pixel_oracle':'Independent Fraction cue activity at frame starts, original glyph rectangle geometry and forward image composition; every RGB frame and silent PCM sample compared exactly',
             'scope':'UTF-8 SRT plain-text and declared WebVTT color-class/voice/alignment subset; immutable edits, exact rational times, explicit loss policy and bounded scene compilation with font/layout maps'}
+    report['generated']=generated
     (root/'document.json').write_text(json.dumps(render_doc,indent=2)+'\n',encoding='utf-8')
     (root/'verification.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(report))
@@ -325,4 +329,5 @@ def run(root):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True)
-    run(parser.parse_args().output)
+    parser.add_argument('--reference-engine',type=Path)
+    args=parser.parse_args();run(args.output,args.reference_engine)

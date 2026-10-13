@@ -316,8 +316,11 @@ A resource checkpoint stores uniform cached planes and silent PCM compactly.
 A twenty-minute HD caption plan now fits the unchanged 1 GiB bound; short renders
 match the old engine on Windows/Linux. [Resource evidence](../../verification/generated-scene-resources-2026-10-13.json)
 separates retained payload from sampled process memory and makes no long-export claim.
-Caption and production-title migration, plus the complete stage-5 quick gate,
-remain open. These checkpoints do not close the stage.
+`captions.render` now offers explicit generated edit-file output; compiled defaults
+and actual older job retries remain compatible. [Caption evidence](../../verification/generated-captions-2026-10-13.json)
+covers Windows/Linux pixels, exact PCM and publication/session boundaries. Default
+skill and production-title/caption workflow migration, plus the complete stage-5
+quick gate, remain open. These checkpoints do not close the stage.
 
 Goal: a scene (titles, captions, graphics) is a clip source, rendered per frame inside the timeline pass with no `scene.render` step.
 

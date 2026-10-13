@@ -1,6 +1,6 @@
 # Timed captions and subtitle files
 
-Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. `captions.draft` writes a document from transcripts of a timeline's sources. `captions.render` burns a whole document into one transparent overlay. Seven `captions.*` commands are MCP tools; `captions.render` runs through `job.start`. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
+Cutbolt imports a bounded UTF-8 SRT/WebVTT subset, edits immutable caption snapshots, exports standalone subtitle files, and converts a selected time window into ordinary text layers. `captions.draft` writes a document from transcripts of a timeline's sources. `captions.render` prepares a whole document as generated scene edits or a compiled transparent overlay. Seven `captions.*` commands are MCP tools; `captions.render` runs through `job.start`. Files, fonts and rendered media stay local. There is no speech recognition, font download or caption-specific saved-session store.
 
 ## Commands
 
@@ -15,7 +15,7 @@ Caption scene layouts also accept optional `text_layout` with the [Unicode text 
 | `captions.encode` | `document`, `format` | UTF-8 text, byte count/digests, cue ID mapping and loss report; no file write |
 | `captions.export` | `document`, `format`, `loss_policy`, `output_root`, `output` | The encoding report and a newly published file |
 | `captions.scene` | `document`, `scene`, `scene_id`, `offset`, `layouts`, `sampling`, `layer_prefix`, `input_root` | New scene, full inspection and sampled/skipped cue report |
-| `captions.render` | `document`, `layouts`, `project`, `input_root`, `output_root`, `output` | A transparent overlay asset covering the timeline, queued with `job.start` |
+| `captions.render` | `document`, `layouts`, `project`, `input_root`, `output_root`, `output` | Generated scene edit file (`mode: generated`) or transparent overlay asset (default), queued with `job.start` |
 
 Formats are `srt` and `webvtt`. Import uses a relative `{path, bytes, sha256}` source identity beneath an explicit absolute input root, as in [scene identities](SCENES.md). It verifies the actual bytes and never changes the source. Export requires an absolute destination within an existing output root, with `.srt` or `.vtt` respectively. Existing paths are rejected. A temporary file is synced and read back before publication without overwrite. Successful repeated exports to the same path fail with `OUTPUT_EXISTS`; use the returned digest to reconcile a lost response.
 
@@ -124,6 +124,44 @@ Scene duration is 1 frame up to 120 seconds at the scene's rate; offset must not
 The track is compiled as consecutive caption windows. Each window is an ordinary transparent caption scene with one invisible layer, which keeps a window without cues valid. Windows last up to ten seconds, well inside the scene limit so each window's work stays small, in whole multiples of a step that keeps them exact in 48 kHz samples and milliseconds (1 frame at 25 fps, 30 frames at 29.97 fps). A window ends early, on a step, before its 16th cue would start, so no window holds more than 16 layers. The windows are joined losslessly with their exact lengths, and the result is checked for frame count, samples and alpha before it is published. Because windows are whole steps, the asset can run a few frames past the requested duration; `covers` gives the requested length. Place the clip with that duration.
 
 More than 15 cues starting within one step is rejected with `LIMIT_EXCEEDED`. Layout errors, such as a style without a layout, come from `captions.scene` unchanged. No partial output or scratch file remains after a failure.
+
+### Generated captions without a compiled movie
+
+Set `mode: "generated"` and an unused `.json` output to keep each caption window
+as an editable scene clip. The same window planner and frame-start sampling apply.
+The last scene may have a padded source duration, but its placed clip is trimmed
+to the exact requested coverage. `frames` and `duration` in the receipt describe
+that coverage. Nothing is added to a session until its edit proposal is applied.
+
+`track_id` selects an enabled `alpha_over` video track, creating it above existing
+tracks when absent. It defaults to `asset_id`, or the caption document ID when
+that is omitted. In generated mode, `asset_id` is the prefix for window clip IDs.
+Existing sequential footage is promoted to tracks by the same atomic proposal.
+The command checks the complete proposal against the supplied project revision:
+locked tracks, duplicate IDs, collisions and coverage past the timeline fail
+before publication. It does not extend or overwrite an existing timeline.
+
+The small receipt includes `project_id`, `expected_revision`, and an `operations`
+file reference. Apply it through the normal saved-session command, for example:
+
+```json
+{"command":"session.apply","project_id":"cut","request_id":"place-captions-v1","expected_revision":4,"operations":{"file":"outputs/caption-edits.json","select":"operations"}}
+```
+
+Use the receipt's actual project ID, revision and file path. With a workspace,
+its store supplies `store_root`. Put the edit file inside that workspace and use
+the workspace as `input_root` when preparing captions so relative font paths
+keep their meaning. Each recipe and pinned font identity is saved in the project;
+editing the proposal file later does not change an already saved revision.
+Ordinary session retries, undo and restoration apply.
+
+Generated mode retains the 1,000-operation transaction and 16 MiB document bounds;
+split the requested range if either is exceeded. Scene limits and the whole-render
+generated-source memory bound still apply. Inputs are fully hashed again before
+atomic file publication, existing outputs are never replaced, and cancellation
+cleans up the command's scratch directory. The returned operations require no
+`media.add`, `scene.render` or intermediate caption movie. Omitted `mode` continues
+to use the compiled contract above, including existing queued-job retries.
 
 ## Runnable local fixture and workflow
 

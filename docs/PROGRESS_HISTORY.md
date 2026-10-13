@@ -1,5 +1,33 @@
 # Progress history
 
+## 13 October 2026: generated caption edit documents
+
+`captions.render` now accepts `mode: "generated"`: it publishes a JSON proposal
+containing bounded scene clips and a small receipt pointing to its operations.
+The existing compiled default stays compatible. The planner keeps the same exact
+caption windows and trims the final placed scene to requested coverage. Before
+publication, the command validates the whole edit against the supplied project,
+checks the existing transaction/document bounds and fully re-hashes source files.
+The normal session command applies it with revision checks, retries and undo.
+
+Windows/Linux passed 255/254 Rust tests and all 13 affected strict quick fixtures
+(254/138 seconds), with zero failures or skips. Both compared 1,805 frames and
+3,368,488 stereo sample frames exactly with an older 4bf1191 engine, including
+nonzero starts and NTSC padding. Actual old compiled-job receipts replayed in
+separate legacy queues. Running cancellation, changed fonts, reserved outputs,
+file-reference edits and scratch cleanup passed; synchronous generated preparation
+also passed with unavailable codec executables. [Caption evidence](../verification/generated-captions-2026-10-13.json)
+records the harness corrections and a restored pre-existing command comment;
+both final source copies subsequently passed lint, MCP tests and cost replays.
+
+The memory checkpoint 2ae9be2 was pushed and independently confirmed on remote
+main. Its gate passed five fixtures plus Rust, reused 12 and deferred 61 in 197
+seconds; its background remains pending. The older 61b5397 background finished
+with 13 passes, zero failures and 48 superseded skips in 2,664 seconds. Default
+skill and production-title/caption workflow migration, stage-five full quick,
+stage six and final requirement/performance audits remain open. No new points,
+long-export or fresh-agent claim; PROGRESS.md keeps the 338e114 thorough evidence.
+
 ## 13 October 2026: bound prepared caption-scene memory
 
 Generated sources now retain one RGB value for uniform cached planes and an exact

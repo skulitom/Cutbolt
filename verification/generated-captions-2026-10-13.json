@@ -1,0 +1,227 @@
+{
+  "date": "2026-10-13",
+  "kind": "generated_caption_mode_checkpoint",
+  "parent_commit": "2ae9be28997314b8575912593ea1121903f79554",
+  "source_sha256": {
+    "src/caption_overlay.rs": "f96d0e4c272851831ecee2c43ed24e2cfe1a85d6724446c8d2fc4bd2cf798974",
+    "src/captions.rs": "8b3ad7a29d0d7edce5ede334ae79d34df887fff9cf8822b071421338108bdcb7",
+    "src/commands.rs": "ceaa7cca693c596e2cdd8a20db8d52d5bc1fa87a060467541d2b8d023e6e9308",
+    "src/mcp.rs": "c7d0b0295e78ecd27d277493181927a7ba57cf854f175502a6da57b06a0afca9",
+    "tests/captions.py": "a4dcb92da2392750e03ece02ff74702c1948e1a4f2c816fc012bcfddda73c90a",
+    "tests/generated_captions.py": "8af94e9d4eca1d14c97b0ef776c3e0fd8b59ee5f8c866e70cad8bae6112b53d9"
+  },
+  "matching_final_windows_linux_input_files": 289,
+  "final_input_manifest_sha256": "60ea7b65b7443f24808c7425487bd94e63f69ca98ab51f27b94b01a9a3c4b66c",
+  "platforms": {
+    "windows": {
+      "rust_tests_passed": 255,
+      "format_and_clippy": "passed",
+      "all_targets_build": "passed",
+      "fixtures": [
+        "agent_costs",
+        "agent_ergonomics",
+        "builtin_templates",
+        "captions",
+        "generated_clips",
+        "graphics_place",
+        "integration",
+        "queue_recovery",
+        "scenes",
+        "sessions",
+        "skills",
+        "templates",
+        "tracks"
+      ],
+      "fixture_count": 13,
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 254,
+      "report_sha256": "d554a38dd976c16cc51f1b8bb59edcfcfa7697e17b823a8956d9130449e41512",
+      "log_sha256": "74e9e752e64787497cc9c39ce005ee6b005605d3bc80208a2a6c1362f47ecaac",
+      "old_engine_oracle": {
+        "passed": [
+          "captions.generated_windows_equal_compiled_pixels_pcm_and_exact_ntsc_trim",
+          "captions.generated_proposals_validate_before_publication_and_save_atomically",
+          "captions.generated_jobs_and_actual_compiled_job_receipt_replay",
+          "captions.generated_no_codec_dependency_running_cancellation_and_changed_source_rejection"
+        ],
+        "frames_compared": 1805,
+        "stereo_sample_frames_compared": 3368488,
+        "source_preservation": true,
+        "reference_engine_sha256": "42d73f8f540782cc8389d3970f9c807476d1d487e37ece34b55a491cfcb5ff2f",
+        "actual_older_engine": true
+      },
+      "oracle_report_sha256": "2374fd349ef689faf1897c1b9c66db78561b903a677c8111c4ffe02c00bed0bc",
+      "final_catalog": {
+        "mcp_tests_passed": 6,
+        "format_and_clippy": "passed",
+        "all_targets_build": "passed",
+        "agent_costs": {
+          "passed": [
+            "agent_costs.five_sdk_workflows_with_wire_budgets",
+            "agent_costs.structured_error_recovery"
+          ],
+          "kind": "scripted_replay",
+          "catalog": "default",
+          "sources_preserved": true,
+          "budgets": {
+            "talking-head": [
+              15,
+              9500,
+              235000
+            ],
+            "interview": [
+              6,
+              4500,
+              55000
+            ],
+            "tutorial": [
+              10,
+              4000,
+              60000
+            ],
+            "revision": [
+              8,
+              2500,
+              48000
+            ],
+            "handoff": [
+              8,
+              2600,
+              210000
+            ]
+          }
+        },
+        "report_sha256": "00722a0ae8d751cbf1a8e5212b0738e97943d24f33725582c0f3c5e7c6bafd26",
+        "log_sha256": "cf0fc60b59c23429ecf3cc4dcc8da20b7f01066c46345baf45af0b3f11a8834b"
+      }
+    },
+    "linux": {
+      "rust_tests_passed": 254,
+      "format_and_clippy": "passed",
+      "all_targets_build": "passed",
+      "fixtures": [
+        "agent_costs",
+        "agent_ergonomics",
+        "builtin_templates",
+        "captions",
+        "generated_clips",
+        "graphics_place",
+        "integration",
+        "queue_recovery",
+        "scenes",
+        "sessions",
+        "skills",
+        "templates",
+        "tracks"
+      ],
+      "fixture_count": 13,
+      "failed": 0,
+      "skipped": 0,
+      "reused": 0,
+      "not_started": 0,
+      "wall_seconds": 138,
+      "report_sha256": "8b357f077d344907550aebcfcd7cd3e2790d53c9e35a03b23307729304065783",
+      "log_sha256": "ba6e013b780163530e26ded2d5f2470139568cb045e0ec19749570655b90cd9c",
+      "old_engine_oracle": {
+        "passed": [
+          "captions.generated_windows_equal_compiled_pixels_pcm_and_exact_ntsc_trim",
+          "captions.generated_proposals_validate_before_publication_and_save_atomically",
+          "captions.generated_jobs_and_actual_compiled_job_receipt_replay",
+          "captions.generated_no_codec_dependency_running_cancellation_and_changed_source_rejection"
+        ],
+        "frames_compared": 1805,
+        "stereo_sample_frames_compared": 3368488,
+        "source_preservation": true,
+        "reference_engine_sha256": "bc196069fe100410e4ccc62c8aa202952a6df3f92e2fdf64dbb9a7b790779a53",
+        "actual_older_engine": true
+      },
+      "oracle_report_sha256": "cfb663e23b1e7049881c95f2101331d28b2cc92a86ef475fc08130f725e34162",
+      "final_catalog": {
+        "mcp_tests_passed": 6,
+        "format_and_clippy": "passed",
+        "all_targets_build": "passed",
+        "agent_costs": {
+          "passed": [
+            "agent_costs.five_sdk_workflows_with_wire_budgets",
+            "agent_costs.structured_error_recovery"
+          ],
+          "kind": "scripted_replay",
+          "catalog": "default",
+          "sources_preserved": true,
+          "budgets": {
+            "talking-head": [
+              15,
+              9500,
+              235000
+            ],
+            "interview": [
+              6,
+              4500,
+              55000
+            ],
+            "tutorial": [
+              10,
+              4000,
+              60000
+            ],
+            "revision": [
+              8,
+              2500,
+              48000
+            ],
+            "handoff": [
+              8,
+              2600,
+              210000
+            ]
+          }
+        },
+        "report_sha256": "0f67b38005e10e7f246ff5a26605373ab87864c393eee3f1eca73ab6461dc0f6",
+        "log_sha256": "bc13ccb592010189bc63db255781b0de2ac2ccbbe72339272d374398100c7f3a"
+      }
+    }
+  },
+  "reference_commit": "4bf1191fcbf601cab72fc947c8c78f7b796e9cb5",
+  "contract": [
+    "Explicit captions.render mode generated publishes a JSON edit proposal with bounded native scene clips; default compiled mode remains.",
+    "The same caption window planner uses exact frame/sample/millisecond clocks. Last placed scene is trimmed to requested coverage.",
+    "Complete proposal is validated against the supplied project before publication. It retains 1000-edit and 16 MiB document limits.",
+    "Compact receipt points to operations for normal revision-checked session.apply, retry, undo and saved recipe pinning.",
+    "Source identities are fully hashed again before atomic publication. No generated movie, FFmpeg or ffprobe is required for synchronous preparation."
+  ],
+  "verified_boundaries": [
+    "Old-renderer equality for 30-second coverage, nonzero start and an NTSC padded final source trimmed to 305 placed frames.",
+    "Source preservation, duplicate output, path escape, wrong extension, locked track, overlapping placement and coverage beyond the timeline.",
+    "File-reference application, revision conflicts, identical saved edit retries before and after undo, and saved-store integrity.",
+    "Queued generated completion/retry and actual old compiled-job receipt replay from an isolated legacy-engine queue.",
+    "Running-command cancellation, competing active jobs for one output, same-size font mutation during preparation, scratch cleanup and absence of failed outputs."
+  ],
+  "fixture_development": [
+    "The first harness used unsupported absolute external-font paths. It now uses relative paths under one explicit workspace root.",
+    "The second harness compared Windows canonical path spellings. It now proves both paths identify the same file.",
+    "The third harness omitted session.create request_id. The required field was added; all prior decoded comparisons had already passed."
+  ],
+  "comment_restoration": {
+    "path": "src/commands.rs",
+    "before_sha256": "efd3a1982800997cd7e20bca1bab308d0ac72107a3ffc2f5a8a4196add49a04e",
+    "after_sha256": "ceaa7cca693c596e2cdd8a20db8d52d5bc1fa87a060467541d2b8d023e6e9308",
+    "scope": "Restore the unchanged media.transcribe.paths documentation line accidentally re-encoded by a line-ending repair script; no executable code change. All other input files retain the verification manifest hashes."
+  },
+  "verification_scope": "The 13-suite and full Rust runs used the pre-restoration manifest. One unchanged media.transcribe.paths documentation comment had been accidentally re-encoded by a line-ending helper. Restored byte-for-byte from parent; no executable code changed. Both platforms then rebuilt all targets and passed formatting, lint, MCP unit tests and all agent-cost replays on the final matching sources.",
+  "background_audit": {
+    "commit": "61b5397cec21cb7a068c29e0580e87640b555243",
+    "passed": 13,
+    "failed": 0,
+    "superseded_skips": 48,
+    "not_started": 0,
+    "wall_seconds": 2664
+  },
+  "limits": [
+    "This is an opt-in caption API checkpoint. Production coordinator and default skill workflow migration remain open.",
+    "No full long-caption export, speed claim, fresh-agent success claim or complete stage-five gate.",
+    "Quick verification does not refresh the 338e114 thorough evidence or award points. Stages five and six and the final performance/requirement audits remain open."
+  ]
+}

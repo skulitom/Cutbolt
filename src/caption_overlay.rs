@@ -1,7 +1,7 @@
-//! A whole caption document rendered as one transparent overlay asset for an `alpha_over` track.
-//! A document can run for hours, longer than any scene, so the overlay is compiled as a series of
-//! caption windows, each an ordinary caption scene, and the windows are joined losslessly. Windows
-//! stay at ten seconds and fifteen cues, well inside the scene limits, so each one's work is small.
+//! A whole caption document as compiled overlay media or saved generated scene edits.
+//! A document can run for hours, longer than any scene. Both modes use caption windows bounded
+//! to ten seconds and fifteen cues. Compiled mode joins their movies losslessly; generated mode
+//! publishes a validated edit proposal retaining the scene recipes and exact placed coverage.
 use crate::{
     Result,
     captions::{self, Document, Layout},
@@ -11,6 +11,7 @@ use crate::{
     scene::{self, Scene},
     time::Time,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -21,6 +22,24 @@ use std::{
 
 /// Caption layers per window: the scene limit less the blank layer every window carries.
 const CUES_PER_WINDOW: usize = 15;
+
+/// Keep compiled requests compatible; generated mode publishes editable scene operations.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// A transparent lossless movie asset, the existing behavior.
+    #[default]
+    Compiled,
+    /// A JSON edit proposal containing generated scene clips, with no intermediate movie.
+    Generated,
+}
+impl Mode {
+    pub fn is_compiled(&self) -> bool {
+        *self == Self::Compiled
+    }
+}
 
 /// What to render.
 pub struct Request<'a> {
@@ -33,6 +52,8 @@ pub struct Request<'a> {
     pub start: Option<Time>,
     pub duration: Option<Time>,
     pub asset_id: Option<&'a str>,
+    pub mode: Mode,
+    pub track_id: Option<&'a str>,
 }
 
 fn gcd(a: u64, b: u64) -> u64 {
@@ -130,18 +151,16 @@ pub fn render(request: &Request) -> Result<Value> {
         windows.push((frame, end));
         frame = end;
     }
+    if request.mode == Mode::Generated {
+        return generated(request, rate, start, duration, frames, &windows);
+    }
+    if request.track_id.is_some() {
+        return Err(
+            error("INVALID_ARGUMENT", "track_id requires mode generated").with_path("track_id"),
+        );
+    }
     let output = render::destination(request.output, request.output_root)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| error("CLOCK_ERROR", "Clock before epoch"))?
-        .as_nanos();
-    let scratch = Scratch(
-        output
-            .parent()
-            .expect("validated parent")
-            .join(format!(".cutbolt-captions-{}-{nonce}", std::process::id())),
-    );
-    fs::create_dir(&scratch.0)?;
+    let scratch = scratch(&output)?;
     let mut list = String::new();
     let mut sampled = 0;
     let mut skipped = Vec::new();
@@ -229,4 +248,168 @@ pub fn render(request: &Request) -> Result<Value> {
         "asset":{"id":asset_id,"path":output,"duration":length,"identity":{"sha256":verified.sha256,"bytes":bytes}},
         "next":format!("media.add the asset, add a video track with composite alpha_over, and place it at {} for {} s",start,duration)}),
     )
+}
+
+/// Save an atomic edit proposal containing bounded scene windows. No intermediate movie.
+fn generated(
+    request: &Request,
+    rate: Time,
+    start: Time,
+    duration: Time,
+    frames: u64,
+    windows: &[(u64, u64)],
+) -> Result<Value> {
+    use crate::media::Control;
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    let project = request.project;
+    let prefix = request.asset_id.unwrap_or(&request.document.id);
+    let track_id = request.track_id.unwrap_or(prefix);
+    crate::tracks::id(track_id)?;
+    let output = render::destination_extension(request.output, request.output_root, "json")?;
+    if start.plus(duration)?.compare(project.duration()?)?.is_gt() {
+        return Err(error(
+            "INVALID_RANGE",
+            "Generated captions end after the timeline; extend it explicitly first",
+        ));
+    }
+    let edit = |value: Value| json!({"op":"tracks.edit","edit":value});
+    let mut operations = Vec::new();
+    if project.tracks.is_none() {
+        operations.push(edit(
+            json!({"op":"promote","video_track_id":format!("{prefix}-source-video"),
+            "audio_track_id":format!("{prefix}-source-audio")}),
+        ));
+    }
+    if let Some(track) = project
+        .tracks
+        .as_ref()
+        .and_then(|a| a.tracks.iter().find(|t| t.id == track_id))
+    {
+        if track.kind != crate::tracks::Kind::Video
+            || track.composite != crate::tracks::Composite::AlphaOver
+            || !track.enabled
+        {
+            return Err(error(
+                "INVALID_TRACKS",
+                "Generated captions require an enabled video alpha_over track",
+            )
+            .with_path("track_id"));
+        }
+    } else {
+        operations.push(edit(
+            json!({"op":"add","track":{"id":track_id,"kind":"video",
+            "locked":false,"enabled":true,"clips":[],"transitions":[],"composite":"alpha_over"}}),
+        ));
+    }
+    if windows.len() + operations.len() > 1000 {
+        return Err(error(
+            "LIMIT_EXCEEDED",
+            "Generated captions require at most 1000 edits; split the requested range",
+        ));
+    }
+    let control = media::Uncontrolled;
+    control.phase("caption-scenes")?;
+    control.total(windows.len() as u64);
+    let mut dependencies = BTreeMap::new();
+    let mut sampled = 0;
+    let mut skipped = Vec::new();
+    for (index, &(from, to)) in windows.iter().enumerate() {
+        control.check()?;
+        let scene_id = format!("{prefix}-{index}");
+        let length = Time::new((to - from) * rate.den, rate.num)?;
+        let at = start.plus(Time::new(from * rate.den, rate.num)?)?;
+        let converted = captions::to_scene(&captions::SceneRequest {
+            document: request.document.clone(),
+            scene: base(&scene_id, project, rate, length)?,
+            scene_id: scene_id.clone(),
+            offset: at,
+            layouts: request.layouts.clone(),
+            sampling: captions::Sampling::SampleStart,
+            layer_prefix: "cue".into(),
+            input_root: request.input_root.to_path_buf(),
+        })?;
+        for cue in converted["cues"].as_array().into_iter().flatten() {
+            match cue["status"].as_str() {
+                Some("sampled") => sampled += 1,
+                Some("no_sampled_frame") => skipped.push(cue["cue_id"].clone()),
+                _ => {}
+            }
+        }
+        let scene = crate::generated::SceneRef(Box::new(serde_json::from_value(
+            converted["scene"].clone(),
+        )?));
+        for (source, bytes) in crate::generated::dependencies(&scene, request.input_root)? {
+            if let Some(previous) = dependencies.insert(source.path, (source.sha256.clone(), bytes))
+                && previous != (source.sha256, bytes)
+            {
+                return Err(error(
+                    "MEDIA_CHANGED",
+                    "Caption source identity changed between windows",
+                ));
+            }
+        }
+        let covered = Time::new((to.min(frames) - from) * rate.den, rate.num)?;
+        operations.push(edit(json!({"op":"place","track_id":track_id,"collision":"reject",
+            "clip":{"id":scene_id,"scene":scene,"start":at,"source_in":Time::ZERO,"duration":covered}})));
+        control.frames(index as u64 + 1)?;
+    }
+    // Prove the proposal applies atomically to this revision before publishing it. This checks
+    // duplicate IDs, locked tracks, collisions, source clocks and the existing batch limits.
+    project.apply(project.revision, serde_json::from_value(json!(operations))?)?;
+    let artifact = json!({"schema_version":1,"kind":"generated_caption_operations","project_id":project.id,
+        "expected_revision":project.revision,"track_id":track_id,"start":start,"duration":duration,
+        "windows":windows.len(),"operations":operations});
+    let bytes = serde_json::to_vec(&artifact)?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err(error(
+            "LIMIT_EXCEEDED",
+            "Generated caption document exceeds the 16 MiB workspace document limit; split the requested range",
+        ));
+    }
+    let scratch = scratch(&output)?;
+    let temp = scratch.0.join("captions.json");
+    let mut file = fs::File::create_new(&temp)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    drop(file);
+    let hash = format!("{:x}", Sha256::digest(&bytes));
+    if media::file_hash(&temp)? != hash {
+        return Err(error(
+            "EXPORT_VALIDATION_FAILED",
+            "Generated caption document bytes differ",
+        ));
+    }
+    for (path, (hash, bytes)) in dependencies {
+        if fs::metadata(&path)?.len() != bytes || media::file_hash(&path)? != hash {
+            return Err(error(
+                "MEDIA_CHANGED",
+                "Caption source changed before publication",
+            ));
+        }
+    }
+    control.check()?;
+    media::publish(&temp, &output)?;
+    Ok(
+        json!({"output":output,"sha256":hash,"bytes":bytes.len(),"compiled":false,
+        "mode":"generated","frames":frames,"windows":windows.len(),"start":start,"duration":duration,
+        "covers":duration,"cues":{"sampled_windows":sampled,"no_sampled_frame":skipped},
+        "project_id":project.id,"expected_revision":project.revision,"track_id":track_id,
+        "operations":{"file":output,"select":"operations"},
+        "next":"Apply operations from the output document with session.apply at expected_revision; the saved clips render their scenes directly."}),
+    )
+}
+
+fn scratch(output: &Path) -> Result<Scratch> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| error("CLOCK_ERROR", "Clock before epoch"))?
+        .as_nanos();
+    let path = output
+        .parent()
+        .expect("validated parent")
+        .join(format!(".cutbolt-captions-{}-{nonce}", std::process::id()));
+    fs::create_dir(&path)?;
+    Ok(Scratch(path))
 }

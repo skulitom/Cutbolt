@@ -999,5 +999,5 @@ pub fn to_scene(request: &SceneRequest) -> Result<Value> {
     )
 }
 pub fn capabilities() -> Value {
-    json!({"schema_version":1,"formats":["srt","webvtt"],"encoding":"utf8","time":"exact_rational","export_time":"exact_milliseconds_no_rounding","maximum_cues":4096,"maximum_styles":32,"maximum_hours":24,"style_fields":["color"],"cue_fields":["text","start","end","style","align","speaker"],"rendering":"explicit_per_style_fonts_and_boxes_sample_start","overlap_policies":["allow","reject"],"export_loss_policies":["reject","allow_reported"]})
+    json!({"schema_version":1,"formats":["srt","webvtt"],"encoding":"utf8","time":"exact_rational","export_time":"exact_milliseconds_no_rounding","maximum_cues":4096,"maximum_styles":32,"maximum_hours":24,"style_fields":["color"],"cue_fields":["text","start","end","style","align","speaker"],"rendering":"explicit_per_style_fonts_and_boxes_sample_start","track_modes":["compiled","generated"],"default_track_mode":"compiled","generated_track_output":"json_operations_for_revision_checked_session_apply","overlap_policies":["allow","reject"],"export_loss_policies":["reject","allow_reported"]})
 }
