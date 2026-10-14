@@ -1,5 +1,31 @@
 # Progress history
 
+## 14 October 2026: close placed-footage comparison and schema regression checks
+
+The final retained-release comparison passes its predeclared exactness and
+ten-second plain-preview ceiling: forty alternating observations, twenty exact
+previews and twenty exact lossless exports across plain and neutral-grade paths.
+Every request opens one original video decoder with a late input seek; the original
+twenty-minute 1080p30 source hash is unchanged. Both final-build H.264 direct/conform
+pairs also match, including decoded AAC padding. Timing uses unchanged lossless
+encoding, with profile-4 H.264 checked separately. The before/after builds are
+f13453d/04255ee. Preview medians are 16.7% and 7.9% slower; lossless export medians
+are 0.02% and 1.02% slower. The [measurement record](PLACED_FOOTAGE_PERFORMANCE.md)
+retains all samples, ranges and load, without claiming a general speed win.
+
+The description correction at 06fe784 passes formatting, six MCP-filter tests,
+seventeen schema-filter tests (possibly overlapping) and all three strict workflow
+fixtures in 36 seconds, with no failures/skips/reuse/defer. This closes the preceding
+history entry's required post-commit checks. Catalog and workflow budgets still pass;
+the [focused record](../verification/schema-description-2026-10-14.json) identifies
+the actual tested source, while the earlier complete quick gate remains at 26cb066.
+
+The requirement audit and both plans now distinguish completed implementation,
+targeted checks and measurement from the remaining final thorough milestone. No
+editing points or full milestone claim are added. The final thorough run must use
+the committed, pushed implementation and all 86 current fixtures; its result and
+any background failures must be inspected before declaring the goal complete.
+
 ## 14 October 2026: name working precision in the snapshot schema description
 
 The final requirement audit found that Project.schema_version still named only

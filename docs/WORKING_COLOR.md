@@ -1,9 +1,9 @@
 # Working color
 
-Stage six is in development. Saved projects can now explicitly select working
-precision with `project.working_space`. The default remains the existing 8-bit
-encoded renderer. The bounded banding references pass; the complete stage gate
-is still open.
+Saved projects can explicitly select working precision with `project.working_space`.
+The default remains the existing 8-bit encoded renderer. Targeted Windows/Linux
+references, the complete default-path quick gate and the final placed-footage
+comparison pass their correctness checks. The thorough milestone remains open.
 
 ## Saved selection
 
@@ -198,7 +198,10 @@ workflow boundaries. Quick reports retain these numerical results in their
 `working_footage` field. Proxy generation retains its documented reference-master
 requirement; source normalization still outputs native RGB8.
 
-The complete default-path quick gate and final performance audit remain required
-before closing stage six. This checkpoint makes no HDR, speed or points claim. Source normalization
+The complete 85-fixture default-path quick gate passed at 26cb066. The final
+[placed-footage comparison](PLACED_FOOTAGE_PERFORMANCE.md) passes exactness and
+its preview ceiling, with slower preview medians reported. It measures default
+8-bit rendering; precise-mode throughput requires a separate study. The final
+thorough milestone remains required. This makes no HDR or points claim. Source normalization
 still supplies the supported native RGB8 inputs; wider working storage does not
 recover source detail already quantized during normalization.

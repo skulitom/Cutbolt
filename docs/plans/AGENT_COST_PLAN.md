@@ -6,7 +6,7 @@ Handoff plan, 11 October 2026. Written for an implementing agent. It changes no 
 
 The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps the implementation
 and assertions to every stage below. It distinguishes completed targeted acceptance
-from the remaining final comparison and thorough milestone. Earlier checkpoint notes
+from the completed placed comparison and remaining thorough milestone. Earlier checkpoint notes
 are retained with their dates; the original problem description follows.
 
 ## The problem

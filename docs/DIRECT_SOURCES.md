@@ -10,7 +10,9 @@ Stage 1's complete milestone passed at 338e114 on 12 October. The later complete
 stage-3/4/5 quick gates and Windows/Linux checks verify automatic preparation,
 native layering and generated scenes. Optional [working precision](WORKING_COLOR.md)
 has targeted Windows/Linux evidence and a complete 85-fixture quick gate at
-26cb066. The final placed-source comparison and thorough milestone remain open. See the
+26cb066. The final [placed-source comparison](PLACED_FOOTAGE_PERFORMANCE.md) passes
+exactness and its declared preview ceiling, while recording slower preview medians.
+The final thorough milestone remains open. See the
 [requirement audit](plans/PLAN_COMPLETION_AUDIT.md) for exact evidence and remaining work.
 
 The intermittent H.264 difference discussed below was subsequently reproduced

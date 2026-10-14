@@ -6,7 +6,7 @@ Handoff plan, 11 October 2026. Written for an implementing agent. It changes no 
 
 The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps the implementation
 and assertions to every stage below. It distinguishes completed targeted acceptance
-from the remaining final comparison and thorough milestone. Earlier checkpoint notes
+from the completed placed comparison and remaining thorough milestone. Earlier checkpoint notes
 are retained with their dates; the original problem description follows.
 
 ## The problem
@@ -394,6 +394,14 @@ queue retries, cache contexts and changed-source publication. Nine existing
 regression suites and the corrected registered fixture pass on Windows/Linux.
 The complete default-path quick gate and final placed-track comparison remain
 open; source normalization and proxy-generation limits remain unchanged.
+
+Final comparison update, 14 October: the complete 85-fixture quick gate passed
+at 26cb066. The [placed-footage comparison](../PLACED_FOOTAGE_PERFORMANCE.md)
+now records forty observations against the retained stage-3 release, with exact
+preview/export equality, source preservation, one late-seeking original decoder
+per request and all plain previews under ten seconds. Preview medians are slower;
+lossless export medians are nearly unchanged. The separate H.264 profile-4 fix
+has exact Windows/Linux checks. Final thorough evidence remains pending.
 
 - Add a project setting: `working_space: { "bits": 8 | 16, "light": "encoded" | "linear" }`.
   - The default, 8-bit encoded, is today's behavior and must leave every v1 fixture bit-identical.

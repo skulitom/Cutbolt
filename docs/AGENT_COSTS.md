@@ -609,3 +609,18 @@ The [evidence](../verification/generated-caption-skills-2026-10-13.json) retains
 attempts, source/binary identities and separate preflight/harness corrections. This
 is bounded single-run evidence; earlier tutorial/handoff results remain historical,
 and no repeatability or provider-token reduction from stage zero is claimed.
+
+## Final schema-description check, 14 October 2026
+
+The schema now names explicit working precision among version-2 snapshot features,
+including an explicit default-mode selection. At 06fe784 the three strict workflow
+fixtures pass in 36 seconds, with no failures, skips, reuse or deferred fixtures.
+The workspace catalog remains 18 tools/22,726 bytes. The five scripted workflows
+use 15/6/10/8/8 calls, zero normal failures or schema/capabilities lookups, and
+207,359/43,992/54,133/38,185/183,076 received bytes. Title creation remains two
+calls/775 bytes. These are byte measurements from scripted regressions; the fresh
+agent trials above retain their original token measurements and scope.
+
+MCP and schema Rust filters pass six and seventeen tests respectively; these
+filters may overlap. [Focused evidence](../verification/schema-description-2026-10-14.json)
+records the source and report identities. The final thorough milestone is separate.
