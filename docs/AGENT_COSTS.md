@@ -624,3 +624,14 @@ agent trials above retain their original token measurements and scope.
 MCP and schema Rust filters pass six and seventeen tests respectively; these
 filters may overlap. [Focused evidence](../verification/schema-description-2026-10-14.json)
 records the source and report identities. The final thorough milestone is separate.
+
+## Final thorough milestone, 14 October 2026
+
+At `5d91c46`, all 86 strict thorough fixtures pass, including all five scripted
+workflow budgets, catalog/error checks and executable skill examples. There are
+no failed, skipped, reused or deferred fixtures. The
+[milestone record](../verification/final-plans-milestone-2026-10-14.json) identifies
+the tested code and binary; [complete evidence](../verification/latest.json)
+retains the actual wire measurements. Fresh-agent token/call results above keep
+their original trial scope. This refresh introduces no new autonomous trial,
+provider-token reduction claim or editing points.

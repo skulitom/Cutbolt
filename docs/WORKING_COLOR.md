@@ -3,7 +3,8 @@
 Saved projects can explicitly select working precision with `project.working_space`.
 The default remains the existing 8-bit encoded renderer. Targeted Windows/Linux
 references, the complete default-path quick gate and the final placed-footage
-comparison pass their correctness checks. The thorough milestone remains open.
+comparison pass their correctness checks. The final strict thorough milestone at
+`5d91c46` passes all 86 fixtures.
 
 ## Saved selection
 
@@ -202,6 +203,6 @@ The complete 85-fixture default-path quick gate passed at 26cb066. The final
 [placed-footage comparison](PLACED_FOOTAGE_PERFORMANCE.md) passes exactness and
 its preview ceiling, with slower preview medians reported. It measures default
 8-bit rendering; precise-mode throughput requires a separate study. The final
-thorough milestone remains required. This makes no HDR or points claim. Source normalization
+thorough milestone at `5d91c46` passes all 86 fixtures. This makes no HDR or points claim. Source normalization
 still supplies the supported native RGB8 inputs; wider working storage does not
 recover source detail already quantized during normalization.

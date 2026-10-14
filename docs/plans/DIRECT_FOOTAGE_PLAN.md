@@ -4,10 +4,11 @@ Handoff plan, 11 October 2026. Written for an implementing agent. It changes no 
 
 ## Current acceptance audit
 
-The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps the implementation
-and assertions to every stage below. It distinguishes completed targeted acceptance
-from the completed placed comparison and remaining thorough milestone. Earlier checkpoint notes
-are retained with their dates; the original problem description follows.
+The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps implementation
+and passing assertions to every stage below. All stages and acceptance requirements
+are verified, including the placed comparison and the final 86-fixture thorough
+milestone at `5d91c46`. Earlier checkpoint notes are retained as dated history;
+the original problem description follows.
 
 ## The problem
 
@@ -438,3 +439,14 @@ has exact Windows/Linux checks. Final thorough evidence remains pending.
 - **Compositor throughput.** Moving clips from the FFmpeg base graph to Rust decoders costs CPU. Measure stage 1 on the 20-minute file before and after. If it regresses badly, keep FFV1 clips on the FFmpeg base and only direct clips in Rust.
 - **Index build time on long files.** Show progress, run it as a queued phase, and cache it.
 - **Disk use of stage-2 conversions.** Report expected bytes up front, and enforce the cap.
+
+## Final acceptance, 14 October 2026
+
+All stages 0–6 are verified by the [requirement audit](PLAN_COMPLETION_AUDIT.md).
+The strict thorough milestone at `5d91c46` passes all 86 fixtures, including the
+full-length 4K, sustained recording, source-preservation and working-precision
+checks, with unchanged source fingerprints and no skips/reuse/defer. Earlier
+Windows/Linux records identify their own tested sources. The final placed-footage
+comparison retains exact output and a passing preview ceiling while reporting
+slower preview medians. Source normalization remains RGB8; HDR delivery and general
+precise-mode throughput claims remain outside this plan's verified scope.

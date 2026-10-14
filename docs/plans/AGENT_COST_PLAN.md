@@ -4,10 +4,11 @@ Handoff plan, 11 October 2026. Written for an implementing agent. It changes no 
 
 ## Current acceptance audit
 
-The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps the implementation
-and assertions to every stage below. It distinguishes completed targeted acceptance
-from the completed placed comparison and remaining thorough milestone. Earlier checkpoint notes
-are retained with their dates; the original problem description follows.
+The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps implementation
+and passing assertions to every stage below. All stages and acceptance requirements
+are verified, including the placed comparison and the final 86-fixture thorough
+milestone at `5d91c46`. Earlier checkpoint notes are retained as dated history;
+the original problem description follows.
 
 ## The problem
 
@@ -264,3 +265,13 @@ comparative benchmark, recognition accuracy or distribution-release completion.
 | `fonts.find` reading OS font folders | Yes. Read-only, no copying, licensing noted. |
 | Number of built-in templates | About 20 original designs. Never copy or imitate another product's catalog. |
 | Plugin harnesses after Claude Code | Decide with the distribution track. The strategy report suggests Codex, then Gemini CLI. |
+
+## Final acceptance, 14 October 2026
+
+All stages 0–5 are verified by the [requirement audit](PLAN_COMPLETION_AUDIT.md).
+The strict thorough milestone at `5d91c46` passes all 86 fixtures, including the
+scripted workflow budgets, compact catalog, structured errors, original templates,
+font discovery, shorthand and executable skills. Separate retained fresh-agent
+trials satisfy the approved call, peak-context and no-schema-lookup targets.
+The milestone refresh does not turn byte replays into provider-token measurements
+or award editing points. Earlier checkpoint notes remain historical evidence.

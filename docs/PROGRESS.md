@@ -2,7 +2,7 @@
 
 **Verified checklist coverage: 100.0% (100/100 acceptance points).**
 
-Baseline: `cutbolt-local-v1`. Verified: 2026-10-12. All 50 capability groups remain in the denominator.
+Baseline: `cutbolt-local-v1`. Verified: 2026-10-14. All 50 capability groups remain in the denominator.
 
 This measures our explicitly scoped checklist, not equal engineering effort, cross-product equivalence or completion of every professional editing feature. Each capability has two explicit checkpoints worth one point each. A working narrow subset earns one; its broader acceptance cases must pass to earn the second. Plans and code without passing evidence earn zero.
 

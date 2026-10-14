@@ -12,8 +12,8 @@ native layering and generated scenes. Optional [working precision](WORKING_COLOR
 has targeted Windows/Linux evidence and a complete 85-fixture quick gate at
 26cb066. The final [placed-source comparison](PLACED_FOOTAGE_PERFORMANCE.md) passes
 exactness and its declared preview ceiling, while recording slower preview medians.
-The final thorough milestone remains open. See the
-[requirement audit](plans/PLAN_COMPLETION_AUDIT.md) for exact evidence and remaining work.
+The final strict thorough milestone at `5d91c46` passes all 86 fixtures. See the
+[requirement audit](plans/PLAN_COMPLETION_AUDIT.md) for exact evidence and scope.
 
 The intermittent H.264 difference discussed below was subsequently reproduced
 with identical encoder inputs. Export profile 4 enables CPU-independent encoding;

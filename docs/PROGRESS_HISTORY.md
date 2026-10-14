@@ -1,5 +1,32 @@
 # Progress history
 
+## 14 October 2026: complete the direct-footage and agent-cost plans
+
+The final strict thorough run at `5d91c46` passes all 86 registered fixtures in
+4,374.5 seconds, with no failures, skips, reused passes or deferred checks.
+Formatting, all-target lint and Rust tests pass. The complete 30-minute 4K output,
+every precise-footage workflow, repeated H.264 output, automatic normalization,
+generated scenes and all five agent-cost budgets pass. Sustained recording passes
+once in 914.1 seconds without a verifier retry. This closes the final
+milestone left open by the preceding history entries.
+
+The [milestone record](../verification/final-plans-milestone-2026-10-14.json)
+identifies the observed executable, commit, complete source fingerprints and raw
+report/log hashes. `verification/latest.json` and the generated progress documents
+are refreshed only by this successful thorough run. The capability definition and
+v1 denominator remain unchanged; no v2 or agent-only editing points are awarded.
+
+The [requirement audit](plans/PLAN_COMPLETION_AUDIT.md) closes every stage in both
+plans against implementation and scoped evidence, including earlier Windows/Linux
+checks and fresh-agent trials. The separate placed-footage comparison retains its
+slower preview medians, nearly unchanged lossless export times and exact decoded
+equality. No general speed win, unrestricted compatibility or HDR timeline claim
+is made. Release binaries and broader distribution remain a separate track.
+
+This closing commit contains evidence and documentation; the tested engine source
+is unchanged. It ships through the normal gate, whose result and background status
+must be checked before the thread goal is declared complete.
+
 ## 14 October 2026: close placed-footage comparison and schema regression checks
 
 The final retained-release comparison passes its predeclared exactness and

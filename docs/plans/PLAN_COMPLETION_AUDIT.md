@@ -5,11 +5,12 @@ user's approved audio-cache and identity-cache amendments and peak-context token
 metric. This audit checks implementation and assertions, not just earlier stage
 labels. It changes no scope, release gate or editing points.
 
-Status: the implementation and targeted Windows/Linux checks are complete. The
-85-fixture default-path gate passed at 26cb066. The placed-footage comparison now
-passes its correctness and declared preview-budget checks, with slower preview
-medians reported. The final thorough milestone remains open; this document does
-not yet declare the overall goal complete.
+Status: every implementation stage and acceptance requirement in both plans is
+verified. The final strict thorough milestone at `5d91c46` passes all 86 fixtures,
+with no failures, skips, reused passes or deferred checks. Formatting, lint and
+Rust tests pass; source fingerprints match the tested checkout. The completed
+placed-footage comparison retains its slower preview medians and passing declared
+ceiling. No scope or points definition changes accompany this completion.
 
 Earlier evidence files describe their own checkpoints. A later complete gate can
 close an earlier open regression check without changing that historical record.
@@ -46,12 +47,14 @@ checkout metadata; they do not claim the Git label alone identifies the tested c
 | Stage 6: saved working space/default | `project.working_space` accepts all four depth/light combinations; absent or explicit 8-bit encoded selection retains the old rendering path. Store checks cover schema, validation, receipts, retry, undo and restore. Wide scene/generated/recursive frames are retained until one final transfer/dither step. Normalization remains native RGB8; this does not recover already-quantized source detail. |
 | Stage 6: independent numerical references | `working_color`, `working_effects`, `working_layers` and `working_scenes` use independent f64, Fraction and Decimal equations. Declared tolerances are one UNORM16 code per primitive/effect, two for complete scenes and explicitly bounded accumulated layers. `working_timelines` allows one delivered RGB8 code; its 27 cases/324 frames observed zero error on Windows/Linux. |
 | Stage 6: grade/fade banding | `working_banding` independently computes transfer, grade, coverage, depth stores and Bayer thresholds. The 1,024-frame temporal ramp has 1,024 distinct means; the 256-level spatial gradient retains all levels through 33 fade frames. Reference bytes/tile means are exact, with no added plateaus. This is a numerical SDR precision result. |
-| Stage 6: real workflow boundaries | `working_footage` adds 93 cases/1,044 exact frames per platform for original/direct/cached sources, effects/structural properties, native alpha, nested scenes, proxies, generated PCM, queues, caches and changed-source publication. The complete 85-fixture default-path quick gate at 26cb066 passes, including these cases. The final placed comparison passes correctness and its preview ceiling; the final thorough milestone remains pending. |
+| Stage 6: real workflow boundaries | `working_footage` adds 93 cases/1,044 exact frames per platform for original/direct/cached sources, effects/structural properties, native alpha, nested scenes, proxies, generated PCM, queues, caches and changed-source publication. The complete 85-fixture default-path quick gate at 26cb066 passes, including these cases. The final placed comparison passes correctness and its preview ceiling. The final strict thorough milestone at 5d91c46 passes all 86 fixtures, including all precise-mode workflows. |
 
 The [stage-six quick record](../../verification/stage6-full-quick-2026-10-14.json)
 identifies 26cb066 exactly: 85 fixtures, 261 Rust tests, no failures/skips/reuse,
-2,864 seconds. It predates the profile-4 fix; the final thorough run must include
-that separately verified change and all 86 current fixtures. H.264 profile 4 can
+2,864 seconds. It predates the profile-4 fix. The final
+[thorough milestone](../../verification/final-plans-milestone-2026-10-14.json) at
+`5d91c46` includes that fix and all 86 fixtures, with matching source identities
+and refreshed generated progress. H.264 profile 4 can
 change lossy output relative to earlier profiles; the default working-color path
 and saved completed receipts remain unchanged.
 
@@ -59,6 +62,11 @@ Primary direct-footage evidence: [source contract](../DIRECT_SOURCES.md),
 [automatic preparation](../AUTOMATIC_PREPARATION.md), [clip effects](../CLIP_EFFECTS.md),
 [generated clips](../GENERATED_CLIPS.md), [working color](../WORKING_COLOR.md), and the
 dated JSON records under [verification](../../verification).
+
+The routine `direct_sources` fixture deliberately leaves `stage_one_complete` and
+`long_source_latency_verified` false: it does not run the separate long-source
+performance experiment. Stage-one closure uses that fixture together with the
+retained stage-one milestone and the final placed-footage comparison above.
 
 ## Agent cost
 
@@ -103,7 +111,10 @@ repeatable comparative lead. The separate [comparative pilot](../FOOTAGE_BENCHMA
 reports its wins, ties, losses and limitations. Original code licensing, dependency
 notices and source-preservation rules remain intact.
 
-Before closure: record the final thorough result,
-exact tested commit/fingerprints and remaining verifier failures. Update generated
-PROGRESS only through a successful thorough run; do not promote targeted checks
-into milestone evidence.
+Closure evidence: the [final milestone](../../verification/final-plans-milestone-2026-10-14.json)
+pins `5d91c46`, the observed test binary, all 86 fixture names, full-report/log hashes
+and the source fingerprint set. The [complete evidence](../../verification/latest.json)
+and [generated progress](../PROGRESS.md) come from that successful thorough run.
+Recording passes once without a retry; no fixture failures remain in this milestone.
+The v1 capability definition is unchanged. Earlier targeted Windows/Linux results,
+fresh-agent trials and the separate performance comparison retain their stated scopes.
