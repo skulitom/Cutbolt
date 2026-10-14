@@ -1,5 +1,33 @@
 # Progress history
 
+## 14 October 2026: complete default-path regression gate and plan audit
+
+The frozen 26cb066 checkout passes all 85 registered quick fixtures with no
+failures, skips or reuse in 2,864 seconds. Its all-target build and 261 Rust tests
+pass. Recording completes once in 42 seconds; direct sources and every working
+color, scene, timeline, banding and footage fixture pass. This run predates the
+profile-4 H.264 fix at 04255ee, whose separate Windows/Linux targeted checks
+remain recorded. The final thorough milestone must include all 86 current
+fixtures. [Full-gate evidence](../verification/stage6-full-quick-2026-10-14.json)
+pins the tested commit and retained external report/log hashes. The clean frozen
+verification checkout was archived after both processes ended.
+
+The [requirement audit](plans/PLAN_COMPLETION_AUDIT.md) maps both plans' stages
+to implementation and independent assertions. It distinguishes historical
+checkpoint limits from later acceptance, including the approved audio/identity
+cache changes and peak-request token metric. It records the current 236 error
+codes, 41 skill examples, 18-tool/22,726-byte workspace catalog and two-call,
+775-byte title. Documentation now explains SDK omission semantics and identifies
+the later H.264 repeatability fix instead of calling that investigation unresolved.
+All audit links resolve and the repository material check passes.
+
+The final placed-footage comparison is running on retained f13453d/04255ee
+releases. No new speed result is claimed. The final thorough milestone and
+complete goal closure remain open; generated PROGRESS stays stale and no points
+are awarded. Verifier status reports no unresolved failure. This documentation
+commit will be shipped after the comparison, keeping compilation out of its
+measured intervals.
+
 ## 14 October 2026: repeatable H.264 delivery and placed-comparison preparation
 
 The new long placed-footage driver's short smoke check found different H.264

@@ -2,6 +2,13 @@
 
 Handoff plan, 11 October 2026. Written for an implementing agent. It changes no scope, criteria or points. This is agent-interface work: it earns **no** editing points (see `AGENTS.md` and [HYPERFRAMES_STRATEGY.md](../HYPERFRAMES_STRATEGY.md)). Line references are to `main` at `549e319`; re-check them before editing.
 
+## Current acceptance audit
+
+The [14 October requirement audit](PLAN_COMPLETION_AUDIT.md) maps the implementation
+and assertions to every stage below. It distinguishes completed targeted acceptance
+from the remaining final comparison and thorough milestone. Earlier checkpoint notes
+are retained with their dates; the original problem description follows.
+
 ## The problem
 
 1. **The default catalog is the full one.**

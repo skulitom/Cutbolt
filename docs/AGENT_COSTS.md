@@ -80,7 +80,11 @@ Only the compact listings change. They omit redundant dialect/default hints, use
 shape summary, preserve required descriptions and shorten optional descriptions. Strict parsing and
 full lookups remain. Full-mode tool arrays are byte-identical to `f8d680d`, with and without a
 workspace. Official SDK and wire tests cover both modes, bare default, environment selection,
-flag precedence, schema validation and annotation defaults.
+flag precedence, schema validation and annotation defaults. Python MCP SDK 1.12.3
+retains omitted hints as `None`; the fixture applies protocol defaults explicitly
+and requires full/core effective hints to agree. Fresh Claude Code 2.1.280 plugin
+trials accept the compact catalog. Those trials do not establish how arbitrary
+clients present permissions for missing hints.
 
 | Workflow | Calls | Sent bytes | Received, Windows | Received, Linux |
 | --- | ---: | ---: | ---: | ---: |
@@ -581,8 +585,10 @@ the auditor correction is counted as an agent workflow. No raw media/transcripts
 
 These observations do not establish repeatability, speech accuracy or a comparative lead.
 Release binaries remain separate work. The [two-model comparative pilot](FOOTAGE_BENCHMARK_RESULTS.md)
-is now complete, with losses and limitations reported; direct-footage stage 2 has passed its
-full quick check, while stages 3-6 remain unfinished. No editing points or generated milestone evidence change.
+is now complete, with losses and limitations reported. At that checkpoint direct-footage
+stage 2 had passed its full quick check and stages 3-6 remained unfinished. The
+[14 October audit](plans/PLAN_COMPLETION_AUDIT.md) records subsequent acceptance.
+No editing points were awarded by these agent-interface changes.
 
 ## Generated caption workflow update, 13 October 2026
 

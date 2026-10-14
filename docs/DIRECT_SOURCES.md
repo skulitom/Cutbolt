@@ -1,16 +1,23 @@
 # Compressed-source inspection
 
-The source index, saved direct bindings and exact frame previews implement part of
-[direct-footage stage 1](plans/DIRECT_FOOTAGE_PLAN.md). Original compressed clips can now supply
-single-frame previews, placed-track base pictures, top-level transitions and cropped/faded
-overlays, together with exact sound in sequential/placed-track renders and range exports.
-Eligible files report `timeline.ready: true`, `timeline.direct: true` and
-`source_index.direct_decode_available: true`. The long-source preview/range gate passes as recorded
-below. The complete stage-1 milestone passed at 338e114 on 12 October; later changes have
-separate evidence. The intermittent delivery comparison discussed below remains unresolved.
-Stage 2 adds [automatic normalization](AUTOMATIC_PREPARATION.md). Its fixed 546cac4 checkout
-passed all 74 full-quick stages on 13 October; [bounded evidence](../verification/stage2-full-quick-2026-10-13.json)
-records the separate stage-2 acceptance. Stages 3-6 remain open.
+Original compressed clips supply exact pictures and sound in sequential, placed and
+nested timelines, with saved effects, previews and exports. Eligible files report
+`timeline.ready: true`, `timeline.direct: true` and
+`source_index.direct_decode_available: true`. Other supported sources use
+[automatic normalization](AUTOMATIC_PREPARATION.md).
+
+Stage 1's complete milestone passed at 338e114 on 12 October. The later complete
+stage-3/4/5 quick gates and Windows/Linux checks verify automatic preparation,
+native layering and generated scenes. Optional [working precision](WORKING_COLOR.md)
+has targeted Windows/Linux evidence and a complete 85-fixture quick gate at
+26cb066. The final placed-source comparison and thorough milestone remain open. See the
+[requirement audit](plans/PLAN_COMPLETION_AUDIT.md) for exact evidence and remaining work.
+
+The intermittent H.264 difference discussed below was subsequently reproduced
+with identical encoder inputs. Export profile 4 enables CPU-independent encoding;
+48 exports per platform now match exactly across direct/conformed paths. See the
+[14 October evidence](../verification/export-repeatability-2026-10-14.json). Older
+completed receipts remain unchanged. The dated observations below are retained.
 
 `media.inspect` adds `source_index` for H.264, HEVC and ProRes video. It records decoded presentation
 order, rather than treating compressed packets as frames. The summary includes the presented frame
@@ -336,7 +343,10 @@ reader alongside the source receipt. A compressed file without its `decode` bind
 enter the reference profile. This keeps indexed conversion and exact audio policy coupled to
 the decoder that implements them.
 
-## Open H.264 delivery comparison, 12 October 2026
+## H.264 delivery investigation, 12 October 2026
+
+Superseded by the [14 October repeatability fix](../verification/export-repeatability-2026-10-14.json)
+described above. The following records what was known at the earlier checkpoint.
 
 Background verification at 6c3447a and f5fe95f intermittently failed the HEVC/Opus
 H.264-range comparison. The newer diagnostic records identical packed RGB before export
