@@ -114,7 +114,7 @@ impl Clip {
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
-    /// Snapshot schema version: 1 for legacy projects, 2 for native clip effects or generated scenes. The first such edit upgrades only the new revision; old snapshots are preserved.
+    /// Snapshot schema version: 1 for legacy projects, 2 for native clip effects, generated scenes or an explicit working-space setting. The first such edit upgrades only the new revision; old snapshots are preserved.
     pub schema_version: u32,
     /// Project ID, 1-128 bytes.
     pub id: String,

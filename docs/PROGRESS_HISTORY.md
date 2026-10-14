@@ -1,5 +1,21 @@
 # Progress history
 
+## 14 October 2026: name working precision in the snapshot schema description
+
+The final requirement audit found that Project.schema_version still named only
+clip effects and generated scenes as version-2 features. Its schema description
+now also names an explicit working-space setting, matching validation and the
+existing operation that upgrades only the new saved revision. This includes an
+explicit 8-bit encoded setting. Older snapshots remain preserved.
+
+The frozen placed-footage comparison continues with its original retained
+binaries. Focused catalog/schema tests and the three agent workflow fixtures are
+queued after the comparison, so compilation cannot affect measured intervals.
+Their results must be checked before shipping this commit. The final thorough
+milestone remains pending and must use this corrected description; no points or
+new milestone claim are made. The earlier waiting shipment coordinator was
+superseded before it shipped or started verification.
+
 ## 14 October 2026: complete default-path regression gate and plan audit
 
 The frozen 26cb066 checkout passes all 85 registered quick fixtures with no
