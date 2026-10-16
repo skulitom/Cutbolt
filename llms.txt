@@ -32,8 +32,8 @@ Qualifying H.264/HEVC 8-bit 4:2:0 originals work directly at the project's exact
 
 ## Optional
 
-- [Latest release](https://github.com/skulitom/Cutbolt/releases/latest): CLI archives for Windows x64, Linux x64 and macOS ARM64, cutbolt-windows-x64.mcpb and SHA256SUMS; FFmpeg and ffprobe are installed separately. MCP Registry name: io.github.skulitom/cutbolt.
+- [Latest release](https://github.com/skulitom/Cutbolt/releases/latest): CLI archives for Windows x64, Linux x64 and macOS ARM64, cutbolt-windows-x64.mcpb and SHA256SUMS; FFmpeg and ffprobe are installed separately; background jobs (and so MCP exports) need Windows or Linux. MCP Registry name: io.github.skulitom/cutbolt.
 - [Anode](https://github.com/skulitom/Anode): sibling tool (same author, MIT, local MCP server): Windows desktop automation for agents in a hidden background session.
 - [Pixelbolt](https://github.com/skulitom/Pixelbolt): sibling tool (same author, MIT, local MCP server): pixel art and sprite animation from editable JSON recipes.
-- [Inkbolt](https://github.com/skulitom/Inkbolt): sibling tool (same author, MIT, local MCP server): vector and raster image editing for diagrams; SVG in, SVG and PDF out.
+- [Inkbolt](https://github.com/skulitom/Inkbolt): sibling tool (same author, MIT, local MCP server): vector and raster image editing for diagrams; SVG, PNG, JPEG and TIFF in; SVG and PDF out.
 - [Nestbolt](https://github.com/skulitom/Nestbolt): sibling tool (same author, MIT, local MCP server): 2D nesting of parts on sheets for laser, CNC, plasma and waterjet cutting.

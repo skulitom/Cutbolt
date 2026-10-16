@@ -22,7 +22,7 @@ Eligible H.264 and HEVC footage can be edited directly. Other supported sources 
 
 Cutbolt is in development. Windows and Linux are the current verification platforms. Every install needs FFmpeg and ffprobe on PATH, or `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` set to them; Cutbolt bundles neither.
 
-**Prebuilt (early release):** the [latest release](https://github.com/skulitom/Cutbolt/releases/latest) has the CLI for Windows x64, Linux x64 and macOS ARM64 (macOS is not a verification platform, and Windows-only engine features stay Windows-only), and `cutbolt-windows-x64.mcpb`, an MCP bundle for Claude Desktop on Windows. Check downloads against `SHA256SUMS`. Cutbolt is in the official MCP Registry as `io.github.skulitom/cutbolt`.
+**Prebuilt (early release):** the [latest release](https://github.com/skulitom/Cutbolt/releases/latest) has the CLI for Windows x64, Linux x64 and macOS ARM64 (macOS is not a verification platform: background jobs, which MCP exports go through, need Windows or Linux, and Windows-only engine features stay Windows-only), and `cutbolt-windows-x64.mcpb`, an MCP bundle for Claude Desktop on Windows. Check downloads against `SHA256SUMS`. Cutbolt is in the official MCP Registry as `io.github.skulitom/cutbolt`.
 
 **From source,** with Rust and a C build toolchain, in this repository's checkout:
 
@@ -66,5 +66,5 @@ Cutbolt is one of five free, MIT-licensed tools for agents by the same author. E
 
 - [Anode](https://github.com/skulitom/Anode): Windows desktop automation in a hidden background session, so an agent can click, type and take screenshots without taking over your screen.
 - [Pixelbolt](https://github.com/skulitom/Pixelbolt): pixel art and sprite animation from editable JSON recipes, exported as sprite sheets, atlases, animated PNGs and GIFs.
-- [Inkbolt](https://github.com/skulitom/Inkbolt): vector and raster image editing for diagrams and illustrations, with SVG import and SVG and PDF export.
+- [Inkbolt](https://github.com/skulitom/Inkbolt): vector and raster image editing for diagrams and illustrations, with SVG, PNG, JPEG and TIFF import and SVG and PDF export.
 - [Nestbolt](https://github.com/skulitom/Nestbolt): 2D nesting of parts on sheets for laser, CNC, plasma and waterjet cutting, also [in your browser](https://skulitom.github.io/Nestbolt/).
