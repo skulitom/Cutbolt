@@ -4,6 +4,10 @@ Cutbolt is a local video editing engine for AI agents. Turn recorded footage int
 
 Use it through JSON commands, a Rust library or MCP over stdio. The engine runs on your machine, preserves source media, and needs no account or hosted service.
 
+- **Who it's for:** people who turn recorded footage (interviews, talking heads, tutorials, screen recordings and presentations) into finished videos and want Claude Code or another MCP agent to do the editing on their own machine.
+- **Use it when** an agent should cut, caption, mix and export real footage with exact timing, and you want to inspect, retry or undo each change it makes.
+- **Don't use it when** you want to edit by hand in a visual timeline (Cutbolt is driven by an agent, JSON commands or a Rust library), need a hosted or cloud service, want new video generated from a text prompt (it edits footage you already have), or need formats beyond its documented limits (see [current scope](#current-scope)).
+
 ## What you can make
 
 - **Interviews and talking heads:** cut by time or transcript, shorten pauses, switch between synchronized cameras, and add timed captions.
@@ -16,9 +20,11 @@ Eligible H.264 and HEVC footage can be edited directly. Other supported sources 
 
 ## Get started
 
-Cutbolt is in development. Install from source with Rust, a C build toolchain, and FFmpeg/ffprobe available on PATH. Windows and Linux are the current verification platforms; prebuilt releases are still in preparation.
+Cutbolt is in development. Windows and Linux are the current verification platforms. Every install needs FFmpeg and ffprobe on PATH, or `CUTBOLT_FFMPEG` and `CUTBOLT_FFPROBE` set to them; Cutbolt bundles neither.
 
-From this repository's checkout:
+**Prebuilt (early release):** the [latest release](https://github.com/skulitom/Cutbolt/releases/latest) has the CLI for Windows x64, Linux x64 and macOS ARM64 (macOS is not a verification platform: background jobs, which MCP exports go through, need Windows or Linux, and Windows-only engine features stay Windows-only), and `cutbolt-windows-x64.mcpb`, an MCP bundle for Claude Desktop on Windows. Check downloads against `SHA256SUMS`. Cutbolt is in the official MCP Registry as `io.github.skulitom/cutbolt`.
+
+**From source,** with Rust and a C build toolchain, in this repository's checkout:
 
 ```text
 cargo install --path . --locked
@@ -53,3 +59,12 @@ Verification checks decoded pictures, audio samples, timing and saved-edit behav
 See the [development workflow](docs/DEVELOPMENT_LOOP.md), [architecture](docs/ARCHITECTURE.md) and [1.0 roadmap](docs/ROADMAP_1_0.md) for implementation and planning details.
 
 Original project code is licensed under [MIT](LICENSE). External dependencies retain their own licenses; tested versions and requirements are in the [dependency ledger](docs/DEPENDENCIES.md). Repository material and attribution rules are documented in [research and publication boundaries](docs/RESEARCH.md).
+
+## Sibling tools
+
+Cutbolt is one of five free, MIT-licensed tools for agents by the same author. Each runs locally as an MCP server:
+
+- [Anode](https://github.com/skulitom/Anode): Windows desktop automation in a hidden background session, so an agent can click, type and take screenshots without taking over your screen.
+- [Pixelbolt](https://github.com/skulitom/Pixelbolt): pixel art and sprite animation from editable JSON recipes, exported as sprite sheets, atlases, animated PNGs and GIFs.
+- [Inkbolt](https://github.com/skulitom/Inkbolt): vector and raster image editing for diagrams and illustrations, with SVG, PNG, JPEG and TIFF import and SVG and PDF export.
+- [Nestbolt](https://github.com/skulitom/Nestbolt): 2D nesting of parts on sheets for laser, CNC, plasma and waterjet cutting, also [in your browser](https://skulitom.github.io/Nestbolt/).
