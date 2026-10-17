@@ -7,6 +7,7 @@ Use it through JSON commands, a Rust library or MCP over stdio. The engine runs 
 - **Who it's for:** people who turn recorded footage (interviews, talking heads, tutorials, screen recordings and presentations) into finished videos and want Claude Code or another MCP agent to do the editing on their own machine.
 - **Use it when** an agent should cut, caption, mix and export real footage with exact timing, and you want to inspect, retry or undo each change it makes.
 - **Don't use it when** you want to edit by hand in a visual timeline (Cutbolt is driven by an agent, JSON commands or a Rust library), need a hosted or cloud service, want new video generated from a text prompt (it edits footage you already have), or need formats beyond its documented limits (see [current scope](#current-scope)).
+- **Compared with** Kinocut (formerly mcp-video), claudeclip, video-edit-mcp, Video Jungle MCP, Vlexor and HyperFrames in [Local video editing MCP servers for AI agents, and hosted alternatives: 7 compared](https://skulitom.github.io/Cutbolt/compare/local-video-editing-mcp-servers/) (checked 17 October 2026): Cutbolt measured over MCP (frame-exact cuts, safe retries, undo, byte-identical repeat exports on one FFmpeg build), the others read from their code and docs, and when to choose each instead.
 
 ## What you can make
 
