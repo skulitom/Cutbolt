@@ -1,0 +1,10 @@
+python -X utf8 tools/verify.py --only skills --no-rust --engine target/release/cutbolt.exe, main ddc77c9, 2026-10-17 (temporary folder path removed)
+quick verification of cutbolt.exe copied to a temporary folder
+[  0:00] skills started
+[  0:33] skills passed in 33 s
+
+Quick verification: 1 passed, 0 failed, 0 skipped, 0 not started, 34 s. No evidence was written; run --thorough for progress evidence.
+
+real	0m33.928s
+user	0m0.015s
+sys	0m0.000s

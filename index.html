@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cutbolt: local video editing for AI agents</title>
+<meta name="description" content="Cutbolt is a free, MIT-licensed video editing engine with a local MCP server: agents cut, caption, mix and export real footage on a saved timeline with revisions, safe retries and undo. No account or hosted service.">
+<link rel="canonical" href="https://skulitom.github.io/Cutbolt/">
+<style>
+:root { --bg: #ffffff; --fg: #1d1d1f; --muted: #5b5b66; --link: #0b57d0; --rule: #d9d9e0; }
+@media (prefers-color-scheme: dark) { :root { --bg: #16171a; --fg: #e8e8ec; --muted: #a2a2ad; --link: #8ab4f8; --rule: #33343a; } }
+body { background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+main { max-width: 46rem; margin: 0 auto; padding: 2rem 16px 4rem; }
+a { color: var(--link); }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 1rem; }
+h2 { font-size: 1.2rem; margin: 2rem 0 0.5rem; }
+.muted { color: var(--muted); font-size: 0.9rem; }
+footer { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Cutbolt: local video editing for AI agents</h1>
+<p>Cutbolt is a video editing engine for AI agents. Claude Code or another MCP client turns recorded footage into a
+finished edit on your own machine: it arranges shots, tightens dialogue, adds captions and titles, mixes sound and
+exports H.264 or lossless masters. Every saved edit has a revision, so the agent can inspect a change, retry a request
+safely or undo a decision. It is a single Rust executable with a local MCP server over stdio and a JSON command line,
+free and MIT-licensed. It needs FFmpeg and ffprobe, which you install separately, and no account or hosted
+service.</p>
+<p><a href="https://github.com/skulitom/Cutbolt">Source, install and docs on GitHub</a> ·
+<a href="https://github.com/skulitom/Cutbolt/releases/latest">Latest release</a></p>
+
+<h2>Comparisons</h2>
+<ul>
+<li><a href="compare/local-video-editing-mcp-servers/">Local video editing MCP servers for AI agents</a> (checked 17
+October 2026)</li>
+</ul>
+
+<footer class="muted">Plain static pages: no scripts, trackers or cookies. Made by the Cutbolt maintainers.</footer>
+</main>
+</body>
+</html>
