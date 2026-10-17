@@ -33,6 +33,7 @@ Qualifying H.264/HEVC 8-bit 4:2:0 originals work directly at the project's exact
 ## Optional
 
 - [Latest release](https://github.com/skulitom/Cutbolt/releases/latest): CLI archives for Windows x64, Linux x64 and macOS ARM64, cutbolt-windows-x64.mcpb and SHA256SUMS; FFmpeg and ffprobe are installed separately; background jobs (and so MCP exports) need Windows or Linux. MCP Registry name: io.github.skulitom/cutbolt.
+- [Local video editing MCP servers compared](https://skulitom.github.io/Cutbolt/compare/local-video-editing-mcp-servers/): Cutbolt against Kinocut (formerly mcp-video), claudeclip, video-edit-mcp, Video Jungle MCP, Vlexor and HyperFrames, checked 17 October 2026, with Cutbolt's measured MCP run, what each needs, how each edits, saved edits and undo, and when to choose each.
 - [Anode](https://github.com/skulitom/Anode): sibling tool (same author, MIT, local MCP server): Windows desktop automation for agents in a hidden background session.
 - [Pixelbolt](https://github.com/skulitom/Pixelbolt): sibling tool (same author, MIT, local MCP server): pixel art and sprite animation from editable JSON recipes.
 - [Inkbolt](https://github.com/skulitom/Inkbolt): sibling tool (same author, MIT, local MCP server): vector and raster image editing for diagrams; SVG, PNG, JPEG and TIFF in; SVG and PDF out.
