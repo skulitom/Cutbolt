@@ -14,6 +14,21 @@ For a new animated video from a brief, an HTML graphics tool may be a better aut
 choice. Cutbolt can finish its rendered graphics over footage. For a title on footage,
 use an original built-in template with graphics.place.
 
+## When Cutbolt isn't installed
+
+The plugin starts cutbolt from PATH and installs nothing. With no cutbolt_* tools, or with
+plugin:cutbolt:cutbolt failed in /mcp, the executable is missing. With the user's agreement:
+
+1. Download the archive for the platform from https://github.com/skulitom/Cutbolt/releases/latest
+   and check it against that release's SHA256SUMS. Windows x64 and Linux x64 are verified;
+   the macOS ARM64 build runs, but MCP exports need Windows or Linux.
+2. Extract it to a folder the user chooses and add that folder to the user's PATH.
+3. Put FFmpeg and ffprobe on PATH, or set CUTBOLT_FFMPEG and CUTBOLT_FFPROBE; Cutbolt
+   bundles neither.
+4. In a new terminal, cutbolt --version and cutbolt doctor; doctor exits 0 with ready true.
+5. Restart Claude Code from that terminal. Don't also add the server with claude mcp add:
+   the plugin already registers it.
+
 ## Calls and results
 
 The plugin starts local stdio MCP in the current project directory. A command such as

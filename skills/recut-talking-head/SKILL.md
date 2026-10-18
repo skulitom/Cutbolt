@@ -9,6 +9,7 @@ This self-contained recipe covers a new cut through reviewed delivery. For an ex
 project, use session.get to obtain its head and track IDs, then skip initial setup. Perform
 only the stages requested by the user; captions and delivery are optional when revising timing.
 Sources and outputs stay in the chosen workspace, and every output uses a new name.
+With no cutbolt_* tools available, first follow "When Cutbolt isn't installed" in the cutbolt skill.
 
 Use the listed cutbolt_* tool for a command when present (omit command from its arguments);
 otherwise use cutbolt_run with command and arguments. Replace $PLACEHOLDERS with actual
