@@ -43,14 +43,14 @@ Replace the path with your workspace directory; on Windows, use a path such as `
 
 See [installation and client setup](docs/INSTALLATION.md) for prerequisites, configuration and the optional Claude Code plugin. The plugin includes recipes for recuts, tutorials, multicam editing, captions and delivery. Other agents can start with [llms.txt](llms.txt).
 
-To add the plugin to Claude Code from GitHub, once the CLI and FFmpeg are installed:
+To use the Claude Code plugin instead of configuring the client by hand, add it from GitHub:
 
 ```text
 claude plugin marketplace add skulitom/Cutbolt
 claude plugin install cutbolt@cutbolt-local
 ```
 
-Then restart Claude Code. The plugin starts `cutbolt` from PATH and installs nothing itself.
+Then restart Claude Code in your footage workspace. The plugin starts `cutbolt` from PATH and installs nothing itself. Its recipes follow `main`, which can be ahead of the prebuilt release, so install the CLI from source for the plugin: as above, or with `cargo install --git https://github.com/skulitom/Cutbolt --locked`.
 
 Once connected, try a request such as:
 
