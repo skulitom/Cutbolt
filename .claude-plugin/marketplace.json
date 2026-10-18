@@ -3,6 +3,6 @@
   "owner": {"name": "Cutbolt contributors"},
   "metadata": {"description": "Original skills and local stdio MCP configuration for Cutbolt."},
   "plugins": [
-    {"name": "cutbolt", "source": "./", "description": "Local footage editing with the external Cutbolt engine.", "version": "0.1.0"}
+    {"name": "cutbolt", "source": "./", "description": "Local footage editing with the external Cutbolt engine.", "version": "0.1.1"}
   ]
 }
