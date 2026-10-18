@@ -25,7 +25,7 @@ cutbolt --version in a terminal to check. With the user's agreement:
    cargo install --git https://github.com/skulitom/Cutbolt --locked
    A prebuilt archive from https://github.com/skulitom/Cutbolt/releases/latest is quicker:
    check it against SHA256SUMS, extract it and add its folder to PATH. It can be older than
-   the recipes, though: a request refused with INVALID_JSON naming an unknown field means it is.
+   the recipes, though: INVALID_JSON naming an unknown field that a recipe uses means it is.
 2. Put FFmpeg and ffprobe on PATH, or set CUTBOLT_FFMPEG and CUTBOLT_FFPROBE; Cutbolt
    bundles neither.
 3. In a new terminal, run cutbolt --version and cutbolt doctor; doctor exits 0 with ready true.
