@@ -19,7 +19,8 @@ use an original built-in template with graphics.place.
 The plugin starts cutbolt from PATH and installs nothing. With no cutbolt_* tools, or with
 plugin:cutbolt:cutbolt failed in /mcp, the executable is usually missing from PATH; run
 cutbolt --version in a terminal to check. If it prints a version, don't reinstall: run cutbolt
-doctor and follow its repair hints. Otherwise, with the user's agreement:
+doctor and follow its repair hints; once it reports ready true, restart Claude Code from that
+terminal, in the folder that holds the footage. Otherwise, with the user's agreement:
 
 1. Install an engine that matches these recipes, which follow the repository's main branch.
    With a Rust toolchain supporting edition 2024 and a C compiler/linker, run
