@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cutbolt comparisons: local video editing MCP servers for AI agents</title>
+<meta name="description" content="Cutbolt&#x27;s comparison page: which video editing MCP servers for AI agents edit your files locally or on a hosted service, and what each can undo and export.">
+<link rel="canonical" href="https://skulitom.github.io/Cutbolt/compare/">
+<style>
+:root { --bg: #ffffff; --fg: #1d1d1f; --muted: #5b5b66; --link: #0b57d0; --rule: #d9d9e0; }
+@media (prefers-color-scheme: dark) { :root { --bg: #16171a; --fg: #e8e8ec; --muted: #a2a2ad; --link: #8ab4f8; --rule: #33343a; } }
+body { background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+main { max-width: 46rem; margin: 0 auto; padding: 2rem 16px 4rem; }
+a { color: var(--link); }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 1rem; }
+h2 { font-size: 1.2rem; margin: 2rem 0 0.5rem; }
+.muted { color: var(--muted); font-size: 0.9rem; }
+h2 a { text-decoration: none; }
+footer { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1rem; }
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Cutbolt comparisons: local video editing MCP servers for AI agents",
+  "description": "Cutbolt's comparison page: which video editing MCP servers for AI agents edit your files locally or on a hosted service, and what each can undo and export.",
+  "url": "https://skulitom.github.io/Cutbolt/compare/",
+  "inLanguage": "en",
+  "dateModified": "2026-10-21",
+  "isPartOf": {
+    "@type": "WebSite",
+    "name": "Cutbolt",
+    "url": "https://skulitom.github.io/Cutbolt/"
+  },
+  "about": {
+    "@type": "SoftwareApplication",
+    "name": "Cutbolt",
+    "url": "https://github.com/skulitom/Cutbolt"
+  },
+  "mainEntity": {
+    "@type": "ItemList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "url": "https://skulitom.github.io/Cutbolt/compare/local-video-editing-mcp-servers/",
+        "name": "Local video editing MCP servers for AI agents, and hosted alternatives: 7 compared"
+      }
+    ]
+  }
+}
+</script>
+</head>
+<body>
+<main>
+<h1>Cutbolt comparisons</h1>
+<p>We make Cutbolt, a free, MIT-licensed video editing engine with a local MCP server. This page compares it with other video editing tools for AI agents. It says which numbers we measured and which we read from the other tools&#x27; code and docs, and when it was last checked.</p>
+<h2><a href="local-video-editing-mcp-servers/">Local video editing MCP servers for AI agents, and hosted alternatives: 7 compared</a></h2>
+<p>Checked 17 October 2026. Four are local MCP servers that edit your files: Cutbolt (18 tools by default), Kinocut (formerly mcp-video; 203 tools), claudeclip (31) and video-edit-mcp (34). Video Jungle MCP edits on Video Jungle&#x27;s servers, Vlexor has a hosted engine plan each edit and renders it on your machine (on 17 October its package could not be installed the way its README says), and HyperFrames renders new videos from HTML. We measured Cutbolt over MCP on one Windows PC, in six runs across its 0.4.0 release and main: a cut of a 720p test clip exported exactly the expected 150 source frames in order, resending the same edit returned its original receipt, undo restored the earlier cut, and repeated H.264 exports of the cut were byte-identical with one FFmpeg build (main also fixes a repeatability case that 0.4.0 still has). We read the other six from their code and docs without running them.</p>
+<h2>Comparisons for our other tools</h2>
+<ul>
+<li><a href="https://skulitom.github.io/Anode/compare/windows-desktop-automation-for-ai-agents/">Windows desktop automation for AI agents</a> (Anode, checked 16 October 2026)</li>
+<li><a href="https://skulitom.github.io/Pixelbolt/compare/pixel-art-mcp-servers-for-ai-agents/">Pixel art and sprite MCP servers for AI agents</a> (Pixelbolt, checked 17 October 2026)</li>
+<li><a href="https://skulitom.github.io/Pixelbolt/compare/pixel-fx-designer-alternatives/">Pixel FX Designer alternatives</a> (Pixelbolt, checked 19 October 2026)</li>
+<li><a href="https://skulitom.github.io/Inkbolt/compare/svg-vector-editing-mcp-servers/">SVG and vector editing MCP servers for AI agents</a> (Inkbolt, checked 18 October 2026)</li>
+<li><a href="https://skulitom.github.io/Nestbolt/compare/nesting-for-ai-agents/">Nesting MCP servers and CLIs for AI agents</a> (Nestbolt, checked 20 October 2026)</li>
+<li><a href="https://skulitom.github.io/Nestbolt/deepnest-alternative/">A Deepnest alternative, with the benchmark</a> (Nestbolt, benchmark run 13 October 2026)</li>
+</ul>
+<footer class="muted"><p>Plain static pages: no JavaScript, trackers or cookies. Made by the Cutbolt maintainers. <a href="../">Cutbolt</a> · <a href="https://github.com/skulitom/Cutbolt">GitHub</a> · <a href="https://github.com/skulitom/Cutbolt/issues/new">Report a mistake</a></p></footer>
+</main>
+</body>
+</html>
