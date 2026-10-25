@@ -1,0 +1,120 @@
+{
+ "what": "Cutbolt 0.4.0 as downloaded: cutbolt-v0.4.0-x86_64-pc-windows-msvc.zip from the v0.4.0 GitHub release (SHA-256 ee8458b2... matches SHA256SUMS); its cutbolt.exe is byte-identical to server/cutbolt.exe in cutbolt-windows-x64.mcpb (SHA-256 5f755d1e... matches cutbolt-windows-x64.mcpb.sha256)",
+ "engine": "cutbolt 0.4.0 (commit e668c16a668f34a10c96b4b30c627b44235087d1)",
+ "ffmpeg": "ffmpeg version 7.0-full_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+ "os": "Windows-11-10.0.26200-SP0",
+ "cpu": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+ "frame_coded_clip": {
+  "runs": [
+   "2026-10-25 15:00:18 +0000",
+   "2026-10-25 15:00:30 +0000",
+   "2026-10-25 15:00:43 +0000"
+  ],
+  "tools_list": {
+   "tools": 18,
+   "wire_bytes": 21198
+  },
+  "median_ms": {
+   "initialize": 9.6,
+   "tools/list": 10.4,
+   "media.inspect": 502.1,
+   "session.create": 13.6,
+   "preview.frame rev0 at 3 s": 362.6,
+   "session.apply ripple_delete 1-2 s": 6.0,
+   "session.apply same request resent": 1.2,
+   "session.get after retry": 0.9,
+   "preview.frame rev1 at 1 s": 302.6,
+   "export-rev1-a (job.start)": 97.6,
+   "export-rev1-a (job.wait)": 1933.8,
+   "export-rev1-a (start to finished)": 2028.5,
+   "export-rev1-b (job.start)": 14.7,
+   "export-rev1-b (job.wait)": 1895.8,
+   "export-rev1-b (start to finished)": 1910.5,
+   "export-rev1-reference (job.start)": 14.9,
+   "export-rev1-reference (job.wait)": 3235.7,
+   "export-rev1-reference (start to finished)": 3250.8,
+   "session.undo": 6.9,
+   "session.get head": 1.2,
+   "session.get rev0": 0.9,
+   "session.history": 0.9,
+   "export-head (job.start)": 13.7,
+   "export-head (job.wait)": 1917.4,
+   "export-head (start to finished)": 1931.3
+  },
+  "h264_rev1_sha256_all_exports": [
+   "07aa3d1f1bdbc35aee3387e5cc0170ce142e99efd04232e3ed2e69059dae9f21"
+  ],
+  "h264_head_sha256_all_runs": [
+   "23f9d8d6574b2e1aa1f127e633043df1f86b18c7626edc9153241d2a69f86d66"
+  ],
+  "encoder_input_video_sha256_all_exports": [
+   "b83572e8c82ec3a66e6106f7d5087796521621f8973c7132ed60205970c3dd2a"
+  ],
+  "source_sha256_before_and_after_all_runs": [
+   "4ded9771228aa0404ab2b8e59ce61c6cd0a75c798e27a8c09903405639601730"
+  ],
+  "source_unchanged_all_runs": true,
+  "resent_request_kept_revision_1": true,
+  "undo_equals_revision_0": true,
+  "every_frame_and_preview_matches_expected_source_frame": true,
+  "reference_decoded_video_sha256_all_runs": [
+   "b83572e8c82ec3a66e6106f7d5087796521621f8973c7132ed60205970c3dd2a"
+  ],
+  "mp4_audio_durations": [
+   "5.000000",
+   "6.000000"
+  ]
+ },
+ "moving_pattern_clip": {
+  "runs": [
+   "2026-10-25 15:01:00 +0000",
+   "2026-10-25 15:01:23 +0000"
+  ],
+  "h264_rev1_sha256_all_exports": [
+   "0b6478c07cc4b794a9b551de538581e4611e2a8326f79b75a340c7dbef19803b"
+  ],
+  "h264_head_sha256_all_runs": [
+   "4ed948aaca3f73b08a7df84334d37398733693c9633cfe22e87a6562ad65c966"
+  ],
+  "encoder_input_video_sha256_all_exports": [
+   "756b130d89ee11b3433b16154d4d4b558a3722c2c4449363826dd1b94bdddf93"
+  ],
+  "source_sha256_before_and_after_all_runs": [
+   "ca010470aae659124ee00af57e5f96f44dfdf2bc7021455cd7f33a5566560583"
+  ],
+  "source_unchanged_all_runs": true,
+  "resent_request_kept_revision_1": true,
+  "undo_equals_revision_0": true,
+  "h264_rev1_decoded_video_sha256_all_exports": [
+   "605b4c42cd6b449507ee3170d9d2342dcbe09440748851c06aa056734a4acd67"
+  ]
+ },
+ "compared_with_17_oct_source_builds": {
+  "main ddc77c9": {
+   "colour_h264_rev1_same": true,
+   "colour_h264_head_same": true,
+   "colour_encoder_input_same": true,
+   "motion_h264_rev1_same": false,
+   "motion_encoder_input_same": true,
+   "old_colour_h264_rev1": [
+    "07aa3d1f1bdbc35aee3387e5cc0170ce142e99efd04232e3ed2e69059dae9f21"
+   ],
+   "old_motion_h264_rev1": [
+    "1b8b554110638402af4d096938bb2849fae047ed4a8f75be16733069bcd6db35"
+   ]
+  },
+  "release 0.4.0 (e668c16)": {
+   "colour_h264_rev1_same": true,
+   "colour_h264_head_same": true,
+   "colour_encoder_input_same": true,
+   "motion_h264_rev1_same": true,
+   "motion_encoder_input_same": true,
+   "old_colour_h264_rev1": [
+    "07aa3d1f1bdbc35aee3387e5cc0170ce142e99efd04232e3ed2e69059dae9f21"
+   ],
+   "old_motion_h264_rev1": [
+    "0b6478c07cc4b794a9b551de538581e4611e2a8326f79b75a340c7dbef19803b"
+   ]
+  }
+ }
+}

@@ -1,0 +1,7 @@
+ffmpeg-skill 2.16.1 as fetched on 2026-10-25: npm pack ffmpeg-skill@2.16.1 (npm 11.17.0)
+npm registry: tarball https://registry.npmjs.org/ffmpeg-skill/-/ffmpeg-skill-2.16.1.tgz
+dist.integrity sha512-Ay7v89/OprWjQ2iDD0OY8X2K1XW4PoOS5zLMZhRSRggZyPRs7+KmaCIcIr3Z0h6+oe4AdAhrZWGnYryuhlzgyg== (npm pack checked it)
+gitHead 88e2f42fdf7856885b63ff8e41d652d1c64cb41e = the v2.16.1 tag on github.com/kajisho5/ffmpeg-skill
+tarball SHA-256 ffd95e18a3c017196a6333f1c6e5a482bee158d9d79279258592183a3e153d80
+Unpacked with tar -xzf into its own folder; scripts/cut.py run directly with Python 3.13.9 (python -s -E), FFmpeg 7.0 (gyan.dev full build) first on PATH.
+Not installed into any agent's skills folder; --transcribe, --hw and every network-capable option left off.

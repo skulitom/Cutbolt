@@ -1,0 +1,42 @@
+Searches for Cutbolt's comparison page refresh, run 2026-10-25 about 14:58-15:00 London (standard web search tool, US results).
+The page's three searches, then two queries Claude agents wrote on 22 October when asked to find a video editing MCP server.
+Ranked results in order as returned; Cutbolt (skulitom/Cutbolt or skulitom.github.io/Cutbolt) appeared in none.
+
+1. "local video editing MCP server"
+   enterprisedna.co/directories/mcp/pastorsimon1798-mcp-video; glama.ai/mcp/servers/gcszw71lip (Video Editor MCP);
+   www.tella.com/blog/best-mcp-servers-for-video-editing; lobehub.com/mcp?q=fmp; glama.ai/mcp/servers/Intelligence08/video-editing-mcp;
+   enterprisedna.co/directories/mcp/video-edit-mcp; glama.ai/mcp/servers/j16og442eq; glama.ai/mcp/servers/@burningion/video-editing-mcp (README);
+   glama.ai/mcp/servers/wtdsgcqcf0 (Vlexor MCP Server)
+   Summary named: mcp-video, Vlexor MCP, Video Editor MCP (Video Jungle), an FFmpeg server on LobeHub, a Premiere Pro MCP,
+   video-edit-mcp, and Tella's roundup (DaVinci Resolve MCP, Premiere Pro MCP, Palmier Pro, ffmpeg-mcp-lite). "Strongest fully
+   local candidates are mcp-video and ffmpeg-mcp-lite."
+
+2. "MCP server for video editing local ffmpeg agent"
+   glama.ai/mcp/servers/@Kush36Agrawal/Video_Editor_MCP; glama.ai/mcp/servers/ov0qov2xh1 (LICENSE); playbooks.com/mcp/kush36agrawal-video-editor;
+   mcpservers.org/{de,ko,es,zh-TW,hi,ja,pt-BR}/servers/kyanitelabs/mcp-video
+   Summary named: mcp-video (kyanitelabs), Video Editor MCP Server (Kush36Agrawal, one execute_ffmpeg tool).
+
+3. "best video editing MCP server for Claude Code"
+   www.tella.com/blog/best-mcp-servers-for-video-editing; json2video.com/claude-video/video-mcp-servers/; www.opus.pro/blog/claude-video-editing-mcp;
+   mcpservers.org/es/servers/video-db/agent-toolkit; glama.ai/mcp/servers/ejbol9ot4x; mcpservers.org/{ja,de,en}/servers/video-db/agent-toolkit;
+   buildtolaunch.substack.com/p/best-mcp-servers-claude-code
+   Summary: "No single server wins"; grouped by job (Tella, OpusClip, Reap, Submagic, DaVinci Resolve and Premiere bridges,
+   Palmier Pro, ffmpeg-mcp-lite, JSON2Video, Creatomate, Shotstack, Plainly). "The results don't include independent head-to-head tests."
+   "The most detailed roundups come from vendors that sell listed products (Tella, JSON2Video, OpusClip)."
+
+4. "MCP server local video editing ffmpeg cut captions render Claude Code"   (a query Claude agents wrote, 22 October)
+   www.tella.com/blog/best-mcp-servers-for-video-editing; glama.ai/mcp/servers/musyta-labs/mcpCut; glama.ai/mcp/servers/x15v5qmjnq;
+   glama.ai/mcp/servers/KyaniteLabs/kinocut; glama.ai/mcp/servers/ejbol9ot4x; mcpservers.org/{ru,th}/servers/kyanitelabs/mcp-video;
+   glama.ai/mcp/servers/y8ta1e6pbt; glama.ai/mcp/servers/j16og442eq
+   Summary named: claudeclip, video-editor-mcp (ffmpeg, faster-whisper, yt-dlp; optional DaVinci Resolve and CapCut), mcp-video/kinocut,
+   mcpCut (edit log per project; FFmpeg or MLT render), ffmpeg-mcp-lite, Tella (hosted), Palmier Pro (Mac).
+
+5. "video editing MCP server github trim subtitles burn-in ffmpeg Whisper"   (a query Claude agents wrote, 22 October)
+   lobehub.com/mcp?q=fmp; glama.ai/mcp/servers/m7e38fpi8x; lobehub.com/mcp?q=ffmpeg; lobehub.com/mcp?q=FFmpeg; glama.ai/mcp/servers/r7uqvwdx8q (Video Tools MCP);
+   glama.ai/mcp/servers/i1jxb59zpg; glama.ai/mcp/servers/@misbahsy/video-audio-mcp (CONTRIBUTING); glama.ai/mcp/servers/@Kush36Agrawal/Video_Editor_MCP;
+   glama.ai/mcp/servers/strzhao/video-to-text-mcp
+   Summary named: ffmpeg-mcp-video-editor (38 tools, caption burning), Video MCP (FFmpeg, Whisper, yt-dlp), Video Tools MCP, video-to-text-mcp,
+   misbahsy/video-audio-mcp. "No result confirmed a single server that goes Whisper -> SRT -> burn-in."
+
+Compared with 17 Oct: directories still fill most results; a vendor roundup (Tella, "as of October 2026") now ranks in 3 of 5;
+summaries still say no independent head-to-head test exists. Cutbolt: absent from all five (as on 17 Oct).

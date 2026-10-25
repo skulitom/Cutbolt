@@ -1,0 +1,19 @@
+quick verification of cutbolt.exe copied to <temp>
+[  0:00] skills started
+[  0:01] skills FAILED in 2 s
+----- skills output -----
+exit 1
+
+Traceback (most recent call last):
+  File "tests\skills.py", line 312, in <module>
+    run(parser.parse_args().output)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "tests\skills.py", line 159, in run
+    assert not tool['isError'] and envelope['ok'], (skill, label, envelope)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ('recut-talking-head', 'render', {'error': {'code': 'INVALID_JSON', 'hint': "Correct the field named by path to match the command's argument contract.", 'message': 'arguments: mode: unknown field `mode`, expected one of `document`, `layouts`, `project`, `input_root`, `output_root`, `output`, `start`, `duration`, `asset_id`', 'path': 'arguments.mode', 'retry': 'changed'}, 'ok': False})
+
+-----
+
+Quick verification: 0 passed, 1 failed, 0 skipped, 0 not started, 2 s. No evidence was written; run --thorough for progress evidence.
+Failed: skills (rerun with --last-failed)

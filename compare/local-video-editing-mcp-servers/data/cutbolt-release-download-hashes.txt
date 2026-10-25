@@ -1,0 +1,44 @@
+Cutbolt 0.4.0 as downloaded on 2026-10-25 from https://github.com/skulitom/Cutbolt/releases/tag/v0.4.0
+(gh release download v0.4.0 -R skulitom/Cutbolt), checked with sha256sum and unpacked with tar -xf.
+
+Published SHA256SUMS:
+d5a99c3fbff2b9d6468c5dfa69771137bf2549eb55f0d23a4c0b75728d0e6edb  cutbolt-v0.4.0-aarch64-apple-darwin.tar.gz
+ee8458b22f70fbf68e2f379f8c2df36f4b066dc3ee06c13c822bc2fdf1524a80  cutbolt-v0.4.0-x86_64-pc-windows-msvc.zip
+005f0d3affd5acce971ae3bb849dad97e6cec87a4e4ea5153976e5289e6893e7  cutbolt-v0.4.0-x86_64-unknown-linux-gnu.tar.gz
+5f755d1ec6e0e46217d85333543843f1e6dfb085e439af4a492474a0dbd1ecac  cutbolt-windows-x64.mcpb
+15ca36a4a3f801c525abfa776ab9e56097e6b7ec4cddf4174338a0a56ed30bf0  cutbolt-windows-x64.mcpb.sha256
+
+Published cutbolt-windows-x64.mcpb.sha256:
+5f755d1ec6e0e46217d85333543843f1e6dfb085e439af4a492474a0dbd1ecac  cutbolt-windows-x64.mcpb
+
+Computed:
+ee8458b22f70fbf68e2f379f8c2df36f4b066dc3ee06c13c822bc2fdf1524a80  cutbolt-v0.4.0-x86_64-pc-windows-msvc.zip   matches SHA256SUMS: True
+5f755d1ec6e0e46217d85333543843f1e6dfb085e439af4a492474a0dbd1ecac  cutbolt-windows-x64.mcpb   matches SHA256SUMS and .sha256: True
+04248c402f8b25e408f790064464b7afd096da319d2f5c41c1a1160312b68a2c  cutbolt.exe inside the zip
+04248c402f8b25e408f790064464b7afd096da319d2f5c41c1a1160312b68a2c  server/cutbolt.exe inside the MCPB
+zip exe == MCPB exe: True
+
+cutbolt.exe --version: cutbolt 0.4.0 (commit e668c16a668f34a10c96b4b30c627b44235087d1)
+The MCPB manifest starts it as: cutbolt.exe --workspace <workspace> mcp --tools core
+
+manifest.json inside the MCPB (SHA-256 45d2510ca52153fbad0aff66266c951cfd655fa6de31d6fa454c530d52b389e0) declares 18 tools, the same names as --tools core: True
+  cutbolt_cache_inspect
+  cutbolt_cache_prune
+  cutbolt_schema
+  cutbolt_session_create
+  cutbolt_session_get
+  cutbolt_session_apply
+  cutbolt_session_undo
+  cutbolt_session_receipt
+  cutbolt_session_history
+  cutbolt_job_status
+  cutbolt_job_cancel
+  cutbolt_job_resume
+  cutbolt_job_start
+  cutbolt_job_wait
+  cutbolt_timeline_check
+  cutbolt_files_list
+  cutbolt_media_inspect
+  cutbolt_run
+Its build step (mcpb/build.mjs, mergeTools) lists the tools from the live server and takes their descriptions from
+the repository's mcpb/manifest.json, a build template whose 32 entries include tools the build drops.

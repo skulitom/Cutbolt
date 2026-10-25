@@ -1,0 +1,9 @@
+quick verification of cutbolt.exe copied to <temp>
+[  0:01] skills started
+[  0:41] skills passed in 40 s
+
+Quick verification: 1 passed, 0 failed, 0 skipped, 0 not started, 42 s. No evidence was written; run --thorough for progress evidence.
+
+real	0m42.299s
+user	0m0.015s
+sys	0m0.015s

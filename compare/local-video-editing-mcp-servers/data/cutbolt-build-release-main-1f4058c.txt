@@ -1,0 +1,5 @@
+    Finished `release` profile [optimized] target(s) in 1m 46s
+
+real	1m46.684s
+user	0m0.000s
+sys	0m0.015s

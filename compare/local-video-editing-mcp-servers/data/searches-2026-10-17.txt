@@ -1,0 +1,36 @@
+Searches for Cutbolt's comparison page, standard web search tool, 2026-10-17 about 15:00 BST.
+Cutbolt (skulitom/Cutbolt) appeared in none of the three.
+
+1. "local video editing MCP server"
+   - enterprisedna.co/directories/mcp/pastorsimon1798-mcp-video
+   - glama.ai/mcp/servers/gcszw71lip (Video Editor MCP)
+   - lobehub.com/mcp?q=fmp (an FFmpeg-powered editing server, Python 3.10+)
+   - glama.ai/mcp/servers/Intelligence08/video-editing-mcp
+   - enterprisedna.co/directories/mcp/video-edit-mcp (22 stars per listing)
+   - glama.ai/mcp/servers/@burningion/video-editing-mcp README (Video Jungle account + API key; OTIO to DaVinci Resolve)
+   - glama.ai/mcp/servers/wtdsgcqcf0 (Vlexor MCP Server)
+   - glama.ai/mcp/servers/burningion/video-editing-mcp
+   - images.glama.ai/mcp/servers/Open2Loop/vlexor-mcp
+   Summary also named a Premiere Pro MCP server needing an Anthropic API key.
+
+2. "MCP server for video editing local ffmpeg agent"
+   - enterprisedna.co/directories/mcp/pastorsimon1798-mcp-video
+   - mcpservers.org/{es,ko,hi,vi,ja,pt-BR}/servers/kyanitelabs/mcp-video (6 language copies)
+   - enterprisedna.co/directories/mcp/kyanitelabs-kinocut
+   - glama.ai/mcp/servers/j16og442eq
+   - images.glama.ai/mcp/servers/Open2Loop/vlexor-mcp
+   Summary: "closest match is mcp-video"; listings disagree (pastorsimon1798/mcp-video 29 stars vs KyaniteLabs/kinocut 77).
+   It also mentioned "a local-first editing engine where AI hosts can inspect footage, propose edits, modify multitrack
+   projects, and render locally" without a name.
+
+3. "best video editing MCP server for Claude Code"
+   - opus.pro/blog/claude-video-editing-mcp (vendor guide, hosted OpusClip MCP)
+   - mcpservers.org/{es,ja,de}/servers/video-db/agent-toolkit
+   - glama.ai/mcp/servers/ejbol9ot4x
+   - openclip.app/alternatives/best-video-editing-mcp-servers (vendor ranking, "Best Video Editing MCP Servers in 2026")
+   - claudemarketplaces.com/mcp/burningion/video-editing-mcp
+   - mdskills.ai/fr/mcp-servers/video-edit-mcp
+   - claudemarketplaces.com/mcp/pachote/nira-video-mcp
+   Summary: "I found no independent head-to-head comparison, and the rankings that did appear come from vendors or
+   directories." It named OpenClip (hosted, OAuth), claudeclip (local, fetches ffmpeg), burningion, NIRA (55 FFmpeg
+   tools) and VideoDB Director (API key).
