@@ -1,0 +1,50 @@
+{
+ "tool": "ffmpeg-skill 2.16.1 (npm, gitHead 88e2f42), scripts/cut.py",
+ "label": "accurate",
+ "run": 1,
+ "date": "2026-10-25 16:27:22 +0000",
+ "ffmpeg": "ffmpeg version 7.0-full_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+ "os": "Windows-11-10.0.26200-SP0",
+ "cpu": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+ "python": "3.13.9",
+ "args": [
+  "cut.py",
+  "<run>/source.mp4",
+  "--segments",
+  "0-1,2-3,5-8",
+  "--accurate",
+  "-o",
+  "<run>/out.mp4",
+  "--json"
+ ],
+ "what": "run 1's cut sent again to the same output path",
+ "exit_code": 1,
+ "wall_ms": 332.7,
+ "output_sha256_before": "94778f0c02e8fe80e476e38afa19f09d77b7633649664d172d769f6827c46ecc",
+ "output_sha256_after": "94778f0c02e8fe80e476e38afa19f09d77b7633649664d172d769f6827c46ecc",
+ "output_unchanged": true,
+ "reply": {
+  "status": "failed",
+  "exit_code": 1,
+  "error": {
+   "kind": "input",
+   "message": "refusing to overwrite existing output '<run>\\\\out.mp4': pass --overwrite to replace it, or choose another -o path",
+   "code": "INPUT_INVALID",
+   "retryable": false,
+   "hint": "pass --overwrite, or choose another -o path",
+   "reason": "output_exists",
+   "details": {
+    "outputs": [
+     {
+      "path": "<run>\\out.mp4",
+      "resolved": "<run>\\out.mp4",
+      "size": 238328,
+      "mtime_ns": 1792945637703964200
+     }
+    ]
+   }
+  },
+  "commands": []
+ },
+ "stderr": "error: refusing to overwrite existing output '<run>\\\\out.mp4': pass --overwrite to replace it, or choose another -o path\nhint: pass --overwrite, or choose another -o path\n"
+}

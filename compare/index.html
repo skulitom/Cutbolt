@@ -26,7 +26,7 @@ footer { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1rem;
   "description": "Cutbolt's comparison page: which video editing MCP servers for AI agents edit your files locally or on a hosted service, and what each can undo and export.",
   "url": "https://skulitom.github.io/Cutbolt/compare/",
   "inLanguage": "en",
-  "dateModified": "2026-10-21",
+  "dateModified": "2026-10-25",
   "isPartOf": {
     "@type": "WebSite",
     "name": "Cutbolt",
@@ -56,10 +56,10 @@ footer { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1rem;
 <h1>Cutbolt comparisons</h1>
 <p>We make Cutbolt, a free, MIT-licensed video editing engine with a local MCP server. This page compares it with other video editing tools for AI agents. It says which numbers we measured and which we read from the other tools&#x27; code and docs, and when it was last checked.</p>
 <h2><a href="local-video-editing-mcp-servers/">Local video editing MCP servers for AI agents, and hosted alternatives: 7 compared</a></h2>
-<p>Checked 17 October 2026. Four are local MCP servers that edit your files: Cutbolt (18 tools by default), Kinocut (formerly mcp-video; 203 tools), claudeclip (31) and video-edit-mcp (34). Video Jungle MCP edits on Video Jungle&#x27;s servers, Vlexor has a hosted engine plan each edit and renders it on your machine (on 17 October its package could not be installed the way its README says), and HyperFrames renders new videos from HTML. We measured Cutbolt over MCP on one Windows PC, in six runs across its 0.4.0 release and main: a cut of a 720p test clip exported exactly the expected 150 source frames in order, resending the same edit returned its original receipt, undo restored the earlier cut, and repeated H.264 exports of the cut were byte-identical with one FFmpeg build (main also fixes a repeatability case that 0.4.0 still has). We read the other six from their code and docs without running them.</p>
+<p>Re-checked 25 October 2026 (first published 17 October). Four are local MCP servers that edit your files: Cutbolt (18 tools listed by default, 86 in full), Kinocut (formerly mcp-video; 203 tools), claudeclip (31) and ffmpeg-skill (42, 12 listed by default). Video Jungle MCP edits on Video Jungle&#x27;s servers, Vlexor has a hosted engine plan each edit and renders it on your machine (on 17 and 25 October its package could not be installed the way its README says), and HyperFrames renders new videos from HTML. We measured Cutbolt over MCP on one Windows PC, as its 0.4.0 release download, as 0.4.0 built from source and as main: a cut of a 720p test clip exported exactly the expected 150 source frames in order, resending the same edit returned its original receipt, undo restored the earlier cut, and repeated H.264 exports of the cut were byte-identical with one FFmpeg build (main also fixes a repeatability case that 0.4.0 still has). We also ran ffmpeg-skill&#x27;s cut on the same clip with --accurate: frame-exact and repeatable too, writing a new file per call with no revisions or undo. We read the other five from their code and docs without running them.</p>
 <h2>Comparisons for our other tools</h2>
 <ul>
-<li><a href="https://skulitom.github.io/Anode/compare/windows-desktop-automation-for-ai-agents/">Windows desktop automation for AI agents</a> (Anode, checked 16 October 2026)</li>
+<li><a href="https://skulitom.github.io/Anode/compare/windows-desktop-automation-for-ai-agents/">Windows desktop automation for AI agents</a> (Anode, checked 24 October 2026)</li>
 <li><a href="https://skulitom.github.io/Pixelbolt/compare/pixel-art-mcp-servers-for-ai-agents/">Pixel art and sprite MCP servers for AI agents</a> (Pixelbolt, checked 17 October 2026)</li>
 <li><a href="https://skulitom.github.io/Pixelbolt/compare/pixel-fx-designer-alternatives/">Pixel FX Designer alternatives</a> (Pixelbolt, checked 19 October 2026)</li>
 <li><a href="https://skulitom.github.io/Inkbolt/compare/svg-vector-editing-mcp-servers/">SVG and vector editing MCP servers for AI agents</a> (Inkbolt, checked 18 October 2026)</li>

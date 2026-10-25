@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Local video editing MCP servers for AI agents: 7 compared (Oct 2026)</title>
-<meta name="description" content="By the Cutbolt maintainers, checked 17 Oct 2026: Cutbolt, Kinocut (formerly mcp-video), claudeclip, video-edit-mcp, Video Jungle MCP, Vlexor and HyperFrames. What runs locally, accounts and keys, saved edits and undo, captions, audio, repeatable exports.">
+<meta name="description" content="By the Cutbolt maintainers, re-checked 25 Oct 2026: Cutbolt, Kinocut (formerly mcp-video), claudeclip, ffmpeg-skill, Video Jungle MCP, Vlexor and HyperFrames. Cutbolt's and ffmpeg-skill's cuts measured; what runs locally, accounts and keys, saved edits and undo, captions, audio, repeatable exports.">
 <link rel="canonical" href="https://skulitom.github.io/Cutbolt/compare/local-video-editing-mcp-servers/">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "TechArticle",
   "headline": "Local video editing MCP servers for AI agents, and hosted alternatives: 7 compared",
-  "description": "By the Cutbolt maintainers: seven video editing MCP servers and tools for AI agents compared (Cutbolt, Kinocut, claudeclip, video-edit-mcp, Video Jungle MCP, Vlexor and HyperFrames): how each edits, what runs on your machine, accounts and keys, saved edits and undo, captions and audio, repeatable output and cost. Cutbolt 0.4.0 and main measured over MCP; the others read from their code and docs.",
+  "description": "By the Cutbolt maintainers: seven video editing MCP servers and tools for AI agents compared (Cutbolt, Kinocut, claudeclip, ffmpeg-skill, Video Jungle MCP, Vlexor and HyperFrames): how each edits, what runs on your machine, accounts and keys, saved edits and undo, captions and audio, repeatable output and cost. Cutbolt 0.4.0 (as downloaded and built from source) and main measured over MCP, and ffmpeg-skill's cut run on the same clip; the others read from their code and docs. Re-checked 25 October 2026.",
   "datePublished": "2026-10-17",
-  "dateModified": "2026-10-17",
+  "dateModified": "2026-10-25",
   "inLanguage": "en",
   "url": "https://skulitom.github.io/Cutbolt/compare/local-video-editing-mcp-servers/",
   "mainEntityOfPage": "https://skulitom.github.io/Cutbolt/compare/local-video-editing-mcp-servers/",
@@ -24,7 +24,7 @@
     {"@type": "SoftwareApplication", "name": "Cutbolt", "url": "https://github.com/skulitom/Cutbolt", "applicationCategory": "MultimediaApplication"},
     {"@type": "SoftwareApplication", "name": "Kinocut", "alternateName": "mcp-video", "url": "https://github.com/KyaniteLabs/kinocut", "applicationCategory": "MultimediaApplication"},
     {"@type": "SoftwareApplication", "name": "claudeclip", "url": "https://github.com/gulkoa/claudeclip", "applicationCategory": "MultimediaApplication"},
-    {"@type": "SoftwareApplication", "name": "video-edit-mcp", "url": "https://github.com/Aditya2755/video-edit-mcp", "applicationCategory": "MultimediaApplication"},
+    {"@type": "SoftwareApplication", "name": "ffmpeg-skill", "url": "https://github.com/kajisho5/ffmpeg-skill", "applicationCategory": "MultimediaApplication"},
     {"@type": "SoftwareApplication", "name": "Video Jungle MCP", "alternateName": "video-editor-mcp", "url": "https://github.com/burningion/video-editing-mcp", "applicationCategory": "MultimediaApplication"},
     {"@type": "SoftwareApplication", "name": "Vlexor MCP", "url": "https://github.com/Open2Loop/vlexor-mcp", "applicationCategory": "MultimediaApplication"},
     {"@type": "SoftwareApplication", "name": "HyperFrames", "url": "https://github.com/heygen-com/hyperframes", "applicationCategory": "MultimediaApplication"}
@@ -58,25 +58,31 @@ footer { border-top: 1px solid var(--rule); margin-top: 3rem; padding-top: 1rem;
 <main>
 <h1>Local video editing MCP servers for AI agents, and hosted alternatives: 7 compared</h1>
 
-<p class="lead"><strong>On 17 October 2026, the makers of Cutbolt compared seven video editing tools for AI
-agents: we measured Cutbolt over MCP on one Windows PC and read the other six from their code and docs, without running
-them. Four are local MCP servers that edit your files: Cutbolt (18 tools by default), Kinocut (formerly mcp-video; 203
-tools), claudeclip (31) and video-edit-mcp (34). Video Jungle MCP edits on Video Jungle's servers, Vlexor has a hosted
-engine plan each edit and renders it on your machine, and HyperFrames renders new videos from HTML, with no local MCP
-server for desktop agents. In six runs across Cutbolt's 0.4.0 release and <code>main</code>, a cut of a 720p test clip
-exported exactly the expected 150 source frames in order, resending the same edit request returned its original receipt
-instead of applying it again, undo restored the earlier cut, and repeated H.264 exports of the cut were byte-identical
-with one FFmpeg build.</strong> Method, sources and data are below.</p>
+<p class="lead"><strong>As re-checked on 25 October 2026, four of the seven video editing tools for AI agents compared
+here are local MCP servers that edit your files: Cutbolt (ours; 18 tools listed by default, 86 in full), Kinocut (formerly mcp-video; 203), claudeclip
+(31) and ffmpeg-skill (42, 12 listed by default). On one Windows PC we ran Cutbolt over
+MCP and ffmpeg-skill's cut on the same 720p test clip: both cut exactly the expected 150 source frames and wrote
+byte-identical files on repeat runs with one FFmpeg build, and Cutbolt also keeps a saved timeline with revisions, safe
+retries and undo, while ffmpeg-skill writes a new file per call.</strong> The other five (Kinocut, claudeclip, Video
+Jungle MCP, Vlexor and HyperFrames) we read from their code and docs at their latest release or commit, without running
+them: Video Jungle MCP edits on Video Jungle's servers, Vlexor has a hosted engine plan each edit and renders it on your
+machine, and HyperFrames renders new videos from HTML, with no local MCP server for desktop agents. Resending the same
+edit request to Cutbolt returned its original receipt and undo restored the earlier cut; resending ffmpeg-skill's cut to
+the same path was refused and left the file untouched, so neither applied an edit twice, but the agent got an error
+rather than its earlier result. We also measured Cutbolt's 0.4.0 release exactly as downloaded. The page was first
+published on 17 October; method, sources and data are below.</p>
 
 <p class="note"><strong>We make Cutbolt.</strong> Read this as a vendor's page: our own numbers come from runs you can
 repeat, and everything about the other tools links to where we read it. If we got something wrong,
 <a href="https://github.com/skulitom/Cutbolt/issues/new">open an issue</a> and we will correct it.</p>
 
-<p class="meta">Last checked: 17 October 2026 (UK time) · Cutbolt measured as the 0.4.0 release (tag <code>v0.4.0</code>,
-<code>e668c16</code>) and as <code>main</code> at <code>ddc77c9</code> (40 commits later), both built from source ·
-Next check by 16 November 2026, or sooner when one of these tools releases.</p>
+<p class="meta">Last checked: 25 October 2026 (UK time; first published 17 October) · Cutbolt measured as the 0.4.0
+release download (tag <code>v0.4.0</code>, <code>e668c16</code>) and as <code>main</code> at <code>1f4058c</code>, and on
+17 October as 0.4.0 and <code>main</code> at <code>ddc77c9</code> built from source · ffmpeg-skill 2.16.1 run from its
+npm package · <a href="#changes">What changed since 17 October</a> · Next check by 24 November 2026, or sooner when a
+release changes something this page says.</p>
 
-<h2>The short answer</h2>
+<h2>The short answer: which video editing MCP server to use</h2>
 <ul>
 <li><strong>You have real footage (interviews, talking heads, tutorials, screen recordings) and want an agent to cut,
 caption, mix and export it, then revise, retry or undo its edits, on your own machine with no account:</strong> Cutbolt.
@@ -85,7 +91,13 @@ fixes a repeatability case that the 0.4.0 release still has). You install FFmpeg
 yourself, and MCP exports need Windows or Linux (the macOS build can't run them). It is young: version 0.4.0 and 1 GitHub
 star.</li>
 <li><strong>You want the most tools of the seven compared here (203), in Python, with quality gates, receipts and optional AI
-extras (transcription, upscaling, HTML graphics):</strong> Kinocut, with 206 GitHub stars and regular releases.</li>
+extras (transcription, upscaling, HTML graphics):</strong> Kinocut, with 221 GitHub stars and regular releases (three
+since 17 October).</li>
+<li><strong>You want an agent to run separate editing jobs (cuts, captions, reframing, loudness, delivery checks) with
+a large, documented FFmpeg tool set and nothing to run but Python and FFmpeg (its <code>npx</code> installer also needs
+Node.js):</strong> ffmpeg-skill, with about 2,770 GitHub stars. We ran its cut with <code>--accurate</code>: frame-exact
+on our clip, like Cutbolt's. It keeps no revisions or undo: each call writes a new file, or a <code>project.json</code>
+you edit is rendered again.</li>
 <li><strong>You want quick one-off jobs (trim, convert, make a GIF, burn in subtitles, even out loudness) from one
 <code>npx</code> line, with FFmpeg fetched for you:</strong> claudeclip.</li>
 <li><strong>You want to make new videos, such as motion graphics, explainers or launch videos, rather than edit
@@ -93,19 +105,19 @@ footage:</strong> HyperFrames. It installs as a Claude Code plugin and a CLI; it
 needs a HeyGen account.</li>
 <li><strong>Your footage lives in Video Jungle, or you want hosted search and edits with a hand-off to DaVinci Resolve
 Studio:</strong> Video Jungle MCP, with a Video Jungle account and API key.</li>
-<li><strong>Vlexor and video-edit-mcp:</strong> on 17 October Vlexor's package could not be installed as its README
-says, and its site said it was being rebuilt; video-edit-mcp has had no commits since July 2025. Check both before you
-rely on them.</li>
+<li><strong>Vlexor:</strong> on 17 and again on 25 October its package could not be installed as its README says, and
+its site said it was being rebuilt. Check it before you rely on it.</li>
 </ul>
 
-<h2>Side by side</h2>
-<p class="muted">Cutbolt's column is measured or taken from its own docs. The other columns are from each project's
+<h2>Side by side: local FFmpeg-based servers and hosted alternatives</h2>
+<p class="muted">Cutbolt's column is measured or taken from its own docs. In ffmpeg-skill's column, the cut, repeat and
+resend results are measured by us and the rest is from its docs and code. The other columns are from each project's
 README, docs and source at the commit named under <a href="#sources">Sources</a>, or from its own web pages, read on 17
-October 2026, not run by us. Tool counts for the others are counted in their source.</p>
+October 2026 and re-checked on 25 October, not run by us. Tool counts for the others are counted in their source.</p>
 <div class="wrap">
 <table>
 <thead>
-<tr><th></th><th>Cutbolt</th><th>Kinocut</th><th>claudeclip</th><th>video-edit-mcp</th><th>Video Jungle MCP</th><th>Vlexor MCP</th><th>HyperFrames</th></tr>
+<tr><th></th><th>Cutbolt</th><th>Kinocut</th><th>claudeclip</th><th>ffmpeg-skill</th><th>Video Jungle MCP</th><th>Vlexor MCP</th><th>HyperFrames</th></tr>
 </thead>
 <tbody>
 <tr><th>How it edits</th>
@@ -113,7 +125,8 @@ October 2026, not run by us. Tool counts for the others are counted in their sou
 encodes on your machine</td>
 <td>FFmpeg operations on your files, plus a JSON timeline spec and multi-step workflows</td>
 <td>One FFmpeg command per tool call, writing a new file (next to the input unless you name one)</td>
-<td>One MoviePy operation per call; results can stay in memory between calls</td>
+<td>One FFmpeg job per tool call on your files, each writing a new file (it never overwrites its input); a JSON
+project file can also be rendered in one pass</td>
 <td>Edits and renders on Video Jungle's servers; can send an OpenTimelineIO (OTIO) timeline to a running DaVinci Resolve
 Studio</td>
 <td>A hosted engine turns your instruction into an edit plan; the plan becomes one FFmpeg command run on your
@@ -121,18 +134,22 @@ machine</td>
 <td>Renders new videos written in HTML, CSS and JavaScript: headless Chrome captures each frame, FFmpeg encodes</td></tr>
 <tr><th>What you need</th>
 <td>FFmpeg and ffprobe; the release CLI (Windows, Linux, macOS on Apple silicon, where MCP exports don't run), the
-Windows MCPB bundle, or Rust to build it</td>
+Windows MCPB bundle, or Rust to build it (its Claude Code plugin needs <code>main</code> built from source)</td>
 <td>Python 3.11+ and FFmpeg (<code>pip install kinocut</code>); Node.js only for its HyperFrames and Revideo tools</td>
 <td>Node.js 18+ (<code>npx -y claudeclip</code>); installing it downloads an FFmpeg 6.1.1 build, and it uses your own
 FFmpeg when it finds one</td>
-<td>Python 3.10+ (<code>uvx video-edit-mcp</code>); MoviePy brings its own FFmpeg; ImageMagick for text</td>
+<td>Python 3.9+ (standard library only) and FFmpeg 5.0+ (6.1+ recommended); installs as an agent skill
+(<code>npx ffmpeg-skill</code>, which needs Node.js 16+) or a Claude Code plugin, and its MCP server runs from that
+folder</td>
 <td>Python 3.11+ (<code>uvx video-editor-mcp</code>)</td>
 <td>Node.js and FFmpeg. The package its README runs, <code>@velxor/mcp</code>, was not on npm, and the repository can't be
 built on its own</td>
 <td>Node.js 22+ and FFmpeg; it downloads a headless Chrome if it finds none</td></tr>
 <tr><th>Account, key or hosted service</th>
 <td>None</td>
-<td>None for the FFmpeg tools; image analysis with Claude Vision needs an Anthropic API key</td>
+<td>None for the FFmpeg tools. Its optional AI image analysis is off by default since 1.16.4; turned on by the
+operator, it sends images to Anthropic's API (with a key), to another Anthropic-compatible endpoint you configure, or to
+a local server</td>
 <td>None</td>
 <td>None</td>
 <td>A Video Jungle account and API key</td>
@@ -148,11 +165,12 @@ built on its own</td>
 returned 404)</td>
 <td>Free CLI; the hosted connector follows your HeyGen plan (not checked)</td></tr>
 <tr><th>MCP tools</th>
-<td>18 by default (counted from <code>tools/list</code>), with one of them running 69 more commands; 86 with
-<code>--tools full</code></td>
+<td>18 by default and in the MCPB bundle (counted from <code>tools/list</code>), with one of them running 69 more
+commands; 86 with <code>--tools full</code></td>
 <td>203 (its README says 203)</td>
 <td>31</td>
-<td>34</td>
+<td>42, of which 12 are listed by default (any can be called by name; <code>FFMPEG_SKILL_MCP_FULL=1</code> lists
+all)</td>
 <td>10 (11 with its macOS Photos search)</td>
 <td>6</td>
 <td>No local MCP server for desktop agents (its Studio has WebMCP tools, an early browser feature, for an agent in the browser); the hosted
@@ -160,10 +178,12 @@ connector's tool list isn't published</td></tr>
 <tr><th>Saved edits, retries and undo</th>
 <td>Yes: every edit is a saved revision with history and undo, and resending a request with the same ID returns its
 original receipt instead of applying it again (both measured)</td>
-<td>Projects, and recipes you can replay into a new revision; workflow receipts can resume; no undo tool among the
-203</td>
+<td>Projects, and recipes you can replay into a new revision; workflow receipts can resume; since 1.16.3 it won't
+replace an existing media output unless told to (<code>overwrite=true</code>); no undo tool among the 203</td>
 <td>None; tools never overwrite a file</td>
-<td>None</td>
+<td>No revisions, undo or request IDs kept by the tool; an edit can be kept as a <code>project.json</code> that you
+change and render again. An existing output path is refused unless you pass <code>--overwrite</code> (measured:
+resending a cut was refused and the file left unchanged); a saved plan refuses to run if an input changed</td>
 <td>Projects and edits stored on Video Jungle</td>
 <td>None in the MCP package; plans carry version IDs</td>
 <td>Your HTML files are the project, with a Studio app for visual edits</td></tr>
@@ -171,7 +191,7 @@ original receipt instead of applying it again (both measured)</td>
 <td>A PNG of any exact frame, returned in the reply (measured), plus range previews and contact sheets</td>
 <td>Low-resolution previews, single frames and thumbnails</td>
 <td>A contact sheet of timestamped frames, and single frames</td>
-<td>Extracted frames</td>
+<td>Frames or a timecoded contact sheet, written as PNG files (<code>look</code>)</td>
 <td>No frame preview; it opens the edit in Video Jungle's web app in your browser</td>
 <td>No frame preview</td>
 <td>A browser preview with live reload</td></tr>
@@ -181,45 +201,91 @@ meters, loudness normalisation, ducking, pause tightening</td>
 <td>Burned-in subtitles, SRT from Whisper transcription, caption translation; mixing, ducking, loudness normalisation
 to a LUFS target</td>
 <td>Burns in an existing SRT or ASS file; EBU R128 loudness normalisation, volume, audio replace</td>
-<td>Text overlays (no subtitle tools); audio mixing; no loudness normalisation</td>
+<td>Burned-in and karaoke captions, silence removal, audio clean-up, loudness; transcripts from an optional local
+speech engine you install</td>
 <td>A subtitles option on hosted edits</td>
 <td>Burned-in captions from the plan</td>
-<td>Caption and audio workflows (mixing, voiceover, EQ, compression) through its agent skills</td></tr>
+<td>Captions, voiceover and audio mixing (EQ, compression, ducking) through its agent skills</td></tr>
 <tr><th>Output checks and repeatability</th>
 <td>Each export checks its decoded output's timing and frame and sample counts. Measured with one FFmpeg 7.0 build:
-repeated H.264 exports of one cut byte-identical within each build (6 on one clip, 4 on another). The 0.4.0 release
-has a documented intermittent case, fixed on <code>main</code>; no promise across FFmpeg builds</td>
+repeated H.264 exports of one cut byte-identical within each build, and the downloaded 0.4.0 release's exports matched
+those of our 17 October source build byte for byte. The 0.4.0 release has a documented intermittent case, fixed on
+<code>main</code>; no promise across FFmpeg builds</td>
 <td>Receipts with SHA-256 of each step's inputs and outputs, and quality gates; it says rendered bytes may vary across
 FFmpeg builds</td>
 <td>No claim found; a smoke test calls all 31 tools in CI on three systems</td>
-<td>No claim found; no tests in the repository</td>
+<td>Each tool's JSON reply includes a probe of its output, and <code>check</code> grades delivery specs. Measured
+on our clip: its cut was frame-exact (150 of 150 frames, 5.000 s of audio) and three repeat outputs were
+byte-identical with one FFmpeg build; no determinism claim found</td>
 <td>No claim found</td>
 <td>No claim found</td>
 <td>Its README says "Deterministic: same input, same frames, same output"; not run by us</td></tr>
 <tr><th>Network, telemetry and desktop</th>
 <td>No networking crate in its <code>Cargo.lock</code>; <code>doctor</code> reports no runtime network; no telemetry</td>
 <td>Downloads web video (yt-dlp) when given a URL, and missing Google Fonts and model weights on demand; no telemetry
-found</td>
+found, and since 1.16.4 it turns off the telemetry of the HyperFrames and Revideo renderers it runs</td>
 <td>No network calls in its code after installation; no telemetry or desktop control found</td>
-<td>Downloads video from any URL with yt-dlp; its latest code serves MCP over HTTP, not stdio (release 0.1.1 uses
-stdio)</td>
+<td>No network calls in its own code; an optional speech engine downloads its model on first use; no telemetry or
+desktop control found</td>
 <td>Uses the hosted API for everything, downloads an AI model at startup and runs the model's own code, opens your
 browser, and can drive DaVinci Resolve</td>
 <td>Sends your instruction and any transcript to vlexor.app; renders locally</td>
 <td>CLI telemetry to PostHog, on by default (you can turn it off); website capture and cloud rendering are options</td></tr>
 <tr><th>Licence · stars · latest package version</th>
 <td>MIT · 1 · 0.4.0, 12 Oct 2026</td>
-<td>Apache-2.0 · 206 · 1.16.1, 6 Oct 2026</td>
+<td>Apache-2.0 · 221 · 1.16.4, 24 Oct 2026</td>
 <td>MIT · 0 · 1.2.1, 4 Aug 2026</td>
-<td>MIT · 28 · 0.1.1, 28 Jul 2025</td>
+<td>MIT · about 2,770 · 2.16.1, 24 Oct 2026</td>
 <td>No licence file · 294 · 0.1.59, 9 Oct 2025</td>
 <td>MIT · 0 · no releases; one commit, 18 Aug 2026</td>
-<td>Apache-2.0 · about 65,700 · 0.8.168, 17 Oct 2026</td></tr>
+<td>Apache-2.0 · about 71,900 · 0.8.198, 25 Oct 2026</td></tr>
 </tbody>
 </table>
 </div>
 
 <h2 id="measured">What we measured on Cutbolt</h2>
+<h3 id="measured-1025">25 October 2026: the release as you download it, and today's <code>main</code></h3>
+<p>On 17 October we built Cutbolt from source (below). On 25 October we ran the same probe on the 0.4.0 release exactly
+as people download it, on the same machine with the same FFmpeg build:</p>
+<ul>
+<li><strong>The download:</strong> the Windows zip from the
+<a href="https://github.com/skulitom/Cutbolt/releases/tag/v0.4.0">v0.4.0 GitHub release</a> and the Windows MCPB bundle
+both matched their published SHA-256 checksums, and the <code>cutbolt.exe</code> inside each was byte-identical; it
+reports commit <code>e668c16</code>, the tag (<a href="data/cutbolt-release-download-hashes.txt">hashes</a>).</li>
+<li><strong>MCP tools:</strong> it lists the same 18 tools by default and with <code>--tools core</code>, the mode the
+MCPB bundle starts it in (21,198 bytes, as on 17 October), and 86 with <code>--tools full</code>
+(<a href="data/cutbolt-tools-modes-release-download-v0.4.0.json">lists</a>). The bundle's own manifest declares the same
+18 (listed in the <a href="data/cutbolt-release-download-hashes.txt">hashes file</a>): its build step lists the tools
+from the server and takes only their descriptions from the repository's <code>mcpb/manifest.json</code>, a build template
+whose 32 entries include tools the build drops.</li>
+<li><strong>Three runs on the colour-coded clip and two on the moving pattern:</strong> every exported frame and both
+previews were the expected source frames, the resent request kept revision 1, undo restored revision 0, and the source
+file was unchanged. Every H.264 export had the same SHA-256 as the matching export from our 17 October source build of
+0.4.0, on both clips (<a href="data/cutbolt-release-download-summary.json">summary and comparison</a>). Median times were
+within 1 ms of 17 October's for the session calls and within 7% for inspection, previews and exports.</li>
+<li><strong>Today's <code>main</code>:</strong> <code>1f4058c</code>. Its three commits since <code>ddc77c9</code> change
+docs, skill recipes, plugin files, a security policy and evaluation cases, not the engine's source or Cargo files. We built it (1 min 46 s,
+<a href="data/cutbolt-build-release-main-1f4058c.txt">build</a>) and ran one probe on each clip: the same 18 and 86 tools,
+the same checks passing, and the same export bytes as <code>ddc77c9</code>
+(<a href="data/cutbolt-mcp-probe-main-1f4058c-run1.json">colour run</a>,
+<a href="data/cutbolt-motion-main-1f4058c-run1.json">moving-pattern run</a>,
+<a href="data/cutbolt-tools-modes-main-1f4058c.json">tool lists</a>). Cutbolt's skills check passed on it in 40 s
+(<a href="data/cutbolt-verify-skills-main-1f4058c.txt">output</a>).</li>
+<li><strong>The Claude Code plugin needs <code>main</code>:</strong> the plugin (added to the repository on 18 October)
+uses <code>main</code>'s skill recipes, and Cutbolt's README says to build <code>main</code> from source for it. We checked
+why: run against the 0.4.0 download, the same skills check stopped at the first recipe, whose render step sends a
+<code>mode</code> argument that 0.4.0 doesn't accept
+(<a href="data/cutbolt-verify-skills-main-recipes-on-release-download-v0.4.0.txt">output</a>).</li>
+</ul>
+<p class="muted">Scripts added: <a href="data/cutbolt_tools_modes.py">cutbolt_tools_modes.py</a> (tool lists in each
+mode) and <a href="data/cutbolt_summary_release.py">cutbolt_summary_release.py</a> (the summary and comparison). Runs:
+release download <a href="data/cutbolt-mcp-probe-release-download-v0.4.0-run1.json">1</a>,
+<a href="data/cutbolt-mcp-probe-release-download-v0.4.0-run2.json">2</a>,
+<a href="data/cutbolt-mcp-probe-release-download-v0.4.0-run3.json">3</a>, moving pattern
+<a href="data/cutbolt-motion-release-download-v0.4.0-run1.json">1</a>,
+<a href="data/cutbolt-motion-release-download-v0.4.0-run2.json">2</a>.</p>
+
+<h3 id="measured-1017">17 October 2026: 0.4.0 and <code>main</code> built from source</h3>
 <p>On 17 October 2026, on one machine: Windows 11 Pro (build 26200), an AMD Ryzen 9 7950X3D, Rust 1.98.1, FFmpeg 7.0
 (the gyan.dev full build), no GPU work. We built two versions from source with <code>cargo build --release
 --locked</code>: the 0.4.0 release (tag <code>v0.4.0</code>, <code>e668c16</code>, 1 min 45 s), which is what the release
@@ -296,28 +362,36 @@ mkdir run1
 ffmpeg -f lavfi -i "color=c=black:s=1280x720:r=30:d=10,format=gbrp,geq=r='mod(N\,16)*16+8':g='floor(N/16)*12+8':b='64',scale=out_color_matrix=bt709:out_range=tv,format=yuv420p" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=10" -ac 2 -c:v libx264 -profile:v high -preset medium -crf 12 -g 30 -bf 2 -colorspace bt709 -color_primaries bt709 -color_trc bt709 -c:a aac -b:a 192k -movflags +faststart run1/source.mp4
 python cutbolt_probe.py target/release/cutbolt ffmpeg ffprobe run1 run1-result.json</pre>
 <p class="muted">Use a new folder holding a copy of <code>source.mp4</code> for each run. To test <code>main</code>, run
-<code>git checkout ddc77c9</code> and <code>cargo build --release --locked</code> again. On Windows, use <code>cutbolt.exe</code> and full paths to
+<code>git checkout ddc77c9</code> (or <code>1f4058c</code>, the 25 October <code>main</code>, with the same engine code) and
+<code>cargo build --release --locked</code> again. On Windows, use <code>cutbolt.exe</code> and full paths to
 <code>ffmpeg.exe</code> and <code>ffprobe.exe</code>. With our FFmpeg build the clip hashed
 <code>4ded9771…</code>, and the moving pattern <code>ca010470…</code> (both in full in the summary); file hashes match ours only with the same FFmpeg build, while the frame,
 retry and undo checks and the run-to-run comparisons don't depend on it. For the moving pattern, replace the first
 input with <code>-f lavfi -i "testsrc2=s=1280x720:r=30:d=10"</code> and use <code>-vf
 "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"</code>; then only the hash comparisons apply. The hashes file
-gives the FFmpeg commands for the decoded-stream hashes.</p>
+gives the FFmpeg commands for the decoded-stream hashes. To test the release as downloaded instead of building it, run
+<code>gh release download v0.4.0 -R skulitom/Cutbolt</code> (or download from the release page), check the files against
+<code>SHA256SUMS</code>, unpack the Windows zip and pass its <code>cutbolt.exe</code> to the probe; on 25 October both
+clips hashed as above with the same FFmpeg build.</p>
 
 <h2>Each tool, and when to choose it over Cutbolt</h2>
 
 <h3 id="kinocut">Kinocut (formerly mcp-video)</h3>
-<p><a href="https://github.com/KyaniteLabs/kinocut">KyaniteLabs/kinocut</a> (PyPI <code>kinocut</code> 1.16.1) is the
-project that directory listings still show as mcp-video under pastorsimon1798 or KyaniteLabs: those addresses redirect
-to the same repository, and the <code>mcp-video</code> package on PyPI now just installs Kinocut. It is a Python server
+<p><a href="https://github.com/KyaniteLabs/kinocut">KyaniteLabs/kinocut</a> (PyPI <code>kinocut</code> 1.16.4, 24
+October 2026) is the project that directory listings still show as mcp-video under pastorsimon1798 or KyaniteLabs: those
+addresses redirect to the same repository, and the <code>mcp-video</code> package on PyPI (1.6.19) now just installs
+Kinocut. It is a Python server
 whose source registers 203 tools: trimming, merging, effects, overlays, subtitles, audio mixing and loudness, a JSON
 timeline spec, projects and replayable recipes, OTIO import and export, quality gates, and optional AI tools such as
 Whisper transcription and upscaling, plus wrappers for HyperFrames. Multi-step workflows write receipts with SHA-256 of
-each step's inputs and outputs and can resume; its README says rendered bytes may vary across FFmpeg builds. Its
+each step's inputs and outputs and can resume; its README says rendered bytes may vary across FFmpeg builds. Since
+1.16.3 it won't replace an existing media output unless the call says <code>overwrite=true</code>. Its
 FFmpeg tools need no account, but some tools fetch from the network: a video URL given to <code>video_analyze</code> is
-downloaded with yt-dlp, missing Google Fonts and model weights are downloaded on demand, and image analysis with Claude
-Vision needs an Anthropic API key. The repository has 5,757 test functions and CI. We read the repository 29 commits
-after 1.16.1, the version you install.</p>
+downloaded with yt-dlp, and missing Google Fonts and model weights are downloaded on demand. Since 1.16.4 its optional
+AI image analysis is off by default; an operator can send images to Anthropic's API (with a key), to another
+Anthropic-compatible endpoint, or to a local server, and it turns off the telemetry of the HyperFrames and Revideo renderers it starts. It
+also ships plugin files for Claude Code and other agents. The repository has 5,846 test functions and CI. We read its
+1.16.4 release, the version you install.</p>
 <p><strong>Choose it</strong> when you want the largest tool set compared here (203 tools), in Python, AI extras such as transcription and
 upscaling, or HTML graphics through HyperFrames, from an active project with a large test suite. <strong>Choose
 Cutbolt</strong> when the agent will revise an edit many times: every edit is a saved revision with undo, resending a
@@ -337,17 +411,47 @@ every tool on three operating systems. All its commits so far came from one auth
 have FFmpeg installed. <strong>Choose Cutbolt</strong> for an edit made of many cuts you will revisit: a saved
 multi-clip timeline with linked picture and sound (frame-exact in our test), captions from transcripts, and undo.</p>
 
-<h3 id="video-edit-mcp">video-edit-mcp</h3>
-<p><a href="https://github.com/Aditya2755/video-edit-mcp">Aditya2755/video-edit-mcp</a> (PyPI <code>video-edit-mcp</code>
-0.1.1) wraps MoviePy 1.0.3 in 34 tools for trimming, merging, speed, overlays, format conversion and audio mixing, and
-can keep results in memory to chain calls without temporary files. It has no subtitle tools, no loudness
-normalisation, no tests, and no commits since 30 July 2025. Its <code>download_video</code> tool fetches any URL with
-yt-dlp, text overlays need ImageMagick, and outputs go to <code>~/Downloads/video_mcp_output</code> unless you set
-<code>VIDEO_MCP_OUTPUT_DIR</code>. The code on GitHub now serves MCP over HTTP, while the 0.1.1 package on PyPI uses
-stdio.</p>
-<p><strong>Choose it</strong> if you want MoviePy in Python, chaining operations in memory without temporary files, or
-a URL download tool, and you're prepared to maintain a fork (no commits since July 2025). <strong>Choose Cutbolt</strong> for an actively developed engine with tests, captions, loudness and saved, undoable
-edits.</p>
+<h3 id="ffmpeg-skill">ffmpeg-skill (new on this page on 25 October)</h3>
+<p><a href="https://github.com/kajisho5/ffmpeg-skill">kajisho5/ffmpeg-skill</a> (npm <code>ffmpeg-skill</code> 2.16.1,
+24 October 2026; about 2,770 GitHub stars, created 3 September 2026) is an agent skill and a local MCP server: a
+<code>SKILL.md</code> that teaches a probe, edit and verify workflow, 42 Python tools on FFmpeg (cuts and joins, silence
+removal, reframing, captions and karaoke, overlays and graphics, HDR to SDR, colour, audio clean-up, sync, multicam,
+loudness, delivery checks, and rendering a JSON project), and <code>mcp/server.py</code>, which lists 12 of them by
+default and runs each call as its own script. It uses only Python's standard library, needs no account or key, and its
+own code makes no network calls; its optional transcription uses a speech engine you install, which downloads its
+model on first use. The tool keeps no revisions or undo: each call writes a new file, it refuses to replace an existing
+output unless told to, and a whole edit can be kept as a <code>project.json</code> you change and render again. Its README
+reports its own agent evaluations (not checked by us).</p>
+<p><strong>We ran its cut.</strong> It meets our rules for running another tool in what we used: open source, offline,
+no account or key, no network or desktop access. From its npm package (its <code>gitHead</code> is the release tag), on the
+same machine, test clip and FFmpeg build as Cutbolt, we ran its <code>cut</code> tool the way its MCP server runs each
+call, keeping source seconds 0–1, 2–3 and 5–8: the same final cut as Cutbolt's revision 1 above.
+<code>cut.py source.mp4 --segments 0-1,2-3,5-8 --accurate -o out.mp4 --json</code> gave, in three runs, 150 frames that
+were all the expected source frames, 5.000 s of audio and byte-identical files. Without <code>--accurate</code>, it stream-copies when it can, so a cut may start up to 0.5 s early at a keyframe (it
+reports the precision it reached); on our clip it found that the frames are reordered (B-frames), re-cut every segment
+from the source instead, and wrote the same file. Sent again to the same output path, the cut was refused ("refusing to
+overwrite existing output") and the file left untouched: it can't apply twice, but the agent gets an error rather than
+its earlier result. Both encoded video with x264 at CRF 18, preset medium (audio: AAC at 192 kb/s for ffmpeg-skill,
+320 kb/s for Cutbolt). ffmpeg-skill's cut took 0.94–1.00 s from start to exit; Cutbolt's export of the same cut took
+1.9–2.0 s from queueing the job to its finished receipt, about twice as long. The work differs: Cutbolt's export also
+decodes the file it wrote to check its frame and sample counts and hashes, while ffmpeg-skill probes its output. So this
+is one clip on one PC, not a speed benchmark. Data: <a href="data/ffmpeg-skill-2.16.1-package.txt">package check</a>; runs
+with <code>--accurate</code> <a href="data/ffmpeg-skill-2.16.1-cut-accurate-run1.json">1</a>,
+<a href="data/ffmpeg-skill-2.16.1-cut-accurate-run2.json">2</a>,
+<a href="data/ffmpeg-skill-2.16.1-cut-accurate-run3.json">3</a> and without
+<a href="data/ffmpeg-skill-2.16.1-cut-default-run1.json">1</a>,
+<a href="data/ffmpeg-skill-2.16.1-cut-default-run2.json">2</a>;
+<a href="data/ffmpeg-skill-2.16.1-cut-resend.json">the resend</a>; script
+<a href="data/ffmpeg_skill_cut_probe.py">ffmpeg_skill_cut_probe.py</a>. To repeat it: <code>npm pack
+ffmpeg-skill@2.16.1</code>, unpack it into its own folder, make the colour-coded clip as above, put
+<code>ffmpeg_skill_cut_probe.py</code> next to <code>cutbolt_frame_ids.py</code>, and run <code>python -I
+ffmpeg_skill_cut_probe.py package ffmpeg ffprobe source.mp4 out accurate 3 --resend --accurate</code> (and
+<code>... default 2</code> for its default mode).</p>
+<p><strong>Choose it</strong> when the agent should run editing jobs on files with a large, documented FFmpeg tool set
+(delivery checks, captions, HDR, multicam), from a popular, active project that needs nothing but Python and FFmpeg to
+run; in our test its cut with <code>--accurate</code> was as frame-exact as Cutbolt's. <strong>Choose Cutbolt</strong>
+when the agent will revise one edit over many steps: a saved multi-track timeline with revisions and undo, where
+resending a request with the same ID returns its original receipt, rather than a new file per call.</p>
 
 <h3 id="video-jungle">Video Jungle MCP (burningion/video-editing-mcp)</h3>
 <p><a href="https://github.com/burningion/video-editing-mcp">burningion/video-editing-mcp</a> (PyPI
@@ -365,8 +469,8 @@ account, no browser and no desktop app in the loop.</p>
 <p><a href="https://github.com/Open2Loop/vlexor-mcp">Open2Loop/vlexor-mcp</a> has 6 tools. Its
 <code>generate_edit_plan</code> sends your instruction (and any transcript) to Vlexor's hosted engine, which counts
 against your plan's usage; <code>compile_edit_plan</code> and <code>render</code> then build and run an FFmpeg command on
-your machine, with burned-in captions as an option. It needs a Vlexor API key to start. On 17 October 2026 the package
-its README tells you to run, <code>@velxor/mcp</code>, returned 404 on npm, the repository depends on private packages
+your machine, with burned-in captions as an option. It needs a Vlexor API key to start. On 17 October 2026, and again on
+25 October, the package its README tells you to run, <code>@velxor/mcp</code>, returned 404 on npm, the repository depends on private packages
 and can't be built on its own, Vlexor's home page said it was being rebuilt, and its pricing page returned 404. Its terms
 describe Pro, Pro+ and Max plans with monthly caps on AI-editing minutes.</p>
 <p><strong>Choose it</strong>, once it can be installed again, for edits planned by a hosted AI from plain-language
@@ -375,13 +479,14 @@ account or usage limits, where the agent itself decides each edit.</p>
 
 <h3 id="hyperframes">HyperFrames</h3>
 <p><a href="https://github.com/heygen-com/hyperframes">heygen-com/hyperframes</a> (npm <code>hyperframes</code>
-0.8.168, about 65,700 GitHub stars) turns HTML, CSS and JavaScript into video: headless Chrome captures each frame and
-FFmpeg encodes them. It ships a CLI, 21 agent skills and a Claude Code plugin, with workflows for captions, audio and
-whole videos. It has no local MCP server for desktop agents: its MCP is a hosted connector, in beta, that needs a
+0.8.198, 25 October 2026; about 71,900 GitHub stars) turns HTML, CSS and JavaScript into video: headless Chrome captures
+each frame and FFmpeg encodes them. It ships a CLI, a Claude Code plugin and 7 agent skills (on 21 October it replaced
+its workflow skills, 21 when we first checked, with 7 knowledge skills); captions and audio mixing are covered in its
+media skill. It has no local MCP server for desktop agents: its MCP is a hosted connector, in beta, that needs a
 HeyGen account and renders on HeyGen's infrastructure, and its Studio app exposes WebMCP tools (an early browser feature) to an agent
 running in the browser. Its CLI sends usage data to PostHog by default, which you can turn off
 (<code>hyperframes telemetry disable</code>, <code>HYPERFRAMES_NO_TELEMETRY</code> or <code>DO_NOT_TRACK</code>). It
-releases almost every day.</p>
+releases several times a day: 28 versions on npm after the 0.8.168 we first read, up to 0.8.198 on 25 October.</p>
 <p><strong>Choose it</strong> to make new videos (motion graphics, explainers, launch videos, animated captions)
 from code models already write well, with a large community behind it. <strong>Choose Cutbolt</strong> to edit footage
 you recorded: cuts, ripple deletes, linked sound, multicam, OTIO hand-off and loudness, all through a local MCP server.
@@ -407,78 +512,176 @@ runs didn't hit it.</li>
 <li>Speech recognition, for cutting your own recordings by transcript, is optional and needs a separately installed
 Python and model setup; its tested setup used WSL and an NVIDIA GPU. Without it, transcript edits need a transcript you
 supply.</li>
-<li>It is young: version 0.4.0 (12 October 2026), 1 GitHub star, not on crates.io. Install it from the release archives
-or from source. It is in the official MCP Registry as <code>io.github.skulitom/cutbolt</code>.</li>
+<li>It is young: version 0.4.0 (12 October 2026, still the latest release on 25 October), 1 GitHub star, not on
+crates.io. Install it from the release archives or from source; the Claude Code plugin needs <code>main</code> built
+from source, because at least one of its recipes sends an argument the 0.4.0 release doesn't accept. It is in the
+official MCP Registry as
+<code>io.github.skulitom/cutbolt</code>.</li>
 </ul>
 
-<h2 id="also">Also in the results, plus two we added</h2>
+<h2 id="also">Also in the results, and others we found</h2>
 <ul>
+<li><strong><a href="https://github.com/Aditya2755/video-edit-mcp">video-edit-mcp</a></strong> (PyPI
+<code>video-edit-mcp</code> 0.1.1, 30 stars, MIT), a column here until 25 October: 34 MoviePy tools for trimming,
+merging, speed, overlays, conversion and audio mixing, with no subtitle tools, loudness normalisation or tests, and no
+commits since 30 July 2025. Its <code>download_video</code> tool fetches any URL with yt-dlp, and the code on GitHub now
+serves MCP over HTTP while the PyPI package uses stdio.</li>
+<li><strong><a href="https://github.com/kevinwatt/ffmpeg-mcp-lite">ffmpeg-mcp-lite</a></strong> (PyPI 0.2.2, 28 stars,
+MIT), named in three of the five search summaries on 25 October and the only local FFmpeg server in Tella's roundup
+(which ranked for three of them): 8 tools, one FFmpeg command each, writing to <code>~/Downloads</code> unless you set
+<code>FFMPEG_OUTPUT_DIR</code> and replacing an earlier output of the same name; its trim is a stream copy
+(<code>-c copy</code>), so a cut starts at a keyframe rather than at the frame asked for.</li>
+<li><strong><a href="https://github.com/Kush36Agrawal/Video_Editor_MCP">Kush36Agrawal/Video_Editor_MCP</a></strong>
+(51 stars, no licence file, all commits on 4 January 2025), the top result for "MCP server for video editing local
+ffmpeg agent" on 25 October: 2 tools, one of which (<code>execute_command</code>) runs any shell command the agent sends,
+not only FFmpeg.</li>
+<li><strong><a href="https://github.com/misbahsy/video-audio-mcp">misbahsy/video-audio-mcp</a></strong> (89 stars,
+MIT), listed in one of our 25 October searches: 27 FFmpeg tools; no commits since 24 May 2025.</li>
+<li><strong><a href="https://github.com/MartinDelophy/ai-video-editor">Timeline Studio</a></strong> (895 stars, MIT), a
+browser editor with a headless stdio MCP server of 8 tools whose edit model is the closest we found to Cutbolt's:
+edits are checked against the timeline's revision and applied all or nothing, replaying an operation ID does nothing,
+and every apply writes a new timeline file (there is no undo tool).</li>
+<li><strong>Editors that serve MCP while their app is open</strong> (none meets our rules for running):
+<a href="https://github.com/palmier-io/palmier-pro">Palmier Pro</a> (about 14,600 stars; macOS 26 on Apple silicon;
+binaries after 0.7.6 are proprietary; analytics on by default, which you can switch off),
+<a href="https://github.com/diffusionstudio/editor">Diffusion Studio</a> (about 3,400 stars, MPL-2.0; needs a sign-in),
+<a href="https://github.com/0xsline/OpenChatCut">OpenChatCut</a> (about 2,700 stars, AGPL-3.0; the agent's edits are
+drafts you approve, or are applied at once in its auto mode) and <a href="https://github.com/cartesiancs/cartcut">Cartcut</a>
+(818 stars, MIT licence file, macOS builds; undo and redo tools).</li>
+<li><strong><a href="https://github.com/ronak-create/FableCut">FableCut</a></strong> (746 stars, MIT; in the MCP
+Registry): a stdio MCP server that edits a local browser editor's project, with revision-checked edits, automatic saved
+versions and every export read back with ffprobe. It starts a background localhost server and a headless Chrome or Edge
+for exports, and can fetch URLs, fonts and a model from a CDN, so it doesn't meet our rules for running.</li>
+<li><strong><a href="https://github.com/calesthio/OpenMontage">OpenMontage</a></strong> (about 71,800 stars,
+AGPL-3.0): an agentic video production system of pipelines and agent skills for coding assistants; its README doesn't
+mention MCP.</li>
+<li><strong><a href="https://github.com/Mvp2o-ai/cuttingfloor">cuttingfloor</a></strong>, new on 16 October: immutable
+timelines, a QA check and OTIO, FCPXML and EDL export, as a local Docker image or a hosted API. Its repository says no
+licence has been chosen and all rights are reserved, so it is source-available, not open source.</li>
+<li><strong>Hosted, with an account:</strong> <a href="https://github.com/musyta-labs/OrcCut">Orccut</a> (listed as
+"mcpCut" on Glama, which ranked for one of our searches; sign up for a token; history and named versions on its
+servers) and <a href="https://github.com/descriptinc/descript-mcp">Descript's MCP</a>.</li>
 <li><strong>NIRA Video MCP</strong> (PyPI <code>nira-video-mcp</code> 1.0.3, May 2026): its README lists 55 tools:
 FFmpeg-based editing, grading, audio and delivery, plus 5 AI video generation tools (fal.ai with your key, or Wan2GP on
 your own GPU) that need a US$49 one-time PRO licence key, which also unlocks HLS export and thumbnail sprites. Its GitHub
-repository and account returned 404 on 17 October 2026, so we didn't read its code: it is only in the PyPI package,
+repository and account returned 404 on 17 and 25 October 2026, so we didn't read its code: it is only in the PyPI package,
 which we didn't download.</li>
 <li><strong>VideoDB Director MCP</strong> (<a href="https://github.com/video-db/agent-toolkit">video-db/agent-toolkit</a>,
 PyPI <code>videodb-director-mcp</code> 0.1.7): 4 tools. <code>call_director</code> passes requests to VideoDB's hosted
 Director agents, two tools fetch VideoDB's docs, and one opens a video in your browser. It needs a VideoDB API key, and
 the repository has no licence file.</li>
 <li><strong><a href="https://github.com/Intelligence08/video-editing-mcp">Intelligence08/video-editing-mcp</a></strong>,
-which ranked twice for "local video editing MCP server": it describes itself as an "MCP Interface for Video Jungle" and has
+which ranked twice for "local video editing MCP server" on both 17 and 25 October (two Glama listings of it): it describes itself as an "MCP Interface for Video Jungle" and has
 almost the same files as Video Jungle MCP above; 0 stars, no licence file, last push July 2025.</li>
 <li><strong><a href="https://openclip.app/mcp">OpenClip</a></strong>: a hosted MCP server for turning long videos into
 clips, signed in with OAuth; new accounts start with 0 processing credits, and plans start at US$14.99 a month, billed
 monthly. Its own <a href="https://openclip.app/alternatives/best-video-editing-mcp-servers">"Best Video Editing MCP
-Servers in 2026"</a> page ranked for one of our searches.</li>
+Servers in 2026"</a> page ranked for one of our searches on 17 October, though not on 25 October.</li>
 <li><strong><a href="https://www.opus.pro/mcp">OpusClip</a></strong>: a hosted MCP server (clip, caption, reframe, edit,
 repurpose, schedule posts), signed in with an OpusClip account. Its MCP page offers a free trial, then a Pro plan with
 metered per-render-minute pricing; its pricing page lists a free plan (60 credits a month, watermark, no editing),
 Starter at US$15 a month and Pro at US$29 a month (US$14.50 a month billed annually).</li>
-<li>An Adobe Premiere Pro MCP server was named in one search summary. The most starred one we found,
-<a href="https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP">hetpatel-11/Adobe_Premiere_Pro_MCP</a> (712 stars, MIT),
+<li>Adobe Premiere Pro MCP servers were named in search summaries on both dates. The most starred one we found,
+<a href="https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP">hetpatel-11/Adobe_Premiere_Pro_MCP</a> (755 stars, MIT),
 drives Premiere Pro; we didn't read it further.</li>
 <li>Not in these searches, added for their stars:
-<a href="https://github.com/samuelgursky/davinci-resolve-mcp">DaVinci Resolve MCP</a> (about 3,600 stars, MIT) drives a
+<a href="https://github.com/samuelgursky/davinci-resolve-mcp">DaVinci Resolve MCP</a> (about 3,700 stars, MIT, release
+4.15.3) drives a
 running DaVinci Resolve 18.5 or later through its scripting API; choose it when you edit in Resolve yourself and want an
 agent to help there. <a href="https://github.com/video-creator/ffmpeg-mcp">video-creator/ffmpeg-mcp</a> (153 stars, MIT)
 has 8 FFmpeg tools, runs on macOS only, downloads FFmpeg binaries at run time from personal Gitee repositories, and plays
 video in an ffplay window.</li>
+<li><strong>DaVinci Resolve 21.1</strong> (Blackmagic, 8 September 2026): Blackmagic's
+<a href="https://www.blackmagicdesign.com/media/partial/release/20260908-03">press release</a> says it "now supports
+integration with AI assistants such as Claude, Claude Code and ChatGPT Codex". The release doesn't say how they connect
+or which editions have it, and we haven't tried it. Look at it, or the community DaVinci Resolve MCP above, when you
+edit in Resolve yourself.</li>
+</ul>
+
+<h2 id="changes">What changed since 17 October</h2>
+<ul>
+<li><strong>ffmpeg-skill joined the table, and we ran its cut</strong> (frame-exact and repeatable on our clip, like
+Cutbolt's). video-edit-mcp, with no commits since July 2025, moved to "Also".</li>
+<li><strong>Cutbolt</strong> was measured as the 0.4.0 release download, with the same results and the same export bytes
+as our source build; <code>main</code> is now <code>1f4058c</code>, with the same engine code; the Claude Code plugin
+added on 18 October needs <code>main</code> built from source.</li>
+<li><strong>Changed upstream since 17 October</strong> (the page was right then): HyperFrames replaced its 21 workflow
+skills with 7 knowledge skills on 21 October; Kinocut 1.16.4 (24 October) turned its optional AI image analysis off by
+default, where before an Anthropic API key was enough to use it.</li>
+<li><strong>Updates:</strong> Kinocut 1.16.3 and 1.16.4 (no overwriting a media output without
+<code>overwrite=true</code> since 1.16.3; renderer telemetry off since 1.16.4; plugin files; 221 stars; 5,846 test
+functions; read at the release itself rather than 29 commits past it; the <code>mcp-video</code> shim is 1.6.19);
+HyperFrames 0.8.198 (about 71,900 stars; several releases a day rather than almost one a day); DaVinci Resolve MCP
+repinned to its 4.15.3 release; star counts for video-edit-mcp and the Premiere Pro and DaVinci Resolve MCP servers.</li>
+<li><strong>Searches:</strong> re-run on 25 October with two queries Claude agents wrote; Tella's roundup now ranks in
+three of five, OpenClip's page in none; Cutbolt still appears in none. The 17 October results are now published too.</li>
+<li><strong>Running other tools:</strong> ffmpeg-skill meets our rules in what we used and was run; ffmpeg-mcp-lite and
+Timeline Studio's headless server may meet them too, and Kinocut's plain FFmpeg trim would likely pass; it is first in
+line for the next check.</li>
+<li><strong>Added to "Also":</strong> ffmpeg-mcp-lite, Kush36Agrawal/Video_Editor_MCP, misbahsy/video-audio-mcp,
+Timeline Studio, four editors that serve MCP while their app is open, FableCut, OpenMontage, cuttingfloor, Orccut,
+Descript's MCP and DaVinci Resolve 21.1's assistant integration.</li>
+<li><strong>Re-checked, no change:</strong> claudeclip, Video Jungle MCP, Vlexor (still not installable), NIRA Video
+MCP, VideoDB Director MCP, Intelligence08/video-editing-mcp, video-creator/ffmpeg-mcp, OpenClip and OpusClip.</li>
 </ul>
 
 <h2 id="method">Method</h2>
 <ul>
-<li><strong>The searches this page answers</strong>, run on 17 October 2026: "local video editing MCP server", "MCP
-server for video editing local ffmpeg agent" and "best video editing MCP server for Claude Code". Directory pages
-(Glama, Enterprise DNA, mcpservers.org and others) filled most results, with two vendors' own pages (OpenClip and
-OpusClip). One summary said it found no independent head-to-head comparison. Cutbolt appeared in none.</li>
-<li><strong>Which tools:</strong> mcp-video (now Kinocut) and Vlexor, which ranked for the second search; HyperFrames,
-the most starred video tool for agents we know of; and claudeclip, video-edit-mcp and Video Jungle MCP, which ranked or
-were named in the results. The other results, and two servers we added for their stars, are under "Also in the
-results".</li>
-<li><strong>Cutbolt</strong> was built and tested as described above, from fresh clones of its 0.4.0 tag and
-<code>main</code>.</li>
-<li><strong>The other tools were not installed or run.</strong> We run another tool only when it is open source from
-its official source, works offline with no account or key, and can't reach the network or your desktop. Only
-claudeclip met all three; its installation downloads an FFmpeg binary from a third-party release, so we read its code
-instead of installing it, and we didn't test its cuts. Kinocut, video-edit-mcp and HyperFrames can fetch from the web,
-Video Jungle MCP and Vlexor need accounts and keys, and Vlexor's package couldn't be installed. We read each README, the
-files named below and the hosted services' own pages, and counted MCP tools in each server's source. Stars, releases and
-package versions come from GitHub, PyPI and npm on 17 October 2026.</li>
+<li><strong>The searches this page answers</strong>, first run on 17 October 2026: "local video editing MCP server",
+"MCP server for video editing local ffmpeg agent" and "best video editing MCP server for Claude Code". On 25 October we
+ran them again, with two queries Claude agents wrote when we asked them to find a video editing MCP server: "MCP server
+local video editing ffmpeg cut captions render Claude Code" and "video editing MCP server github trim subtitles burn-in
+ffmpeg Whisper" (<a href="data/searches-2026-10-25.txt">results</a>). Directory pages (Glama, Enterprise DNA,
+mcpservers.org, LobeHub and others) filled most results; Tella's vendor roundup ranked in three of the five, and
+JSON2Video's and OpusClip's own pages in one. One summary again said the results include no independent head-to-head
+tests.
+Cutbolt appeared in none, on either date.</li>
+<li><strong>Which tools:</strong> mcp-video (now Kinocut) and Vlexor, which ranked for the second search on 17
+October; HyperFrames, the most starred tool compared here (about 71,900 stars); claudeclip and Video Jungle MCP, which
+ranked or were named in the results; and, from 25 October, ffmpeg-skill (about 2,770 stars), which Claude agents named
+when we asked them to find a video editing MCP server on 22 October and which GitHub search ranks highly; it didn't
+appear in the five web searches. ffmpeg-mcp-lite, named in three search summaries, stays under "Also": it has 8
+single-command tools and keyframe-only trims. The other results, and servers we added for their stars or their design,
+are under "Also".</li>
+<li><strong>Cutbolt</strong> was built and tested from fresh clones of its 0.4.0 tag and <code>main</code> on 17 October,
+and on 25 October as the release download and as <code>main</code> again, as described above.</li>
+<li><strong>Running the other tools.</strong> We run another tool only when it is open source from its official source,
+works offline with no account or key, and can't reach the network or your desktop. On 25 October we ran ffmpeg-skill's
+<code>cut</code> from its npm package in its own folder, with its optional transcription and hardware encoding left
+off, on the same clip, machine and FFmpeg build as Cutbolt. claudeclip also meets the rules, but its installation
+downloads an FFmpeg binary from a third-party release, so we read its code instead and didn't test its cuts.
+ffmpeg-mcp-lite and Timeline Studio's headless server may meet them too; they are under "Also" and weren't run. We
+judge the rules on the features we run: Kinocut can fetch from the web through some tools, but its plain FFmpeg trim
+tool (no URL inputs or downloads) would likely pass that way; we didn't run it this time, and it is first in line for the next check. HyperFrames' CLI
+sends telemetry by default and can capture websites, Video Jungle MCP and Vlexor need accounts and keys, and Vlexor's
+package couldn't be installed. For every tool we read the README, the files named below and the hosted services' own pages,
+and counted MCP tools in each server's source. Stars, releases and package versions come from GitHub, PyPI and npm on
+the date given.</li>
 </ul>
 
 <h2 id="sources">Sources</h2>
-<p class="muted">All read on 17 October 2026, at the commit shown.</p>
+<p class="muted">Read on 17 October 2026 at the commit shown, and re-checked on 25 October 2026 at each tool's
+latest release or, where it has none, its latest commit, with versions and stars (repinned below where a tool released;
+the others hadn't changed).</p>
 <ul>
-<li>Kinocut at <code>939aecc</code>:
-<a href="https://github.com/KyaniteLabs/kinocut/blob/939aecc96e716bc2126c1797d9957230627aebc4/README.md">README</a>,
-<a href="https://github.com/KyaniteLabs/kinocut/blob/939aecc96e716bc2126c1797d9957230627aebc4/pyproject.toml">pyproject.toml</a>,
-<a href="https://github.com/KyaniteLabs/kinocut/blob/939aecc96e716bc2126c1797d9957230627aebc4/docs/ENTERPRISE.md">docs/ENTERPRISE.md</a>,
-<a href="https://github.com/KyaniteLabs/kinocut/tree/939aecc96e716bc2126c1797d9957230627aebc4/kinocut">kinocut/</a>
-(203 <code>@mcp.tool</code> registrations in <code>server_tools_*.py</code>),
-<a href="https://github.com/KyaniteLabs/kinocut/blob/939aecc96e716bc2126c1797d9957230627aebc4/kinocut/ai_engine/download.py">ai_engine/download.py</a>,
-<a href="https://github.com/KyaniteLabs/kinocut/blob/939aecc96e716bc2126c1797d9957230627aebc4/kinocut/font_manager.py">font_manager.py</a>,
-<a href="https://github.com/KyaniteLabs/kinocut/blob/939aecc96e716bc2126c1797d9957230627aebc4/kinocut/image_engine.py">image_engine.py</a>;
-<a href="https://pypi.org/project/kinocut/">PyPI kinocut</a> and <a href="https://pypi.org/project/mcp-video/">mcp-video</a>
-(the release, 1.16.1, is 29 commits behind <code>939aecc</code>).</li>
+<li>Kinocut at its 1.16.4 release, <code>5577169</code> (read 25 October; on 17 October we read <code>939aecc</code>,
+which the release contains):
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/README.md">README</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/pyproject.toml">pyproject.toml</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/docs/ENTERPRISE.md">docs/ENTERPRISE.md</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/docs/VISION_PRIVACY.md">docs/VISION_PRIVACY.md</a>
+(model calls off by default, renderer telemetry),
+<a href="https://github.com/KyaniteLabs/kinocut/tree/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/kinocut">kinocut/</a>
+(203 <code>@mcp.tool</code> registrations in <code>server_tools_*.py</code>, the same names as on 17 October),
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/kinocut/output_policy.py">output_policy.py</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/kinocut/defaults.py">defaults.py</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/kinocut/ai_engine/download.py">ai_engine/download.py</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/kinocut/font_download_worker.py">font_download_worker.py</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/blob/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/kinocut/image_engine.py">image_engine.py</a>,
+<a href="https://github.com/KyaniteLabs/kinocut/tree/5577169ea5b9fc109a5a93625f1d7ddcd195ccc7/plugins/kinocut">plugins/kinocut/</a>;
+release notes for <a href="https://github.com/KyaniteLabs/kinocut/releases/tag/v1.16.3">1.16.3</a> and
+<a href="https://github.com/KyaniteLabs/kinocut/releases/tag/v1.16.4">1.16.4</a>;
+<a href="https://pypi.org/project/kinocut/">PyPI kinocut</a> and <a href="https://pypi.org/project/mcp-video/">mcp-video</a>.</li>
 <li>claudeclip at <code>045b32b</code>:
 <a href="https://github.com/gulkoa/claudeclip/blob/045b32bfee3a726aaff94a783048e6353ee8d109/README.md">README</a>,
 <a href="https://github.com/gulkoa/claudeclip/blob/045b32bfee3a726aaff94a783048e6353ee8d109/package.json">package.json</a>,
@@ -489,6 +692,18 @@ package versions come from GitHub, PyPI and npm on 17 October 2026.</li>
 <a href="https://www.npmjs.com/package/claudeclip">npm claudeclip</a>;
 <a href="https://github.com/eugeneware/ffmpeg-static/blob/5d17f62ee62b4d11a5c9416ecba44c20464b7a1f/install.js">ffmpeg-static's install.js</a>
 at <code>5d17f62</code> (the FFmpeg download).</li>
+<li>ffmpeg-skill at its 2.16.1 release, <code>88e2f42</code> (read and run 25 October):
+<a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/README.md">README</a>
+(no account or key, line 65; 42 tools, line 199; <code>--accurate</code>, line 213; MCP setup, lines 347–352; outputs
+never overwritten silently, line 392; requirements, line 424),
+<a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/scripts/cut.py">scripts/cut.py</a>,
+<a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/scripts/_contract.py#L1612">scripts/_contract.py</a>
+(the 12 default MCP tools),
+<a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/scripts/look.py">scripts/look.py</a>,
+<a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/mcp/server.py">mcp/server.py</a>,
+<a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/package.json">package.json</a>
+and <a href="https://github.com/kajisho5/ffmpeg-skill/blob/88e2f42fdf7856885b63ff8e41d652d1c64cb41e/LICENSE">LICENSE</a> (MIT);
+<a href="https://www.npmjs.com/package/ffmpeg-skill">npm ffmpeg-skill</a>.</li>
 <li>video-edit-mcp at <code>6338987</code>:
 <a href="https://github.com/Aditya2755/video-edit-mcp/blob/6338987b9d785cb6134d0a4797550b33a8715670/README.md">README</a>,
 <a href="https://github.com/Aditya2755/video-edit-mcp/blob/6338987b9d785cb6134d0a4797550b33a8715670/pyproject.toml">pyproject.toml</a>,
@@ -511,26 +726,56 @@ at <code>5d17f62</code> (the FFmpeg download).</li>
 (6 tools); <a href="https://registry.npmjs.org/@velxor%2fmcp">npm registry entry for @velxor/mcp</a> (404);
 <a href="https://vlexor.app/en">Vlexor's home page</a> ("being rebuilt"),
 <a href="https://vlexor.app/en/pricing">its pricing page</a> (404) and <a href="https://vlexor.app/en/terms">terms</a>.</li>
-<li>HyperFrames at <code>b18b3e9</code>:
-<a href="https://github.com/heygen-com/hyperframes/blob/b18b3e958aa199529fa5fa06728e81b97d520021/README.md">README</a>,
-<a href="https://github.com/heygen-com/hyperframes/blob/b18b3e958aa199529fa5fa06728e81b97d520021/docs/guides/mcp.mdx">docs/guides/mcp.mdx</a>
+<li>HyperFrames at its 0.8.198 release, <code>d7f323d</code> (read 25 October; on 17 October we read
+<code>b18b3e9</code>):
+<a href="https://github.com/heygen-com/hyperframes/blob/d7f323d3191c8c88ccabe4fc2547c33821e16500/README.md">README</a>
+(7 skills),
+<a href="https://github.com/heygen-com/hyperframes/tree/d7f323d3191c8c88ccabe4fc2547c33821e16500/skills">skills/</a>,
+<a href="https://github.com/heygen-com/hyperframes/blob/d7f323d3191c8c88ccabe4fc2547c33821e16500/docs/guides/mcp.mdx">docs/guides/mcp.mdx</a>
 (hosted connector),
-<a href="https://github.com/heygen-com/hyperframes/blob/b18b3e958aa199529fa5fa06728e81b97d520021/docs/guides/webmcp.mdx">docs/guides/webmcp.mdx</a>,
-<a href="https://github.com/heygen-com/hyperframes/blob/b18b3e958aa199529fa5fa06728e81b97d520021/packages/cli/src/telemetry/config.ts">packages/cli/src/telemetry/config.ts</a>,
-<a href="https://github.com/heygen-com/hyperframes/blob/b18b3e958aa199529fa5fa06728e81b97d520021/packages/cli/src/browser/manager.ts">packages/cli/src/browser/manager.ts</a>
-(Chrome download); <a href="https://www.npmjs.com/package/hyperframes">npm hyperframes</a>.</li>
+<a href="https://github.com/heygen-com/hyperframes/blob/d7f323d3191c8c88ccabe4fc2547c33821e16500/docs/guides/webmcp.mdx">docs/guides/webmcp.mdx</a>,
+<a href="https://github.com/heygen-com/hyperframes/blob/d7f323d3191c8c88ccabe4fc2547c33821e16500/packages/cli/src/telemetry/config.ts">packages/cli/src/telemetry/config.ts</a>,
+<a href="https://github.com/heygen-com/hyperframes/blob/d7f323d3191c8c88ccabe4fc2547c33821e16500/packages/cli/src/browser/manager.ts">packages/cli/src/browser/manager.ts</a>
+(Chrome download); <a href="https://www.npmjs.com/package/hyperframes">npm hyperframes</a> (release dates).</li>
 <li>Also: <a href="https://pypi.org/project/nira-video-mcp/">PyPI nira-video-mcp</a>;
 <a href="https://github.com/video-db/agent-toolkit/tree/8a7a6f4f9833a94ebbf1f16ed1489a30b76865a2/modelcontextprotocol">video-db/agent-toolkit</a>
 at <code>8a7a6f4</code>; OpenClip's <a href="https://openclip.app/mcp">MCP page</a> and
 <a href="https://openclip.app/pricing">pricing</a> and
 <a href="https://openclip.app/alternatives/best-video-editing-mcp-servers">comparison page</a>; OpusClip's <a href="https://www.opus.pro/mcp">MCP page</a> and
 <a href="https://www.opus.pro/pricing">pricing</a>;
-<a href="https://github.com/samuelgursky/davinci-resolve-mcp/blob/90eba8cdf4df333beb4ce41fe0ab198b8fa7d125/README.md">davinci-resolve-mcp</a>
-at <code>90eba8c</code>;
+<a href="https://github.com/samuelgursky/davinci-resolve-mcp/blob/931bc2cda8fd9049982a457de9ff70836c406cd7/README.md">davinci-resolve-mcp</a>
+at its 4.15.3 release, <code>931bc2c</code>;
 <a href="https://github.com/video-creator/ffmpeg-mcp/blob/c2a9ab70fc82cc0b27dd31280968217f63036265/src/ffmpeg_mcp/ffmpeg.py">ffmpeg-mcp</a>
 at <code>c2a9ab7</code>;
 <a href="https://github.com/Intelligence08/video-editing-mcp">Intelligence08/video-editing-mcp</a>;
 <a href="https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP">hetpatel-11/Adobe_Premiere_Pro_MCP</a>.</li>
+<li>Added on 25 October (read, not run, at the commit shown):
+ffmpeg-mcp-lite at <code>622af39</code>
+(<a href="https://github.com/kevinwatt/ffmpeg-mcp-lite/blob/622af399fb776342b03ae7b355a34e5cd5e02a64/src/ffmpeg_mcp_lite/server.py">server.py</a>,
+<a href="https://github.com/kevinwatt/ffmpeg-mcp-lite/blob/622af399fb776342b03ae7b355a34e5cd5e02a64/src/ffmpeg_mcp_lite/tools/trim.py">tools/trim.py</a>,
+<a href="https://github.com/kevinwatt/ffmpeg-mcp-lite/blob/622af399fb776342b03ae7b355a34e5cd5e02a64/src/ffmpeg_mcp_lite/config.py">config.py</a>;
+<a href="https://pypi.org/project/ffmpeg-mcp-lite/">PyPI</a>);
+Kush36Agrawal/Video_Editor_MCP at <a href="https://github.com/Kush36Agrawal/Video_Editor_MCP/blob/74b373d5612a16068c39b630facfa1b5190ebc7c/src/video_editor/server.py"><code>74b373d</code></a>
+(src/video_editor/server.py);
+misbahsy/video-audio-mcp at <a href="https://github.com/misbahsy/video-audio-mcp/blob/905549bab29c612f861df9c8eccdd9a52781602f/server.py"><code>905549b</code></a>
+(server.py, 27 <code>@mcp.tool</code>);
+OpenMontage at <a href="https://github.com/calesthio/OpenMontage/blob/e01dbf433f46eeb91d39bf905e194162921019a3/README.md"><code>e01dbf4</code></a>
+(README);
+Timeline Studio at its v1.0.9 tag
+<a href="https://github.com/MartinDelophy/ai-video-editor/tree/56c925e38e20acb9466250349778d4730774413e/skills/edit-timeline-studio"><code>56c925e</code></a>;
+FableCut at its v1.16.0 tag <a href="https://github.com/ronak-create/FableCut/tree/1b2df0661c9e05c29f1d64b5b2a85694960ed7e5"><code>1b2df06</code></a>;
+OpenChatCut at its v0.2.17 tag <a href="https://github.com/0xsline/OpenChatCut/tree/72ddb3300cda4ed31cbd0bccbfc94fb29b8cffca"><code>72ddb33</code></a>;
+Diffusion Studio at <a href="https://github.com/diffusionstudio/editor/tree/af570c164a5d0ee961040feb1f8d1d40617c291d"><code>af570c1</code></a>;
+Cartcut at its v0.6.0 tag <a href="https://github.com/cartesiancs/cartcut/tree/6dd7591899d13da090c4588d2d27f50a25fbc19b"><code>6dd7591</code></a>;
+Palmier Pro's <a href="https://github.com/palmier-io/palmier-pro/blob/eba39db77ba64a0bb4eec899c0b725681eb03155/BINARY_LICENSE.md">BINARY_LICENSE.md</a>
+(added at <code>eba39db</code>, 28 August 2026) and its
+last public source, <a href="https://github.com/palmier-io/palmier-pro/tree/8805801fa4df8bc2dbc57cb0a854a1f5108f95c6"><code>8805801</code></a>;
+cuttingfloor at <a href="https://github.com/Mvp2o-ai/cuttingfloor/blob/8f17b4647d28f821ca93f6a9bcb6a75645832732/README.md"><code>8f17b46</code></a>
+(README, licence section);
+Orccut at <a href="https://github.com/musyta-labs/OrcCut/tree/9e07cbb9f59006c33421f6b069693e87abbbea4a"><code>9e07cbb</code></a>;
+<a href="https://github.com/descriptinc/descript-mcp">descriptinc/descript-mcp</a>;
+<a href="https://www.tella.com/blog/best-mcp-servers-for-video-editing">Tella's roundup</a> (dated 16 October 2026);
+Blackmagic's <a href="https://www.blackmagicdesign.com/media/partial/release/20260908-03">DaVinci Resolve 21.1 release</a>.</li>
 <li>Cutbolt at <code>ddc77c9</code>:
 <a href="https://github.com/skulitom/Cutbolt/blob/ddc77c9b04b70bbb8e744539bb46f773a34e4b87/README.md">README</a>,
 <a href="https://github.com/skulitom/Cutbolt/blob/ddc77c9b04b70bbb8e744539bb46f773a34e4b87/llms.txt">llms.txt</a>,
@@ -553,10 +798,18 @@ the <a href="https://github.com/skulitom/Cutbolt/releases/tag/v0.4.0">0.4.0 rele
 <a href="data/cutbolt-independent-hashes.txt">independent hashes</a>,
 <a href="data/cutbolt-cargo-test-release-main-ddc77c9.txt">tests</a>,
 <a href="data/cutbolt-verify-skills-main-ddc77c9.txt">skill recipes</a>.</li>
+<li>Cutbolt on 25 October: the <a href="https://github.com/skulitom/Cutbolt/releases/tag/v0.4.0">v0.4.0 release
+files</a> and <code>SHA256SUMS</code>; <code>main</code> at <code>1f4058c</code>
+(<a href="https://github.com/skulitom/Cutbolt/compare/ddc77c9b04b70bbb8e744539bb46f773a34e4b87...1f4058cb9931e35bf15369ca51e1210ae72a89c2">changes since
+<code>ddc77c9</code></a>; its <a href="https://github.com/skulitom/Cutbolt/blob/1f4058cb9931e35bf15369ca51e1210ae72a89c2/README.md">README</a>
+on the Claude Code plugin); and the <a href="https://github.com/skulitom/Cutbolt/blob/e668c16a668f34a10c96b4b30c627b44235087d1/mcpb/manifest.json">MCPB
+build template</a> at the tag (<code>--tools core</code>; the shipped manifest is inside the <code>.mcpb</code>).</li>
+<li>The searches: <a href="data/searches-2026-10-17.txt">17 October</a> and
+<a href="data/searches-2026-10-25.txt">25 October</a>.</li>
 </ul>
 
 <footer class="muted">
-<p>Last checked 17 October 2026. A plain static page: no JavaScript, trackers or cookies.
+<p>Last checked 25 October 2026 (first published 17 October). A plain static page: no JavaScript, trackers or cookies.
 <a href="https://skulitom.github.io/Cutbolt/">Cutbolt</a> ·
 <a href="https://skulitom.github.io/Cutbolt/compare/">All comparisons</a> ·
 <a href="https://github.com/skulitom/Cutbolt">GitHub</a> ·
